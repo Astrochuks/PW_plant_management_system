@@ -35,9 +35,10 @@ STATUS_KEYWORDS = {
     'breakdown': ['breakdown', 'broke down', 'broken', 'not working', 'down', 'bd', 'b/d'],
     'faulty': ['faulty', 'fault', 'defective', 'problem', 'issue'],
     'scrap': ['scrap', 'scrapped', 'write off', 'written off', 'condemned'],
-    'missing': ['missing', 'not seen', 'cannot locate', 'not found'],
+    'missing': ['missing', 'not seen', 'cannot locate', 'not found', 'not on site', 'not seen on site'],
     'stolen': ['stolen', 'theft'],
     'in_transit': ['transit', 'transferred', 'transfer to', 'moving to', 'in route'],
+    'off_hire': ['off hired', 'off hire', 'offhired', 'off-hired', 'offhire'],
 }
 
 # Column name variations in Excel files
