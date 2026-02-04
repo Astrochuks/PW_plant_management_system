@@ -450,7 +450,12 @@ CREATE TABLE spare_parts (
 | po_date | Date on the Purchase Order document |
 | total_cost | Auto-calculated: (unit × qty) × (1+VAT%) × (1-discount%) + other |
 
-**Current Count**: 458 parts records (329 with dates, 449 with location)
+**Current Count**: 458 parts records (100% with dates, 100% with location)
+
+**Time Columns** (auto-populated by trigger):
+- `year` - Extracted from `replaced_date`
+- `month` - 1-12
+- `week_number` - ISO week 1-53
 
 **Location Tracking Logic**:
 - Weekly reports are the **PRIMARY** source for `current_location_id` in plants_master
@@ -459,6 +464,18 @@ CREATE TABLE spare_parts (
   - `current_location_id` = NULL (unknown until they appear in a weekly report)
   - Historical location available in spare_parts data
 - `unit_cost` is calculated as `total_cost / quantity` from Excel data
+
+**Time-Based Query Examples**:
+```sql
+-- Monthly spending
+SELECT year, month, SUM(unit_cost * quantity) as total
+FROM spare_parts GROUP BY year, month;
+
+-- Weekly spending at a location
+SELECT week_number, SUM(unit_cost * quantity) as total
+FROM spare_parts WHERE location_id = 'xxx' AND year = 2025
+GROUP BY week_number;
+```
 
 ---
 
