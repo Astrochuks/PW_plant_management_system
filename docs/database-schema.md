@@ -405,11 +405,18 @@ ORDER BY l.name, count DESC;
 
 ## Current Statistics
 
-| Table | Count |
-|-------|-------|
-| locations | 27 |
-| fleet_number_prefixes | 78 |
-| archived_plants | ~480 |
-| plants_master | ~1,599 |
-| plant_weekly_records | ~1,700+ |
-| plant_location_history | ~1,900+ |
+| Table | Count | Purpose |
+|-------|-------|---------|
+| locations | 27 | Site locations |
+| fleet_number_prefixes | 79 | Prefix → fleet type mapping |
+| plants_master | 1,601 | Current plant state |
+| archived_plants | 478 | Legacy plants pending first report |
+| plant_weekly_records | 1,732 | Weekly snapshots (immutable) |
+| plant_location_history | 1,584 | Movement tracking |
+| spare_parts | 458 | Parts replacement history |
+| users | 2 | System users |
+| weekly_report_submissions | 0 | Upload tracking (ETL creates) |
+| upload_tokens | 0 | Site officer auth |
+| notifications | 0 | User alerts |
+| purchase_order_submissions | 0 | PO tracking |
+| plant_events | 0 | Event audit log |

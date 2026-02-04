@@ -424,6 +424,54 @@ class WeeklyReportETL:
             self.archived_plants_cache[plant['fleet_number']] = plant
         print(f"  Archived plants: {len(self.archived_plants_cache)}")
 
+    def _create_submission(self, file_path: Path, metadata: 'ReportMetadata', location_id: str) -> Optional[str]:
+        """Create a weekly report submission record. Returns submission_id."""
+        try:
+            result = self.supabase.table("weekly_report_submissions").upsert({
+                'year': metadata.year,
+                'week_number': metadata.week_number,
+                'week_ending_date': metadata.week_ending_date.isoformat(),
+                'location_id': location_id,
+                'source_type': 'etl',
+                'source_file_name': file_path.name,
+                'status': 'processing',
+                'processing_started_at': datetime.now().isoformat(),
+            }, on_conflict="year,week_number,location_id").execute()
+            return result.data[0]['id'] if result.data else None
+        except Exception as e:
+            # Table might not have the unique constraint, try insert
+            try:
+                result = self.supabase.table("weekly_report_submissions").insert({
+                    'year': metadata.year,
+                    'week_number': metadata.week_number,
+                    'week_ending_date': metadata.week_ending_date.isoformat(),
+                    'location_id': location_id,
+                    'source_type': 'etl',
+                    'source_file_name': file_path.name,
+                    'status': 'processing',
+                    'processing_started_at': datetime.now().isoformat(),
+                }).execute()
+                return result.data[0]['id'] if result.data else None
+            except:
+                return None
+
+    def _update_submission(self, submission_id: str, plants_processed: int, plants_created: int,
+                           plants_updated: int, status: str = 'completed', errors: list = None):
+        """Update submission record with results."""
+        if not submission_id:
+            return
+        try:
+            self.supabase.table("weekly_report_submissions").update({
+                'status': status,
+                'plants_processed': plants_processed,
+                'plants_created': plants_created,
+                'plants_updated': plants_updated,
+                'processing_completed_at': datetime.now().isoformat(),
+                'errors': errors or [],
+            }).eq('id', submission_id).execute()
+        except Exception as e:
+            pass  # Ignore submission update errors
+
     def _process_file(self, file_path: Path):
         """Process a single weekly report file with batch operations."""
         print(f"\n[{file_path.name}]", flush=True)
@@ -437,6 +485,9 @@ class WeeklyReportETL:
         print(f"  Week ending: {metadata.week_ending_date} (Week {metadata.week_number}, {metadata.year})")
 
         location_id = self._get_or_create_location(metadata.location)
+
+        # Create submission record
+        submission_id = self._create_submission(file_path, metadata, location_id)
 
         df = pd.read_excel(file_path, header=metadata.header_row)
         df.columns = [str(c).strip() for c in df.columns]
@@ -536,13 +587,22 @@ class WeeklyReportETL:
         # Now save weekly records for all plants
         self._batch_save_weekly_records(
             plants_to_create + plants_to_migrate + plants_to_update,
-            metadata, location_id
+            metadata, location_id, submission_id
         )
 
         total = len(plants_to_create) + len(plants_to_migrate) + len(plants_to_update)
         print(f"  Processed {total} plants (new: {len(plants_to_create)}, migrated: {len(plants_to_migrate)}, updated: {len(plants_to_update)})")
         with self._stats_lock:
             self.stats.plants_processed += total
+
+        # Update submission record with results
+        self._update_submission(
+            submission_id,
+            plants_processed=total,
+            plants_created=len(plants_to_create) + len(plants_to_migrate),
+            plants_updated=len(plants_to_update),
+            status='completed'
+        )
 
     def _get_or_create_location(self, name: str) -> str:
         """Get location ID, creating if necessary. Thread-safe."""
@@ -791,7 +851,7 @@ class WeeklyReportETL:
         except Exception as e:
             pass  # Ignore errors
 
-    def _batch_save_weekly_records(self, all_plants: list, metadata: ReportMetadata, location_id: str):
+    def _batch_save_weekly_records(self, all_plants: list, metadata: ReportMetadata, location_id: str, submission_id: str = None):
         """Batch save weekly snapshots."""
         records = []
 
@@ -803,7 +863,7 @@ class WeeklyReportETL:
             if not master_plant:
                 continue
 
-            records.append({
+            record = {
                 'plant_id': master_plant['id'],
                 'location_id': location_id,
                 'year': metadata.year,
@@ -818,7 +878,10 @@ class WeeklyReportETL:
                 'off_hire': data['off_hire'],
                 'transfer_from': data['transfer_from'],
                 'transfer_to': data['transfer_to'],
-            })
+            }
+            if submission_id:
+                record['submission_id'] = submission_id
+            records.append(record)
 
         # Batch upsert to handle existing records
         for i in range(0, len(records), BATCH_SIZE):
