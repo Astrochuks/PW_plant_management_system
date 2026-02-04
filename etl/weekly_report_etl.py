@@ -763,15 +763,33 @@ class WeeklyReportETL:
                     self.stats.errors.append(f"Update error for {master_plant['fleet_number']}: {e}")
 
     def _add_location_history(self, plant_id: str, location_id: str, start_date: date):
-        """Add location history record."""
+        """Add location history record. Prevents duplicates by checking existing open record."""
         try:
+            # Check if there's already an open record for this plant
+            existing = self.supabase.table("plant_location_history").select(
+                "id, location_id"
+            ).eq("plant_id", plant_id).is_("end_date", "null").execute()
+
+            if existing.data:
+                # Already has an open record
+                existing_location = existing.data[0]['location_id']
+                if existing_location == location_id:
+                    # Same location - no need to add another record
+                    return
+                else:
+                    # Different location - close the old one first
+                    self.supabase.table("plant_location_history").update({
+                        'end_date': start_date.isoformat()
+                    }).eq("id", existing.data[0]['id']).execute()
+
+            # Add new location history record
             self.supabase.table("plant_location_history").insert({
                 'plant_id': plant_id,
                 'location_id': location_id,
                 'start_date': start_date.isoformat(),
             }).execute()
         except Exception as e:
-            pass  # Ignore duplicate errors
+            pass  # Ignore errors
 
     def _batch_save_weekly_records(self, all_plants: list, metadata: ReportMetadata, location_id: str):
         """Batch save weekly snapshots."""

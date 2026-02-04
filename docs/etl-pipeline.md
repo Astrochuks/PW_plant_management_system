@@ -301,6 +301,26 @@ with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
 - `_stats_lock`: Protects statistics counters
 - Database handles its own concurrency
 
+### Plants in Multiple Files
+
+When the same plant appears in multiple site reports (e.g., WP297 in both ABUJA and JOS):
+
+**Behavior:**
+1. Each file processes the plant independently
+2. `plants_master` is updated by each file (last writer wins)
+3. `plant_weekly_records` saves a snapshot for each site report
+4. `plant_location_history` only creates a new entry if location changes
+
+**Why This Happens:**
+- Data entry error (plant listed at wrong site)
+- Plant transferred during the week
+- Plant used across multiple sites
+
+**Resolution:**
+- The `plants_master` reflects the most recently processed file
+- Weekly records preserve all reports for audit
+- Location history now checks for existing open records before adding new ones
+
 ---
 
 ## 5. Error Handling
