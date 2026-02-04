@@ -29,6 +29,291 @@ router = APIRouter()
 logger = get_logger(__name__)
 
 
+# ============================================================================
+# Non-parametric routes MUST come before /{plant_id} routes
+# ============================================================================
+
+
+@router.get("/events")
+async def list_plant_events(
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+    event_type: str | None = Query(None, pattern="^(movement|missing|new|returned|verification_failed)$"),
+    plant_id: UUID | None = None,
+    location_id: UUID | None = None,
+    acknowledged: bool | None = None,
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+) -> dict[str, Any]:
+    """List plant events (movements, new plants, missing plants, etc.)
+
+    Args:
+        current_user: The authenticated user.
+        event_type: Filter by event type.
+        plant_id: Filter by specific plant.
+        location_id: Filter by location involved.
+        acknowledged: Filter by acknowledgement status.
+        page: Page number.
+        limit: Items per page.
+
+    Returns:
+        Paginated list of plant events.
+    """
+    client = get_supabase_admin_client()
+
+    query = (
+        client.table("plant_events")
+        .select("*, plants(fleet_number, description)", count="exact")
+    )
+
+    if event_type:
+        query = query.eq("event_type", event_type)
+    if plant_id:
+        query = query.eq("plant_id", str(plant_id))
+    if location_id:
+        query = query.or_(f"from_location_id.eq.{location_id},to_location_id.eq.{location_id}")
+    if acknowledged is not None:
+        query = query.eq("acknowledged", acknowledged)
+
+    offset = (page - 1) * limit
+    query = query.range(offset, offset + limit - 1)
+    query = query.order("created_at", desc=True)
+
+    result = query.execute()
+    total = result.count or 0
+
+    # Transform to include plant info
+    events = []
+    for item in result.data:
+        item["fleet_number"] = item.get("plants", {}).get("fleet_number") if item.get("plants") else None
+        item["plant_description"] = item.get("plants", {}).get("description") if item.get("plants") else None
+        if "plants" in item:
+            del item["plants"]
+        events.append(item)
+
+    return {
+        "success": True,
+        "data": events,
+        "meta": {
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "total_pages": (total + limit - 1) // limit if total > 0 else 0,
+        },
+    }
+
+
+@router.patch("/events/{event_id}/acknowledge")
+async def acknowledge_event(
+    event_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+    remarks: str | None = None,
+) -> dict[str, Any]:
+    """Acknowledge a plant event.
+
+    Args:
+        event_id: The event UUID.
+        current_user: The authenticated admin user.
+        remarks: Optional remarks about acknowledgement.
+
+    Returns:
+        Updated event.
+    """
+    client = get_supabase_admin_client()
+
+    # Check event exists
+    existing = (
+        client.table("plant_events")
+        .select("id")
+        .eq("id", str(event_id))
+        .execute()
+    )
+
+    if not existing.data:
+        raise NotFoundError("Plant event", str(event_id))
+
+    update_data = {
+        "acknowledged": True,
+        "acknowledged_by": current_user.id,
+        "acknowledged_at": "now()",
+    }
+    if remarks:
+        update_data["remarks"] = remarks
+
+    result = (
+        client.table("plant_events")
+        .update(update_data)
+        .eq("id", str(event_id))
+        .execute()
+    )
+
+    logger.info(
+        "Plant event acknowledged",
+        event_id=str(event_id),
+        user_id=current_user.id,
+    )
+
+    return {
+        "success": True,
+        "data": result.data[0],
+    }
+
+
+@router.get("/search/{query}")
+async def search_plants(
+    query: str,
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+    status: str | None = None,
+    location_id: UUID | None = None,
+    fleet_type_id: UUID | None = None,
+    limit: int = Query(20, ge=1, le=100),
+) -> dict[str, Any]:
+    """Full-text search for plants.
+
+    Args:
+        query: Search query.
+        current_user: The authenticated user.
+        status: Filter by status.
+        location_id: Filter by location.
+        fleet_type_id: Filter by fleet type.
+        limit: Maximum results.
+
+    Returns:
+        Search results ranked by relevance.
+    """
+    client = get_supabase_admin_client()
+
+    result = client.rpc(
+        "search_plants",
+        {
+            "p_search_term": query,
+            "p_status": status,
+            "p_location_id": str(location_id) if location_id else None,
+            "p_fleet_type_id": str(fleet_type_id) if fleet_type_id else None,
+            "p_limit": limit,
+            "p_offset": 0,
+        },
+    ).execute()
+
+    return {
+        "success": True,
+        "data": result.data,
+        "meta": {"query": query, "count": len(result.data)},
+    }
+
+
+@router.get("/usage/summary")
+async def get_usage_summary(
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+    year: int | None = None,
+    month: int | None = Query(None, ge=1, le=12),
+    location_id: UUID | None = None,
+    limit: int = Query(50, ge=1, le=500),
+) -> dict[str, Any]:
+    """Get plant usage summary across the fleet.
+
+    Args:
+        current_user: The authenticated user.
+        year: Filter by year.
+        month: Filter by month (1-12).
+        location_id: Filter by location.
+        limit: Maximum plants to return.
+
+    Returns:
+        Usage summary for plants.
+    """
+    client = get_supabase_admin_client()
+
+    result = client.rpc(
+        "get_plant_usage_summary",
+        {
+            "p_plant_id": None,
+            "p_year": year,
+            "p_month": month,
+            "p_location_id": str(location_id) if location_id else None,
+        },
+    ).execute()
+
+    return {
+        "success": True,
+        "data": result.data[:limit] if result.data else [],
+        "meta": {
+            "year": year,
+            "month": month,
+            "total": len(result.data) if result.data else 0,
+        },
+    }
+
+
+@router.get("/usage/breakdowns")
+async def get_breakdown_report(
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+    year: int | None = None,
+    week_number: int | None = Query(None, ge=1, le=53),
+    location_id: UUID | None = None,
+) -> dict[str, Any]:
+    """Get breakdown report - plants with breakdown hours.
+
+    Args:
+        current_user: The authenticated user.
+        year: Filter by year.
+        week_number: Filter by week number.
+        location_id: Filter by location.
+
+    Returns:
+        List of plants with breakdowns.
+    """
+    client = get_supabase_admin_client()
+
+    result = client.rpc(
+        "get_breakdown_report",
+        {
+            "p_year": year,
+            "p_week_number": week_number,
+            "p_location_id": str(location_id) if location_id else None,
+        },
+    ).execute()
+
+    return {
+        "success": True,
+        "data": result.data,
+    }
+
+
+@router.get("/utilization")
+async def get_fleet_utilization(
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+    limit: int = Query(100, ge=1, le=500),
+) -> dict[str, Any]:
+    """Get fleet utilization view with comprehensive stats.
+
+    Args:
+        current_user: The authenticated user.
+        limit: Maximum plants to return.
+
+    Returns:
+        Plant utilization data with hours, rates, and costs.
+    """
+    client = get_supabase_admin_client()
+
+    result = (
+        client.table("v_plant_utilization")
+        .select("*")
+        .order("total_hours_worked", desc=True)
+        .limit(limit)
+        .execute()
+    )
+
+    return {
+        "success": True,
+        "data": result.data,
+    }
+
+
+# ============================================================================
+# Parametric routes with /{plant_id}
+# ============================================================================
+
+
 @router.get("", response_model=PlantListResponse)
 async def list_plants(
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
@@ -347,178 +632,6 @@ async def get_plant_location_history(
     }
 
 
-@router.get("/search/{query}")
-async def search_plants(
-    query: str,
-    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
-    status: str | None = None,
-    location_id: UUID | None = None,
-    fleet_type_id: UUID | None = None,
-    limit: int = Query(20, ge=1, le=100),
-) -> dict[str, Any]:
-    """Full-text search for plants.
-
-    Args:
-        query: Search query.
-        current_user: The authenticated user.
-        status: Filter by status.
-        location_id: Filter by location.
-        fleet_type_id: Filter by fleet type.
-        limit: Maximum results.
-
-    Returns:
-        Search results ranked by relevance.
-    """
-    client = get_supabase_admin_client()
-
-    result = client.rpc(
-        "search_plants",
-        {
-            "p_search_term": query,
-            "p_status": status,
-            "p_location_id": str(location_id) if location_id else None,
-            "p_fleet_type_id": str(fleet_type_id) if fleet_type_id else None,
-            "p_limit": limit,
-            "p_offset": 0,
-        },
-    ).execute()
-
-    return {
-        "success": True,
-        "data": result.data,
-        "meta": {"query": query, "count": len(result.data)},
-    }
-
-
-# ============================================================================
-# Plant Events & Tracking Endpoints
-# ============================================================================
-
-
-@router.get("/events")
-async def list_plant_events(
-    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
-    event_type: str | None = Query(None, pattern="^(movement|missing|new|returned|verification_failed)$"),
-    plant_id: UUID | None = None,
-    location_id: UUID | None = None,
-    acknowledged: bool | None = None,
-    page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
-) -> dict[str, Any]:
-    """List plant events (movements, new plants, missing plants, etc.)
-
-    Args:
-        current_user: The authenticated user.
-        event_type: Filter by event type.
-        plant_id: Filter by specific plant.
-        location_id: Filter by location involved.
-        acknowledged: Filter by acknowledgement status.
-        page: Page number.
-        limit: Items per page.
-
-    Returns:
-        Paginated list of plant events.
-    """
-    client = get_supabase_admin_client()
-
-    query = (
-        client.table("plant_events")
-        .select("*, plants(fleet_number, description)", count="exact")
-    )
-
-    if event_type:
-        query = query.eq("event_type", event_type)
-    if plant_id:
-        query = query.eq("plant_id", str(plant_id))
-    if location_id:
-        query = query.or_(f"from_location_id.eq.{location_id},to_location_id.eq.{location_id}")
-    if acknowledged is not None:
-        query = query.eq("acknowledged", acknowledged)
-
-    offset = (page - 1) * limit
-    query = query.range(offset, offset + limit - 1)
-    query = query.order("created_at", desc=True)
-
-    result = query.execute()
-    total = result.count or 0
-
-    # Transform to include plant info
-    events = []
-    for item in result.data:
-        item["fleet_number"] = item.get("plants", {}).get("fleet_number") if item.get("plants") else None
-        item["plant_description"] = item.get("plants", {}).get("description") if item.get("plants") else None
-        if "plants" in item:
-            del item["plants"]
-        events.append(item)
-
-    return {
-        "success": True,
-        "data": events,
-        "meta": {
-            "page": page,
-            "limit": limit,
-            "total": total,
-            "total_pages": (total + limit - 1) // limit if total > 0 else 0,
-        },
-    }
-
-
-@router.patch("/events/{event_id}/acknowledge")
-async def acknowledge_event(
-    event_id: UUID,
-    current_user: Annotated[CurrentUser, Depends(require_admin)],
-    remarks: str | None = None,
-) -> dict[str, Any]:
-    """Acknowledge a plant event.
-
-    Args:
-        event_id: The event UUID.
-        current_user: The authenticated admin user.
-        remarks: Optional remarks about acknowledgement.
-
-    Returns:
-        Updated event.
-    """
-    client = get_supabase_admin_client()
-
-    # Check event exists
-    existing = (
-        client.table("plant_events")
-        .select("id")
-        .eq("id", str(event_id))
-        .execute()
-    )
-
-    if not existing.data:
-        raise NotFoundError("Plant event", str(event_id))
-
-    update_data = {
-        "acknowledged": True,
-        "acknowledged_by": current_user.id,
-        "acknowledged_at": "now()",
-    }
-    if remarks:
-        update_data["remarks"] = remarks
-
-    result = (
-        client.table("plant_events")
-        .update(update_data)
-        .eq("id", str(event_id))
-        .execute()
-    )
-
-    logger.info(
-        "Plant event acknowledged",
-        event_id=str(event_id),
-        user_id=current_user.id,
-    )
-
-    return {
-        "success": True,
-        "data": result.data[0],
-    }
-
-
 @router.get("/{plant_id}/weekly-records")
 async def get_plant_weekly_records(
     plant_id: UUID,
@@ -610,119 +723,6 @@ async def get_plant_events(
     return {
         "success": True,
         "data": events,
-    }
-
-
-# ============================================================================
-# Plant Usage & Analytics Endpoints
-# ============================================================================
-
-
-@router.get("/usage/summary")
-async def get_usage_summary(
-    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
-    year: int | None = None,
-    month: int | None = Query(None, ge=1, le=12),
-    location_id: UUID | None = None,
-    limit: int = Query(50, ge=1, le=500),
-) -> dict[str, Any]:
-    """Get plant usage summary across the fleet.
-
-    Args:
-        current_user: The authenticated user.
-        year: Filter by year.
-        month: Filter by month (1-12).
-        location_id: Filter by location.
-        limit: Maximum plants to return.
-
-    Returns:
-        Usage summary for plants.
-    """
-    client = get_supabase_admin_client()
-
-    result = client.rpc(
-        "get_plant_usage_summary",
-        {
-            "p_plant_id": None,
-            "p_year": year,
-            "p_month": month,
-            "p_location_id": str(location_id) if location_id else None,
-        },
-    ).execute()
-
-    return {
-        "success": True,
-        "data": result.data[:limit] if result.data else [],
-        "meta": {
-            "year": year,
-            "month": month,
-            "total": len(result.data) if result.data else 0,
-        },
-    }
-
-
-@router.get("/usage/breakdowns")
-async def get_breakdown_report(
-    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
-    year: int | None = None,
-    week_number: int | None = Query(None, ge=1, le=53),
-    location_id: UUID | None = None,
-) -> dict[str, Any]:
-    """Get breakdown report - plants with breakdown hours.
-
-    Args:
-        current_user: The authenticated user.
-        year: Filter by year.
-        week_number: Filter by week number.
-        location_id: Filter by location.
-
-    Returns:
-        List of plants with breakdowns.
-    """
-    client = get_supabase_admin_client()
-
-    result = client.rpc(
-        "get_breakdown_report",
-        {
-            "p_year": year,
-            "p_week_number": week_number,
-            "p_location_id": str(location_id) if location_id else None,
-        },
-    ).execute()
-
-    return {
-        "success": True,
-        "data": result.data,
-    }
-
-
-@router.get("/utilization")
-async def get_fleet_utilization(
-    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
-    limit: int = Query(100, ge=1, le=500),
-) -> dict[str, Any]:
-    """Get fleet utilization view with comprehensive stats.
-
-    Args:
-        current_user: The authenticated user.
-        limit: Maximum plants to return.
-
-    Returns:
-        Plant utilization data with hours, rates, and costs.
-    """
-    client = get_supabase_admin_client()
-
-    result = (
-        client.table("v_plant_utilization")
-        .select("*")
-        .order("total_hours_worked", desc=True)
-        .limit(limit)
-        .execute()
-    )
-
-    return {
-        "success": True,
-        "data": result.data,
     }
 
 

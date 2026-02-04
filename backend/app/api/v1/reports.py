@@ -38,8 +38,7 @@ async def get_dashboard_summary(
     location_stats = (
         client.table("v_location_stats")
         .select("*")
-        .eq("is_active", True)
-        .order("plant_count", desc=True)
+        .order("total_plants", desc=True)
         .limit(10)
         .execute()
     )

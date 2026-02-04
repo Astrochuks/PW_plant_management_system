@@ -21,27 +21,23 @@ logger = get_logger(__name__)
 @router.get("")
 async def list_locations(
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
-    include_inactive: bool = False,
 ) -> dict[str, Any]:
     """List all locations.
 
     Args:
         current_user: The authenticated user.
-        include_inactive: Include inactive locations.
 
     Returns:
         List of locations with summary stats.
     """
     client = get_supabase_admin_client()
 
-    query = client.table("v_location_stats").select("*")
-
-    if not include_inactive:
-        query = query.eq("is_active", True)
-
-    query = query.order("name")
-
-    result = query.execute()
+    result = (
+        client.table("v_location_stats")
+        .select("*")
+        .order("location_name")
+        .execute()
+    )
 
     return {
         "success": True,
