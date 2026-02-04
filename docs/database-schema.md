@@ -403,6 +403,86 @@ ORDER BY l.name, count DESC;
 
 ---
 
+### 8. `spare_parts`
+Tracks spare parts purchases and maintenance costs.
+
+```sql
+CREATE TABLE spare_parts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    plant_id UUID NOT NULL REFERENCES plants_master(id),
+    location_id UUID REFERENCES locations(id),  -- WHERE purchased
+    submission_id UUID REFERENCES purchase_order_submissions(id),
+
+    -- PO Details
+    purchase_order_number VARCHAR(100),
+    po_date DATE,                               -- Date on PO document
+    requisition_number VARCHAR(100),            -- REQ NO from PO
+
+    -- Part Details
+    part_number VARCHAR(100),
+    part_description TEXT,
+    supplier VARCHAR(255),
+    reason_for_change VARCHAR(255),
+    quantity INTEGER DEFAULT 1,
+
+    -- Costs
+    unit_cost NUMERIC(15,2),
+    vat_percentage NUMERIC(5,2) DEFAULT 0,
+    discount_percentage NUMERIC(5,2) DEFAULT 0,
+    other_costs NUMERIC(15,2) DEFAULT 0,
+    total_cost NUMERIC(15,2) GENERATED ALWAYS AS (
+        ROUND((unit_cost * quantity) * (1 + vat_percentage/100)
+              * (1 - discount_percentage/100) + other_costs, 2)
+    ) STORED,
+
+    -- Audit
+    replaced_date DATE,
+    remarks TEXT,
+    created_by UUID REFERENCES users(id),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+**Key Fields:**
+| Field | Description |
+|-------|-------------|
+| location_id | WHERE the PO was raised (may differ from plant's current location) |
+| po_date | Date on the Purchase Order document |
+| total_cost | Auto-calculated: (unit × qty) × (1+VAT%) × (1-discount%) + other |
+
+**Current Count**: 458 parts records
+
+---
+
+### 9. `plant_spending_anomalies` (View)
+Detects suspicious patterns in spare parts spending.
+
+```sql
+CREATE VIEW plant_spending_anomalies AS
+SELECT
+    fleet_number, fleet_type, status, current_location,
+    parts_count, total_spent, first_purchase, last_purchase,
+    CASE
+        WHEN current_location_id IS NULL THEN 'NO_LOCATION'
+        WHEN last_verified_date IS NULL THEN 'NEVER_VERIFIED'
+        WHEN status IN ('missing', 'stolen') THEN 'MISSING_STOLEN'
+        WHEN status = 'unverified' AND total_spent > 1000000 THEN 'HIGH_SPEND_UNVERIFIED'
+        ELSE 'OK'
+    END as anomaly_flag
+FROM spare_parts sp
+JOIN plants_master pm ON sp.plant_id = pm.id;
+```
+
+**Anomaly Flags:**
+| Flag | Meaning |
+|------|---------|
+| NO_LOCATION | Plant has no location, never appeared in reports |
+| NEVER_VERIFIED | Plant has parts but never verified |
+| MISSING_STOLEN | Plant marked missing/stolen but has spending |
+| HIGH_SPEND_UNVERIFIED | >₦1M spent but status is unverified |
+
+---
+
 ## Current Statistics
 
 | Table | Count | Purpose |
