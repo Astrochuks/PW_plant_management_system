@@ -137,17 +137,41 @@ def get_plant_lookup(client):
 
 
 def get_location_lookup(client):
-    """Get location name -> location_id mapping."""
+    """Get location name -> location_id mapping with fuzzy matching support."""
     result = client.table("locations").select("id, name").execute()
-    # Create lookup with various name formats (uppercase, original, lowercase, title)
     lookup = {}
+    locations_list = []  # For fuzzy matching
     count = len(result.data)
     for loc in result.data:
+        locations_list.append((loc["name"], loc["id"]))
+        # Exact matches (case variants)
         lookup[loc["name"]] = loc["id"]
         lookup[loc["name"].upper()] = loc["id"]
         lookup[loc["name"].lower()] = loc["id"]
         lookup[loc["name"].title()] = loc["id"]
-    return lookup, count
+    return lookup, count, locations_list
+
+
+def find_location_id(location_name, lookup, locations_list):
+    """Find location_id with fuzzy matching support."""
+    if not location_name:
+        return None
+
+    name = location_name.strip()
+
+    # Try exact match first
+    if name in lookup:
+        return lookup[name]
+    if name.upper() in lookup:
+        return lookup[name.upper()]
+
+    # Try partial match - if location_name is contained in any location
+    name_upper = name.upper()
+    for loc_name, loc_id in locations_list:
+        if name_upper in loc_name.upper() or loc_name.upper() in name_upper:
+            return loc_id
+
+    return None
 
 
 def main():
@@ -168,7 +192,7 @@ def main():
     plant_lookup = get_plant_lookup(client)
     print(f"   Found {len(plant_lookup)} plants in plants_master.")
 
-    location_lookup, location_count = get_location_lookup(client)
+    location_lookup, location_count, locations_list = get_location_lookup(client)
     print(f"   Found {location_count} locations.")
 
     # Step 3: Process Excel file
@@ -176,33 +200,74 @@ def main():
     xl = pd.ExcelFile(SPARE_PARTS_FILE)
 
     # Column mapping - NOTE: "cost of spare parts" is TOTAL cost, not unit cost
+    # Extended column mapping to handle all variations
     column_map = {
+        # Date columns
         "p o-date": "replaced_date",
         "po - date": "replaced_date",
         "po -date": "replaced_date",
         "po date": "replaced_date",
         "date replaced": "replaced_date",
+        # Equipment type
         "equipment          type": "equipment_type",
         "equipment type": "equipment_type",
+        # Part number
         "part   number": "part_number",
         "part number": "part_number",
+        # Supplier
         "supplier": "supplier",
+        # Part description
         "sparepart description": "part_description",
         "spare part description": "part_description",
-        "reason for  change (wear, damage, preventive schedule)": "reason_for_change",
-        "reason for change (wear, damage, preventive schedule)": "reason_for_change",
-        "reason for change": "reason_for_change",
-        "cost of spare parts": "total_cost",  # This is TOTAL cost, not unit
+        # Cost
+        "cost of spare parts": "total_cost",
         "cost of spareparts": "total_cost",
         "cost": "total_cost",
+        # Quantity
         "quantity used": "quantity",
         "quantity": "quantity",
+        # PO number
         "work order job number": "purchase_order_number",
         "work order number": "purchase_order_number",
+        # Location
         "location": "location",
+        # Remarks
         "remarks": "remarks",
         "remark": "remarks",
     }
+
+    def map_column_smart(col_name):
+        """Map column using exact match first, then partial matching."""
+        col_lower = col_name.lower().strip()
+
+        # Try exact match first
+        if col_lower in column_map:
+            return column_map[col_lower]
+
+        # Partial matching for columns with many variations
+        if 'reason' in col_lower:
+            return 'reason_for_change'
+        if 'date' in col_lower or col_lower.startswith('p o') or col_lower.startswith('po'):
+            return 'replaced_date'
+        if 'equipment' in col_lower and 'type' in col_lower:
+            return 'equipment_type'
+        if 'part' in col_lower and ('number' in col_lower or 'no' in col_lower):
+            return 'part_number'
+        if 'supplier' in col_lower:
+            return 'supplier'
+        if 'description' in col_lower:
+            return 'part_description'
+        if 'cost' in col_lower:
+            return 'total_cost'
+        if 'quantity' in col_lower or 'qty' in col_lower:
+            return 'quantity'
+        if 'order' in col_lower:
+            return 'purchase_order_number'
+        if 'location' in col_lower:
+            return 'location'
+        if 'remark' in col_lower:
+            return 'remarks'
+        return None
 
     # Columns that can have ditto marks (resolve " to value from row above)
     ditto_columns = [
@@ -233,11 +298,12 @@ def main():
             # Normalize column names
             df.columns = [str(c).lower().strip() for c in df.columns]
 
-            # Map columns
+            # Map columns using the smart mapping function
             rename_map = {}
             for col in df.columns:
-                if col in column_map:
-                    rename_map[col] = column_map[col]
+                mapped = map_column_smart(col)
+                if mapped:
+                    rename_map[col] = mapped
             df = df.rename(columns=rename_map)
 
             # Resolve ditto marks BEFORE processing
@@ -275,12 +341,10 @@ def main():
                 if po_number == '"': po_number = None
                 if remarks == '"': remarks = None
 
-                # Parse location and look up location_id
+                # Parse location and look up location_id (with fuzzy matching)
                 location_name = str(row.get('location', '')).strip() if pd.notna(row.get('location')) else None
                 if location_name == '"': location_name = None
-                location_id = None
-                if location_name:
-                    location_id = location_lookup.get(location_name) or location_lookup.get(location_name.upper())
+                location_id = find_location_id(location_name, location_lookup, locations_list) if location_name else None
 
                 # Skip if no meaningful data
                 if not (replaced_date or part_description or total_cost):
@@ -362,40 +426,34 @@ def main():
     # Step 5: Insert location history from spare parts (historical location data)
     print("\n5. Creating location history from spare parts...")
     if location_history_entries:
-        # Deduplicate: keep unique plant_id + location_id + start_date combinations
+        # Deduplicate: keep unique plant_id + start_date combinations
         seen = set()
         unique_entries = []
         for entry in location_history_entries:
-            key = (entry["plant_id"], entry["location_id"], entry["start_date"])
+            key = (entry["plant_id"], entry["start_date"])
             if key not in seen:
                 seen.add(key)
                 unique_entries.append(entry)
 
         print(f"   {len(unique_entries)} unique location history entries to create")
 
-        # Insert in batches, ignore duplicates (plant may already have location from weekly reports)
+        # Insert entries, let database handle duplicates
         history_inserted = 0
         history_skipped = 0
-        for i in range(0, len(unique_entries), batch_size):
-            batch = unique_entries[i:i + batch_size]
-            for entry in batch:
-                try:
-                    # Check if this plant already has a location history entry
-                    # Only add if it's a NEW location at a DIFFERENT date
-                    existing = client.table("plant_location_history").select("id, start_date").eq(
-                        "plant_id", entry["plant_id"]
-                    ).eq("location_id", entry["location_id"]).execute()
-
-                    if not existing.data:
-                        # No existing entry for this plant+location, create it
-                        client.table("plant_location_history").insert(entry).execute()
-                        history_inserted += 1
-                    else:
-                        history_skipped += 1
-                except Exception as e:
+        for entry in unique_entries:
+            try:
+                client.table("plant_location_history").insert(entry).execute()
+                history_inserted += 1
+            except Exception as e:
+                # Check for constraint violations or duplicates
+                if "23505" in str(e) or "duplicate" in str(e).lower():
+                    history_skipped += 1
+                elif "23503" in str(e):  # FK violation
+                    history_skipped += 1
+                else:
                     history_skipped += 1
 
-        print(f"   Created: {history_inserted}, Skipped (already exists): {history_skipped}")
+        print(f"   Created: {history_inserted}, Skipped: {history_skipped}")
     else:
         print("   No location history entries to create")
 
