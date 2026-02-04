@@ -175,7 +175,7 @@ def main():
     print(f"\n3. Processing {SPARE_PARTS_FILE}...")
     xl = pd.ExcelFile(SPARE_PARTS_FILE)
 
-    # Column mapping
+    # Column mapping - NOTE: "cost of spare parts" is TOTAL cost, not unit cost
     column_map = {
         "p o-date": "replaced_date",
         "po - date": "replaced_date",
@@ -192,9 +192,9 @@ def main():
         "reason for  change (wear, damage, preventive schedule)": "reason_for_change",
         "reason for change (wear, damage, preventive schedule)": "reason_for_change",
         "reason for change": "reason_for_change",
-        "cost of spare parts": "unit_cost",
-        "cost of spareparts": "unit_cost",
-        "cost": "unit_cost",
+        "cost of spare parts": "total_cost",  # This is TOTAL cost, not unit
+        "cost of spareparts": "total_cost",
+        "cost": "total_cost",
         "quantity used": "quantity",
         "quantity": "quantity",
         "work order job number": "purchase_order_number",
@@ -204,14 +204,15 @@ def main():
         "remark": "remarks",
     }
 
-    # Columns that can have ditto marks
+    # Columns that can have ditto marks (resolve " to value from row above)
     ditto_columns = [
         'replaced_date', 'equipment_type', 'part_number', 'supplier',
-        'part_description', 'reason_for_change', 'unit_cost', 'quantity',
+        'part_description', 'reason_for_change', 'total_cost', 'quantity',
         'purchase_order_number', 'location', 'remarks'
     ]
 
     all_parts = []
+    location_history_entries = []  # Collect location history from spare parts dates
     sheets_processed = 0
     sheets_skipped = 0
 
@@ -255,8 +256,14 @@ def main():
                 part_description = str(row.get('part_description', '')).strip() if pd.notna(row.get('part_description')) else None
                 supplier = str(row.get('supplier', '')).strip() if pd.notna(row.get('supplier')) else None
                 reason = str(row.get('reason_for_change', '')).strip() if pd.notna(row.get('reason_for_change')) else None
-                unit_cost = clean_cost(row.get('unit_cost'))
+
+                # IMPORTANT: Excel has TOTAL cost, we need to calculate unit_cost
+                total_cost = clean_cost(row.get('total_cost'))
                 quantity = clean_quantity(row.get('quantity')) or 1
+                unit_cost = None
+                if total_cost is not None and quantity > 0:
+                    unit_cost = total_cost / quantity
+
                 po_number = str(row.get('purchase_order_number', '')).strip() if pd.notna(row.get('purchase_order_number')) else None
                 remarks = str(row.get('remarks', '')).strip() if pd.notna(row.get('remarks')) else None
 
@@ -276,20 +283,22 @@ def main():
                     location_id = location_lookup.get(location_name) or location_lookup.get(location_name.upper())
 
                 # Skip if no meaningful data
-                if not (replaced_date or part_description or unit_cost):
+                if not (replaced_date or part_description or total_cost):
                     continue
 
                 # Get plant_id
                 plant_id = plant_lookup.get(fleet_num)
                 if not plant_id:
                     # Create plant if it doesn't exist in plants_master
+                    # NOTE: current_location_id is NULL - spare parts location is historical,
+                    # not current. Current location comes from weekly reports only.
                     try:
                         result = client.table("plants_master").insert({
                             "fleet_number": fleet_num,
                             "description": f"Created from spare parts tracking",
                             "status": "unverified",
                             "physical_verification": False,
-                            "current_location_id": location_id,  # Use spare parts location as initial location
+                            "current_location_id": None,  # Unknown until appears in weekly report
                         }).execute()
                         plant_id = result.data[0]["id"]
                         plant_lookup[fleet_num] = plant_id
@@ -313,6 +322,16 @@ def main():
                     "purchase_order_number": po_number,
                     "remarks": remarks,
                 })
+
+                # Collect location history entry if we have date and location
+                # This is HISTORICAL data - shows where plant was at this date
+                if replaced_date and location_id:
+                    location_history_entries.append({
+                        "plant_id": plant_id,
+                        "location_id": location_id,
+                        "start_date": replaced_date,
+                        "transfer_reason": "Location from spare parts record",
+                    })
 
             sheets_processed += 1
 
@@ -340,8 +359,48 @@ def main():
 
     print(f"\n   Inserted: {inserted}, Errors: {errors}")
 
-    # Step 5: Verify
-    print("\n5. Verifying...")
+    # Step 5: Insert location history from spare parts (historical location data)
+    print("\n5. Creating location history from spare parts...")
+    if location_history_entries:
+        # Deduplicate: keep unique plant_id + location_id + start_date combinations
+        seen = set()
+        unique_entries = []
+        for entry in location_history_entries:
+            key = (entry["plant_id"], entry["location_id"], entry["start_date"])
+            if key not in seen:
+                seen.add(key)
+                unique_entries.append(entry)
+
+        print(f"   {len(unique_entries)} unique location history entries to create")
+
+        # Insert in batches, ignore duplicates (plant may already have location from weekly reports)
+        history_inserted = 0
+        history_skipped = 0
+        for i in range(0, len(unique_entries), batch_size):
+            batch = unique_entries[i:i + batch_size]
+            for entry in batch:
+                try:
+                    # Check if this plant already has a location history entry
+                    # Only add if it's a NEW location at a DIFFERENT date
+                    existing = client.table("plant_location_history").select("id, start_date").eq(
+                        "plant_id", entry["plant_id"]
+                    ).eq("location_id", entry["location_id"]).execute()
+
+                    if not existing.data:
+                        # No existing entry for this plant+location, create it
+                        client.table("plant_location_history").insert(entry).execute()
+                        history_inserted += 1
+                    else:
+                        history_skipped += 1
+                except Exception as e:
+                    history_skipped += 1
+
+        print(f"   Created: {history_inserted}, Skipped (already exists): {history_skipped}")
+    else:
+        print("   No location history entries to create")
+
+    # Step 6: Verify
+    print("\n6. Verifying...")
     result = client.table("spare_parts").select("id", count="exact").execute()
     print(f"   Total spare parts in database: {result.count}")
 
