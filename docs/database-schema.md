@@ -450,7 +450,12 @@ CREATE TABLE spare_parts (
 | po_date | Date on the Purchase Order document |
 | total_cost | Auto-calculated: (unit × qty) × (1+VAT%) × (1-discount%) + other |
 
-**Current Count**: 458 parts records
+**Current Count**: 458 parts records (449 with location_id populated)
+
+**Location Tracking**:
+- Spare parts now track WHERE the purchase was made via `location_id`
+- For plants not in weekly reports (e.g., P401, P415), spare parts location is used to set `current_location_id` in plants_master
+- This enables comprehensive location tracking from both weekly reports AND spare parts data
 
 ---
 
@@ -492,8 +497,8 @@ JOIN plants_master pm ON sp.plant_id = pm.id;
 | plants_master | 1,601 | Current plant state |
 | archived_plants | 478 | Legacy plants pending first report |
 | plant_weekly_records | 1,732 | Weekly snapshots (immutable) |
-| plant_location_history | 1,584 | Movement tracking |
-| spare_parts | 458 | Parts replacement history |
+| plant_location_history | 1,586 | Movement tracking |
+| spare_parts | 458 | Parts replacement history (449 with location) |
 | users | 2 | System users |
 | weekly_report_submissions | 0 | Upload tracking (ETL creates) |
 | upload_tokens | 0 | Site officer auth |
