@@ -32,8 +32,8 @@ BATCH_SIZE = 100  # Records per batch insert
 STATUS_KEYWORDS = {
     'working': ['working', 'operational', 'running', 'in use'],
     'standby': ['standby', 'stand by', 'standing by', 'idle', 'available'],
-    'breakdown': ['breakdown', 'broke down', 'broken', 'not working', 'down', 'bd', 'b/d'],
-    'faulty': ['faulty', 'fault', 'defective', 'problem', 'issue'],
+    'breakdown': ['breakdown', 'broke down', 'broken', 'not working', 'down', 'bd', 'b/d', 'for repairs', 'for repair'],
+    'faulty': ['faulty', 'fault', 'defective', 'problem', 'issue', 'no engine', 'no compressor'],
     'scrap': ['scrap', 'scrapped', 'write off', 'written off', 'condemned'],
     'missing': ['missing', 'not seen', 'cannot locate', 'not found', 'not on site', 'not seen on site'],
     'stolen': ['stolen', 'theft'],

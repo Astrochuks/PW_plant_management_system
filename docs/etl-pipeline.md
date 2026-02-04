@@ -108,8 +108,8 @@ The ETL extracts plant status from the REMARK column using keyword matching:
 STATUS_KEYWORDS = {
     'working': ['working', 'operational', 'running', 'in use'],
     'standby': ['standby', 'stand by', 'standing by', 'idle', 'available'],
-    'breakdown': ['breakdown', 'broke down', 'broken', 'not working', 'down', 'bd', 'b/d'],
-    'faulty': ['faulty', 'fault', 'defective', 'problem', 'issue'],
+    'breakdown': ['breakdown', 'broke down', 'broken', 'not working', 'down', 'bd', 'b/d', 'for repairs', 'for repair'],
+    'faulty': ['faulty', 'fault', 'defective', 'problem', 'issue', 'no engine', 'no compressor'],
     'scrap': ['scrap', 'scrapped', 'write off', 'written off', 'condemned'],
     'missing': ['missing', 'not seen', 'cannot locate', 'not found', 'not on site', 'not seen on site'],
     'stolen': ['stolen', 'theft'],
@@ -353,8 +353,11 @@ with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
 | "Working" | working | working ✓ |
 | "Not on site" | missing | missing ✓ |
 | "Off hired" | off_hire | off_hire ✓ |
+| "For repairs" | breakdown | breakdown ✓ |
+| "No engine" | faulty | faulty ✓ |
+| "No compressor" | faulty | faulty ✓ |
 | "Pump faulty, still operational" | faulty | working (degraded) |
-| "Sent to workshop for service" | unverified | maintenance |
+| "Sent to workshop for service" | breakdown | breakdown ✓ |
 | "Clutch problem, starter issue" | faulty | faulty ✓ |
 | "Removed battery, waiting" | unverified | standby |
 | "Back from repairs, running" | working | working ✓ |

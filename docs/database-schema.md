@@ -152,13 +152,13 @@ CREATE INDEX idx_plants_master_status ON plants_master(status);
 **Status Values**:
 | Status | Description | Count |
 |--------|-------------|-------|
-| working | Operational, in use | 698 (43.7%) |
+| working | Operational, in use | 646 (40.4%) |
 | missing | Cannot be located, not on site | 257 (16.1%) |
-| standby | Available but not in use | 232 (14.5%) |
+| standby | Available but not in use | 231 (14.4%) |
 | unverified | No remarks provided | 145 (9.1%) |
-| faulty | Has issues, partially functional | 132 (8.3%) |
+| faulty | Has issues (no engine, no compressor, etc.) | 136 (8.5%) |
+| breakdown | Currently broken, for repairs | 97 (6.1%) |
 | scrap | Written off | 70 (4.4%) |
-| breakdown | Currently broken | 48 (3%) |
 | off_hire | Equipment off-hired/not in service | 15 (0.9%) |
 | in_transit | Being transferred | 1 |
 | stolen | Reported stolen | 1 |
