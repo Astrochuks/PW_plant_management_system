@@ -3,7 +3,7 @@
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Body, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Body, Query, Request
 from pydantic import BaseModel, EmailStr, Field
 
 from app.core.database import get_supabase_client, get_supabase_admin_client
@@ -62,14 +62,20 @@ class RefreshRequest(BaseModel):
 
 
 @router.post("/login", response_model=LoginResponse)
-async def login(credentials: LoginRequest, request: Request) -> LoginResponse:
+async def login(
+    credentials: LoginRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+) -> LoginResponse:
     """Authenticate user and return tokens.
 
     Rate limited: 5 failed attempts per email locks account for 15 minutes.
+    Logging runs in background to minimize response time.
 
     Args:
         credentials: Email and password.
         request: FastAPI request object for IP/user-agent extraction.
+        background_tasks: FastAPI background tasks for async logging.
 
     Returns:
         Access and refresh tokens with user info.
@@ -77,7 +83,7 @@ async def login(credentials: LoginRequest, request: Request) -> LoginResponse:
     ip_address = get_client_ip(request)
     user_agent = get_user_agent(request)
 
-    # Check rate limits BEFORE attempting authentication
+    # Check rate limits BEFORE attempting authentication (1 DB call)
     auth_service.check_rate_limit(credentials.email, ip_address)
 
     try:
@@ -90,14 +96,11 @@ async def login(credentials: LoginRequest, request: Request) -> LoginResponse:
         })
 
         if not response.session:
-            # Record failed attempt
-            auth_service.record_login_attempt(
-                credentials.email, ip_address, success=False, failure_reason="invalid_credentials"
-            )
-            auth_service.log_auth_event(
-                "login_failed", credentials.email,
-                ip_address=ip_address, user_agent=user_agent,
-                details={"reason": "invalid_credentials"}
+            # Log in background - don't slow the response
+            background_tasks.add_task(
+                auth_service.record_login,
+                credentials.email, ip_address, False, "invalid_credentials",
+                None, user_agent, {"reason": "invalid_credentials"}
             )
             raise AuthenticationError("Invalid credentials")
 
@@ -114,24 +117,18 @@ async def login(credentials: LoginRequest, request: Request) -> LoginResponse:
         )
 
         if not user_data.data:
-            auth_service.record_login_attempt(
-                credentials.email, ip_address, success=False, failure_reason="user_not_found"
-            )
-            auth_service.log_auth_event(
-                "login_failed", credentials.email,
-                ip_address=ip_address, user_agent=user_agent,
-                details={"reason": "user_not_in_system"}
+            background_tasks.add_task(
+                auth_service.record_login,
+                credentials.email, ip_address, False, "user_not_found",
+                None, user_agent, {"reason": "user_not_in_system"}
             )
             raise AuthenticationError("User not found in system")
 
         if not user_data.data.get("is_active"):
-            auth_service.record_login_attempt(
-                credentials.email, ip_address, success=False, failure_reason="account_deactivated"
-            )
-            auth_service.log_auth_event(
-                "login_failed", credentials.email, user_id=user.id,
-                ip_address=ip_address, user_agent=user_agent,
-                details={"reason": "account_deactivated"}
+            background_tasks.add_task(
+                auth_service.record_login,
+                credentials.email, ip_address, False, "account_deactivated",
+                str(user.id), user_agent, {"reason": "account_deactivated"}
             )
             raise AuthenticationError("User account is deactivated")
 
@@ -140,18 +137,11 @@ async def login(credentials: LoginRequest, request: Request) -> LoginResponse:
             "last_login_at": "now()"
         }).eq("id", user.id).execute()
 
-        # Record successful login
-        auth_service.record_login_attempt(credentials.email, ip_address, success=True)
-        auth_service.log_auth_event(
-            "login_success", credentials.email, user_id=user.id,
-            ip_address=ip_address, user_agent=user_agent,
-            details={"role": user_data.data["role"]}
-        )
-
-        logger.info(
-            "User logged in",
-            user_id=user.id,
-            email=user.email,
+        # Log success in background
+        background_tasks.add_task(
+            auth_service.record_login,
+            credentials.email, ip_address, True, None,
+            str(user.id), user_agent, {"role": user_data.data["role"]}
         )
 
         return LoginResponse(
@@ -170,9 +160,11 @@ async def login(credentials: LoginRequest, request: Request) -> LoginResponse:
     except AuthenticationError:
         raise
     except Exception as e:
-        # Record failed attempt for unexpected errors
-        auth_service.record_login_attempt(
-            credentials.email, ip_address, success=False, failure_reason="system_error"
+        # Log in background
+        background_tasks.add_task(
+            auth_service.record_login,
+            credentials.email, ip_address, False, "system_error",
+            None, user_agent, {}
         )
         logger.error("Login failed", error=str(e), email=credentials.email)
         raise AuthenticationError("Invalid credentials")
