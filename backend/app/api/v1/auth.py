@@ -10,7 +10,7 @@ from pydantic import BaseModel, EmailStr, Field, field_validator
 from app.config import get_settings
 from app.core.database import get_supabase_admin_client, create_auth_client
 from app.core.exceptions import AuthenticationError, ValidationError, NotFoundError
-from app.core.security import CurrentUser, get_current_user, require_admin
+from app.core.security import CurrentUser, get_current_user, require_admin, invalidate_user_cache
 from app.monitoring.logging import get_logger
 from app.services.auth_service import auth_service
 
@@ -369,6 +369,9 @@ async def update_my_profile(
         .eq("id", current_user.id)
         .execute()
     )
+
+    # Invalidate cache so next request picks up the new name
+    invalidate_user_cache(current_user.id)
 
     # Log profile update
     auth_service.log_auth_event(
@@ -905,6 +908,9 @@ async def update_user(
         .execute()
     )
 
+    # Invalidate cached user data so changes take effect immediately
+    invalidate_user_cache(str(user_id))
+
     # Revoke sessions if user was deactivated
     if request_body.is_active is False:
         try:
@@ -1059,7 +1065,8 @@ async def deactivate_user(
         "updated_at": "now()",
     }).eq("id", str(user_id)).execute()
 
-    # Revoke all active sessions so existing JWTs stop working immediately
+    # Invalidate cache + revoke sessions immediately
+    invalidate_user_cache(str(user_id))
     try:
         client.auth.admin.sign_out(str(user_id))
     except Exception as e:

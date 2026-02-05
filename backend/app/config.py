@@ -39,6 +39,8 @@ class Settings(BaseSettings):
 
     # Security
     trust_proxy: bool = False  # Only enable behind a known reverse proxy (nginx, cloudflare)
+    supabase_jwt_secret: str | None = None  # From Supabase dashboard > Settings > API > JWT Secret
+    user_cache_ttl_seconds: int = 300  # How long to cache user data (5 min default)
 
     # Rate Limiting
     rate_limit_requests: int = 100  # requests per minute
