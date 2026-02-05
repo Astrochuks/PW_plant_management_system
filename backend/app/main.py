@@ -77,8 +77,8 @@ def create_application() -> FastAPI:
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "Accept"],
     )
 
     # Add custom middleware (order matters - first added is outermost)
@@ -118,7 +118,7 @@ def create_application() -> FastAPI:
                 "success": False,
                 "error": {
                     "code": "INTERNAL_ERROR",
-                    "message": "An unexpected error occurred" if settings.is_production else str(exc),
+                    "message": "An unexpected error occurred",
                     "request_id": getattr(request.state, "request_id", None),
                 },
             },

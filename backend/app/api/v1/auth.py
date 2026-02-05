@@ -1,33 +1,58 @@
 """Authentication and user management endpoints."""
 
+import re
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Body, Query, Request
-from pydantic import BaseModel, EmailStr, Field
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
-from app.core.database import get_supabase_client, get_supabase_admin_client
+from app.config import get_settings
+from app.core.database import get_supabase_admin_client, create_auth_client
 from app.core.exceptions import AuthenticationError, ValidationError, NotFoundError
 from app.core.security import CurrentUser, get_current_user, require_admin
 from app.monitoring.logging import get_logger
 from app.services.auth_service import auth_service
+
+
+def validate_password_strength(password: str) -> str:
+    """Validate password meets complexity requirements."""
+    errors = []
+    if len(password) < 12:
+        errors.append("at least 12 characters")
+    if not re.search(r"[A-Z]", password):
+        errors.append("at least one uppercase letter")
+    if not re.search(r"[a-z]", password):
+        errors.append("at least one lowercase letter")
+    if not re.search(r"\d", password):
+        errors.append("at least one number")
+    if errors:
+        raise ValueError(f"Password must contain: {', '.join(errors)}")
+    return password
 
 router = APIRouter()
 logger = get_logger(__name__)
 
 
 def get_client_ip(request: Request) -> str | None:
-    """Extract client IP from request, handling proxies."""
-    # Check X-Forwarded-For header (set by proxies/load balancers)
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        # First IP in the list is the original client
-        return forwarded.split(",")[0].strip()
-    # Check X-Real-IP header
-    real_ip = request.headers.get("x-real-ip")
-    if real_ip:
-        return real_ip
-    # Fall back to direct client
+    """Extract client IP from request.
+
+    Only trusts proxy headers (X-Forwarded-For, X-Real-IP) when
+    TRUST_PROXY is enabled in settings. Otherwise, uses the direct
+    connection IP to prevent header spoofing attacks.
+    """
+    settings = get_settings()
+
+    if settings.trust_proxy:
+        # Behind a known reverse proxy — trust forwarded headers
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+        real_ip = request.headers.get("x-real-ip")
+        if real_ip:
+            return real_ip
+
+    # Direct connection IP (cannot be spoofed)
     if request.client:
         return request.client.host
     return None
@@ -87,10 +112,11 @@ async def login(
     auth_service.check_rate_limit(credentials.email, ip_address)
 
     try:
-        client = get_supabase_client()
+        # Fresh client per login - prevents session race conditions
+        auth_client = create_auth_client()
 
         # Authenticate with Supabase
-        response = client.auth.sign_in_with_password({
+        response = auth_client.auth.sign_in_with_password({
             "email": credentials.email,
             "password": credentials.password,
         })
@@ -107,9 +133,10 @@ async def login(
         session = response.session
         user = response.user
 
-        # Get user details from our users table
+        # Get user details from our users table (admin client for service query)
+        admin_client = get_supabase_admin_client()
         user_data = (
-            client.table("users")
+            admin_client.table("users")
             .select("id, email, role, full_name, is_active, must_change_password")
             .eq("id", user.id)
             .single()
@@ -133,7 +160,7 @@ async def login(
             raise AuthenticationError("User account is deactivated")
 
         # Update last login
-        client.table("users").update({
+        admin_client.table("users").update({
             "last_login_at": "now()"
         }).eq("id", user.id).execute()
 
@@ -171,12 +198,17 @@ async def login(
 
 
 @router.post("/refresh", response_model=LoginResponse)
-async def refresh_token(request_body: RefreshRequest, request: Request) -> LoginResponse:
+async def refresh_token(
+    request_body: RefreshRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+) -> LoginResponse:
     """Refresh access token using refresh token.
 
     Args:
         request_body: Refresh token.
         request: FastAPI request object.
+        background_tasks: FastAPI background tasks for async logging.
 
     Returns:
         New access and refresh tokens.
@@ -185,9 +217,10 @@ async def refresh_token(request_body: RefreshRequest, request: Request) -> Login
     user_agent = get_user_agent(request)
 
     try:
-        client = get_supabase_client()
+        # Fresh client per refresh - prevents session race conditions
+        auth_client = create_auth_client()
 
-        response = client.auth.refresh_session(request_body.refresh_token)
+        response = auth_client.auth.refresh_session(request_body.refresh_token)
 
         if not response.session:
             raise AuthenticationError("Invalid refresh token")
@@ -195,9 +228,10 @@ async def refresh_token(request_body: RefreshRequest, request: Request) -> Login
         session = response.session
         user = response.user
 
-        # Get user details
+        # Get user details (admin client for service query)
+        admin_client = get_supabase_admin_client()
         user_data = (
-            client.table("users")
+            admin_client.table("users")
             .select("id, email, role, full_name, is_active")
             .eq("id", user.id)
             .single()
@@ -207,10 +241,11 @@ async def refresh_token(request_body: RefreshRequest, request: Request) -> Login
         if not user_data.data or not user_data.data.get("is_active"):
             raise AuthenticationError("User account is deactivated")
 
-        # Log token refresh
-        auth_service.log_auth_event(
-            "token_refreshed", user_data.data["email"], user_id=user.id,
-            ip_address=ip_address, user_agent=user_agent
+        # Log token refresh in background
+        background_tasks.add_task(
+            auth_service.log_auth_event,
+            "token_refreshed", user_data.data["email"], user.id,
+            ip_address, user_agent
         )
 
         return LoginResponse(
@@ -250,26 +285,26 @@ async def logout(
     user_agent = get_user_agent(request)
 
     try:
-        client = get_supabase_client()
-        client.auth.sign_out()
-
-        # Log logout event
-        auth_service.log_auth_event(
-            "logout", current_user.email, user_id=current_user.id,
-            ip_address=ip_address, user_agent=user_agent
-        )
-
-        logger.info(
-            "User logged out",
-            user_id=current_user.id,
-            email=current_user.email,
-        )
-
-        return {"success": True}
-
+        # Sign out via admin API (doesn't corrupt shared client state)
+        admin_client = get_supabase_admin_client()
+        admin_client.auth.admin.sign_out(current_user.id)
     except Exception as e:
-        logger.error("Logout failed", error=str(e), user_id=current_user.id)
-        return {"success": False}
+        # Sign-out failure is not critical — JWT expires naturally
+        logger.warning("Admin sign-out call failed", error=str(e), user_id=current_user.id)
+
+    # Log logout event
+    auth_service.log_auth_event(
+        "logout", current_user.email, user_id=current_user.id,
+        ip_address=ip_address, user_agent=user_agent
+    )
+
+    logger.info(
+        "User logged out",
+        user_id=current_user.id,
+        email=current_user.email,
+    )
+
+    return {"success": True}
 
 
 @router.get("/me")
@@ -365,19 +400,28 @@ class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str = Field(..., min_length=12)
 
+    @field_validator("new_password")
+    @classmethod
+    def check_password_strength(cls, v: str) -> str:
+        return validate_password_strength(v)
+
 
 @router.post("/change-password")
 async def change_password(
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     request_body: ChangePasswordRequest,
     request: Request,
+    background_tasks: BackgroundTasks,
 ) -> dict[str, bool]:
     """Change user's password.
+
+    Verifies current password before allowing the change.
 
     Args:
         current_user: The authenticated user.
         request_body: Current and new passwords.
         request: FastAPI request object.
+        background_tasks: FastAPI background tasks for async logging.
 
     Returns:
         Success confirmation.
@@ -385,24 +429,35 @@ async def change_password(
     ip_address = get_client_ip(request)
     user_agent = get_user_agent(request)
 
+    # Verify current password by attempting sign-in (fresh client)
     try:
-        client = get_supabase_client()
-
-        # Update password via Supabase Auth
-        client.auth.update_user({
-            "password": request_body.new_password,
+        verify_client = create_auth_client()
+        verify_client.auth.sign_in_with_password({
+            "email": current_user.email,
+            "password": request_body.current_password,
         })
+    except Exception:
+        raise AuthenticationError("Current password is incorrect")
+
+    try:
+        # Update password via admin API (no shared session needed)
+        admin_client = get_supabase_admin_client()
+        admin_client.auth.admin.update_user_by_id(
+            current_user.id,
+            {"password": request_body.new_password},
+        )
 
         # Clear must_change_password flag
-        client.table("users").update({
+        admin_client.table("users").update({
             "must_change_password": False,
             "updated_at": "now()",
         }).eq("id", current_user.id).execute()
 
-        # Log password change
-        auth_service.log_auth_event(
-            "password_changed", current_user.email, user_id=current_user.id,
-            ip_address=ip_address, user_agent=user_agent
+        # Log password change in background
+        background_tasks.add_task(
+            auth_service.log_auth_event,
+            "password_changed", current_user.email, current_user.id,
+            ip_address, user_agent
         )
 
         logger.info(
@@ -412,9 +467,11 @@ async def change_password(
 
         return {"success": True}
 
+    except AuthenticationError:
+        raise
     except Exception as e:
         logger.error("Password change failed", error=str(e), user_id=current_user.id)
-        raise ValidationError(f"Password change failed: {str(e)}")
+        raise ValidationError("Password change failed")
 
 
 # ============================================================================
@@ -587,6 +644,11 @@ class CreateUserRequest(BaseModel):
     full_name: str = Field(..., min_length=2, max_length=255)
     role: Literal["admin", "management"] = "management"
 
+    @field_validator("password")
+    @classmethod
+    def check_password_strength(cls, v: str) -> str:
+        return validate_password_strength(v)
+
 
 class UpdateUserRequest(BaseModel):
     """Request body for updating a user."""
@@ -594,6 +656,17 @@ class UpdateUserRequest(BaseModel):
     full_name: str | None = None
     role: Literal["admin", "management"] | None = None
     is_active: bool | None = None
+
+
+class ResetPasswordRequest(BaseModel):
+    """Request body for admin password reset."""
+
+    new_password: str = Field(..., min_length=12)
+
+    @field_validator("new_password")
+    @classmethod
+    def check_password_strength(cls, v: str) -> str:
+        return validate_password_strength(v)
 
 
 @router.post("/users", status_code=201)
@@ -695,7 +768,7 @@ async def create_user(
         raise
     except Exception as e:
         logger.error("Failed to create user", error=str(e), email=request_body.email)
-        raise ValidationError(f"Failed to create user: {str(e)}")
+        raise ValidationError("Failed to create user")
 
 
 @router.get("/users")
@@ -832,6 +905,13 @@ async def update_user(
         .execute()
     )
 
+    # Revoke sessions if user was deactivated
+    if request_body.is_active is False:
+        try:
+            client.auth.admin.sign_out(str(user_id))
+        except Exception as e:
+            logger.warning("Failed to revoke sessions on deactivation", error=str(e), user_id=str(user_id))
+
     # Determine event type
     event_type = "user_updated"
     if request_body.is_active is False:
@@ -867,8 +947,8 @@ async def update_user(
 async def reset_user_password(
     user_id: UUID,
     current_user: Annotated[CurrentUser, Depends(require_admin)],
+    request_body: ResetPasswordRequest,
     request: Request,
-    new_password: str = Body(..., min_length=12, embed=True),
 ) -> dict[str, Any]:
     """Reset a user's password (Admin only).
 
@@ -877,8 +957,8 @@ async def reset_user_password(
     Args:
         user_id: The user's UUID.
         current_user: The authenticated admin user.
+        request_body: New password.
         request: FastAPI request object.
-        new_password: The new password.
 
     Returns:
         Success confirmation.
@@ -902,7 +982,7 @@ async def reset_user_password(
         # Update password in Supabase Auth
         client.auth.admin.update_user_by_id(
             str(user_id),
-            {"password": new_password},
+            {"password": request_body.new_password},
         )
 
         # Update timestamp
@@ -933,7 +1013,7 @@ async def reset_user_password(
 
     except Exception as e:
         logger.error("Password reset failed", error=str(e), user_id=str(user_id))
-        raise ValidationError(f"Password reset failed: {str(e)}")
+        raise ValidationError("Password reset failed")
 
 
 @router.delete("/users/{user_id}")
@@ -978,6 +1058,12 @@ async def deactivate_user(
         "is_active": False,
         "updated_at": "now()",
     }).eq("id", str(user_id)).execute()
+
+    # Revoke all active sessions so existing JWTs stop working immediately
+    try:
+        client.auth.admin.sign_out(str(user_id))
+    except Exception as e:
+        logger.warning("Failed to revoke sessions on deactivation", error=str(e), user_id=str(user_id))
 
     # Log deactivation
     auth_service.log_auth_event(

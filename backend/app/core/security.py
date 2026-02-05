@@ -9,8 +9,11 @@ from fastapi import Depends, Header, Request
 from pydantic import BaseModel
 
 from app.config import get_settings
-from app.core.database import get_supabase_client
+from app.core.database import get_supabase_client, get_supabase_admin_client
 from app.core.exceptions import AuthenticationError, AuthorizationError
+from app.monitoring.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class CurrentUser(BaseModel):
@@ -60,7 +63,8 @@ async def get_current_user(
     token = parts[1]
 
     try:
-        # Verify token with Supabase
+        # Verify token with Supabase (get_user with explicit token is read-only,
+        # does not mutate client session state, so singleton is safe here)
         client = get_supabase_client()
         user_response = client.auth.get_user(token)
 
@@ -69,8 +73,8 @@ async def get_current_user(
 
         supabase_user = user_response.user
 
-        # Get user details from our users table
-        admin_client = client  # Use same client to get user info
+        # Get user details from our users table (admin client bypasses RLS)
+        admin_client = get_supabase_admin_client()
         user_data = (
             admin_client.table("users")
             .select("id, email, role, full_name, is_active")
@@ -103,7 +107,8 @@ async def get_current_user(
     except AuthenticationError:
         raise
     except Exception as e:
-        raise AuthenticationError(f"Authentication failed: {str(e)}")
+        logger.error("Authentication failed", error=str(e))
+        raise AuthenticationError("Authentication failed")
 
 
 async def get_current_active_user(
@@ -198,4 +203,5 @@ async def validate_upload_token(
     except AuthenticationError:
         raise
     except Exception as e:
-        raise AuthenticationError(f"Token validation failed: {str(e)}")
+        logger.error("Token validation failed", error=str(e))
+        raise AuthenticationError("Token validation failed")

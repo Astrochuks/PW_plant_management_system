@@ -13,10 +13,13 @@ from app.config import get_settings
 
 @lru_cache
 def get_supabase_client() -> Client:
-    """Get Supabase client with anonymous key.
+    """Get cached Supabase client with anonymous key.
 
-    This client respects Row Level Security (RLS) policies.
-    Use for user-authenticated requests.
+    WARNING: This is a singleton. Do NOT use for operations that mutate
+    auth state (sign_in, sign_out, refresh_session, update_user).
+    Use create_auth_client() for those operations.
+
+    Safe for: table queries, get_user(token) validation.
     """
     settings = get_settings()
     return create_client(
@@ -39,25 +42,23 @@ def get_supabase_admin_client() -> Client:
     )
 
 
-def get_authenticated_client(access_token: str) -> Client:
-    """Get Supabase client authenticated with user's access token.
+def create_auth_client() -> Client:
+    """Create a fresh Supabase client for auth operations.
 
-    This client will execute queries in the context of the authenticated user,
-    respecting RLS policies.
+    NOT cached — each call returns a new instance. Use this for any
+    operation that mutates the client's auth state:
+    - sign_in_with_password (sets session)
+    - refresh_session (changes session)
+    - sign_out (clears session)
 
-    Args:
-        access_token: The user's JWT access token from Supabase Auth.
-
-    Returns:
-        Authenticated Supabase client.
+    This prevents race conditions when multiple users authenticate
+    concurrently on the same server.
     """
     settings = get_settings()
-    client = create_client(
+    return create_client(
         settings.supabase_url,
         settings.supabase_anon_key,
     )
-    client.auth.set_session(access_token, "")
-    return client
 
 
 class DatabaseClient:

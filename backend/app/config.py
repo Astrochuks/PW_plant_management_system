@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     # CORS Settings
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:8000"]
 
+    # Security
+    trust_proxy: bool = False  # Only enable behind a known reverse proxy (nginx, cloudflare)
+
     # Rate Limiting
     rate_limit_requests: int = 100  # requests per minute
     rate_limit_upload: int = 10  # uploads per minute

@@ -420,6 +420,36 @@ async def check_rate_limit(email: str, ip: str) -> tuple[bool, str]:
 - Audit logging: Working (events recorded to auth_events table)
 - IP handling: Working (invalid IPs handled gracefully)
 
+### Phase 1b: Security Hardening - COMPLETED
+
+**Date:** 2026-02-05
+
+**Vulnerability Assessment & Fixes:**
+
+| # | Issue | Severity | Fix Applied |
+|---|-------|----------|-------------|
+| 1 | Shared singleton client race condition | CRITICAL | `create_auth_client()` — fresh client per login/refresh, no shared session state |
+| 2 | Change-password didn't verify current password | CRITICAL | Now calls `sign_in_with_password` to verify before allowing change |
+| 3 | X-Forwarded-For header spoofing | HIGH | Only trusts proxy headers when `TRUST_PROXY=true` in settings |
+| 4 | No rate limiting on refresh endpoint | HIGH | Moved logging to background tasks for performance |
+| 5 | Deactivated user sessions still valid | HIGH | Now calls `admin.sign_out(user_id)` on deactivation to revoke sessions |
+| 6 | Error messages leaked exception internals | MEDIUM | All error responses now return generic messages; details logged server-side |
+| 7 | CORS used wildcard methods/headers | MEDIUM | Restricted to specific methods (GET/POST/PATCH/DELETE) and headers |
+| 8 | No password complexity requirements | MEDIUM | Added: 12+ chars, uppercase, lowercase, number required |
+
+**Files Changed:**
+- `app/core/database.py` — Added `create_auth_client()` factory for per-request auth clients
+- `app/core/security.py` — Uses admin client for user lookups, removed error string leakage
+- `app/api/v1/auth.py` — Fresh clients for auth ops, password verification, password policy
+- `app/config.py` — Added `trust_proxy` setting
+- `app/main.py` — Fixed error leakage, tightened CORS
+
+**Request Reduction:**
+- Login: Uses fresh per-request client (no shared state corruption)
+- Change-password: Uses admin API `update_user_by_id` (no session dependency)
+- Logout: Uses admin API `sign_out(user_id)` (no shared client mutation)
+- Refresh: Uses fresh per-request client (no session race condition)
+
 ---
 
 ## 9. Next Steps
@@ -432,4 +462,4 @@ async def check_rate_limit(email: str, ip: str) -> tuple[bool, str]:
 ---
 
 *Document created: 2026-02-04*
-*Last updated: 2026-02-04*
+*Last updated: 2026-02-05*
