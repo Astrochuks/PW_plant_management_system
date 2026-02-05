@@ -123,8 +123,10 @@ def _verify_token_via_supabase(token: str) -> str:
 def _verify_token(token: str) -> str:
     """Verify a JWT token and return the user_id.
 
-    Uses local verification if JWT secret is configured (0 network calls),
-    otherwise falls back to Supabase Auth API (1 network call).
+    Strategy:
+    1. Try local HS256 verification (0 network calls) if JWT secret is configured
+    2. If local fails (e.g., token signed with ES256), fall back to Supabase API
+    3. Expired tokens are rejected immediately without a network call
     """
     settings = get_settings()
 
@@ -133,11 +135,14 @@ def _verify_token(token: str) -> str:
             payload = _verify_token_locally(token)
             return payload["sub"]
         except jwt.ExpiredSignatureError:
+            # Definitely expired — no need to call Supabase
             raise AuthenticationError("Token has expired")
         except jwt.InvalidTokenError:
-            raise AuthenticationError("Invalid token")
-    else:
-        return _verify_token_via_supabase(token)
+            # Token may be signed with a different algorithm (e.g., ES256)
+            # Fall back to Supabase verification
+            logger.debug("Local JWT verification failed, falling back to Supabase")
+
+    return _verify_token_via_supabase(token)
 
 
 # =============================================================================
