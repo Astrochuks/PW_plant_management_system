@@ -44,6 +44,9 @@ async def list_locations(
     return {
         "success": True,
         "data": result.data,
+        "meta": {
+            "total": len(result.data) if result.data else 0,
+        },
     }
 
 
