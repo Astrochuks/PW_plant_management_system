@@ -223,6 +223,153 @@ async def update_location(
     }
 
 
+@router.delete("/{location_id}")
+async def delete_location(
+    location_id: UUID,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+    force: bool = Query(False, description="Force delete by reassigning plants to NULL location"),
+) -> dict[str, Any]:
+    """Delete a location.
+
+    Fails if plants are currently assigned to this location, unless force=true
+    is specified (which sets their current_location_id to NULL).
+
+    Historical records (weekly reports, location history, events) are preserved
+    and will reference the deleted location's ID.
+
+    Args:
+        location_id: The location UUID.
+        request: The HTTP request.
+        background_tasks: Background task runner.
+        current_user: The authenticated admin user.
+        force: If true, unassign plants from this location before deleting.
+
+    Returns:
+        Success message.
+    """
+    client = get_supabase_admin_client()
+
+    # Verify location exists
+    existing = (
+        client.table("locations")
+        .select("id, name")
+        .eq("id", str(location_id))
+        .single()
+        .execute()
+    )
+
+    if not existing.data:
+        raise NotFoundError("Location", str(location_id))
+
+    location_name = existing.data["name"]
+
+    # Check for plants currently at this location
+    plants_at_location = (
+        client.table("plants_master")
+        .select("id", count="exact")
+        .eq("current_location_id", str(location_id))
+        .execute()
+    )
+    plant_count = plants_at_location.count or 0
+
+    if plant_count > 0 and not force:
+        raise ValidationError(
+            f"Cannot delete location '{location_name}': {plant_count} plant(s) currently assigned. "
+            f"Transfer them first or use force=true to unassign.",
+            details=[{
+                "field": "location_id",
+                "message": f"{plant_count} plants assigned",
+                "code": "HAS_DEPENDENCIES",
+            }],
+        )
+
+    # Check for non-nullable historical records that would block deletion
+    weekly_records = (
+        client.table("plant_weekly_records")
+        .select("id", count="exact")
+        .eq("location_id", str(location_id))
+        .limit(1)
+        .execute()
+    )
+    weekly_count = weekly_records.count or 0
+
+    submissions = (
+        client.table("weekly_report_submissions")
+        .select("id", count="exact")
+        .eq("location_id", str(location_id))
+        .limit(1)
+        .execute()
+    )
+    submission_count = submissions.count or 0
+
+    location_history = (
+        client.table("plant_location_history")
+        .select("id", count="exact")
+        .eq("location_id", str(location_id))
+        .limit(1)
+        .execute()
+    )
+    history_count = location_history.count or 0
+
+    if weekly_count > 0 or submission_count > 0 or history_count > 0:
+        deps = []
+        if weekly_count > 0:
+            deps.append(f"{weekly_count} weekly record(s)")
+        if submission_count > 0:
+            deps.append(f"{submission_count} submission(s)")
+        if history_count > 0:
+            deps.append(f"{history_count} location history record(s)")
+        raise ValidationError(
+            f"Cannot delete location '{location_name}': has historical data ({', '.join(deps)}). "
+            f"Locations with historical records cannot be deleted to preserve data integrity.",
+            details=[{
+                "field": "location_id",
+                "message": "Has historical records",
+                "code": "HAS_HISTORY",
+            }],
+        )
+
+    # If force, unassign plants from this location
+    if plant_count > 0 and force:
+        client.table("plants_master").update(
+            {"current_location_id": None}
+        ).eq("current_location_id", str(location_id)).execute()
+
+    # Delete the location (nullable FKs on upload_tokens, spare_parts, etc. auto-set to NULL)
+    client.table("locations").delete().eq("id", str(location_id)).execute()
+
+    logger.info(
+        "Location deleted",
+        location_id=str(location_id),
+        name=location_name,
+        plants_unassigned=plant_count if force else 0,
+        user_id=current_user.id,
+    )
+
+    background_tasks.add_task(
+        audit_service.log,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        action="delete",
+        table_name="locations",
+        record_id=str(location_id),
+        old_values={"name": location_name},
+        ip_address=get_client_ip(request),
+        description=f"Deleted location {location_name}"
+        + (f" (force: {plant_count} plants unassigned)" if force and plant_count > 0 else ""),
+    )
+
+    return {
+        "success": True,
+        "message": f"Location '{location_name}' deleted successfully",
+        "details": {
+            "plants_unassigned": plant_count if force else 0,
+        },
+    }
+
+
 @router.get("/{location_id}/plants")
 async def get_location_plants(
     location_id: UUID,

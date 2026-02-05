@@ -88,8 +88,8 @@ async def list_spare_parts(
     # Transform data to include fleet_number
     parts = []
     for item in result.data:
-        item["fleet_number"] = item.get("plants", {}).get("fleet_number") if item.get("plants_master") else None
-        item["plant_description"] = item.get("plants", {}).get("description") if item.get("plants_master") else None
+        item["fleet_number"] = item.get("plants_master", {}).get("fleet_number") if item.get("plants_master") else None
+        item["plant_description"] = item.get("plants_master", {}).get("description") if item.get("plants_master") else None
         item["supplier_name"] = item.get("supplier")  # supplier is stored as text, not FK
         if "plants_master" in item:
             del item["plants_master"]
@@ -227,8 +227,8 @@ async def get_spare_part(
 
     # Transform data
     data = result.data
-    data["fleet_number"] = data.get("plants", {}).get("fleet_number") if data.get("plants_master") else None
-    data["plant_description"] = data.get("plants", {}).get("description") if data.get("plants_master") else None
+    data["fleet_number"] = data.get("plants_master", {}).get("fleet_number") if data.get("plants_master") else None
+    data["plant_description"] = data.get("plants_master", {}).get("description") if data.get("plants_master") else None
     data["supplier_name"] = data.get("supplier")  # supplier is stored as text, not FK
     if "plants_master" in data:
         del data["plants_master"]

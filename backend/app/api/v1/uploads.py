@@ -388,7 +388,7 @@ async def list_weekly_submissions(
     submissions = []
     for item in result.data:
         item["location_name"] = item.get("locations", {}).get("name") if item.get("locations") else None
-        del item["locations"]
+        item.pop("locations", None)
         submissions.append(item)
 
     return {
@@ -503,9 +503,10 @@ async def list_upload_tokens(
     tokens = []
     for item in result.data:
         item["location_name"] = item.get("locations", {}).get("name") if item.get("locations") else None
-        del item["locations"]
+        item.pop("locations", None)
         # Don't expose the actual token in list view
-        item["token"] = item["token"][:4] + "****"
+        raw_token = item.get("token", "")
+        item["token"] = (raw_token[:4] + "****") if raw_token and len(raw_token) >= 4 else "****"
         tokens.append(item)
 
     return {

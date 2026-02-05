@@ -276,7 +276,7 @@ async def process_weekly_report(
             raise ValueError("Invalid file format: no fleet_number column")
 
         # Get existing plants for this location
-        existing_plants = client.table("plants").select("id, fleet_number").execute()
+        existing_plants = client.table("plants_master").select("id, fleet_number").execute()
         fleet_to_id = {p["fleet_number"]: p["id"] for p in existing_plants.data}
 
         # Process each row
@@ -344,8 +344,11 @@ async def process_weekly_report(
                     **plant_data,
                 })
             else:
-                # New plant
-                plant_data["status"] = "active"
+                # New plant — resolve fleet_type from prefix, set working status
+                resolved_type = client.rpc("resolve_fleet_type", {"p_fleet_number": fleet_num}).execute()
+                if resolved_type.data:
+                    plant_data["fleet_type"] = resolved_type.data
+                plant_data["status"] = "working"
                 plants_to_insert.append(plant_data)
 
         # Batch insert new plants (exclude _usage field)
@@ -355,11 +358,25 @@ async def process_weekly_report(
                     {k: v for k, v in p.items() if k != "_usage"}
                     for p in plants_to_insert
                 ]
-                insert_result = client.table("plants").insert(insert_data).execute()
+                insert_result = client.table("plants_master").insert(insert_data).execute()
                 result["plants_created"] = len(insert_result.data)
                 # Update plants_to_insert with generated IDs for tracking
                 for i, p in enumerate(plants_to_insert):
                     p["id"] = insert_result.data[i]["id"]
+
+                # Record initial location history for new plants
+                location_history_records = [
+                    {
+                        "plant_id": p["id"],
+                        "location_id": location_id,
+                        "start_date": datetime.utcnow().isoformat(),
+                        "transfer_reason": "First seen in weekly report",
+                    }
+                    for p in plants_to_insert if p.get("id")
+                ]
+                if location_history_records:
+                    client.table("plant_location_history").insert(location_history_records).execute()
+
                 logger.info("Inserted new plants", count=result["plants_created"], job_id=job_id)
             except Exception as e:
                 result["errors"].append(f"Failed to insert plants: {str(e)}")
@@ -369,7 +386,7 @@ async def process_weekly_report(
         for plant in plants_to_update:
             try:
                 update_data = {k: v for k, v in plant.items() if k not in ("id", "_usage")}
-                client.table("plants").update(update_data).eq("id", plant["id"]).execute()
+                client.table("plants_master").update(update_data).eq("id", plant["id"]).execute()
                 result["plants_updated"] += 1
             except Exception as e:
                 result["warnings"].append(f"Failed to update plant {plant['fleet_number']}: {str(e)}")
@@ -408,7 +425,7 @@ async def process_weekly_report(
             client,
             title=f"Weekly report processed",
             message=f"Processed {result['plants_processed']} plants: {result['plants_created']} new, {result['plants_updated']} updated",
-            notification_type="upload_complete" if result["success"] else "upload_warning",
+            notification_type="report_processed" if result["success"] else "warning",
             data={"job_id": job_id, "location_id": location_id},
         )
 
@@ -438,7 +455,7 @@ async def process_weekly_report(
             client,
             title="Weekly report processing failed",
             message=f"Error: {str(e)[:200]}",
-            notification_type="upload_failed",
+            notification_type="report_failed",
             data={"job_id": job_id, "error": str(e)[:500]},
         )
 
@@ -508,13 +525,15 @@ async def process_purchase_order(
                 df = _map_po_columns(df)
 
                 # Get plant ID for this fleet
-                plant_result = client.table("plants").select("id").eq("fleet_number", fleet_num).execute()
+                plant_result = client.table("plants_master").select("id").eq("fleet_number", fleet_num).execute()
 
                 if not plant_result.data:
-                    # Create plant if doesn't exist
-                    new_plant = client.table("plants").insert({
+                    # Create plant if doesn't exist — resolve fleet_type from prefix
+                    resolved_type = client.rpc("resolve_fleet_type", {"p_fleet_number": fleet_num}).execute()
+                    new_plant = client.table("plants_master").insert({
                         "fleet_number": fleet_num,
-                        "status": "active",
+                        "fleet_type": resolved_type.data if resolved_type.data else None,
+                        "status": "unverified",
                         "physical_verification": False,
                     }).execute()
                     plant_id = new_plant.data[0]["id"]
@@ -586,7 +605,7 @@ async def process_purchase_order(
             client,
             title="Purchase order processed",
             message=f"Processed {result['parts_processed']} parts: {result['parts_created']} created",
-            notification_type="upload_complete" if result["success"] else "upload_warning",
+            notification_type="report_processed" if result["success"] else "warning",
             data={"job_id": job_id, "po_number": po_number},
         )
 
@@ -615,7 +634,7 @@ async def process_purchase_order(
             client,
             title="Purchase order processing failed",
             message=f"Error: {str(e)[:200]}",
-            notification_type="upload_failed",
+            notification_type="report_failed",
             data={"job_id": job_id, "error": str(e)[:500]},
         )
 
@@ -652,7 +671,7 @@ async def _record_plant_locations(
 
     try:
         # Get plant IDs for fleet numbers
-        plants = client.table("plants").select("id, fleet_number, current_location_id").in_("fleet_number", fleet_numbers).execute()
+        plants = client.table("plants_master").select("id, fleet_number, current_location_id").in_("fleet_number", fleet_numbers).execute()
         fleet_to_plant = {p["fleet_number"]: p for p in plants.data}
 
         # Get submission details for week info
