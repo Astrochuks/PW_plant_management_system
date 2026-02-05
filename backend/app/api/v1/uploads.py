@@ -4,8 +4,9 @@ from datetime import date
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Query, Request, UploadFile
 
+from app.api.v1.auth import get_client_ip
 from app.config import get_settings
 from app.core.database import get_supabase_admin_client
 from app.core.exceptions import ValidationError, AuthenticationError, NotFoundError
@@ -22,6 +23,7 @@ from app.models.upload import (
     WeeklyReportSubmission,
 )
 from app.monitoring.logging import get_logger
+from app.services.audit_service import audit_service
 from app.workers.etl_worker import process_weekly_report, process_purchase_order
 
 router = APIRouter()
@@ -30,6 +32,7 @@ logger = get_logger(__name__)
 
 @router.post("/weekly-report", response_model=UploadResponse)
 async def upload_weekly_report(
+    request: Request,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     token: str = Form(...),
@@ -138,6 +141,24 @@ async def upload_weekly_report(
         location_id=str(final_location_id),
     )
 
+    background_tasks.add_task(
+        audit_service.log,
+        user_id=token_info.get("token_id", "token_upload"),
+        user_email=submitter_email or "token_upload",
+        action="upload",
+        table_name="weekly_report_submissions",
+        record_id=job_id,
+        new_values={
+            "file_name": file.filename,
+            "file_size": file_size,
+            "location_id": str(final_location_id),
+            "week_ending_date": str(week_ending_date),
+            "submitter_name": submitter_name,
+        },
+        ip_address=get_client_ip(request),
+        description=f"Uploaded weekly report for {token_info.get('location_name', 'unknown')} week ending {week_ending_date}",
+    )
+
     return UploadResponse(
         success=True,
         job_id=job_id,
@@ -152,6 +173,7 @@ async def upload_weekly_report(
 
 @router.post("/purchase-order", response_model=UploadResponse)
 async def upload_purchase_order(
+    request: Request,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     token: str = Form(...),
@@ -238,6 +260,24 @@ async def upload_purchase_order(
         process_purchase_order,
         job_id=job_id,
         storage_path=storage_path,
+    )
+
+    background_tasks.add_task(
+        audit_service.log,
+        user_id=token_info.get("token_id", "token_upload"),
+        user_email=submitter_email or "token_upload",
+        action="upload",
+        table_name="purchase_order_submissions",
+        record_id=job_id,
+        new_values={
+            "file_name": file.filename,
+            "file_size": file_size,
+            "po_number": po_number,
+            "po_date": str(po_date) if po_date else None,
+            "submitter_name": submitter_name,
+        },
+        ip_address=get_client_ip(request),
+        description=f"Uploaded purchase order {po_number or file.filename}",
     )
 
     return UploadResponse(
@@ -365,6 +405,8 @@ async def list_weekly_submissions(
 
 @router.post("/tokens/generate")
 async def generate_upload_token(
+    request: Request,
+    background_tasks: BackgroundTasks,
     current_user: Annotated[CurrentUser, Depends(require_admin)],
     name: str = Form(...),
     location_id: UUID | None = Form(None),
@@ -374,6 +416,8 @@ async def generate_upload_token(
     """Generate a new upload token for site officers.
 
     Args:
+        request: The HTTP request.
+        background_tasks: Background task runner.
         current_user: The authenticated admin user.
         name: Friendly name for the token.
         location_id: Optional location to restrict the token to.
@@ -396,6 +440,8 @@ async def generate_upload_token(
         },
     ).execute()
 
+    token_data = result.data[0]
+
     logger.info(
         "Upload token generated",
         token_name=name,
@@ -403,9 +449,26 @@ async def generate_upload_token(
         user_id=current_user.id,
     )
 
+    background_tasks.add_task(
+        audit_service.log,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        action="create",
+        table_name="upload_tokens",
+        record_id=token_data.get("id"),
+        new_values={
+            "name": name,
+            "location_id": str(location_id) if location_id else None,
+            "upload_types": upload_types,
+            "expires_in_days": expires_in_days,
+        },
+        ip_address=get_client_ip(request),
+        description=f"Generated upload token '{name}'",
+    )
+
     return {
         "success": True,
-        "data": result.data[0],
+        "data": token_data,
     }
 
 

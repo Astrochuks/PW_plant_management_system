@@ -3,8 +3,9 @@
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 
+from app.api.v1.auth import get_client_ip
 from app.core.database import get_supabase_admin_client
 from app.core.exceptions import NotFoundError, ValidationError
 from app.core.security import (
@@ -13,6 +14,7 @@ from app.core.security import (
     require_management_or_admin,
 )
 from app.monitoring.logging import get_logger
+from app.services.audit_service import audit_service
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -80,6 +82,8 @@ async def get_location(
 
 @router.post("", status_code=201)
 async def create_location(
+    request: Request,
+    background_tasks: BackgroundTasks,
     current_user: Annotated[CurrentUser, Depends(require_admin)],
     name: str,
     code: str | None = None,
@@ -88,6 +92,8 @@ async def create_location(
     """Create a new location.
 
     Args:
+        request: The HTTP request.
+        background_tasks: Background task runner.
         current_user: The authenticated admin user.
         name: Location name.
         code: Short code for the location.
@@ -112,34 +118,52 @@ async def create_location(
             details=[{"field": "name", "message": "Already exists", "code": "DUPLICATE"}],
         )
 
+    location_data = {
+        "name": name.upper(),
+        "code": code.upper() if code else name[:3].upper(),
+        "address": address,
+        "is_active": True,
+    }
+
     # Create location
     result = (
         client.table("locations")
-        .insert({
-            "name": name.upper(),
-            "code": code.upper() if code else name[:3].upper(),
-            "address": address,
-            "is_active": True,
-        })
+        .insert(location_data)
         .execute()
     )
 
+    created = result.data[0]
+
     logger.info(
         "Location created",
-        location_id=result.data[0]["id"],
+        location_id=created["id"],
         name=name,
         user_id=current_user.id,
     )
 
+    background_tasks.add_task(
+        audit_service.log,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        action="create",
+        table_name="locations",
+        record_id=created["id"],
+        new_values=location_data,
+        ip_address=get_client_ip(request),
+        description=f"Created location {name.upper()}",
+    )
+
     return {
         "success": True,
-        "data": result.data[0],
+        "data": created,
     }
 
 
 @router.patch("/{location_id}")
 async def update_location(
     location_id: UUID,
+    request: Request,
+    background_tasks: BackgroundTasks,
     current_user: Annotated[CurrentUser, Depends(require_admin)],
     name: str | None = None,
     code: str | None = None,
@@ -150,6 +174,8 @@ async def update_location(
 
     Args:
         location_id: The location UUID.
+        request: The HTTP request.
+        background_tasks: Background task runner.
         current_user: The authenticated admin user.
         name: New location name.
         code: New short code.
@@ -160,17 +186,6 @@ async def update_location(
         Updated location.
     """
     client = get_supabase_admin_client()
-
-    # Check location exists
-    existing = (
-        client.table("locations")
-        .select("id")
-        .eq("id", str(location_id))
-        .execute()
-    )
-
-    if not existing.data:
-        raise NotFoundError("Location", str(location_id))
 
     # Build update data
     update_data = {}
@@ -186,6 +201,21 @@ async def update_location(
     if not update_data:
         raise ValidationError("No fields to update")
 
+    # Fetch current values for fields being changed (for audit diff)
+    fields_to_fetch = ",".join(["id", "name"] + list(update_data.keys()))
+    existing = (
+        client.table("locations")
+        .select(fields_to_fetch)
+        .eq("id", str(location_id))
+        .execute()
+    )
+
+    if not existing.data:
+        raise NotFoundError("Location", str(location_id))
+
+    old_record = existing.data[0]
+    old_values = {k: old_record.get(k) for k in update_data if k in old_record}
+
     update_data["updated_at"] = "now()"
 
     result = (
@@ -200,6 +230,20 @@ async def update_location(
         location_id=str(location_id),
         updated_fields=list(update_data.keys()),
         user_id=current_user.id,
+    )
+
+    location_name = old_record.get("name", str(location_id))
+    background_tasks.add_task(
+        audit_service.log,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        action="update",
+        table_name="locations",
+        record_id=str(location_id),
+        old_values=old_values,
+        new_values={k: v for k, v in update_data.items() if k != "updated_at"},
+        ip_address=get_client_ip(request),
+        description=f"Updated location {location_name}: {', '.join(k for k in update_data if k != 'updated_at')}",
     )
 
     return {

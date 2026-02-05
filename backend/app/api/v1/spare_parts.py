@@ -4,8 +4,9 @@ from datetime import date
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 
+from app.api.v1.auth import get_client_ip
 from app.core.database import get_supabase_admin_client
 from app.core.exceptions import NotFoundError, ValidationError
 from app.core.security import (
@@ -14,6 +15,7 @@ from app.core.security import (
     require_management_or_admin,
 )
 from app.monitoring.logging import get_logger
+from app.services.audit_service import audit_service
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -248,6 +250,8 @@ async def get_spare_part(
 
 @router.post("", status_code=201)
 async def create_spare_part(
+    request: Request,
+    background_tasks: BackgroundTasks,
     current_user: Annotated[CurrentUser, Depends(require_admin)],
     plant_id: UUID,
     part_description: str,
@@ -268,6 +272,8 @@ async def create_spare_part(
     Total cost is auto-calculated as: (unit_cost × quantity × (1 + VAT%) × (1 - discount%)) + other_costs
 
     Args:
+        request: The HTTP request.
+        background_tasks: Background task runner.
         current_user: The authenticated admin user.
         plant_id: The plant this part belongs to.
         part_description: Description of the part.
@@ -324,23 +330,40 @@ async def create_spare_part(
         .execute()
     )
 
+    created = result.data[0]
+    fleet_number = plant.data["fleet_number"]
+
     logger.info(
         "Spare part created",
-        part_id=result.data[0]["id"],
+        part_id=created["id"],
         plant_id=str(plant_id),
-        fleet_number=plant.data["fleet_number"],
+        fleet_number=fleet_number,
         user_id=current_user.id,
+    )
+
+    background_tasks.add_task(
+        audit_service.log,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        action="create",
+        table_name="spare_parts",
+        record_id=created["id"],
+        new_values=part_data,
+        ip_address=get_client_ip(request),
+        description=f"Created spare part for plant {fleet_number}: {part_description}",
     )
 
     return {
         "success": True,
-        "data": result.data[0],
+        "data": created,
     }
 
 
 @router.patch("/{part_id}")
 async def update_spare_part(
     part_id: UUID,
+    request: Request,
+    background_tasks: BackgroundTasks,
     current_user: Annotated[CurrentUser, Depends(require_admin)],
     part_description: str | None = None,
     replaced_date: date | None = None,
@@ -361,6 +384,8 @@ async def update_spare_part(
 
     Args:
         part_id: The spare part UUID.
+        request: The HTTP request.
+        background_tasks: Background task runner.
         current_user: The authenticated admin user.
         All other args are optional fields to update.
 
@@ -369,18 +394,7 @@ async def update_spare_part(
     """
     client = get_supabase_admin_client()
 
-    # Check part exists
-    existing = (
-        client.table("spare_parts")
-        .select("id")
-        .eq("id", str(part_id))
-        .execute()
-    )
-
-    if not existing.data:
-        raise NotFoundError("Spare part", str(part_id))
-
-    # Build update data
+    # Build update data first to know which fields to fetch
     update_data = {}
     if part_description is not None:
         update_data["part_description"] = part_description
@@ -410,6 +424,21 @@ async def update_spare_part(
     if not update_data:
         raise ValidationError("No fields to update")
 
+    # Fetch current values for fields being changed (for audit diff)
+    fields_to_fetch = ",".join(["id", "part_description"] + list(update_data.keys()))
+    existing = (
+        client.table("spare_parts")
+        .select(fields_to_fetch)
+        .eq("id", str(part_id))
+        .execute()
+    )
+
+    if not existing.data:
+        raise NotFoundError("Spare part", str(part_id))
+
+    old_record = existing.data[0]
+    old_values = {k: old_record.get(k) for k in update_data if k in old_record}
+
     # updated_at is auto-set by trigger
 
     result = (
@@ -426,6 +455,19 @@ async def update_spare_part(
         user_id=current_user.id,
     )
 
+    background_tasks.add_task(
+        audit_service.log,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        action="update",
+        table_name="spare_parts",
+        record_id=str(part_id),
+        old_values=old_values,
+        new_values=update_data,
+        ip_address=get_client_ip(request),
+        description=f"Updated spare part {old_record.get('part_description', str(part_id))}: {', '.join(update_data.keys())}",
+    )
+
     return {
         "success": True,
         "data": result.data[0],
@@ -435,12 +477,16 @@ async def update_spare_part(
 @router.delete("/{part_id}")
 async def delete_spare_part(
     part_id: UUID,
+    request: Request,
+    background_tasks: BackgroundTasks,
     current_user: Annotated[CurrentUser, Depends(require_admin)],
 ) -> dict[str, Any]:
     """Delete a spare part record.
 
     Args:
         part_id: The spare part UUID.
+        request: The HTTP request.
+        background_tasks: Background task runner.
         current_user: The authenticated admin user.
 
     Returns:
@@ -448,10 +494,10 @@ async def delete_spare_part(
     """
     client = get_supabase_admin_client()
 
-    # Check part exists
+    # Capture full record before deletion for audit trail
     existing = (
         client.table("spare_parts")
-        .select("id, plant_id")
+        .select("*")
         .eq("id", str(part_id))
         .single()
         .execute()
@@ -460,14 +506,28 @@ async def delete_spare_part(
     if not existing.data:
         raise NotFoundError("Spare part", str(part_id))
 
+    deleted_record = existing.data
+
     # Delete part
     client.table("spare_parts").delete().eq("id", str(part_id)).execute()
 
     logger.info(
         "Spare part deleted",
         part_id=str(part_id),
-        plant_id=existing.data["plant_id"],
+        plant_id=deleted_record["plant_id"],
         user_id=current_user.id,
+    )
+
+    background_tasks.add_task(
+        audit_service.log,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        action="delete",
+        table_name="spare_parts",
+        record_id=str(part_id),
+        old_values=deleted_record,
+        ip_address=get_client_ip(request),
+        description=f"Deleted spare part {deleted_record.get('part_description', str(part_id))}",
     )
 
     return {

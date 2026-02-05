@@ -3,8 +3,9 @@
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 
+from app.api.v1.auth import get_client_ip
 from app.core.database import get_supabase_admin_client
 from app.core.exceptions import NotFoundError, ValidationError
 from app.core.security import (
@@ -24,6 +25,7 @@ from app.models.plant import (
     PlantTransferResponse,
 )
 from app.monitoring.logging import get_logger
+from app.services.audit_service import audit_service
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -105,6 +107,8 @@ async def list_plant_events(
 @router.patch("/events/{event_id}/acknowledge")
 async def acknowledge_event(
     event_id: UUID,
+    request: Request,
+    background_tasks: BackgroundTasks,
     current_user: Annotated[CurrentUser, Depends(require_admin)],
     remarks: str | None = None,
 ) -> dict[str, Any]:
@@ -112,6 +116,8 @@ async def acknowledge_event(
 
     Args:
         event_id: The event UUID.
+        request: The HTTP request.
+        background_tasks: Background task runner.
         current_user: The authenticated admin user.
         remarks: Optional remarks about acknowledgement.
 
@@ -120,16 +126,18 @@ async def acknowledge_event(
     """
     client = get_supabase_admin_client()
 
-    # Check event exists
+    # Check event exists and capture old state
     existing = (
         client.table("plant_events")
-        .select("id")
+        .select("*")
         .eq("id", str(event_id))
         .execute()
     )
 
     if not existing.data:
         raise NotFoundError("Plant event", str(event_id))
+
+    old_values = {"acknowledged": existing.data[0].get("acknowledged", False)}
 
     update_data = {
         "acknowledged": True,
@@ -150,6 +158,19 @@ async def acknowledge_event(
         "Plant event acknowledged",
         event_id=str(event_id),
         user_id=current_user.id,
+    )
+
+    background_tasks.add_task(
+        audit_service.log,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        action="update",
+        table_name="plant_events",
+        record_id=str(event_id),
+        old_values=old_values,
+        new_values={"acknowledged": True, "remarks": remarks},
+        ip_address=get_client_ip(request),
+        description=f"Acknowledged plant event {event_id}",
     )
 
     return {
@@ -427,12 +448,16 @@ async def get_plant(
 @router.post("", status_code=201)
 async def create_plant(
     plant: PlantCreate,
+    request: Request,
+    background_tasks: BackgroundTasks,
     current_user: Annotated[CurrentUser, Depends(require_admin)],
 ) -> dict[str, Any]:
     """Create a new plant.
 
     Args:
         plant: Plant data.
+        request: The HTTP request.
+        background_tasks: Background task runner.
         current_user: The authenticated admin user.
 
     Returns:
@@ -461,16 +486,30 @@ async def create_plant(
         .execute()
     )
 
+    created = result.data[0]
+
     logger.info(
         "Plant created",
-        plant_id=result.data[0]["id"],
+        plant_id=created["id"],
         fleet_number=plant.fleet_number,
         user_id=current_user.id,
     )
 
+    background_tasks.add_task(
+        audit_service.log,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        action="create",
+        table_name="plants",
+        record_id=created["id"],
+        new_values=plant.model_dump(exclude_none=True),
+        ip_address=get_client_ip(request),
+        description=f"Created plant {plant.fleet_number}",
+    )
+
     return {
         "success": True,
-        "data": result.data[0],
+        "data": created,
     }
 
 
@@ -478,6 +517,8 @@ async def create_plant(
 async def update_plant(
     plant_id: UUID,
     plant: PlantUpdate,
+    request: Request,
+    background_tasks: BackgroundTasks,
     current_user: Annotated[CurrentUser, Depends(require_admin)],
 ) -> dict[str, Any]:
     """Update an existing plant.
@@ -485,6 +526,8 @@ async def update_plant(
     Args:
         plant_id: The plant UUID.
         plant: Updated plant data.
+        request: The HTTP request.
+        background_tasks: Background task runner.
         current_user: The authenticated admin user.
 
     Returns:
@@ -492,10 +535,16 @@ async def update_plant(
     """
     client = get_supabase_admin_client()
 
-    # Check plant exists
+    # Update only provided fields
+    update_data = plant.model_dump(exclude_none=True)
+    if not update_data:
+        raise ValidationError("No fields to update")
+
+    # Fetch current values for the fields being changed (for audit diff)
+    fields_to_fetch = ",".join(["id", "fleet_number"] + list(update_data.keys()))
     existing = (
         client.table("plants")
-        .select("id")
+        .select(fields_to_fetch)
         .eq("id", str(plant_id))
         .execute()
     )
@@ -503,10 +552,9 @@ async def update_plant(
     if not existing.data:
         raise NotFoundError("Plant", str(plant_id))
 
-    # Update only provided fields
-    update_data = plant.model_dump(exclude_none=True)
-    if not update_data:
-        raise ValidationError("No fields to update")
+    # Capture old values only for fields that are actually changing
+    old_record = existing.data[0]
+    old_values = {k: old_record.get(k) for k in update_data if k in old_record}
 
     update_data["updated_at"] = "now()"
 
@@ -524,6 +572,20 @@ async def update_plant(
         user_id=current_user.id,
     )
 
+    fleet_number = old_record.get("fleet_number", str(plant_id))
+    background_tasks.add_task(
+        audit_service.log,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        action="update",
+        table_name="plants",
+        record_id=str(plant_id),
+        old_values=old_values,
+        new_values={k: v for k, v in update_data.items() if k != "updated_at"},
+        ip_address=get_client_ip(request),
+        description=f"Updated plant {fleet_number}: {', '.join(update_data.keys())}",
+    )
+
     return {
         "success": True,
         "data": result.data[0],
@@ -534,6 +596,8 @@ async def update_plant(
 async def transfer_plant(
     plant_id: UUID,
     transfer: PlantTransferRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
     current_user: Annotated[CurrentUser, Depends(require_admin)],
 ) -> dict[str, Any]:
     """Transfer a plant to a new location.
@@ -541,6 +605,8 @@ async def transfer_plant(
     Args:
         plant_id: The plant UUID.
         transfer: Transfer details.
+        request: The HTTP request.
+        background_tasks: Background task runner.
         current_user: The authenticated admin user.
 
     Returns:
@@ -562,12 +628,28 @@ async def transfer_plant(
     if not result.data.get("success"):
         raise ValidationError(result.data.get("error", "Transfer failed"))
 
+    from_loc = result.data.get("from_location", "Unknown")
+    to_loc = result.data.get("to_location", "Unknown")
+
     logger.info(
         "Plant transferred",
         plant_id=str(plant_id),
-        from_location=result.data.get("from_location"),
-        to_location=result.data.get("to_location"),
+        from_location=from_loc,
+        to_location=to_loc,
         user_id=current_user.id,
+    )
+
+    background_tasks.add_task(
+        audit_service.log,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        action="transfer",
+        table_name="plants",
+        record_id=str(plant_id),
+        old_values={"location": from_loc},
+        new_values={"location": to_loc, "transfer_reason": transfer.transfer_reason},
+        ip_address=get_client_ip(request),
+        description=f"Transferred plant from {from_loc} to {to_loc}",
     )
 
     return {
