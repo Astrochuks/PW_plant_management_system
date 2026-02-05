@@ -110,15 +110,29 @@ async def get_maintenance_costs(
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
     year: int | None = None,
     location_id: UUID | None = None,
-    group_by: str = Query("month", pattern="^(month|quarter|fleet_type|location)$"),
+    plant_id: UUID | None = None,
+    fleet_type: str | None = Query(None, description="Filter by fleet type name"),
+    group_by: str = Query("month", pattern="^(week|month|quarter|year|fleet_type|location|plant)$"),
 ) -> dict[str, Any]:
     """Get maintenance cost analysis.
+
+    Group by week/month/quarter/year for time trends, or by fleet_type/location/plant
+    for categorical breakdowns. Combine with filters to drill down.
+
+    Examples:
+        - Monthly costs for 2025: ?year=2025&group_by=month
+        - Weekly costs for a plant: ?plant_id=...&group_by=week
+        - Costs by equipment type: ?group_by=fleet_type&year=2025
+        - Costs by location: ?group_by=location
+        - Top-spending plants: ?group_by=plant&year=2025
 
     Args:
         current_user: The authenticated user.
         year: Filter by year.
         location_id: Filter by location.
-        group_by: Grouping dimension.
+        plant_id: Filter by specific plant.
+        fleet_type: Filter by fleet type name.
+        group_by: Grouping dimension (week, month, quarter, year, fleet_type, location, plant).
 
     Returns:
         Maintenance costs grouped by specified dimension.
@@ -130,6 +144,8 @@ async def get_maintenance_costs(
         {
             "p_year": year,
             "p_location_id": str(location_id) if location_id else None,
+            "p_plant_id": str(plant_id) if plant_id else None,
+            "p_fleet_type": fleet_type,
             "p_group_by": group_by,
         },
     ).execute()
@@ -137,6 +153,12 @@ async def get_maintenance_costs(
     return {
         "success": True,
         "data": result.data,
+        "meta": {
+            "group_by": group_by,
+            "year": year,
+            "total_groups": len(result.data) if result.data else 0,
+            "grand_total": sum(row.get("total_cost", 0) for row in result.data) if result.data else 0,
+        },
     }
 
 
@@ -209,7 +231,7 @@ async def get_plant_movement(
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
     date_from: date | None = None,
     date_to: date | None = None,
-    fleet_type_id: UUID | None = None,
+    fleet_type: str | None = Query(None, description="Filter by fleet type name"),
 ) -> dict[str, Any]:
     """Get plant transfer/movement report.
 
@@ -217,7 +239,7 @@ async def get_plant_movement(
         current_user: The authenticated user.
         date_from: Start date.
         date_to: End date.
-        fleet_type_id: Filter by fleet type.
+        fleet_type: Filter by fleet type name.
 
     Returns:
         Plant movement data between locations.
@@ -229,7 +251,7 @@ async def get_plant_movement(
         {
             "p_date_from": str(date_from) if date_from else None,
             "p_date_to": str(date_to) if date_to else None,
-            "p_fleet_type_id": str(fleet_type_id) if fleet_type_id else None,
+            "p_fleet_type": fleet_type,
         },
     ).execute()
 

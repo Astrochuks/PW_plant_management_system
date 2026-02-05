@@ -3,8 +3,9 @@
 Optimized: local JWT verification + user cache reduces Supabase
 requests from 3 per endpoint to 0 (cache hit) or 1 (cache miss).
 
-If SUPABASE_JWT_SECRET is not set, falls back to Supabase Auth
-verification (slower, 1 extra request per call).
+Supabase signs user tokens with ES256 (JWKS). The public key is
+fetched once on startup and cached. Falls back to Supabase Auth
+API if local verification fails.
 """
 
 import time
@@ -12,6 +13,7 @@ from threading import Lock
 from typing import Annotated, Any
 
 import jwt
+from jwt import PyJWKClient
 from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
@@ -83,21 +85,41 @@ def invalidate_user_cache(user_id: str) -> None:
 
 
 # =============================================================================
-# JWT Verification — local when possible, Supabase fallback otherwise
+# JWT Verification — ES256 via JWKS (local, 0 network calls per request)
 # =============================================================================
 
+def _get_jwks_client() -> PyJWKClient:
+    """Get or create the cached JWKS client singleton.
+
+    PyJWKClient fetches the public key on first use and caches it
+    (default lifespan = 300s). No network call on subsequent verifications.
+    """
+    if not hasattr(_get_jwks_client, "_instance"):
+        settings = get_settings()
+        jwks_url = f"{settings.supabase_url}/auth/v1/.well-known/jwks.json"
+        _get_jwks_client._instance = PyJWKClient(
+            jwks_url,
+            cache_jwk_set=True,
+            lifespan=600,
+            headers={"apikey": settings.supabase_anon_key},
+        )
+        logger.info("JWKS client initialized", jwks_url=jwks_url)
+    return _get_jwks_client._instance
+
+
 def _verify_token_locally(token: str) -> dict:
-    """Verify JWT signature locally using the Supabase JWT secret.
+    """Verify JWT signature locally using the JWKS public key (ES256).
 
     Returns the decoded payload with 'sub' (user_id), 'email', 'exp', etc.
     Raises jwt exceptions on invalid/expired tokens.
     """
-    settings = get_settings()
+    jwks_client = _get_jwks_client()
+    signing_key = jwks_client.get_signing_key_from_jwt(token)
     return jwt.decode(
         token,
-        settings.supabase_jwt_secret,
-        algorithms=["HS256"],
-        audience="authenticated",
+        signing_key.key,
+        algorithms=["ES256"],
+        options={"verify_aud": False, "verify_iat": False},
     )
 
 
@@ -124,23 +146,17 @@ def _verify_token(token: str) -> str:
     """Verify a JWT token and return the user_id.
 
     Strategy:
-    1. Try local HS256 verification (0 network calls) if JWT secret is configured
-    2. If local fails (e.g., token signed with ES256), fall back to Supabase API
+    1. Try local ES256 verification via JWKS (0 network calls after key is cached)
+    2. If local fails, fall back to Supabase Auth API (1 network call)
     3. Expired tokens are rejected immediately without a network call
     """
-    settings = get_settings()
-
-    if settings.supabase_jwt_secret:
-        try:
-            payload = _verify_token_locally(token)
-            return payload["sub"]
-        except jwt.ExpiredSignatureError:
-            # Definitely expired — no need to call Supabase
-            raise AuthenticationError("Token has expired")
-        except jwt.InvalidTokenError:
-            # Token may be signed with a different algorithm (e.g., ES256)
-            # Fall back to Supabase verification
-            logger.debug("Local JWT verification failed, falling back to Supabase")
+    try:
+        payload = _verify_token_locally(token)
+        return payload["sub"]
+    except jwt.ExpiredSignatureError:
+        raise AuthenticationError("Token has expired")
+    except Exception as e:
+        logger.debug("Local JWT verification failed, falling back to Supabase", error=str(e))
 
     return _verify_token_via_supabase(token)
 

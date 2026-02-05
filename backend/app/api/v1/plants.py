@@ -181,7 +181,7 @@ async def search_plants(
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
     status: str | None = None,
     location_id: UUID | None = None,
-    fleet_type_id: UUID | None = None,
+    fleet_type: str | None = Query(None, description="Filter by fleet type name"),
     limit: int = Query(20, ge=1, le=100),
 ) -> dict[str, Any]:
     """Full-text search for plants.
@@ -191,7 +191,7 @@ async def search_plants(
         current_user: The authenticated user.
         status: Filter by status.
         location_id: Filter by location.
-        fleet_type_id: Filter by fleet type.
+        fleet_type: Filter by fleet type name.
         limit: Maximum results.
 
     Returns:
@@ -205,7 +205,7 @@ async def search_plants(
             "p_search_term": query,
             "p_status": status,
             "p_location_id": str(location_id) if location_id else None,
-            "p_fleet_type_id": str(fleet_type_id) if fleet_type_id else None,
+            "p_fleet_type": fleet_type,
             "p_limit": limit,
             "p_offset": 0,
         },
@@ -221,24 +221,29 @@ async def search_plants(
 @router.get("/usage/summary")
 async def get_usage_summary(
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
     year: int | None = None,
     month: int | None = Query(None, ge=1, le=12),
+    week_number: int | None = Query(None, ge=1, le=53),
     location_id: UUID | None = None,
-    limit: int = Query(50, ge=1, le=500),
 ) -> dict[str, Any]:
     """Get plant usage summary across the fleet.
 
     Args:
         current_user: The authenticated user.
+        page: Page number.
+        limit: Items per page.
         year: Filter by year.
         month: Filter by month (1-12).
+        week_number: Filter by week number (1-53).
         location_id: Filter by location.
-        limit: Maximum plants to return.
 
     Returns:
-        Usage summary for plants.
+        Paginated usage summary for plants.
     """
     client = get_supabase_admin_client()
+    offset = (page - 1) * limit
 
     result = client.rpc(
         "get_plant_usage_summary",
@@ -246,17 +251,29 @@ async def get_usage_summary(
             "p_plant_id": None,
             "p_year": year,
             "p_month": month,
+            "p_week_number": week_number,
             "p_location_id": str(location_id) if location_id else None,
+            "p_limit": limit,
+            "p_offset": offset,
         },
     ).execute()
 
+    # total_count is returned in each row via window function
+    total = result.data[0]["total_count"] if result.data else 0
+    # Strip the total_count field from response data
+    data = [{k: v for k, v in row.items() if k != "total_count"} for row in result.data]
+
     return {
         "success": True,
-        "data": result.data[:limit] if result.data else [],
+        "data": data,
         "meta": {
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "total_pages": (total + limit - 1) // limit if total > 0 else 0,
             "year": year,
             "month": month,
-            "total": len(result.data) if result.data else 0,
+            "week_number": week_number,
         },
     }
 
@@ -299,30 +316,59 @@ async def get_breakdown_report(
 @router.get("/utilization")
 async def get_fleet_utilization(
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
-    limit: int = Query(100, ge=1, le=500),
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    location_id: UUID | None = None,
+    fleet_type: str | None = Query(None, description="Filter by fleet type name"),
+    status: str | None = Query(None, pattern="^(working|standby|breakdown|faulty|scrap|missing|stolen|unverified|in_transit|off_hire)$"),
+    search: str | None = None,
 ) -> dict[str, Any]:
     """Get fleet utilization view with comprehensive stats.
 
     Args:
         current_user: The authenticated user.
-        limit: Maximum plants to return.
+        page: Page number.
+        limit: Items per page.
+        location_id: Filter by location.
+        fleet_type: Filter by fleet type name.
+        status: Filter by plant status.
+        search: Search in fleet_number or description.
 
     Returns:
-        Plant utilization data with hours, rates, and costs.
+        Paginated plant utilization data with hours, rates, and costs.
     """
     client = get_supabase_admin_client()
 
-    result = (
+    query = (
         client.table("v_plant_utilization")
-        .select("*")
-        .order("total_hours_worked", desc=True)
-        .limit(limit)
-        .execute()
+        .select("*", count="exact")
     )
+
+    if location_id:
+        query = query.eq("current_location_id", str(location_id))
+    if fleet_type:
+        query = query.ilike("fleet_type", f"%{fleet_type}%")
+    if status:
+        query = query.eq("status", status)
+    if search:
+        query = query.or_(f"fleet_number.ilike.%{search}%,description.ilike.%{search}%")
+
+    offset = (page - 1) * limit
+    query = query.order("total_hours_worked", desc=True)
+    query = query.range(offset, offset + limit - 1)
+
+    result = query.execute()
+    total = result.count or 0
 
     return {
         "success": True,
         "data": result.data,
+        "meta": {
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "total_pages": (total + limit - 1) // limit if total > 0 else 0,
+        },
     }
 
 
@@ -350,7 +396,7 @@ async def list_plants(
         limit: Items per page.
         status: Filter by status.
         location_id: Filter by location.
-        fleet_type_id: Filter by fleet type.
+        fleet_type: Filter by fleet type name.
         search: Search in fleet_number, description.
         verified_only: Only show verified plants.
 
@@ -473,14 +519,31 @@ async def create_plant(
             details=[{"field": "fleet_number", "message": "Already exists", "code": "DUPLICATE"}],
         )
 
-    # Create plant
+    # Auto-resolve fleet_type from fleet number prefix if not provided
+    plant_data = plant.model_dump(exclude_none=True, mode="json")
+    if not plant_data.get("fleet_type"):
+        resolved = client.rpc("resolve_fleet_type", {"p_fleet_number": plant.fleet_number}).execute()
+        if resolved.data:
+            plant_data["fleet_type"] = resolved.data
+
+    # Create plant — mode="json" converts UUIDs to strings for Supabase
     result = (
         client.table("plants_master")
-        .insert(plant.model_dump(exclude_none=True))
+        .insert(plant_data)
         .execute()
     )
 
     created = result.data[0]
+
+    # Record initial location history if a location was provided
+    if plant_data.get("current_location_id"):
+        client.table("plant_location_history").insert({
+            "plant_id": created["id"],
+            "location_id": plant_data["current_location_id"],
+            "start_date": created.get("created_at", "now()"),
+            "transfer_reason": "Initial assignment",
+            "created_by": current_user.id,
+        }).execute()
 
     logger.info(
         "Plant created",
@@ -496,7 +559,7 @@ async def create_plant(
         action="create",
         table_name="plants_master",
         record_id=created["id"],
-        new_values=plant.model_dump(exclude_none=True),
+        new_values=plant.model_dump(exclude_none=True, mode="json"),
         ip_address=get_client_ip(request),
         description=f"Created plant {plant.fleet_number}",
     )
@@ -530,7 +593,7 @@ async def update_plant(
     client = get_supabase_admin_client()
 
     # Update only provided fields
-    update_data = plant.model_dump(exclude_none=True)
+    update_data = plant.model_dump(exclude_none=True, mode="json")
     if not update_data:
         raise ValidationError("No fields to update")
 
