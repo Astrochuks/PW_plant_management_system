@@ -10,19 +10,15 @@ from app.core.database import get_supabase_admin_client
 from app.core.exceptions import NotFoundError, ValidationError
 from app.core.security import (
     CurrentUser,
-    get_current_user,
     require_admin,
     require_management_or_admin,
 )
-from app.models.common import PaginationParams, PaginationMeta
 from app.models.plant import (
-    Plant,
     PlantCreate,
     PlantUpdate,
     PlantSummary,
     PlantListResponse,
     PlantTransferRequest,
-    PlantTransferResponse,
 )
 from app.monitoring.logging import get_logger
 from app.services.audit_service import audit_service
@@ -64,7 +60,7 @@ async def list_plant_events(
 
     query = (
         client.table("plant_events")
-        .select("*, plants(fleet_number, description)", count="exact")
+        .select("*, plants_master(fleet_number, description)", count="exact")
     )
 
     if event_type:
@@ -86,10 +82,10 @@ async def list_plant_events(
     # Transform to include plant info
     events = []
     for item in result.data:
-        item["fleet_number"] = item.get("plants", {}).get("fleet_number") if item.get("plants") else None
-        item["plant_description"] = item.get("plants", {}).get("description") if item.get("plants") else None
-        if "plants" in item:
-            del item["plants"]
+        item["fleet_number"] = item.get("plants_master", {}).get("fleet_number") if item.get("plants_master") else None
+        item["plant_description"] = item.get("plants_master", {}).get("description") if item.get("plants_master") else None
+        if "plants_master" in item:
+            del item["plants_master"]
         events.append(item)
 
     return {
@@ -340,9 +336,9 @@ async def list_plants(
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
-    status: str | None = Query(None, pattern="^(active|archived|disposed)$"),
+    status: str | None = Query(None, pattern="^(working|standby|breakdown|faulty|scrap|missing|stolen|unverified|in_transit|off_hire)$"),
     location_id: UUID | None = None,
-    fleet_type_id: UUID | None = None,
+    fleet_type: str | None = Query(None, description="Filter by fleet type name"),
     search: str | None = None,
     verified_only: bool = False,
 ) -> PlantListResponse:
@@ -369,14 +365,12 @@ async def list_plants(
     # Apply filters
     if status:
         query = query.eq("status", status)
-    else:
-        # Default to showing active plants for management
-        if current_user.is_management:
-            query = query.in_("status", ["active", "archived"])
 
     if location_id:
-        # Need to filter by location - join with plants table
-        pass  # TODO: Implement location filter
+        query = query.eq("current_location_id", str(location_id))
+
+    if fleet_type:
+        query = query.ilike("fleet_type", f"%{fleet_type}%")
 
     if search:
         # Full-text search
@@ -467,7 +461,7 @@ async def create_plant(
 
     # Check for duplicate fleet number
     existing = (
-        client.table("plants")
+        client.table("plants_master")
         .select("id")
         .eq("fleet_number", plant.fleet_number)
         .execute()
@@ -481,7 +475,7 @@ async def create_plant(
 
     # Create plant
     result = (
-        client.table("plants")
+        client.table("plants_master")
         .insert(plant.model_dump(exclude_none=True))
         .execute()
     )
@@ -500,7 +494,7 @@ async def create_plant(
         user_id=current_user.id,
         user_email=current_user.email,
         action="create",
-        table_name="plants",
+        table_name="plants_master",
         record_id=created["id"],
         new_values=plant.model_dump(exclude_none=True),
         ip_address=get_client_ip(request),
@@ -543,7 +537,7 @@ async def update_plant(
     # Fetch current values for the fields being changed (for audit diff)
     fields_to_fetch = ",".join(["id", "fleet_number"] + list(update_data.keys()))
     existing = (
-        client.table("plants")
+        client.table("plants_master")
         .select(fields_to_fetch)
         .eq("id", str(plant_id))
         .execute()
@@ -559,7 +553,7 @@ async def update_plant(
     update_data["updated_at"] = "now()"
 
     result = (
-        client.table("plants")
+        client.table("plants_master")
         .update(update_data)
         .eq("id", str(plant_id))
         .execute()
@@ -578,7 +572,7 @@ async def update_plant(
         user_id=current_user.id,
         user_email=current_user.email,
         action="update",
-        table_name="plants",
+        table_name="plants_master",
         record_id=str(plant_id),
         old_values=old_values,
         new_values={k: v for k, v in update_data.items() if k != "updated_at"},
@@ -644,7 +638,7 @@ async def transfer_plant(
         user_id=current_user.id,
         user_email=current_user.email,
         action="transfer",
-        table_name="plants",
+        table_name="plants_master",
         record_id=str(plant_id),
         old_values={"location": from_loc},
         new_values={"location": to_loc, "transfer_reason": transfer.transfer_reason},
@@ -655,6 +649,71 @@ async def transfer_plant(
     return {
         "success": True,
         "data": result.data,
+    }
+
+
+@router.delete("/{plant_id}")
+async def delete_plant(
+    plant_id: UUID,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+) -> dict[str, Any]:
+    """Delete a plant record.
+
+    Captures the full record before deletion for audit trail.
+
+    Args:
+        plant_id: The plant UUID.
+        request: The HTTP request.
+        background_tasks: Background task runner.
+        current_user: The authenticated admin user.
+
+    Returns:
+        Success message.
+    """
+    client = get_supabase_admin_client()
+
+    # Capture full record before deletion for audit trail
+    existing = (
+        client.table("plants_master")
+        .select("*")
+        .eq("id", str(plant_id))
+        .single()
+        .execute()
+    )
+
+    if not existing.data:
+        raise NotFoundError("Plant", str(plant_id))
+
+    deleted_record = existing.data
+    fleet_number = deleted_record.get("fleet_number", str(plant_id))
+
+    # Delete plant
+    client.table("plants_master").delete().eq("id", str(plant_id)).execute()
+
+    logger.info(
+        "Plant deleted",
+        plant_id=str(plant_id),
+        fleet_number=fleet_number,
+        user_id=current_user.id,
+    )
+
+    background_tasks.add_task(
+        audit_service.log,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        action="delete",
+        table_name="plants_master",
+        record_id=str(plant_id),
+        old_values=deleted_record,
+        ip_address=get_client_ip(request),
+        description=f"Deleted plant {fleet_number}",
+    )
+
+    return {
+        "success": True,
+        "message": f"Plant {fleet_number} deleted successfully",
     }
 
 

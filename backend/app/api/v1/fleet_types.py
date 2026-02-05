@@ -107,10 +107,10 @@ async def get_fleet_type_plants(
 
     # Get plant count
     plants = (
-        client.table("plants")
+        client.table("plants_master")
         .select("id", count="exact")
-        .eq("fleet_type_id", str(fleet_type_id))
-        .eq("status", "active")
+        .eq("fleet_type", fleet_type.data.get("name", ""))
+        .not_.is_("status", "null")
         .execute()
     )
 

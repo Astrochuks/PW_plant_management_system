@@ -54,7 +54,7 @@ async def list_spare_parts(
     # Use a view that includes plant info
     query = (
         client.table("spare_parts")
-        .select("*, plants(fleet_number, description)", count="exact")
+        .select("*, plants_master(fleet_number, description)", count="exact")
     )
 
     # Apply filters
@@ -62,17 +62,8 @@ async def list_spare_parts(
         query = query.eq("plant_id", str(plant_id))
 
     if fleet_number:
-        # Need to filter by related plant's fleet_number
-        plant = client.table("plants").select("id").eq("fleet_number", fleet_number.upper()).execute()
-        if plant.data:
-            query = query.eq("plant_id", plant.data[0]["id"])
-        else:
-            # Return empty if plant not found
-            return {
-                "success": True,
-                "data": [],
-                "meta": {"page": page, "limit": limit, "total": 0, "total_pages": 0},
-            }
+        # Use the Supabase join filter to avoid a separate query
+        query = query.eq("plants_master.fleet_number", fleet_number.upper())
 
     if supplier:
         query = query.ilike("supplier", f"%{supplier}%")
@@ -97,11 +88,11 @@ async def list_spare_parts(
     # Transform data to include fleet_number
     parts = []
     for item in result.data:
-        item["fleet_number"] = item.get("plants", {}).get("fleet_number") if item.get("plants") else None
-        item["plant_description"] = item.get("plants", {}).get("description") if item.get("plants") else None
+        item["fleet_number"] = item.get("plants", {}).get("fleet_number") if item.get("plants_master") else None
+        item["plant_description"] = item.get("plants", {}).get("description") if item.get("plants_master") else None
         item["supplier_name"] = item.get("supplier")  # supplier is stored as text, not FK
-        if "plants" in item:
-            del item["plants"]
+        if "plants_master" in item:
+            del item["plants_master"]
         parts.append(item)
 
     return {
@@ -225,7 +216,7 @@ async def get_spare_part(
 
     result = (
         client.table("spare_parts")
-        .select("*, plants(fleet_number, description)")
+        .select("*, plants_master(fleet_number, description)")
         .eq("id", str(part_id))
         .single()
         .execute()
@@ -236,11 +227,11 @@ async def get_spare_part(
 
     # Transform data
     data = result.data
-    data["fleet_number"] = data.get("plants", {}).get("fleet_number") if data.get("plants") else None
-    data["plant_description"] = data.get("plants", {}).get("description") if data.get("plants") else None
+    data["fleet_number"] = data.get("plants", {}).get("fleet_number") if data.get("plants_master") else None
+    data["plant_description"] = data.get("plants", {}).get("description") if data.get("plants_master") else None
     data["supplier_name"] = data.get("supplier")  # supplier is stored as text, not FK
-    if "plants" in data:
-        del data["plants"]
+    if "plants_master" in data:
+        del data["plants_master"]
 
     return {
         "success": True,
@@ -296,7 +287,7 @@ async def create_spare_part(
 
     # Verify plant exists
     plant = (
-        client.table("plants")
+        client.table("plants_master")
         .select("id, fleet_number")
         .eq("id", str(plant_id))
         .single()

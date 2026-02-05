@@ -1,6 +1,6 @@
 """Plant-related Pydantic models."""
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 from uuid import UUID
 
@@ -12,12 +12,14 @@ class PlantBase(BaseModel):
 
     fleet_number: str = Field(..., min_length=1, max_length=50)
     description: str | None = Field(None, max_length=255)
-    fleet_type_id: UUID | None = None
+    fleet_type: str | None = Field(None, max_length=100)
     make: str | None = Field(None, max_length=100)
     model: str | None = Field(None, max_length=100)
     chassis_number: str | None = Field(None, max_length=100)
     year_of_manufacture: int | None = Field(None, ge=1900, le=2100)
     purchase_cost: float | None = Field(None, ge=0)
+    serial_m: str | None = Field(None, max_length=100)
+    serial_e: str | None = Field(None, max_length=100)
     remarks: str | None = None
     current_location_id: UUID | None = None
 
@@ -38,15 +40,20 @@ class PlantUpdate(BaseModel):
     """Model for updating an existing plant."""
 
     description: str | None = None
-    fleet_type_id: UUID | None = None
+    fleet_type: str | None = None
     make: str | None = None
     model: str | None = None
     chassis_number: str | None = None
     year_of_manufacture: int | None = None
     purchase_cost: float | None = None
+    serial_m: str | None = None
+    serial_e: str | None = None
     remarks: str | None = None
     current_location_id: UUID | None = None
-    status: str | None = Field(None, pattern="^(active|archived|disposed)$")
+    status: str | None = Field(
+        None,
+        pattern="^(working|standby|breakdown|faulty|scrap|missing|stolen|unverified|in_transit|off_hire)$",
+    )
     physical_verification: bool | None = None
 
 
@@ -60,7 +67,6 @@ class Plant(PlantBase):
     updated_at: datetime
 
     # Joined fields
-    fleet_type: str | None = None
     current_location: str | None = None
 
     class Config:
@@ -68,20 +74,21 @@ class Plant(PlantBase):
 
 
 class PlantSummary(BaseModel):
-    """Plant summary with maintenance stats."""
+    """Plant summary with maintenance stats from v_plants_summary view."""
 
     id: UUID
     fleet_number: str
-    description: str | None
-    fleet_type: str | None
-    make: str | None
-    model: str | None
-    status: str
-    physical_verification: bool
-    current_location: str | None
-    total_maintenance_cost: float
-    parts_replaced_count: int
-    last_maintenance_date: datetime | None
+    description: str | None = None
+    fleet_type: str | None = None
+    make: str | None = None
+    model: str | None = None
+    status: str | None = None
+    physical_verification: bool | None = None
+    current_location: str | None = None
+    current_location_id: UUID | None = None
+    total_maintenance_cost: float = 0
+    parts_replaced_count: int = 0
+    last_maintenance_date: date | None = None
 
     class Config:
         from_attributes = True

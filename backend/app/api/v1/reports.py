@@ -389,7 +389,7 @@ async def export_maintenance(
 
     query = (
         client.table("spare_parts")
-        .select("*, plants(fleet_number)")
+        .select("*, plants_master(fleet_number)")
     )
 
     if year:
@@ -405,9 +405,9 @@ async def export_maintenance(
     # Transform data
     data = []
     for item in result.data:
-        item["fleet_number"] = item.get("plants", {}).get("fleet_number") if item.get("plants") else None
-        if "plants" in item:
-            del item["plants"]
+        item["fleet_number"] = item.get("plants_master", {}).get("fleet_number") if item.get("plants_master") else None
+        if "plants_master" in item:
+            del item["plants_master"]
         data.append(item)
 
     if format == "csv":

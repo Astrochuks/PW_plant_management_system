@@ -86,8 +86,6 @@ async def create_location(
     background_tasks: BackgroundTasks,
     current_user: Annotated[CurrentUser, Depends(require_admin)],
     name: str,
-    code: str | None = None,
-    address: str | None = None,
 ) -> dict[str, Any]:
     """Create a new location.
 
@@ -96,19 +94,17 @@ async def create_location(
         background_tasks: Background task runner.
         current_user: The authenticated admin user.
         name: Location name.
-        code: Short code for the location.
-        address: Physical address.
 
     Returns:
         Created location with ID.
     """
     client = get_supabase_admin_client()
 
-    # Check for duplicate name
+    # Check for duplicate name (case-insensitive since we store uppercase)
     existing = (
         client.table("locations")
         .select("id")
-        .eq("name", name)
+        .eq("name", name.upper())
         .execute()
     )
 
@@ -118,14 +114,8 @@ async def create_location(
             details=[{"field": "name", "message": "Already exists", "code": "DUPLICATE"}],
         )
 
-    location_data = {
-        "name": name.upper(),
-        "code": code.upper() if code else name[:3].upper(),
-        "address": address,
-        "is_active": True,
-    }
+    location_data = {"name": name.upper()}
 
-    # Create location
     result = (
         client.table("locations")
         .insert(location_data)
@@ -166,9 +156,6 @@ async def update_location(
     background_tasks: BackgroundTasks,
     current_user: Annotated[CurrentUser, Depends(require_admin)],
     name: str | None = None,
-    code: str | None = None,
-    address: str | None = None,
-    is_active: bool | None = None,
 ) -> dict[str, Any]:
     """Update an existing location.
 
@@ -178,34 +165,21 @@ async def update_location(
         background_tasks: Background task runner.
         current_user: The authenticated admin user.
         name: New location name.
-        code: New short code.
-        address: New address.
-        is_active: Active status.
 
     Returns:
         Updated location.
     """
     client = get_supabase_admin_client()
 
-    # Build update data
-    update_data = {}
-    if name is not None:
-        update_data["name"] = name.upper()
-    if code is not None:
-        update_data["code"] = code.upper()
-    if address is not None:
-        update_data["address"] = address
-    if is_active is not None:
-        update_data["is_active"] = is_active
-
-    if not update_data:
+    if name is None:
         raise ValidationError("No fields to update")
 
-    # Fetch current values for fields being changed (for audit diff)
-    fields_to_fetch = ",".join(["id", "name"] + list(update_data.keys()))
+    update_data = {"name": name.upper()}
+
+    # Fetch current name for audit diff
     existing = (
         client.table("locations")
-        .select(fields_to_fetch)
+        .select("id, name")
         .eq("id", str(location_id))
         .execute()
     )
@@ -213,10 +187,7 @@ async def update_location(
     if not existing.data:
         raise NotFoundError("Location", str(location_id))
 
-    old_record = existing.data[0]
-    old_values = {k: old_record.get(k) for k in update_data if k in old_record}
-
-    update_data["updated_at"] = "now()"
+    old_name = existing.data[0]["name"]
 
     result = (
         client.table("locations")
@@ -228,11 +199,11 @@ async def update_location(
     logger.info(
         "Location updated",
         location_id=str(location_id),
-        updated_fields=list(update_data.keys()),
+        old_name=old_name,
+        new_name=name.upper(),
         user_id=current_user.id,
     )
 
-    location_name = old_record.get("name", str(location_id))
     background_tasks.add_task(
         audit_service.log,
         user_id=current_user.id,
@@ -240,10 +211,10 @@ async def update_location(
         action="update",
         table_name="locations",
         record_id=str(location_id),
-        old_values=old_values,
-        new_values={k: v for k, v in update_data.items() if k != "updated_at"},
+        old_values={"name": old_name},
+        new_values=update_data,
         ip_address=get_client_ip(request),
-        description=f"Updated location {location_name}: {', '.join(k for k in update_data if k != 'updated_at')}",
+        description=f"Updated location {old_name} → {name.upper()}",
     )
 
     return {
@@ -258,7 +229,7 @@ async def get_location_plants(
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
-    status: str | None = Query(None, pattern="^(active|archived|disposed)$"),
+    status: str | None = Query(None, pattern="^(working|standby|breakdown|faulty|scrap|missing|stolen|unverified|in_transit|off_hire)$"),
 ) -> dict[str, Any]:
     """Get plants at a specific location.
 
