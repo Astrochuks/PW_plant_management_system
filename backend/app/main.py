@@ -11,7 +11,7 @@ from typing import AsyncGenerator
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.openapi.utils import get_openapi
+
 
 from app.config import get_settings
 from app.core.exceptions import AppException
@@ -129,52 +129,6 @@ def create_application() -> FastAPI:
     async def root():
         """Root endpoint - redirects to health check."""
         return {"status": "ok", "service": "plant-management-api"}
-
-    # Custom OpenAPI schema with Bearer token security
-    def custom_openapi():
-        if app.openapi_schema:
-            return app.openapi_schema
-
-        openapi_schema = get_openapi(
-            title=settings.api_title,
-            version=settings.api_version,
-            description="Plant Management System API - Manage plants, spare parts, and reports",
-            routes=app.routes,
-        )
-
-        # Add security scheme for Bearer token
-        openapi_schema["components"]["securitySchemes"] = {
-            "BearerAuth": {
-                "type": "http",
-                "scheme": "bearer",
-                "bearerFormat": "JWT",
-                "description": "Enter the access_token from /auth/login response",
-            }
-        }
-
-        # Apply security to all endpoints except login, health, and public uploads
-        public_paths = [
-            "/api/v1/auth/login",
-            "/api/v1/auth/refresh",
-            "/api/v1/health",
-            "/api/v1/health/ready",
-            "/api/v1/health/live",
-            "/api/v1/health/detailed",
-            "/api/v1/uploads/weekly-report",
-            "/api/v1/uploads/purchase-order",
-            "/api/v1/uploads/status/{job_id}",
-        ]
-
-        for path, path_item in openapi_schema["paths"].items():
-            if path not in public_paths:
-                for method in path_item.values():
-                    if isinstance(method, dict):
-                        method["security"] = [{"BearerAuth": []}]
-
-        app.openapi_schema = openapi_schema
-        return app.openapi_schema
-
-    app.openapi = custom_openapi
 
     return app
 

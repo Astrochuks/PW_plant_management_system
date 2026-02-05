@@ -12,7 +12,8 @@ from threading import Lock
 from typing import Annotated, Any
 
 import jwt
-from fastapi import Depends, Header, Request
+from fastapi import Depends, Request
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
 from app.config import get_settings
@@ -21,6 +22,10 @@ from app.core.exceptions import AuthenticationError, AuthorizationError
 from app.monitoring.logging import get_logger
 
 logger = get_logger(__name__)
+
+# HTTPBearer integrates with Swagger's Authorize button —
+# no more separate "authorization" parameter on each endpoint
+bearer_scheme = HTTPBearer()
 
 
 # =============================================================================
@@ -196,7 +201,7 @@ class CurrentUser(BaseModel):
 
 async def get_current_user(
     request: Request,
-    authorization: Annotated[str | None, Header()] = None,
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
 ) -> CurrentUser:
     """Extract and validate the current user from the request.
 
@@ -209,15 +214,7 @@ async def get_current_user(
     Cache hit + Supabase JWT: 1 Auth request
     Cache miss + Supabase JWT: 1 Auth + 1 DB request
     """
-    if not authorization:
-        raise AuthenticationError("Authorization header required")
-
-    # Extract token from "Bearer <token>" format
-    parts = authorization.split()
-    if len(parts) != 2 or parts[0].lower() != "bearer":
-        raise AuthenticationError("Invalid authorization header format")
-
-    token = parts[1]
+    token = credentials.credentials
 
     try:
         # Step 1: Verify token and get user_id
