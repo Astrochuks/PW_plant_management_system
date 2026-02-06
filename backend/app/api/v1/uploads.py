@@ -551,3 +551,253 @@ def _validate_upload_file(file: UploadFile, settings) -> None:
             content_type=file.content_type,
             file_name=file.filename,
         )
+
+
+# ============== Admin Upload Endpoints (JWT Auth) ==============
+
+
+@router.post("/admin/weekly-report", response_model=UploadResponse)
+async def admin_upload_weekly_report(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+    file: UploadFile = File(...),
+    week_ending_date: date = Form(...),
+    location_id: UUID = Form(...),
+) -> UploadResponse:
+    """Upload a weekly report as admin (JWT authentication).
+
+    This endpoint is for admin users to upload reports directly
+    without needing an upload token.
+
+    Args:
+        request: The HTTP request.
+        background_tasks: FastAPI background tasks.
+        current_user: The authenticated admin user.
+        file: The Excel file to upload.
+        week_ending_date: The week ending date for this report.
+        location_id: The location this report is for.
+
+    Returns:
+        Upload confirmation with job ID for status tracking.
+    """
+    settings = get_settings()
+    client = get_supabase_admin_client()
+
+    # Get location name for logging
+    location_result = (
+        client.table("locations")
+        .select("name")
+        .eq("id", str(location_id))
+        .single()
+        .execute()
+    )
+    location_name = location_result.data.get("name") if location_result.data else "Unknown"
+
+    # Validate file
+    _validate_upload_file(file, settings)
+
+    # Read file content
+    file_content = await file.read()
+    file_size = len(file_content)
+
+    # Store file in Supabase Storage
+    storage_path = f"weekly-reports/{location_id}/{week_ending_date}/{file.filename}"
+
+    try:
+        client.storage.from_("reports").upload(
+            storage_path,
+            file_content,
+            {"content-type": file.content_type or "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
+        )
+    except Exception as e:
+        if "already exists" in str(e).lower():
+            client.storage.from_("reports").update(storage_path, file_content)
+        else:
+            raise
+
+    # Calculate week number and year
+    week_info = week_ending_date.isocalendar()
+    year = week_info.year
+    week_number = week_info.week
+
+    # Create submission record
+    submission_data = {
+        "year": year,
+        "week_number": week_number,
+        "week_ending_date": str(week_ending_date),
+        "location_id": str(location_id),
+        "submitted_by_name": current_user.full_name,
+        "submitted_by_email": current_user.email,
+        "source_type": "upload",
+        "source_file_path": storage_path,
+        "source_file_name": file.filename,
+        "source_file_size": file_size,
+        "status": "pending",
+    }
+
+    result = (
+        client.table("weekly_report_submissions")
+        .upsert(submission_data, on_conflict="year,week_number,location_id")
+        .execute()
+    )
+
+    job_id = result.data[0]["id"]
+
+    logger.info(
+        "Weekly report uploaded by admin",
+        job_id=job_id,
+        file_name=file.filename,
+        location_id=str(location_id),
+        location_name=location_name,
+        week_ending_date=str(week_ending_date),
+        user_id=current_user.id,
+    )
+
+    # Queue background processing
+    background_tasks.add_task(
+        process_weekly_report,
+        job_id=job_id,
+        storage_path=storage_path,
+        location_id=str(location_id),
+    )
+
+    background_tasks.add_task(
+        audit_service.log,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        action="upload",
+        table_name="weekly_report_submissions",
+        record_id=job_id,
+        new_values={
+            "file_name": file.filename,
+            "file_size": file_size,
+            "location_id": str(location_id),
+            "week_ending_date": str(week_ending_date),
+        },
+        ip_address=get_client_ip(request),
+        description=f"Admin uploaded weekly report for {location_name} week ending {week_ending_date}",
+    )
+
+    return UploadResponse(
+        success=True,
+        job_id=job_id,
+        status=UploadStatus.PENDING,
+        message="File uploaded successfully. Processing started.",
+        file_name=file.filename,
+        file_size=file_size,
+        location=location_name,
+        week_ending_date=week_ending_date,
+    )
+
+
+@router.post("/admin/purchase-order", response_model=UploadResponse)
+async def admin_upload_purchase_order(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+    file: UploadFile = File(...),
+    location_id: UUID | None = Form(None),
+    po_number: str | None = Form(None),
+    po_date: date | None = Form(None),
+) -> UploadResponse:
+    """Upload a purchase order document as admin (JWT authentication).
+
+    This endpoint is for admin users to upload PO documents directly.
+    Supports Excel, PDF, and image files.
+
+    Args:
+        request: The HTTP request.
+        background_tasks: FastAPI background tasks.
+        current_user: The authenticated admin user.
+        file: The document to upload.
+        location_id: Optional location ID.
+        po_number: Purchase order number.
+        po_date: Purchase order date.
+
+    Returns:
+        Upload confirmation with job ID.
+    """
+    settings = get_settings()
+    client = get_supabase_admin_client()
+
+    # Validate file
+    _validate_upload_file(file, settings)
+
+    # Read file content
+    file_content = await file.read()
+    file_size = len(file_content)
+
+    # Store file
+    storage_path = f"purchase-orders/{location_id or 'general'}/{po_date or 'undated'}/{file.filename}"
+
+    try:
+        client.storage.from_("reports").upload(storage_path, file_content)
+    except Exception as e:
+        if "already exists" in str(e).lower():
+            client.storage.from_("reports").update(storage_path, file_content)
+        else:
+            raise
+
+    # Create submission record
+    submission_data = {
+        "po_number": po_number,
+        "po_date": str(po_date) if po_date else None,
+        "location_id": str(location_id) if location_id else None,
+        "submitted_by_name": current_user.full_name,
+        "submitted_by_email": current_user.email,
+        "source_type": "upload",
+        "source_file_path": storage_path,
+        "source_file_name": file.filename,
+        "source_file_size": file_size,
+        "status": "pending",
+    }
+
+    result = (
+        client.table("purchase_order_submissions")
+        .insert(submission_data)
+        .execute()
+    )
+
+    job_id = result.data[0]["id"]
+
+    logger.info(
+        "Purchase order uploaded by admin",
+        job_id=job_id,
+        file_name=file.filename,
+        po_number=po_number,
+        user_id=current_user.id,
+    )
+
+    # Queue background processing
+    background_tasks.add_task(
+        process_purchase_order,
+        job_id=job_id,
+        storage_path=storage_path,
+    )
+
+    background_tasks.add_task(
+        audit_service.log,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        action="upload",
+        table_name="purchase_order_submissions",
+        record_id=job_id,
+        new_values={
+            "file_name": file.filename,
+            "file_size": file_size,
+            "po_number": po_number,
+            "po_date": str(po_date) if po_date else None,
+        },
+        ip_address=get_client_ip(request),
+        description=f"Admin uploaded purchase order {po_number or file.filename}",
+    )
+
+    return UploadResponse(
+        success=True,
+        job_id=job_id,
+        status=UploadStatus.PENDING,
+        message="File uploaded successfully. Processing started.",
+        file_name=file.filename,
+        file_size=file_size,
+    )
