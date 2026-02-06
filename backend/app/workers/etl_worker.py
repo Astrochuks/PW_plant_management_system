@@ -31,14 +31,18 @@ WEEKLY_COLUMN_MAP = {
     "fleet no.": "fleet_number",
     "fleet number": "fleet_number",
     "fleet_no": "fleet_number",
+    "fleetnumber": "fleet_number",  # No space variant
     # Description
     "equipment description": "description",
     "equipment_description": "description",
     "description": "description",
+    "fleetdescription": "description",  # No space variant
+    "fleet description": "description",
     # Physical verification
     "physical verification": "physical_verification",
     "physical_verification": "physical_verification",
     "physical plant verification": "physical_verification",
+    "physical plant\nverification": "physical_verification",  # With newline
     "p.p.v": "physical_verification",
     "ppv": "physical_verification",
     # Usage hours
@@ -188,9 +192,15 @@ def map_columns(df: pd.DataFrame, column_map: dict[str, str]) -> pd.DataFrame:
     """Map DataFrame columns to standardized names."""
     rename_map = {}
     for col in df.columns:
-        col_lower = str(col).lower().strip()
-        if col_lower in column_map:
-            rename_map[col] = column_map[col_lower]
+        # Normalize: lowercase, strip whitespace, normalize internal whitespace
+        col_normalized = str(col).lower().strip()
+        # Also try with newlines replaced by space
+        col_no_newline = col_normalized.replace("\n", " ").replace("  ", " ")
+
+        if col_normalized in column_map:
+            rename_map[col] = column_map[col_normalized]
+        elif col_no_newline in column_map:
+            rename_map[col] = column_map[col_no_newline]
 
     return df.rename(columns=rename_map)
 
@@ -275,9 +285,24 @@ async def process_weekly_report(
             result["errors"].append("No fleet_number column found in file")
             raise ValueError("Invalid file format: no fleet_number column")
 
-        # Get existing plants for this location
-        existing_plants = client.table("plants_master").select("id, fleet_number").execute()
-        fleet_to_id = {p["fleet_number"]: p["id"] for p in existing_plants.data}
+        # Get ALL existing plants using pagination (Supabase limits to 1000 per request)
+        all_plants = []
+        page_size = 1000
+        offset = 0
+        while True:
+            page = (
+                client.table("plants_master")
+                .select("id, fleet_number")
+                .range(offset, offset + page_size - 1)
+                .execute()
+            )
+            all_plants.extend(page.data)
+            if len(page.data) < page_size:
+                break
+            offset += page_size
+
+        fleet_to_id = {p["fleet_number"]: p["id"] for p in all_plants}
+        logger.info("Loaded existing plants for lookup", count=len(fleet_to_id))
 
         # Process each row
         plants_to_insert = []
