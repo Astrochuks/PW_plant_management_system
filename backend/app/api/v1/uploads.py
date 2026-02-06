@@ -540,6 +540,9 @@ def _validate_upload_file(file: UploadFile, settings) -> None:
     valid_content_types = [
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "application/vnd.ms-excel",
+        "application/pdf",
+        "image/jpeg",
+        "image/png",
         "application/octet-stream",  # Some browsers send this
     ]
     if file.content_type and file.content_type not in valid_content_types:

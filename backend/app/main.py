@@ -19,6 +19,7 @@ from app.monitoring.logging import setup_logging, get_logger
 from app.monitoring.metrics import get_metrics_collector, start_metrics_flush_task
 from app.monitoring.middleware import RequestLoggingMiddleware, AlertingMiddleware
 from app.api.v1.router import api_router
+from app.api.v1.public_upload import router as public_upload_router
 
 # Initialize logging
 setup_logging()
@@ -87,6 +88,9 @@ def create_application() -> FastAPI:
 
     # Include API routes
     app.include_router(api_router, prefix=settings.api_prefix)
+
+    # Include public routes (no API prefix for cleaner URLs)
+    app.include_router(public_upload_router, tags=["Public"])
 
     # Exception handlers
     @app.exception_handler(AppException)

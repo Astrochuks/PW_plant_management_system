@@ -48,7 +48,7 @@ class Settings(BaseSettings):
 
     # File Upload Settings
     max_upload_size_mb: int = 10
-    allowed_upload_extensions: list[str] = [".xlsx", ".xls"]
+    allowed_upload_extensions: list[str] = [".xlsx", ".xls", ".pdf", ".jpg", ".jpeg", ".png"]
 
     # Logging
     log_level: str = "INFO"
