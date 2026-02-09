@@ -474,3 +474,163 @@ async def get_location_submissions(
         "success": True,
         "data": result.data,
     }
+
+
+@router.get("/{location_id}/usage")
+async def get_location_usage(
+    location_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+    year: int | None = Query(None, description="Filter by specific year"),
+    week: int | None = Query(None, ge=1, le=53, description="Filter by specific week"),
+    period: str | None = Query(None, pattern="^(week|month|quarter|year|all)$", description="Aggregate by period"),
+) -> dict[str, Any]:
+    """Get usage/utilization statistics for a location.
+
+    Shows aggregated hours worked, standby, breakdown across all plants
+    at this location for the specified period.
+
+    Args:
+        location_id: The location UUID.
+        current_user: The authenticated user.
+        year: Filter by year (defaults to current year if not specified).
+        week: Filter by specific week number.
+        period: Aggregation period: week, month, quarter, year, or all.
+
+    Returns:
+        Usage statistics for the location.
+    """
+    client = get_supabase_admin_client()
+
+    # Verify location exists
+    location = (
+        client.table("locations")
+        .select("id, name")
+        .eq("id", str(location_id))
+        .single()
+        .execute()
+    )
+
+    if not location.data:
+        raise NotFoundError("Location", str(location_id))
+
+    # Build query for weekly records at this location
+    query = (
+        client.table("plant_weekly_records")
+        .select("hours_worked, standby_hours, breakdown_hours, off_hire, year, week_number")
+        .eq("location_id", str(location_id))
+    )
+
+    if year:
+        query = query.eq("year", year)
+    if week:
+        query = query.eq("week_number", week)
+
+    result = query.execute()
+    records = result.data or []
+
+    # Aggregate statistics
+    total_hours_worked = sum(float(r.get("hours_worked") or 0) for r in records)
+    total_standby_hours = sum(float(r.get("standby_hours") or 0) for r in records)
+    total_breakdown_hours = sum(float(r.get("breakdown_hours") or 0) for r in records)
+    total_off_hire = sum(1 for r in records if r.get("off_hire"))
+
+    # Count unique plants and weeks
+    unique_plants = len(set(r.get("plant_id") for r in records if r.get("plant_id")))
+    unique_weeks = len(set((r.get("year"), r.get("week_number")) for r in records))
+
+    # Calculate utilization rate (hours worked / total available hours)
+    total_hours = total_hours_worked + total_standby_hours + total_breakdown_hours
+    utilization_rate = round((total_hours_worked / total_hours * 100) if total_hours > 0 else 0, 2)
+
+    # Get period label
+    if week and year:
+        period_label = f"Week {week}, {year}"
+    elif year:
+        period_label = str(year)
+    else:
+        period_label = "All Time"
+
+    return {
+        "success": True,
+        "data": {
+            "location_id": str(location_id),
+            "location_name": location.data["name"],
+            "period_label": period_label,
+            "hours_worked": round(total_hours_worked, 2),
+            "standby_hours": round(total_standby_hours, 2),
+            "breakdown_hours": round(total_breakdown_hours, 2),
+            "utilization_rate": utilization_rate,
+            "total_records": len(records),
+            "unique_plants": unique_plants,
+            "weeks_tracked": unique_weeks,
+            "off_hire_count": total_off_hire,
+        },
+    }
+
+
+@router.get("/{location_id}/weekly-records")
+async def get_location_weekly_records(
+    location_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+    year: int | None = Query(None, description="Filter by year"),
+    week: int | None = Query(None, ge=1, le=53, description="Filter by week number"),
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(50, ge=1, le=200, description="Items per page"),
+) -> dict[str, Any]:
+    """Get weekly records for all plants at a location.
+
+    Shows detailed per-plant usage for each week.
+
+    Args:
+        location_id: The location UUID.
+        current_user: The authenticated user.
+        year: Filter by year.
+        week: Filter by week.
+        page: Page number.
+        limit: Items per page.
+
+    Returns:
+        Paginated weekly records with plant details.
+    """
+    client = get_supabase_admin_client()
+
+    query = (
+        client.table("plant_weekly_records")
+        .select("*, plants_master(fleet_number, description)", count="exact")
+        .eq("location_id", str(location_id))
+    )
+
+    if year:
+        query = query.eq("year", year)
+    if week:
+        query = query.eq("week_number", week)
+
+    # Apply ordering and pagination
+    offset = (page - 1) * limit
+    query = query.order("year", desc=True).order("week_number", desc=True).order("plants_master(fleet_number)")
+    query = query.range(offset, offset + limit - 1)
+
+    result = query.execute()
+    total = result.count or 0
+
+    # Transform to flatten plant info
+    records = []
+    for item in result.data or []:
+        plant = item.pop("plants_master", None) or {}
+        item["fleet_number"] = plant.get("fleet_number")
+        item["description"] = plant.get("description")
+        records.append(item)
+
+    return {
+        "success": True,
+        "data": records,
+        "meta": {
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "total_pages": (total + limit - 1) // limit if total > 0 else 0,
+            "has_more": page * limit < total,
+            "year": year,
+            "week": week,
+        },
+    }

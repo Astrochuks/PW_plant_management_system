@@ -3,7 +3,7 @@
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 
 from app.api.v1.auth import get_client_ip
 from app.core.database import get_supabase_admin_client
@@ -320,7 +320,8 @@ async def get_fleet_utilization(
     limit: int = Query(20, ge=1, le=100),
     location_id: UUID | None = None,
     fleet_type: str | None = Query(None, description="Filter by fleet type name"),
-    status: str | None = Query(None, pattern="^(working|standby|breakdown|faulty|scrap|missing|stolen|unverified|in_transit|off_hire)$"),
+    status: str | None = Query(None, pattern="^(working|standby|breakdown|missing|stolen|unverified|in_transit|off_hire)$"),
+    condition: str | None = Query(None, pattern="^(good|faulty|needs_repair|scrap)$", description="Filter by physical condition"),
     search: str | None = None,
 ) -> dict[str, Any]:
     """Get fleet utilization view with comprehensive stats.
@@ -331,7 +332,8 @@ async def get_fleet_utilization(
         limit: Items per page.
         location_id: Filter by location.
         fleet_type: Filter by fleet type name.
-        status: Filter by plant status.
+        status: Filter by operational status (working, standby, breakdown, off_hire, etc.).
+        condition: Filter by physical condition (good, faulty, needs_repair, scrap).
         search: Search in fleet_number or description.
 
     Returns:
@@ -350,6 +352,8 @@ async def get_fleet_utilization(
         query = query.ilike("fleet_type", f"%{fleet_type}%")
     if status:
         query = query.eq("status", status)
+    if condition:
+        query = query.eq("condition", condition)
     if search:
         query = query.or_(f"fleet_number.ilike.%{search}%,description.ilike.%{search}%")
 
@@ -372,6 +376,69 @@ async def get_fleet_utilization(
     }
 
 
+@router.get("/stats")
+async def get_plant_stats(
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+    location_id: UUID | None = None,
+) -> dict[str, Any]:
+    """Get plant counts grouped by status and condition.
+
+    Useful for dashboard widgets showing fleet overview.
+
+    Args:
+        current_user: The authenticated user.
+        location_id: Optional filter by location.
+
+    Returns:
+        Counts by status, condition, and combined status+condition.
+    """
+    client = get_supabase_admin_client()
+
+    # Build base query
+    query = client.table("plants_master").select("status, condition", count="exact")
+
+    if location_id:
+        query = query.eq("current_location_id", str(location_id))
+
+    result = query.execute()
+    total = result.count or 0
+
+    # Count by status
+    status_counts = {}
+    condition_counts = {}
+    combined_counts = {}
+
+    for plant in result.data or []:
+        status = plant.get("status") or "unverified"
+        condition = plant.get("condition") or "good"
+
+        status_counts[status] = status_counts.get(status, 0) + 1
+        condition_counts[condition] = condition_counts.get(condition, 0) + 1
+
+        combined_key = f"{status}:{condition}"
+        combined_counts[combined_key] = combined_counts.get(combined_key, 0) + 1
+
+    # Count plants with unknown location
+    unknown_location_result = (
+        client.table("plants_master")
+        .select("id", count="exact")
+        .is_("current_location_id", "null")
+        .execute()
+    )
+    unknown_location_count = unknown_location_result.count or 0
+
+    return {
+        "success": True,
+        "data": {
+            "total": total,
+            "by_status": status_counts,
+            "by_condition": condition_counts,
+            "by_status_and_condition": combined_counts,
+            "unknown_location": unknown_location_count,
+        },
+    }
+
+
 # ============================================================================
 # Parametric routes with /{plant_id}
 # ============================================================================
@@ -382,11 +449,14 @@ async def list_plants(
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
-    status: str | None = Query(None, pattern="^(working|standby|breakdown|faulty|scrap|missing|stolen|unverified|in_transit|off_hire)$"),
+    status: str | None = Query(None, pattern="^(working|standby|breakdown|missing|stolen|unverified|in_transit|off_hire)$"),
+    condition: str | None = Query(None, pattern="^(good|faulty|needs_repair|scrap)$", description="Filter by physical condition"),
     location_id: UUID | None = None,
     fleet_type: str | None = Query(None, description="Filter by fleet type name"),
     search: str | None = None,
     verified_only: bool = False,
+    unknown_location: bool = Query(False, description="Filter for plants with unknown/NULL location"),
+    in_transit: bool = Query(False, description="Filter for plants currently in transit"),
 ) -> PlantListResponse:
     """List plants with filtering and pagination.
 
@@ -394,11 +464,14 @@ async def list_plants(
         current_user: The authenticated user.
         page: Page number.
         limit: Items per page.
-        status: Filter by status.
+        status: Filter by operational status (working, standby, breakdown, off_hire, in_transit, etc.).
+        condition: Filter by physical condition (good, faulty, needs_repair, scrap).
         location_id: Filter by location.
         fleet_type: Filter by fleet type name.
         search: Search in fleet_number, description.
         verified_only: Only show verified plants.
+        unknown_location: If true, only show plants with NULL current_location_id.
+        in_transit: If true, only show plants with in_transit status.
 
     Returns:
         Paginated list of plants with summary stats.
@@ -409,10 +482,20 @@ async def list_plants(
     query = client.table("v_plants_summary").select("*", count="exact")
 
     # Apply filters
-    if status:
+    if in_transit:
+        # Override status filter if in_transit is specified
+        query = query.eq("status", "in_transit")
+    elif status:
         query = query.eq("status", status)
 
-    if location_id:
+    # Filter by physical condition
+    if condition:
+        query = query.eq("condition", condition)
+
+    if unknown_location:
+        # Filter for plants with NULL current_location_id
+        query = query.is_("current_location_id", "null")
+    elif location_id:
         query = query.eq("current_location_id", str(location_id))
 
     if fleet_type:
@@ -840,8 +923,9 @@ async def get_plant_location_history(
 async def get_plant_weekly_records(
     plant_id: UUID,
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
-    year: int | None = None,
-    limit: int = Query(52, ge=1, le=200),
+    year: int | None = Query(None, description="Filter by year"),
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(52, ge=1, le=200, description="Items per page (default 52 = 1 year)"),
 ) -> dict[str, Any]:
     """Get weekly tracking records for a plant.
 
@@ -851,39 +935,62 @@ async def get_plant_weekly_records(
         plant_id: The plant UUID.
         current_user: The authenticated user.
         year: Filter by year.
-        limit: Maximum records (default 52 = 1 year).
+        page: Page number.
+        limit: Items per page (default 52 = 1 year).
 
     Returns:
-        List of weekly records with location info.
+        Paginated list of weekly records with location info.
     """
     client = get_supabase_admin_client()
 
     query = (
         client.table("plant_weekly_records")
-        .select("*, locations(name)")
+        .select("*, locations!plant_weekly_records_location_id_fkey(name)", count="exact")
         .eq("plant_id", str(plant_id))
     )
 
     if year:
         query = query.eq("year", year)
 
+    # Apply ordering and pagination
+    offset = (page - 1) * limit
     query = query.order("year", desc=True).order("week_number", desc=True)
-    query = query.limit(limit)
+    query = query.range(offset, offset + limit - 1)
 
-    result = query.execute()
+    try:
+        result = query.execute()
+        total = result.count or 0
 
-    # Transform to include location name
-    records = []
-    for item in result.data:
-        item["location_name"] = item.get("locations", {}).get("name") if item.get("locations") else None
-        if "locations" in item:
-            del item["locations"]
-        records.append(item)
+        # Transform to include location name
+        records = []
+        for item in result.data or []:
+            # Handle locations which may be a dict or None
+            locations = item.get("locations")
+            if isinstance(locations, dict):
+                item["location_name"] = locations.get("name")
+            else:
+                item["location_name"] = None
 
-    return {
-        "success": True,
-        "data": records,
-    }
+            # Remove embedded relation from response
+            if "locations" in item:
+                del item["locations"]
+
+            records.append(item)
+
+        return {
+            "success": True,
+            "data": records,
+            "meta": {
+                "page": page,
+                "limit": limit,
+                "total": total,
+                "total_pages": (total + limit - 1) // limit if total > 0 else 0,
+                "has_more": page * limit < total,
+                "year": year,
+            },
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch weekly records: {str(e)}")
 
 
 @router.get("/{plant_id}/events")

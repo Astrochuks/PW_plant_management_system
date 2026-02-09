@@ -25,6 +25,7 @@ from app.models.upload import (
 from app.monitoring.logging import get_logger
 from app.services.audit_service import audit_service
 from app.workers.etl_worker import process_weekly_report, process_purchase_order
+from app.services.file_metadata_extractor import extract_and_resolve_metadata, extract_weekly_report_preview
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -384,12 +385,49 @@ async def list_weekly_submissions(
     result = query.execute()
     total = result.count or 0
 
-    # Transform data to include location name
+    # Transform data to include location name and metadata
     submissions = []
     for item in result.data:
         item["location_name"] = item.get("locations", {}).get("name") if item.get("locations") else None
         item.pop("locations", None)
+
+        # Add computed metadata
+        file_size = item.get("source_file_size")
+        if file_size:
+            if file_size >= 1024 * 1024:
+                item["file_size_formatted"] = f"{file_size / (1024 * 1024):.2f} MB"
+            elif file_size >= 1024:
+                item["file_size_formatted"] = f"{file_size / 1024:.1f} KB"
+            else:
+                item["file_size_formatted"] = f"{file_size} bytes"
+
+        # Calculate processing duration
+        started = item.get("processing_started_at")
+        completed = item.get("processing_completed_at")
+        if started and completed:
+            from datetime import datetime
+            try:
+                start_dt = datetime.fromisoformat(started.replace("Z", "+00:00"))
+                end_dt = datetime.fromisoformat(completed.replace("Z", "+00:00"))
+                duration = (end_dt - start_dt).total_seconds()
+                item["processing_duration_seconds"] = round(duration, 2)
+            except Exception:
+                pass
+
         submissions.append(item)
+
+    # Calculate summary counts
+    status_counts = {}
+    total_plants_processed = 0
+    total_plants_created = 0
+    total_plants_updated = 0
+
+    for item in submissions:
+        status = item.get("status", "unknown")
+        status_counts[status] = status_counts.get(status, 0) + 1
+        total_plants_processed += item.get("plants_processed") or 0
+        total_plants_created += item.get("plants_created") or 0
+        total_plants_updated += item.get("plants_updated") or 0
 
     return {
         "success": True,
@@ -399,8 +437,182 @@ async def list_weekly_submissions(
             "limit": limit,
             "total": total,
             "total_pages": (total + limit - 1) // limit if total > 0 else 0,
+            "counts": {
+                "by_status": status_counts,
+                "total_plants_processed": total_plants_processed,
+                "total_plants_created": total_plants_created,
+                "total_plants_updated": total_plants_updated,
+            },
         },
     }
+
+
+@router.get("/submissions/weekly/{submission_id}")
+async def get_weekly_submission(
+    submission_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+) -> dict[str, Any]:
+    """Get a single weekly report submission with full details.
+
+    Args:
+        submission_id: The submission ID.
+        current_user: The authenticated admin user.
+
+    Returns:
+        Full submission details including plant records.
+    """
+    client = get_supabase_admin_client()
+
+    # Get submission with location
+    submission_result = (
+        client.table("weekly_report_submissions")
+        .select("*, locations(name)")
+        .eq("id", str(submission_id))
+        .single()
+        .execute()
+    )
+
+    if not submission_result.data:
+        raise NotFoundError("Weekly report submission", str(submission_id))
+
+    submission = submission_result.data
+    submission["location_name"] = submission.get("locations", {}).get("name") if submission.get("locations") else None
+    submission.pop("locations", None)
+
+    # Get plant weekly records for this submission
+    records_result = (
+        client.table("plant_weekly_records")
+        .select("*, plants_master(fleet_number, fleet_type, description)")
+        .eq("submission_id", str(submission_id))
+        .order("plants_master(fleet_number)")
+        .execute()
+    )
+
+    # Transform plant records
+    plant_records = []
+    for record in records_result.data:
+        plant_info = record.pop("plants_master", {}) or {}
+        plant_records.append({
+            **record,
+            "fleet_number": plant_info.get("fleet_number"),
+            "fleet_type": plant_info.get("fleet_type"),
+            "description": plant_info.get("description"),
+        })
+
+    # Generate file download URL if file exists
+    file_url = None
+    if submission.get("source_file_path"):
+        try:
+            # Create a signed URL valid for 1 hour
+            signed_url = client.storage.from_("reports").create_signed_url(
+                submission["source_file_path"],
+                expires_in=3600,  # 1 hour
+            )
+            file_url = signed_url.get("signedURL")
+        except Exception as e:
+            logger.warning("Could not generate signed URL", error=str(e))
+
+    # Calculate metadata
+    file_size = submission.get("source_file_size", 0)
+    if file_size >= 1024 * 1024:
+        file_size_formatted = f"{file_size / (1024 * 1024):.2f} MB"
+    elif file_size >= 1024:
+        file_size_formatted = f"{file_size / 1024:.2f} KB"
+    else:
+        file_size_formatted = f"{file_size} bytes"
+
+    # Calculate processing duration
+    processing_duration = None
+    if submission.get("processing_started_at") and submission.get("processing_completed_at"):
+        from datetime import datetime
+        try:
+            started = datetime.fromisoformat(submission["processing_started_at"].replace("Z", "+00:00"))
+            completed = datetime.fromisoformat(submission["processing_completed_at"].replace("Z", "+00:00"))
+            duration_seconds = (completed - started).total_seconds()
+            processing_duration = f"{duration_seconds:.2f}s"
+        except Exception:
+            pass
+
+    # Determine file type for frontend viewing
+    file_name = submission.get("source_file_name", "")
+    file_extension = file_name.split(".")[-1].lower() if "." in file_name else ""
+    file_type_map = {
+        "xlsx": "excel",
+        "xls": "excel",
+        "pdf": "pdf",
+        "png": "image",
+        "jpg": "image",
+        "jpeg": "image",
+    }
+    file_type = file_type_map.get(file_extension, "unknown")
+
+    return {
+        "success": True,
+        "data": {
+            "submission": submission,
+            "plant_records": plant_records,
+            "file_url": file_url,
+        },
+        "meta": {
+            "total_records": len(plant_records),
+            "file_size_formatted": file_size_formatted,
+            "file_type": file_type,
+            "file_extension": file_extension,
+            "can_preview_in_browser": file_type in ("pdf", "image"),
+            "processing_duration": processing_duration,
+            "week_label": f"Week {submission.get('week_number', '?')}, {submission.get('year', '?')}",
+        },
+    }
+
+
+@router.get("/submissions/weekly/{submission_id}/file")
+async def download_weekly_submission_file(
+    submission_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+):
+    """Download the uploaded file for a weekly report submission.
+
+    Args:
+        submission_id: The submission ID.
+        current_user: The authenticated admin user.
+
+    Returns:
+        Redirect to signed download URL.
+    """
+    from fastapi.responses import RedirectResponse
+
+    client = get_supabase_admin_client()
+
+    # Get submission to find file path
+    submission_result = (
+        client.table("weekly_report_submissions")
+        .select("source_file_path, source_file_name")
+        .eq("id", str(submission_id))
+        .single()
+        .execute()
+    )
+
+    if not submission_result.data:
+        raise NotFoundError("Weekly report submission", str(submission_id))
+
+    file_path = submission_result.data.get("source_file_path")
+    if not file_path:
+        raise NotFoundError("File for submission", str(submission_id))
+
+    # Create signed URL for download
+    try:
+        signed_url = client.storage.from_("reports").create_signed_url(
+            file_path,
+            expires_in=300,  # 5 minutes
+        )
+        download_url = signed_url.get("signedURL")
+        if not download_url:
+            raise ValidationError("Could not generate download URL")
+
+        return RedirectResponse(url=download_url)
+    except Exception as e:
+        logger.error("Failed to generate download URL", error=str(e))
+        raise ValidationError(f"Could not download file: {str(e)}")
 
 
 @router.post("/tokens/generate")
@@ -556,43 +768,92 @@ def _validate_upload_file(file: UploadFile, settings) -> None:
 # ============== Admin Upload Endpoints (JWT Auth) ==============
 
 
+@router.post("/admin/weekly-report/preview")
+async def preview_weekly_report(
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+    file: UploadFile = File(...),
+) -> dict[str, Any]:
+    """Preview a weekly report before uploading.
+
+    This endpoint extracts metadata and provides a preview of the data
+    for validation before committing the upload.
+
+    Args:
+        current_user: The authenticated admin user.
+        file: The Excel file to preview.
+
+    Returns:
+        Preview data including:
+        - Extracted metadata (location, week ending date)
+        - First 10 plant records
+        - Total plant count
+        - Any validation warnings
+    """
+    settings = get_settings()
+
+    # Validate file type
+    _validate_upload_file(file, settings)
+
+    # Read file content
+    file_content = await file.read()
+
+    # Extract preview
+    preview = extract_weekly_report_preview(file_content)
+
+    # Get list of all locations for frontend dropdown
+    client = get_supabase_admin_client()
+    locations_result = client.table("locations").select("id, name").order("name").execute()
+
+    return {
+        "success": True,
+        "file_name": file.filename,
+        "file_size": len(file_content),
+        "metadata": {
+            "location_id": preview["metadata"].get("location_id"),
+            "location_name": preview["metadata"].get("location_name"),
+            "week_ending_date": str(preview["metadata"].get("week_ending_date")) if preview["metadata"].get("week_ending_date") else None,
+            "extraction_warnings": preview["metadata"].get("extraction_warnings", []),
+        },
+        "data_preview": {
+            "total_plants": preview["total_plants"],
+            "columns_found": preview["columns_found"],
+            "plants": preview["plants_preview"],
+        },
+        "validation_warnings": preview["validation_warnings"],
+        "available_locations": [{"id": loc["id"], "name": loc["name"]} for loc in locations_result.data],
+    }
+
+
 @router.post("/admin/weekly-report", response_model=UploadResponse)
 async def admin_upload_weekly_report(
     request: Request,
     background_tasks: BackgroundTasks,
     current_user: Annotated[CurrentUser, Depends(require_admin)],
     file: UploadFile = File(...),
-    week_ending_date: date = Form(...),
-    location_id: UUID = Form(...),
+    week_ending_date: date | None = Form(None),
+    location_id: UUID | None = Form(None),
 ) -> UploadResponse:
     """Upload a weekly report as admin (JWT authentication).
 
     This endpoint is for admin users to upload reports directly
     without needing an upload token.
 
+    If week_ending_date and location_id are not provided, they will be
+    automatically extracted from the Excel file header.
+
     Args:
         request: The HTTP request.
         background_tasks: FastAPI background tasks.
         current_user: The authenticated admin user.
         file: The Excel file to upload.
-        week_ending_date: The week ending date for this report.
-        location_id: The location this report is for.
+        week_ending_date: Optional - auto-detected from file if not provided.
+        location_id: Optional - auto-detected from file if not provided.
 
     Returns:
         Upload confirmation with job ID for status tracking.
     """
     settings = get_settings()
     client = get_supabase_admin_client()
-
-    # Get location name for logging
-    location_result = (
-        client.table("locations")
-        .select("name")
-        .eq("id", str(location_id))
-        .single()
-        .execute()
-    )
-    location_name = location_result.data.get("name") if location_result.data else "Unknown"
 
     # Validate file
     _validate_upload_file(file, settings)
@@ -601,8 +862,55 @@ async def admin_upload_weekly_report(
     file_content = await file.read()
     file_size = len(file_content)
 
+    # Auto-extract metadata if not provided
+    final_location_id = location_id
+    final_week_ending_date = week_ending_date
+    location_name = None
+    extraction_warnings = []
+
+    if not location_id or not week_ending_date:
+        # Extract metadata from file
+        extracted = extract_and_resolve_metadata(file_content)
+        extraction_warnings = extracted.get("extraction_warnings", [])
+
+        if not location_id:
+            if extracted["location_id"]:
+                final_location_id = UUID(extracted["location_id"])
+                location_name = extracted["location_name"]
+            else:
+                raise ValidationError(
+                    "Could not auto-detect location from file. Please provide location_id.",
+                    details=[
+                        {"field": "location_id", "message": msg, "code": "EXTRACTION_FAILED"}
+                        for msg in extraction_warnings if "location" in msg.lower()
+                    ],
+                )
+
+        if not week_ending_date:
+            if extracted["week_ending_date"]:
+                final_week_ending_date = extracted["week_ending_date"]
+            else:
+                raise ValidationError(
+                    "Could not auto-detect week ending date from file. Please provide week_ending_date.",
+                    details=[
+                        {"field": "week_ending_date", "message": msg, "code": "EXTRACTION_FAILED"}
+                        for msg in extraction_warnings if "date" in msg.lower()
+                    ],
+                )
+
+    # Get location name if not already set
+    if not location_name:
+        location_result = (
+            client.table("locations")
+            .select("name")
+            .eq("id", str(final_location_id))
+            .single()
+            .execute()
+        )
+        location_name = location_result.data.get("name") if location_result.data else "Unknown"
+
     # Store file in Supabase Storage
-    storage_path = f"weekly-reports/{location_id}/{week_ending_date}/{file.filename}"
+    storage_path = f"weekly-reports/{final_location_id}/{final_week_ending_date}/{file.filename}"
 
     try:
         client.storage.from_("reports").upload(
@@ -617,7 +925,7 @@ async def admin_upload_weekly_report(
             raise
 
     # Calculate week number and year
-    week_info = week_ending_date.isocalendar()
+    week_info = final_week_ending_date.isocalendar()
     year = week_info.year
     week_number = week_info.week
 
@@ -625,8 +933,8 @@ async def admin_upload_weekly_report(
     submission_data = {
         "year": year,
         "week_number": week_number,
-        "week_ending_date": str(week_ending_date),
-        "location_id": str(location_id),
+        "week_ending_date": str(final_week_ending_date),
+        "location_id": str(final_location_id),
         "submitted_by_name": current_user.full_name,
         "submitted_by_email": current_user.email,
         "source_type": "upload",
@@ -644,13 +952,19 @@ async def admin_upload_weekly_report(
 
     job_id = result.data[0]["id"]
 
+    # Build message with auto-detection info
+    message = "File uploaded successfully. Processing started."
+    if extraction_warnings:
+        message += f" (Auto-detected: location={location_name}, week_ending={final_week_ending_date})"
+
     logger.info(
         "Weekly report uploaded by admin",
         job_id=job_id,
         file_name=file.filename,
-        location_id=str(location_id),
+        location_id=str(final_location_id),
         location_name=location_name,
-        week_ending_date=str(week_ending_date),
+        week_ending_date=str(final_week_ending_date),
+        auto_detected=bool(not location_id or not week_ending_date),
         user_id=current_user.id,
     )
 
@@ -659,7 +973,7 @@ async def admin_upload_weekly_report(
         process_weekly_report,
         job_id=job_id,
         storage_path=storage_path,
-        location_id=str(location_id),
+        location_id=str(final_location_id),
     )
 
     background_tasks.add_task(
@@ -672,22 +986,23 @@ async def admin_upload_weekly_report(
         new_values={
             "file_name": file.filename,
             "file_size": file_size,
-            "location_id": str(location_id),
-            "week_ending_date": str(week_ending_date),
+            "location_id": str(final_location_id),
+            "week_ending_date": str(final_week_ending_date),
+            "auto_detected": bool(not location_id or not week_ending_date),
         },
         ip_address=get_client_ip(request),
-        description=f"Admin uploaded weekly report for {location_name} week ending {week_ending_date}",
+        description=f"Admin uploaded weekly report for {location_name} week ending {final_week_ending_date}",
     )
 
     return UploadResponse(
         success=True,
         job_id=job_id,
         status=UploadStatus.PENDING,
-        message="File uploaded successfully. Processing started.",
+        message=message,
         file_name=file.filename,
         file_size=file_size,
         location=location_name,
-        week_ending_date=week_ending_date,
+        week_ending_date=final_week_ending_date,
     )
 
 

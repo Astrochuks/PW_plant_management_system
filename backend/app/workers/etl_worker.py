@@ -3,6 +3,11 @@
 Handles async processing of:
 - Weekly report Excel files
 - Purchase order Excel files
+
+Uses AI-powered remarks parsing for:
+- Plant status derivation
+- Transfer detection
+- Condition assessment
 """
 
 import io
@@ -14,6 +19,12 @@ import pandas as pd
 from app.config import get_settings
 from app.core.database import get_supabase_admin_client
 from app.monitoring.logging import get_logger
+from app.services.remarks_parser import (
+    parse_remarks_batch,
+    derive_status_and_condition,
+    ParsedRemarks,
+)
+from app.services.transfer_service import get_transfer_service
 
 logger = get_logger(__name__)
 
@@ -80,7 +91,11 @@ WEEKLY_COLUMN_MAP = {
 
 
 def normalize_fleet_number(value: Any) -> str | None:
-    """Normalize fleet number to standard format."""
+    """Normalize fleet number to standard format.
+
+    Removes ALL internal spaces to ensure consistent matching.
+    e.g., "AF 25" -> "AF25", "T 462" -> "T462"
+    """
     if pd.isna(value):
         return None
 
@@ -95,8 +110,9 @@ def normalize_fleet_number(value: Any) -> str | None:
     if not s or s in ("NAN", "NONE", "N/A", "-", ""):
         return None
 
-    # Normalize spaces
-    s = " ".join(s.split())
+    # Remove ALL internal spaces to ensure consistent matching
+    # "AF 25" -> "AF25", "T 462" -> "T462"
+    s = s.replace(" ", "")
 
     return s if len(s) >= 2 else None
 
@@ -270,6 +286,18 @@ async def process_weekly_report(
 
         logger.info("Starting weekly report processing", job_id=job_id, storage_path=storage_path)
 
+        # Get submission data for week info
+        submission = client.table("weekly_report_submissions").select(
+            "year, week_number, week_ending_date"
+        ).eq("id", job_id).single().execute()
+
+        if not submission.data:
+            raise ValueError("Submission not found")
+
+        submission_year = submission.data["year"]
+        submission_week = submission.data["week_number"]
+        submission_week_ending = submission.data["week_ending_date"]
+
         # Download file from storage
         file_data = client.storage.from_("reports").download(storage_path)
 
@@ -304,9 +332,10 @@ async def process_weekly_report(
         fleet_to_id = {p["fleet_number"]: p["id"] for p in all_plants}
         logger.info("Loaded existing plants for lookup", count=len(fleet_to_id))
 
-        # Process each row
+        # Process each row - first pass to collect data for batch AI parsing
         plants_to_insert = []
         plants_to_update = []
+        plants_for_parsing = []  # Data for AI batch parsing
 
         for idx, row in df.iterrows():
             fleet_num = normalize_fleet_number(row.get("fleet_number"))
@@ -326,7 +355,7 @@ async def process_weekly_report(
             breakdown_hours = parse_hours(row.get("breakdown_hours"))
             off_hire = parse_off_hire(row.get("off_hire"))
 
-            # Extract transfer info
+            # Extract transfer info from columns (may be empty - AI will parse from remarks)
             transfer_from = None
             if pd.notna(row.get("transfer_from")):
                 transfer_from = str(row.get("transfer_from")).strip() or None
@@ -343,6 +372,16 @@ async def process_weekly_report(
             if pd.notna(row.get("remarks")):
                 remarks = str(row.get("remarks")).strip() or None
 
+            # Collect data for AI parsing
+            plants_for_parsing.append({
+                "fleet_number": fleet_num,
+                "remarks": remarks,
+                "hours_worked": hours_worked,
+                "standby_hours": standby_hours,
+                "breakdown_hours": breakdown_hours,
+                "off_hire": off_hire,
+            })
+
             # Data for updating the main plants table
             plant_data = {
                 "fleet_number": fleet_num,
@@ -350,6 +389,9 @@ async def process_weekly_report(
                 "remarks": remarks,
                 "physical_verification": physical_verification,
                 "current_location_id": location_id,
+                "last_verified_date": submission_week_ending,
+                "last_verified_year": submission_year,
+                "last_verified_week": submission_week,
                 "updated_at": datetime.utcnow().isoformat(),
                 # Usage data for weekly tracking (not stored in plants table)
                 "_usage": {
@@ -369,18 +411,59 @@ async def process_weekly_report(
                     **plant_data,
                 })
             else:
-                # New plant — resolve fleet_type from prefix, set working status
-                resolved_type = client.rpc("resolve_fleet_type", {"p_fleet_number": fleet_num}).execute()
-                if resolved_type.data:
-                    plant_data["fleet_type"] = resolved_type.data
+                # New plant - will resolve fleet_type in batch later
                 plant_data["status"] = "working"
                 plants_to_insert.append(plant_data)
+
+        # AI batch parsing of remarks
+        logger.info("Starting AI remarks parsing", count=len(plants_for_parsing), job_id=job_id)
+        parsed_remarks = await parse_remarks_batch(plants_for_parsing)
+        logger.info("AI parsing complete", parsed_count=len(parsed_remarks), job_id=job_id)
+
+        # Apply parsed status and condition to plants
+        for plant in plants_to_insert + plants_to_update:
+            fn = plant["fleet_number"]
+            parsed = parsed_remarks.get(fn)
+            if parsed:
+                usage = plant.get("_usage", {})
+                # Derive final status and condition from AI parsing + hours data
+                status, condition = derive_status_and_condition(
+                    parsed=parsed,
+                    hours_worked=usage.get("hours_worked", 0),
+                    standby_hours=usage.get("standby_hours", 0),
+                    breakdown_hours=usage.get("breakdown_hours", 0),
+                    off_hire=usage.get("off_hire", False),
+                    physical_verification=plant.get("physical_verification"),
+                )
+                plant["status"] = status
+                plant["condition"] = condition
+                plant["status_confidence"] = parsed.confidence
+                # Store parsed data for weekly record
+                plant["_parsed"] = parsed
 
         # Batch insert new plants (exclude _usage field)
         if plants_to_insert:
             try:
+                # Batch resolve fleet types for all new plants (single query)
+                fleet_prefixes = (
+                    client.table("fleet_number_prefixes")
+                    .select("prefix, fleet_type")
+                    .execute()
+                )
+                prefix_to_type = {p["prefix"]: p["fleet_type"] for p in fleet_prefixes.data}
+
+                # Apply fleet types based on prefix
+                import re
+                for plant in plants_to_insert:
+                    fn = plant.get("fleet_number", "")
+                    match = re.match(r'^([A-Z]+)', fn.replace(" ", ""))
+                    if match:
+                        prefix = match.group(1)
+                        if prefix in prefix_to_type:
+                            plant["fleet_type"] = prefix_to_type[prefix]
+
                 insert_data = [
-                    {k: v for k, v in p.items() if k != "_usage"}
+                    {k: v for k, v in p.items() if not k.startswith("_")}
                     for p in plants_to_insert
                 ]
                 insert_result = client.table("plants_master").insert(insert_data).execute()
@@ -407,14 +490,22 @@ async def process_weekly_report(
                 result["errors"].append(f"Failed to insert plants: {str(e)}")
                 logger.error("Failed to insert plants", error=str(e), job_id=job_id)
 
-        # Batch update existing plants (exclude _usage field)
-        for plant in plants_to_update:
+        # Batch update existing plants using upsert (single DB request instead of 1 per plant)
+        if plants_to_update:
             try:
-                update_data = {k: v for k, v in plant.items() if k not in ("id", "_usage")}
-                client.table("plants_master").update(update_data).eq("id", plant["id"]).execute()
-                result["plants_updated"] += 1
+                update_data = [
+                    {k: v for k, v in p.items() if not k.startswith("_")}
+                    for p in plants_to_update
+                ]
+                client.table("plants_master").upsert(
+                    update_data,
+                    on_conflict="id",
+                ).execute()
+                result["plants_updated"] = len(plants_to_update)
+                logger.info("Batch updated plants", count=result["plants_updated"], job_id=job_id)
             except Exception as e:
-                result["warnings"].append(f"Failed to update plant {plant['fleet_number']}: {str(e)}")
+                result["warnings"].append(f"Failed to batch update plants: {str(e)}")
+                logger.error("Failed to batch update plants", error=str(e), job_id=job_id)
 
         # Record weekly location data for plants and detect movements
         all_plants = plants_to_insert + plants_to_update
@@ -424,11 +515,14 @@ async def process_weekly_report(
             location_id,
             [p["fleet_number"] for p in all_plants],
             plant_details=all_plants,  # Pass full plant details for tracking
+            parsed_remarks=parsed_remarks,  # Pass AI parsed data for transfer detection
         )
 
         # Add tracking stats to result
         result["movements_detected"] = tracking_result.get("movements_detected", 0)
         result["new_plants_tracked"] = tracking_result.get("new_plants", 0)
+        result["transfers_detected"] = tracking_result.get("transfers_detected", 0)
+        result["transfers_confirmed"] = tracking_result.get("transfers_confirmed", 0)
 
         result["success"] = len(result["errors"]) == 0
 
@@ -672,8 +766,15 @@ async def _record_plant_locations(
     location_id: str,
     fleet_numbers: list[str],
     plant_details: list[dict[str, Any]] | None = None,
+    parsed_remarks: dict[str, ParsedRemarks] | None = None,
 ) -> dict[str, Any]:
     """Record plant location data for the week and detect movements.
+
+    Also handles:
+    - AI-parsed transfer detection and processing
+    - Confirming pending incoming transfers
+    - "Latest week" logic for location updates
+    - Missing plant detection
 
     Args:
         client: Supabase client.
@@ -681,18 +782,24 @@ async def _record_plant_locations(
         location_id: Current location ID.
         fleet_numbers: List of fleet numbers in this report.
         plant_details: Optional list of dicts with plant details (remarks, physical_verification, etc.)
+        parsed_remarks: AI-parsed remarks data keyed by fleet number.
 
     Returns:
-        Dict with tracking stats (movements, new_plants, etc.)
+        Dict with tracking stats (movements, new_plants, transfers, etc.)
     """
     tracking_result = {
         "movements_detected": 0,
         "new_plants": 0,
         "records_created": 0,
+        "transfers_detected": 0,
+        "transfers_confirmed": 0,
     }
 
     if not fleet_numbers:
         return tracking_result
+
+    parsed_remarks = parsed_remarks or {}
+    transfer_service = get_transfer_service()
 
     try:
         # Get plant IDs for fleet numbers
@@ -725,19 +832,56 @@ async def _record_plant_locations(
             prev_week = 52
             prev_year = year - 1
 
+        plant_ids = [fleet_to_plant[fn]["id"] for fn in fleet_numbers if fn in fleet_to_plant]
+
         prev_records = (
             client.table("plant_weekly_records")
             .select("plant_id, location_id")
             .eq("year", prev_year)
             .eq("week_number", prev_week)
-            .in_("plant_id", [fleet_to_plant[fn]["id"] for fn in fleet_numbers if fn in fleet_to_plant])
+            .in_("plant_id", plant_ids)
             .execute()
         )
         prev_locations = {r["plant_id"]: r["location_id"] for r in prev_records.data}
 
+        # Batch check which plants have ANY existing records (single query instead of 1 per plant)
+        existing_records = (
+            client.table("plant_weekly_records")
+            .select("plant_id")
+            .in_("plant_id", plant_ids)
+            .execute()
+        )
+        plants_with_history = {r["plant_id"] for r in existing_records.data}
+
+        # Check for pending transfers that should be confirmed
+        confirmed_transfers = transfer_service.check_and_confirm_pending_transfers(
+            plant_ids=plant_ids,
+            location_id=location_id,
+            submission_id=submission_id,
+        )
+        tracking_result["transfers_confirmed"] = len(confirmed_transfers)
+
+        # Check which plants this is the latest week for (to update current_location)
+        # Only update current_location if this is the most recent week data for the plant
+        latest_weeks = (
+            client.table("plant_weekly_records")
+            .select("plant_id, year, week_number")
+            .in_("plant_id", plant_ids)
+            .order("year", desc=True)
+            .order("week_number", desc=True)
+            .execute()
+        )
+        # Build map of plant_id -> (latest_year, latest_week)
+        plant_latest_week = {}
+        for r in latest_weeks.data:
+            pid = r["plant_id"]
+            if pid not in plant_latest_week:
+                plant_latest_week[pid] = (r["year"], r["week_number"])
+
         # Prepare weekly records and detect events
         weekly_records = []
         events_to_create = []
+        location_updates = []  # Plants to update current_location
 
         for fn in fleet_numbers:
             if fn not in fleet_to_plant:
@@ -747,8 +891,9 @@ async def _record_plant_locations(
             plant_id = plant["id"]
             details = details_lookup.get(fn, {})
             usage = details.get("_usage", {})
+            parsed = parsed_remarks.get(fn)
 
-            # Create weekly record with usage data
+            # Create weekly record with usage data and AI-parsed fields
             record = {
                 "plant_id": plant_id,
                 "location_id": location_id,
@@ -768,9 +913,137 @@ async def _record_plant_locations(
                 "transfer_from": usage.get("transfer_from"),
                 "transfer_to": usage.get("transfer_to"),
             }
+
+            # Add AI-parsed fields
+            if parsed:
+                record["parsed_status"] = parsed.status
+                record["parsed_transfer_direction"] = parsed.transfer_direction
+                record["ai_confidence"] = parsed.confidence
+                if parsed.condition_notes:
+                    record["parsed_condition_keywords"] = [parsed.condition_notes]
+
+                # Resolve transfer location to ID if detected
+                if parsed.transfer_location:
+                    resolved = transfer_service.resolve_location(parsed.transfer_location)
+                    if resolved:
+                        record["parsed_transfer_location_id"] = resolved["id"]
+
             weekly_records.append(record)
 
-            # Check for movement
+            # Check if this is the latest week for this plant
+            existing_latest = plant_latest_week.get(plant_id)
+            is_latest = (
+                existing_latest is None or
+                (year, week_number) >= existing_latest
+            )
+
+            # Process transfers from Excel columns first (more explicit than AI parsing)
+            transfer_from_col = usage.get("transfer_from")
+            transfer_to_col = usage.get("transfer_to")
+
+            if transfer_from_col or transfer_to_col:
+                # Excel columns have transfer info - create transfer record
+                if transfer_from_col and not transfer_to_col:
+                    # Inbound transfer - plant received from another location
+                    transfer = transfer_service.create_inbound_transfer(
+                        plant_id=plant_id,
+                        to_location_id=location_id,
+                        from_location_raw=transfer_from_col,
+                        source_submission_id=submission_id,
+                        source_remarks=details.get("remarks"),
+                        confidence=1.0,  # High confidence - from explicit column
+                    )
+                    if transfer:
+                        tracking_result["transfers_detected"] += 1
+                        logger.info(
+                            "Created inbound transfer from Excel column",
+                            plant_id=str(plant_id),
+                            from_location=transfer_from_col,
+                        )
+
+                elif transfer_to_col and not transfer_from_col:
+                    # Outbound transfer - but only if destination is different from current location
+                    to_location_resolved = transfer_service.resolve_location(transfer_to_col)
+                    if to_location_resolved and to_location_resolved["id"] != location_id:
+                        # Different location - create outbound transfer
+                        transfer = transfer_service.create_outbound_transfer(
+                            plant_id=plant_id,
+                            from_location_id=location_id,
+                            to_location_raw=transfer_to_col,
+                            source_submission_id=submission_id,
+                            source_remarks=details.get("remarks"),
+                            confidence=1.0,  # High confidence - from explicit column
+                        )
+                        if transfer:
+                            tracking_result["transfers_detected"] += 1
+                            logger.info(
+                                "Created outbound transfer from Excel column",
+                                plant_id=str(plant_id),
+                                to_location=transfer_to_col,
+                            )
+                    # If transfer_to matches current location, ignore (plant is already here)
+
+                elif transfer_from_col and transfer_to_col:
+                    # Both columns filled - need to check if transfer_to is current location
+                    # If transfer_to matches current location, it just confirms arrival (inbound only)
+                    # If transfer_to is different, it's a pass-through (inbound + outbound)
+
+                    # Create inbound (confirmed) since plant is in this report
+                    transfer = transfer_service.create_inbound_transfer(
+                        plant_id=plant_id,
+                        to_location_id=location_id,
+                        from_location_raw=transfer_from_col,
+                        source_submission_id=submission_id,
+                        source_remarks=details.get("remarks"),
+                        confidence=1.0,
+                    )
+                    if transfer:
+                        tracking_result["transfers_detected"] += 1
+                        logger.info(
+                            "Created inbound transfer from Excel columns",
+                            plant_id=str(plant_id),
+                            from_location=transfer_from_col,
+                        )
+
+                    # Check if transfer_to is a DIFFERENT location than current
+                    to_location_resolved = transfer_service.resolve_location(transfer_to_col)
+                    if to_location_resolved and to_location_resolved["id"] != location_id:
+                        # transfer_to is a different location - create outbound (pass-through)
+                        transfer = transfer_service.create_outbound_transfer(
+                            plant_id=plant_id,
+                            from_location_id=location_id,
+                            to_location_raw=transfer_to_col,
+                            source_submission_id=submission_id,
+                            source_remarks=details.get("remarks"),
+                            confidence=1.0,
+                        )
+                        if transfer:
+                            tracking_result["transfers_detected"] += 1
+                            logger.info(
+                                "Created outbound transfer (pass-through) from Excel columns",
+                                plant_id=str(plant_id),
+                                to_location=transfer_to_col,
+                            )
+                    # If transfer_to matches current location, no outbound needed - just arrived here
+
+            # Process AI-detected transfers (only if no Excel column transfers were created)
+            elif parsed and parsed.transfer_detected:
+                transfer = transfer_service.process_transfer_from_parsed(
+                    plant_id=plant_id,
+                    current_location_id=location_id,
+                    parsed=parsed,
+                    submission_id=submission_id,
+                    remarks=details.get("remarks"),
+                )
+                if transfer:
+                    tracking_result["transfers_detected"] += 1
+
+            # Track plants that should have location updated (only for latest week)
+            if is_latest and parsed and parsed.transfer_direction != "outbound":
+                # Don't update location for outbound transfers - plant is leaving
+                location_updates.append(plant_id)
+
+            # Check for movement (location change from previous week)
             prev_location = prev_locations.get(plant_id)
             if prev_location and prev_location != location_id:
                 # Plant has moved!
@@ -788,14 +1061,7 @@ async def _record_plant_locations(
                 tracking_result["movements_detected"] += 1
             elif not prev_location and plant_id not in prev_locations:
                 # Check if this is first time seeing this plant at ANY location
-                first_record = (
-                    client.table("plant_weekly_records")
-                    .select("id")
-                    .eq("plant_id", plant_id)
-                    .limit(1)
-                    .execute()
-                )
-                if not first_record.data:
+                if plant_id not in plants_with_history:
                     # New plant being tracked
                     events_to_create.append({
                         "plant_id": plant_id,
@@ -817,6 +1083,12 @@ async def _record_plant_locations(
             ).execute()
             tracking_result["records_created"] = len(weekly_records)
 
+        # Update current_location only for plants where this is the latest week
+        if location_updates:
+            client.table("plants_master").update({
+                "current_location_id": location_id,
+            }).in_("id", location_updates).execute()
+
         # Create events
         if events_to_create:
             client.table("plant_events").insert(events_to_create).execute()
@@ -837,12 +1109,105 @@ async def _record_plant_locations(
                     "transfer_reason": "Weekly report update",
                 }).execute()
 
+        # Detect missing plants - plants at this location last week but not in current report
+        # Only mark as missing if this is the latest week we have data for
+        try:
+            # Get all plants that were at THIS location in previous week
+            prev_at_location = (
+                client.table("plant_weekly_records")
+                .select("plant_id")
+                .eq("location_id", location_id)
+                .eq("year", prev_year)
+                .eq("week_number", prev_week)
+                .execute()
+            )
+            prev_plant_ids = {r["plant_id"] for r in prev_at_location.data}
+
+            # Current report plant IDs
+            current_plant_ids = set(plant_ids)
+
+            # Missing = was here last week, not in current report
+            missing_plant_ids = prev_plant_ids - current_plant_ids
+
+            if missing_plant_ids:
+                # Check if any of these missing plants have pending outbound transfers
+                pending_transfers = (
+                    client.table("plant_transfers")
+                    .select("plant_id")
+                    .in_("plant_id", list(missing_plant_ids))
+                    .eq("status", "pending")
+                    .eq("direction", "outbound")
+                    .execute()
+                )
+                plants_with_pending_transfer = {r["plant_id"] for r in pending_transfers.data}
+
+                # For plants truly missing (no pending transfer), mark as unknown location
+                truly_missing = missing_plant_ids - plants_with_pending_transfer
+
+                for missing_id in truly_missing:
+                    # Check if this week is the latest for this plant
+                    latest_check = (
+                        client.table("plant_weekly_records")
+                        .select("year, week_number")
+                        .eq("plant_id", missing_id)
+                        .order("year", desc=True)
+                        .order("week_number", desc=True)
+                        .limit(1)
+                        .execute()
+                    )
+
+                    if latest_check.data:
+                        latest = latest_check.data[0]
+                        # Only mark as missing if prev week was the latest record
+                        if (latest["year"], latest["week_number"]) == (prev_year, prev_week):
+                            # Set current_location to NULL (unknown)
+                            client.table("plants_master").update({
+                                "current_location_id": None,
+                                "status": "unverified",
+                            }).eq("id", missing_id).execute()
+
+                            # Close location history
+                            client.table("plant_location_history").update({
+                                "end_date": week_ending_date,
+                            }).eq("plant_id", missing_id).eq("location_id", location_id).is_("end_date", "null").execute()
+
+                            # Get fleet number for logging
+                            plant_info = client.table("plants_master").select("fleet_number").eq("id", missing_id).execute()
+                            fn = plant_info.data[0]["fleet_number"] if plant_info.data else "unknown"
+
+                            # Create missing event
+                            client.table("plant_events").insert({
+                                "plant_id": missing_id,
+                                "event_type": "missing",
+                                "event_date": week_ending_date,
+                                "year": year,
+                                "week_number": week_number,
+                                "from_location_id": location_id,
+                                "details": {"fleet_number": fn},
+                                "remarks": f"Plant {fn} not found in Week {week_number} report - location now unknown",
+                            }).execute()
+
+                            tracking_result["plants_missing"] = tracking_result.get("plants_missing", 0) + 1
+
+                            logger.info(
+                                "Plant marked as missing",
+                                fleet_number=fn,
+                                last_location=location_id,
+                                last_week=prev_week,
+                            )
+
+        except Exception as e:
+            logger.warning("Failed to detect missing plants", error=str(e))
+
         logger.info(
             "Plant tracking recorded",
             submission_id=submission_id,
             records=tracking_result["records_created"],
             movements=tracking_result["movements_detected"],
             new_plants=tracking_result["new_plants"],
+            transfers_detected=tracking_result["transfers_detected"],
+            transfers_confirmed=tracking_result["transfers_confirmed"],
+            plants_missing=tracking_result.get("plants_missing", 0),
         )
 
     except Exception as e:

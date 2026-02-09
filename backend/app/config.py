@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     metrics_enabled: bool = True
     metrics_flush_interval_seconds: int = 60
 
+    # AI - Google Gemini
+    gemini_api_key: str | None = Field(default=None, description="Google Gemini API key for remarks parsing")
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def parse_cors_origins(cls, v: str | list[str]) -> list[str]:
