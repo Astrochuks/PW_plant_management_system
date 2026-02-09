@@ -4,9 +4,10 @@ from datetime import date
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Query, Request, UploadFile
 
 from app.api.v1.auth import get_client_ip
+from app.config import get_settings
 from app.core.database import get_supabase_admin_client
 from app.core.exceptions import NotFoundError, ValidationError
 from app.core.security import (
@@ -24,6 +25,10 @@ from app.services.fleet_parser import (
 
 router = APIRouter()
 logger = get_logger(__name__)
+
+
+# Valid file extensions for PO document attachments
+ALLOWED_PO_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".xlsx", ".xls"}
 
 
 @router.get("")
@@ -149,6 +154,274 @@ async def get_purchase_order_stats(
             "shared_costs": shared_costs,
             "direct_count": sum(1 for po in data if po.get("cost_type") == "direct"),
             "shared_count": sum(1 for po in data if po.get("cost_type") == "shared"),
+        },
+    }
+
+
+@router.get("/plant/{plant_id}/costs")
+async def get_plant_costs(
+    plant_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+    year: int | None = None,
+    period: str | None = Query(None, pattern="^(week|month|quarter|year|all)$"),
+    period_value: int | None = Query(None, description="Week/month/quarter number"),
+) -> dict[str, Any]:
+    """Get maintenance costs for a specific plant.
+
+    Returns both:
+    - Direct costs: POs that are exclusively for this plant
+    - Shared costs: POs that include this plant along with others (shown as contribution)
+
+    Args:
+        plant_id: The plant UUID.
+        current_user: The authenticated user.
+        year: Filter by year.
+        period: Time period type (week, month, quarter, year, all).
+        period_value: Specific period number (e.g., week 5, month 3).
+
+    Returns:
+        Cost breakdown for the plant.
+    """
+    client = get_supabase_admin_client()
+
+    # Verify plant exists
+    plant_result = (
+        client.table("plants_master")
+        .select("id, fleet_number, fleet_type, description")
+        .eq("id", str(plant_id))
+        .single()
+        .execute()
+    )
+
+    if not plant_result.data:
+        raise NotFoundError("Plant", str(plant_id))
+
+    plant = plant_result.data
+
+    # Get all POs associated with this plant
+    fleet_query = (
+        client.table("purchase_order_fleets")
+        .select("purchase_order_id")
+        .eq("plant_id", str(plant_id))
+    )
+    fleet_result = fleet_query.execute()
+    po_ids = [f["purchase_order_id"] for f in fleet_result.data] if fleet_result.data else []
+
+    if not po_ids:
+        return {
+            "success": True,
+            "data": {
+                "plant": plant,
+                "costs": {
+                    "direct_total": 0,
+                    "shared_total": 0,
+                    "shared_contribution": 0,
+                    "grand_total": 0,
+                },
+                "purchase_orders": [],
+            },
+            "meta": {
+                "year": year,
+                "period": period,
+                "period_value": period_value,
+                "po_count": 0,
+            },
+        }
+
+    # Get PO details with cost classification
+    po_query = (
+        client.table("v_purchase_order_costs")
+        .select("*")
+        .in_("id", po_ids)
+    )
+
+    if year:
+        po_query = po_query.eq("year", year)
+
+    if period == "week" and period_value:
+        po_query = po_query.eq("week_number", period_value)
+    elif period == "month" and period_value:
+        po_query = po_query.eq("month", period_value)
+    elif period == "quarter" and period_value:
+        po_query = po_query.eq("quarter", period_value)
+
+    po_query = po_query.order("po_date", desc=True)
+    po_result = po_query.execute()
+    pos = po_result.data or []
+
+    # Calculate costs
+    direct_total = 0.0
+    shared_total = 0.0
+    shared_contribution = 0.0
+
+    enriched_pos = []
+    for po in pos:
+        amount = float(po.get("total_amount") or 0)
+        plant_count = int(po.get("plant_count") or 1)
+        cost_type = po.get("cost_type", "shared")
+
+        if cost_type == "direct":
+            direct_total += amount
+            contribution = amount
+        else:
+            shared_total += amount
+            # Calculate this plant's share (equal split)
+            contribution = amount / plant_count if plant_count > 0 else 0
+            shared_contribution += contribution
+
+        enriched_pos.append({
+            **po,
+            "contribution": round(contribution, 2),
+            "plant_share": f"1/{plant_count}" if plant_count > 1 else "100%",
+        })
+
+    grand_total = direct_total + shared_contribution
+
+    return {
+        "success": True,
+        "data": {
+            "plant": plant,
+            "costs": {
+                "direct_total": round(direct_total, 2),
+                "shared_total": round(shared_total, 2),
+                "shared_contribution": round(shared_contribution, 2),
+                "grand_total": round(grand_total, 2),
+            },
+            "purchase_orders": enriched_pos,
+        },
+        "meta": {
+            "year": year,
+            "period": period,
+            "period_value": period_value,
+            "po_count": len(pos),
+            "direct_count": sum(1 for po in pos if po.get("cost_type") == "direct"),
+            "shared_count": sum(1 for po in pos if po.get("cost_type") == "shared"),
+        },
+    }
+
+
+@router.get("/location/{location_id}/costs")
+async def get_location_costs(
+    location_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+    year: int | None = None,
+    period: str | None = Query(None, pattern="^(week|month|quarter|year|all)$"),
+    period_value: int | None = Query(None, description="Week/month/quarter number"),
+    include_workshop: bool = Query(True, description="Include workshop/general costs"),
+) -> dict[str, Any]:
+    """Get maintenance costs for a specific location/site.
+
+    Returns:
+    - Direct costs: POs for single plants at this location
+    - Shared costs: Multi-fleet POs
+    - Workshop costs: General/workshop costs for the site
+
+    Args:
+        location_id: The location UUID.
+        current_user: The authenticated user.
+        year: Filter by year.
+        period: Time period type.
+        period_value: Specific period number.
+        include_workshop: Include workshop/general costs.
+
+    Returns:
+        Cost breakdown for the location.
+    """
+    client = get_supabase_admin_client()
+
+    # Verify location exists
+    location_result = (
+        client.table("locations")
+        .select("id, name")
+        .eq("id", str(location_id))
+        .single()
+        .execute()
+    )
+
+    if not location_result.data:
+        raise NotFoundError("Location", str(location_id))
+
+    location = location_result.data
+
+    # Get POs for this location
+    po_query = (
+        client.table("v_purchase_order_costs")
+        .select("*")
+        .eq("location_id", str(location_id))
+    )
+
+    if year:
+        po_query = po_query.eq("year", year)
+
+    if period == "week" and period_value:
+        po_query = po_query.eq("week_number", period_value)
+    elif period == "month" and period_value:
+        po_query = po_query.eq("month", period_value)
+    elif period == "quarter" and period_value:
+        po_query = po_query.eq("quarter", period_value)
+
+    po_query = po_query.order("po_date", desc=True)
+    po_result = po_query.execute()
+    pos = po_result.data or []
+
+    # Calculate costs
+    direct_total = 0.0
+    shared_total = 0.0
+    workshop_total = 0.0
+
+    for po in pos:
+        amount = float(po.get("total_amount") or 0)
+        cost_type = po.get("cost_type", "shared")
+        has_workshop = po.get("has_workshop", False)
+
+        if has_workshop and include_workshop:
+            workshop_total += amount
+        elif cost_type == "direct":
+            direct_total += amount
+        else:
+            shared_total += amount
+
+    grand_total = direct_total + shared_total + (workshop_total if include_workshop else 0)
+
+    # Group by month for trend
+    monthly_trend = {}
+    for po in pos:
+        month = po.get("month")
+        yr = po.get("year")
+        if month and yr:
+            key = f"{yr}-{month:02d}"
+            if key not in monthly_trend:
+                monthly_trend[key] = {"direct": 0, "shared": 0, "workshop": 0}
+            amount = float(po.get("total_amount") or 0)
+            cost_type = po.get("cost_type", "shared")
+            has_workshop = po.get("has_workshop", False)
+            if has_workshop:
+                monthly_trend[key]["workshop"] += amount
+            elif cost_type == "direct":
+                monthly_trend[key]["direct"] += amount
+            else:
+                monthly_trend[key]["shared"] += amount
+
+    return {
+        "success": True,
+        "data": {
+            "location": location,
+            "costs": {
+                "direct_total": round(direct_total, 2),
+                "shared_total": round(shared_total, 2),
+                "workshop_total": round(workshop_total, 2),
+                "grand_total": round(grand_total, 2),
+            },
+            "monthly_trend": [
+                {"month": k, **v} for k, v in sorted(monthly_trend.items())
+            ],
+        },
+        "meta": {
+            "year": year,
+            "period": period,
+            "period_value": period_value,
+            "po_count": len(pos),
+            "include_workshop": include_workshop,
         },
     }
 
@@ -284,6 +557,192 @@ async def get_purchase_order(
     }
 
 
+@router.post("/manual", status_code=201)
+async def create_manual_purchase_order(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+    po_number: str = Form(...),
+    po_date: date | None = Form(None),
+    vendor: str | None = Form(None),
+    vendor_address: str | None = Form(None),
+    req_no: str | None = Form(None),
+    location_id: UUID | None = Form(None),
+    subtotal: float | None = Form(None),
+    discount_percentage: float = Form(default=0, ge=0, le=100),
+    vat_percentage: float = Form(default=0, ge=0, le=100),
+    other_costs: float = Form(default=0, ge=0),
+    total_amount: float | None = Form(None),
+    notes: str | None = Form(None),
+    fleet_numbers: str | None = Form(None, description="Comma-separated fleet numbers"),
+    document: UploadFile | None = File(None, description="Optional PO document (PDF, image)"),
+) -> dict[str, Any]:
+    """Create a purchase order from manual entry with optional document attachment.
+
+    This is the main endpoint for manually entering PO data from physical documents
+    (PDF scans, photos of hardcopy, etc.). The document can be attached in the same request.
+
+    Supports multi-fleet POs and workshop entries.
+
+    Args:
+        request: The HTTP request.
+        background_tasks: Background task runner.
+        current_user: The authenticated admin user.
+        po_number: Purchase order number.
+        po_date: PO date.
+        vendor: Vendor name.
+        vendor_address: Vendor address.
+        req_no: Requisition number (auto-resolves location if prefix matches).
+        location_id: Location ID (optional if req_no has known prefix).
+        subtotal: Subtotal before tax/discount.
+        discount_percentage: Discount percentage (0-100).
+        vat_percentage: VAT percentage (0-100).
+        other_costs: Additional costs (shipping, handling, etc.).
+        total_amount: Final total amount.
+        notes: Additional notes.
+        fleet_numbers: Comma-separated fleet numbers (e.g., "T468, 463, WORKSHOP").
+        document: Optional document file (PDF, PNG, JPG).
+
+    Returns:
+        Created purchase order with ID and document info.
+    """
+    client = get_supabase_admin_client()
+
+    # Check for duplicate PO number
+    existing = (
+        client.table("purchase_orders")
+        .select("id")
+        .eq("po_number", po_number.upper())
+        .execute()
+    )
+
+    if existing.data:
+        raise ValidationError(
+            "Purchase order with this number already exists",
+            details=[{"field": "po_number", "message": "Already exists", "code": "DUPLICATE"}],
+        )
+
+    # Try to resolve location from req_no if not provided
+    resolved_location_id = str(location_id) if location_id else None
+    if not resolved_location_id and req_no:
+        resolved_location_id = resolve_location_from_req_no(req_no)
+
+    # Handle document upload if provided
+    storage_path = None
+    file_name = None
+    if document and document.filename:
+        ext = "." + document.filename.split(".")[-1].lower() if "." in document.filename else ""
+        if ext not in ALLOWED_PO_EXTENSIONS:
+            raise ValidationError(
+                f"Invalid file type. Allowed: {', '.join(ALLOWED_PO_EXTENSIONS)}",
+                details=[{"field": "document", "message": "Invalid file type", "code": "INVALID_TYPE"}],
+            )
+
+        file_content = await document.read()
+        location_folder = resolved_location_id or "general"
+        date_folder = str(po_date) if po_date else "undated"
+        storage_path = f"purchase-orders/{location_folder}/{date_folder}/{po_number.upper()}_{document.filename}"
+
+        try:
+            client.storage.from_("reports").upload(
+                storage_path,
+                file_content,
+                {"content-type": document.content_type or "application/octet-stream"},
+            )
+            file_name = document.filename
+        except Exception as e:
+            if "already exists" in str(e).lower():
+                client.storage.from_("reports").update(storage_path, file_content)
+                file_name = document.filename
+            else:
+                logger.warning("Failed to upload document, continuing without it", error=str(e))
+                storage_path = None
+
+    # Create PO
+    po_data = {
+        "po_number": po_number.upper(),
+        "po_date": str(po_date) if po_date else None,
+        "vendor": vendor,
+        "vendor_address": vendor_address,
+        "req_no": req_no.upper() if req_no else None,
+        "location_id": resolved_location_id,
+        "subtotal": subtotal,
+        "discount_percentage": discount_percentage,
+        "vat_percentage": vat_percentage,
+        "other_costs": other_costs,
+        "total_amount": total_amount,
+        "notes": notes,
+        "source_file_path": storage_path,
+        "source_file_name": file_name,
+        "created_by": current_user.id,
+    }
+
+    result = client.table("purchase_orders").insert(po_data).execute()
+    created = result.data[0]
+    po_id = created["id"]
+
+    # Parse and create fleet associations
+    fleets_created = []
+    if fleet_numbers:
+        parsed_fleets = parse_fleet_input(fleet_numbers)
+        for pf in parsed_fleets:
+            fleet_data = {
+                "purchase_order_id": po_id,
+                "fleet_number_raw": pf["fleet_number_raw"],
+                "plant_id": pf["plant_id"],
+                "fleet_type": pf["fleet_type"],
+                "is_workshop": pf["is_workshop"],
+                "is_resolved": pf["is_resolved"],
+            }
+            fleet_result = (
+                client.table("purchase_order_fleets")
+                .insert(fleet_data)
+                .execute()
+            )
+            fleets_created.append(fleet_result.data[0])
+
+    # Determine cost type
+    cost_type = get_cost_classification(fleets_created) if fleets_created else "shared"
+
+    logger.info(
+        "Manual PO created",
+        po_id=po_id,
+        po_number=po_number,
+        fleets_count=len(fleets_created),
+        has_document=bool(storage_path),
+        cost_type=cost_type,
+        user_id=current_user.id,
+    )
+
+    background_tasks.add_task(
+        audit_service.log,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        action="create",
+        table_name="purchase_orders",
+        record_id=po_id,
+        new_values={**po_data, "fleet_numbers": fleet_numbers},
+        ip_address=get_client_ip(request),
+        description=f"Manually created PO {po_number.upper()} ({cost_type})",
+    )
+
+    return {
+        "success": True,
+        "data": {
+            **created,
+            "fleets": fleets_created,
+            "cost_type": cost_type,
+        },
+        "meta": {
+            "fleets_resolved": sum(1 for f in fleets_created if f.get("is_resolved")),
+            "fleets_unresolved": sum(1 for f in fleets_created if not f.get("is_resolved")),
+            "has_workshop": any(f.get("is_workshop") for f in fleets_created),
+            "document_attached": bool(storage_path),
+            "location_auto_resolved": bool(not location_id and resolved_location_id),
+        },
+    }
+
+
 @router.post("", status_code=201)
 async def create_purchase_order(
     request: Request,
@@ -415,6 +874,187 @@ async def create_purchase_order(
             "fleets": fleets_created,
         },
     }
+
+
+@router.post("/{po_id}/attach-document", status_code=200)
+async def attach_document_to_po(
+    po_id: UUID,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+    file: UploadFile = File(...),
+) -> dict[str, Any]:
+    """Attach a document (PDF, image) to an existing purchase order.
+
+    Use this for manually entered POs to attach the original PO document
+    (scanned PDF, photo of hardcopy, etc.).
+
+    Args:
+        po_id: The purchase order UUID.
+        request: The HTTP request.
+        background_tasks: Background task runner.
+        current_user: The authenticated admin user.
+        file: The document file (PDF, PNG, JPG, JPEG).
+
+    Returns:
+        Updated purchase order with file path.
+    """
+    settings = get_settings()
+    client = get_supabase_admin_client()
+
+    # Validate file extension
+    if not file.filename:
+        raise ValidationError("File name is required")
+
+    ext = "." + file.filename.split(".")[-1].lower() if "." in file.filename else ""
+    if ext not in ALLOWED_PO_EXTENSIONS:
+        raise ValidationError(
+            f"Invalid file type. Allowed: {', '.join(ALLOWED_PO_EXTENSIONS)}",
+            details=[{"field": "file", "message": "Invalid file type", "code": "INVALID_TYPE"}],
+        )
+
+    # Verify PO exists
+    existing = (
+        client.table("purchase_orders")
+        .select("id, po_number, po_date, location_id")
+        .eq("id", str(po_id))
+        .single()
+        .execute()
+    )
+
+    if not existing.data:
+        raise NotFoundError("Purchase order", str(po_id))
+
+    po = existing.data
+
+    # Read file content
+    file_content = await file.read()
+    file_size = len(file_content)
+
+    # Store file in Supabase Storage
+    location_folder = po.get("location_id") or "general"
+    date_folder = str(po.get("po_date")) if po.get("po_date") else "undated"
+    storage_path = f"purchase-orders/{location_folder}/{date_folder}/{po['po_number']}_{file.filename}"
+
+    try:
+        client.storage.from_("reports").upload(
+            storage_path,
+            file_content,
+            {"content-type": file.content_type or "application/octet-stream"},
+        )
+    except Exception as e:
+        if "already exists" in str(e).lower():
+            client.storage.from_("reports").update(storage_path, file_content)
+        else:
+            logger.error("Failed to upload PO document", error=str(e))
+            raise ValidationError(f"Failed to upload file: {str(e)}")
+
+    # Update PO with file info
+    result = (
+        client.table("purchase_orders")
+        .update({
+            "source_file_path": storage_path,
+            "source_file_name": file.filename,
+        })
+        .eq("id", str(po_id))
+        .execute()
+    )
+
+    logger.info(
+        "Document attached to PO",
+        po_id=str(po_id),
+        po_number=po["po_number"],
+        file_name=file.filename,
+        file_size=file_size,
+        user_id=current_user.id,
+    )
+
+    background_tasks.add_task(
+        audit_service.log,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        action="update",
+        table_name="purchase_orders",
+        record_id=str(po_id),
+        new_values={"source_file_path": storage_path, "source_file_name": file.filename},
+        ip_address=get_client_ip(request),
+        description=f"Attached document to PO {po['po_number']}: {file.filename}",
+    )
+
+    return {
+        "success": True,
+        "message": f"Document '{file.filename}' attached successfully",
+        "data": {
+            "po_id": str(po_id),
+            "file_name": file.filename,
+            "file_size": file_size,
+            "storage_path": storage_path,
+        },
+    }
+
+
+@router.get("/{po_id}/document")
+async def get_po_document(
+    po_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+) -> dict[str, Any]:
+    """Get a signed URL to download/view the PO document.
+
+    Args:
+        po_id: The purchase order UUID.
+        current_user: The authenticated user.
+
+    Returns:
+        Signed URL for document access.
+    """
+    client = get_supabase_admin_client()
+
+    # Get PO with file path
+    po = (
+        client.table("purchase_orders")
+        .select("id, po_number, source_file_path, source_file_name")
+        .eq("id", str(po_id))
+        .single()
+        .execute()
+    )
+
+    if not po.data:
+        raise NotFoundError("Purchase order", str(po_id))
+
+    if not po.data.get("source_file_path"):
+        raise NotFoundError("Document for purchase order", str(po_id))
+
+    # Create signed URL
+    try:
+        signed_url = client.storage.from_("reports").create_signed_url(
+            po.data["source_file_path"],
+            expires_in=3600,  # 1 hour
+        )
+
+        file_name = po.data.get("source_file_name", "")
+        ext = file_name.split(".")[-1].lower() if "." in file_name else ""
+        file_type_map = {
+            "pdf": "pdf",
+            "png": "image",
+            "jpg": "image",
+            "jpeg": "image",
+            "xlsx": "excel",
+            "xls": "excel",
+        }
+
+        return {
+            "success": True,
+            "data": {
+                "url": signed_url.get("signedURL"),
+                "file_name": file_name,
+                "file_type": file_type_map.get(ext, "unknown"),
+                "can_preview": ext in ("pdf", "png", "jpg", "jpeg"),
+                "expires_in_seconds": 3600,
+            },
+        }
+    except Exception as e:
+        logger.error("Failed to generate signed URL", error=str(e))
+        raise ValidationError(f"Could not generate document URL: {str(e)}")
 
 
 @router.patch("/{po_id}")
