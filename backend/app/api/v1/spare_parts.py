@@ -161,6 +161,158 @@ async def list_spare_parts(
     }
 
 
+@router.get("/autocomplete/suppliers")
+async def autocomplete_suppliers(
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+    q: str = Query(..., min_length=1, description="Search query"),
+    limit: int = Query(10, ge=1, le=50),
+) -> dict[str, Any]:
+    """Get supplier suggestions for autocomplete.
+
+    Returns distinct supplier names matching the search query.
+
+    Args:
+        q: Search query (minimum 1 character).
+        limit: Maximum suggestions to return.
+
+    Returns:
+        List of matching supplier names.
+    """
+    client = get_supabase_admin_client()
+
+    result = client.rpc(
+        "search_distinct_values",
+        {
+            "p_table": "spare_parts",
+            "p_column": "supplier",
+            "p_search": q,
+            "p_limit": limit,
+        },
+    ).execute()
+
+    # Fallback if RPC doesn't exist - use direct query
+    if not result.data and result.data != []:
+        result = (
+            client.table("spare_parts")
+            .select("supplier")
+            .ilike("supplier", f"%{q}%")
+            .not_.is_("supplier", "null")
+            .limit(limit * 3)  # Get more to account for duplicates
+            .execute()
+        )
+        # Get distinct values
+        seen = set()
+        suggestions = []
+        for row in result.data or []:
+            val = row.get("supplier")
+            if val and val not in seen:
+                seen.add(val)
+                suggestions.append(val)
+                if len(suggestions) >= limit:
+                    break
+        return {"success": True, "data": suggestions}
+
+    return {"success": True, "data": result.data or []}
+
+
+@router.get("/autocomplete/descriptions")
+async def autocomplete_descriptions(
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+    q: str = Query(..., min_length=2, description="Search query"),
+    limit: int = Query(10, ge=1, le=50),
+) -> dict[str, Any]:
+    """Get part description suggestions for autocomplete.
+
+    Returns distinct part descriptions matching the search query.
+
+    Args:
+        q: Search query (minimum 2 characters).
+        limit: Maximum suggestions to return.
+
+    Returns:
+        List of matching part descriptions.
+    """
+    client = get_supabase_admin_client()
+
+    result = client.rpc(
+        "search_distinct_values",
+        {
+            "p_table": "spare_parts",
+            "p_column": "part_description",
+            "p_search": q,
+            "p_limit": limit,
+        },
+    ).execute()
+
+    # Fallback if RPC doesn't exist - use direct query
+    if not result.data and result.data != []:
+        result = (
+            client.table("spare_parts")
+            .select("part_description")
+            .ilike("part_description", f"%{q}%")
+            .not_.is_("part_description", "null")
+            .limit(limit * 3)
+            .execute()
+        )
+        seen = set()
+        suggestions = []
+        for row in result.data or []:
+            val = row.get("part_description")
+            if val and val not in seen:
+                seen.add(val)
+                suggestions.append(val)
+                if len(suggestions) >= limit:
+                    break
+        return {"success": True, "data": suggestions}
+
+    return {"success": True, "data": result.data or []}
+
+
+@router.get("/autocomplete/po-numbers")
+async def autocomplete_po_numbers(
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+    q: str = Query(..., min_length=1, description="Search query"),
+    limit: int = Query(10, ge=1, le=50),
+) -> dict[str, Any]:
+    """Get PO number suggestions for autocomplete.
+
+    Returns distinct PO numbers matching the search query.
+    Useful to check if a PO has already been entered.
+
+    Args:
+        q: Search query (minimum 1 character).
+        limit: Maximum suggestions to return.
+
+    Returns:
+        List of matching PO numbers with item count.
+    """
+    client = get_supabase_admin_client()
+
+    result = (
+        client.table("spare_parts")
+        .select("purchase_order_number")
+        .ilike("purchase_order_number", f"%{q.upper()}%")
+        .not_.is_("purchase_order_number", "null")
+        .limit(limit * 3)
+        .execute()
+    )
+
+    # Get distinct with counts
+    po_counts: dict[str, int] = {}
+    for row in result.data or []:
+        po = row.get("purchase_order_number")
+        if po:
+            po_counts[po] = po_counts.get(po, 0) + 1
+
+    # Sort by frequency and limit
+    suggestions = [
+        {"po_number": po, "items_count": count}
+        for po, count in sorted(po_counts.items(), key=lambda x: -x[1])[:limit]
+    ]
+
+    return {"success": True, "data": suggestions}
+
+
 @router.get("/stats")
 async def get_spare_parts_stats(
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
