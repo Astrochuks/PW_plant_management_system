@@ -1880,3 +1880,614 @@ async def get_plant_all_costs(
             "include_shared": include_shared,
         },
     }
+
+
+# ---------- Link Existing Spare Parts ----------
+
+
+@router.get("/{po_id}/find-matching-spare-parts")
+async def find_matching_spare_parts(
+    po_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+) -> dict[str, Any]:
+    """Find spare_parts records that match this PO by PO number.
+
+    Use this to discover existing spare_parts that were entered from the same
+    physical PO document (via Excel upload) but aren't linked to the PO record yet.
+
+    Args:
+        po_id: The purchase order UUID.
+
+    Returns:
+        List of matching spare_parts that could be linked.
+    """
+    client = get_supabase_admin_client()
+
+    # Get PO number
+    po = (
+        client.table("purchase_orders")
+        .select("id, po_number")
+        .eq("id", str(po_id))
+        .single()
+        .execute()
+    )
+
+    if not po.data:
+        raise NotFoundError("Purchase order", str(po_id))
+
+    po_number = po.data["po_number"]
+
+    # Find spare_parts with matching PO number that aren't already linked
+    matching = (
+        client.table("spare_parts")
+        .select("*, plants_master(fleet_number, description)")
+        .eq("purchase_order_number", po_number)
+        .is_("purchase_order_id", "null")  # Not yet linked
+        .execute()
+    )
+
+    # Also try case-insensitive match
+    if not matching.data:
+        matching = (
+            client.table("spare_parts")
+            .select("*, plants_master(fleet_number, description)")
+            .ilike("purchase_order_number", po_number)
+            .is_("purchase_order_id", "null")
+            .execute()
+        )
+
+    parts = []
+    for part in matching.data or []:
+        plant_info = part.pop("plants_master", {}) or {}
+        parts.append({
+            **part,
+            "fleet_number": plant_info.get("fleet_number"),
+            "plant_description": plant_info.get("description"),
+        })
+
+    return {
+        "success": True,
+        "data": parts,
+        "meta": {
+            "po_number": po_number,
+            "matching_count": len(parts),
+            "total_cost": sum(float(p.get("total_cost") or 0) for p in parts),
+        },
+    }
+
+
+@router.post("/{po_id}/link-spare-parts")
+async def link_spare_parts_to_po(
+    po_id: UUID,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+    spare_part_ids: str = Query(..., description="Comma-separated spare_part UUIDs to link"),
+) -> dict[str, Any]:
+    """Link existing spare_parts records to this purchase order.
+
+    Use this after find-matching-spare-parts to connect legacy spare_parts
+    (entered via Excel) to the PO record.
+
+    Args:
+        po_id: The purchase order UUID.
+        spare_part_ids: Comma-separated UUIDs of spare_parts to link.
+
+    Returns:
+        Number of records linked.
+    """
+    client = get_supabase_admin_client()
+
+    # Verify PO exists
+    po = (
+        client.table("purchase_orders")
+        .select("id, po_number")
+        .eq("id", str(po_id))
+        .single()
+        .execute()
+    )
+
+    if not po.data:
+        raise NotFoundError("Purchase order", str(po_id))
+
+    # Parse IDs
+    ids = [sid.strip() for sid in spare_part_ids.split(",") if sid.strip()]
+
+    if not ids:
+        raise ValidationError("No spare_part_ids provided")
+
+    # Update spare_parts to link to PO
+    linked_count = 0
+    for spare_id in ids:
+        try:
+            result = (
+                client.table("spare_parts")
+                .update({"purchase_order_id": str(po_id)})
+                .eq("id", spare_id)
+                .is_("purchase_order_id", "null")  # Only if not already linked
+                .execute()
+            )
+            if result.data:
+                linked_count += 1
+        except Exception as e:
+            logger.warning("Failed to link spare_part", spare_part_id=spare_id, error=str(e))
+
+    logger.info(
+        "Linked spare_parts to PO",
+        po_id=str(po_id),
+        po_number=po.data["po_number"],
+        linked_count=linked_count,
+        attempted=len(ids),
+        user_id=current_user.id,
+    )
+
+    background_tasks.add_task(
+        audit_service.log,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        action="update",
+        table_name="spare_parts",
+        record_id=str(po_id),
+        new_values={"linked_spare_parts": ids},
+        ip_address=get_client_ip(request),
+        description=f"Linked {linked_count} spare_parts to PO {po.data['po_number']}",
+    )
+
+    return {
+        "success": True,
+        "message": f"Linked {linked_count} of {len(ids)} spare_parts to PO",
+        "data": {
+            "linked_count": linked_count,
+            "attempted": len(ids),
+        },
+    }
+
+
+@router.post("/{po_id}/link-all-matching-spare-parts")
+async def link_all_matching_spare_parts(
+    po_id: UUID,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+) -> dict[str, Any]:
+    """Automatically link all spare_parts that match this PO's number.
+
+    Convenience endpoint that finds and links all matching spare_parts in one call.
+
+    Args:
+        po_id: The purchase order UUID.
+
+    Returns:
+        Number of records linked.
+    """
+    client = get_supabase_admin_client()
+
+    # Get PO
+    po = (
+        client.table("purchase_orders")
+        .select("id, po_number")
+        .eq("id", str(po_id))
+        .single()
+        .execute()
+    )
+
+    if not po.data:
+        raise NotFoundError("Purchase order", str(po_id))
+
+    po_number = po.data["po_number"]
+
+    # Update all matching spare_parts
+    result = (
+        client.table("spare_parts")
+        .update({"purchase_order_id": str(po_id)})
+        .eq("purchase_order_number", po_number)
+        .is_("purchase_order_id", "null")
+        .execute()
+    )
+
+    linked_count = len(result.data) if result.data else 0
+
+    # Also try case-insensitive
+    if linked_count == 0:
+        result = (
+            client.table("spare_parts")
+            .update({"purchase_order_id": str(po_id)})
+            .ilike("purchase_order_number", po_number)
+            .is_("purchase_order_id", "null")
+            .execute()
+        )
+        linked_count = len(result.data) if result.data else 0
+
+    logger.info(
+        "Auto-linked spare_parts to PO",
+        po_id=str(po_id),
+        po_number=po_number,
+        linked_count=linked_count,
+        user_id=current_user.id,
+    )
+
+    if linked_count > 0:
+        background_tasks.add_task(
+            audit_service.log,
+            user_id=current_user.id,
+            user_email=current_user.email,
+            action="update",
+            table_name="spare_parts",
+            record_id=str(po_id),
+            new_values={"auto_linked_count": linked_count},
+            ip_address=get_client_ip(request),
+            description=f"Auto-linked {linked_count} spare_parts to PO {po_number}",
+        )
+
+    return {
+        "success": True,
+        "message": f"Linked {linked_count} spare_parts to PO {po_number}",
+        "data": {
+            "linked_count": linked_count,
+            "po_number": po_number,
+        },
+    }
+
+
+# ---------- Unresolved Fleet Numbers ----------
+
+
+@router.get("/unresolved-fleets")
+async def list_unresolved_fleets(
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=200),
+) -> dict[str, Any]:
+    """List all unresolved fleet entries across POs.
+
+    These are fleet numbers that couldn't be matched to plants_master.
+    Admin can review and either:
+    - Create a new plant
+    - Link to an existing plant
+    - Mark as category/workshop
+
+    Returns:
+        List of unresolved fleet entries with their PO info.
+    """
+    client = get_supabase_admin_client()
+
+    query = (
+        client.table("purchase_order_fleets")
+        .select("*, purchase_orders(po_number, po_date, vendor)", count="exact")
+        .is_("plant_id", "null")
+        .eq("is_resolved", False)
+        .eq("is_workshop", False)
+        .eq("is_category", False)
+        .order("created_at", desc=True)
+    )
+
+    offset = (page - 1) * limit
+    result = query.range(offset, offset + limit - 1).execute()
+    total = result.count or 0
+
+    fleets = []
+    for f in result.data or []:
+        po_info = f.pop("purchase_orders", {}) or {}
+        fleets.append({
+            **f,
+            "po_number": po_info.get("po_number"),
+            "po_date": po_info.get("po_date"),
+            "vendor": po_info.get("vendor"),
+        })
+
+    return {
+        "success": True,
+        "data": fleets,
+        "meta": {
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "total_pages": (total + limit - 1) // limit if total > 0 else 0,
+        },
+    }
+
+
+@router.post("/fleets/{fleet_id}/resolve")
+async def resolve_fleet_entry(
+    fleet_id: UUID,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+    action: str = Query(..., pattern="^(link_plant|create_plant|mark_category|mark_workshop)$"),
+    plant_id: UUID | None = Query(None, description="Plant UUID for link_plant action"),
+    fleet_number: str | None = Query(None, description="Fleet number for create_plant action"),
+    description: str | None = Query(None, description="Description for create_plant"),
+    category_name: str | None = Query(None, description="Category name for mark_category"),
+) -> dict[str, Any]:
+    """Resolve an unresolved fleet entry.
+
+    Actions:
+    - link_plant: Link to existing plant (requires plant_id)
+    - create_plant: Create new plant and link (requires fleet_number)
+    - mark_category: Mark as category entry (requires category_name)
+    - mark_workshop: Mark as workshop/general entry
+
+    Args:
+        fleet_id: The fleet association UUID.
+        action: Resolution action to take.
+        plant_id: Plant UUID for link_plant action.
+        fleet_number: Fleet number for create_plant action.
+        description: Description for create_plant action.
+        category_name: Category name for mark_category action.
+
+    Returns:
+        Updated fleet entry.
+    """
+    client = get_supabase_admin_client()
+
+    # Get fleet entry
+    fleet = (
+        client.table("purchase_order_fleets")
+        .select("*")
+        .eq("id", str(fleet_id))
+        .single()
+        .execute()
+    )
+
+    if not fleet.data:
+        raise NotFoundError("Fleet entry", str(fleet_id))
+
+    update_data = {}
+
+    if action == "link_plant":
+        if not plant_id:
+            raise ValidationError("plant_id is required for link_plant action")
+
+        # Verify plant exists
+        plant = (
+            client.table("plants_master")
+            .select("id, fleet_number, fleet_type")
+            .eq("id", str(plant_id))
+            .single()
+            .execute()
+        )
+
+        if not plant.data:
+            raise NotFoundError("Plant", str(plant_id))
+
+        update_data = {
+            "plant_id": str(plant_id),
+            "fleet_type": plant.data.get("fleet_type"),
+            "is_resolved": True,
+        }
+
+    elif action == "create_plant":
+        if not fleet_number:
+            raise ValidationError("fleet_number is required for create_plant action")
+
+        # Check if plant already exists
+        existing = (
+            client.table("plants_master")
+            .select("id")
+            .eq("fleet_number", fleet_number.upper())
+            .execute()
+        )
+
+        if existing.data:
+            raise ValidationError(
+                f"Plant with fleet number '{fleet_number}' already exists",
+                details=[{"field": "fleet_number", "message": "Already exists", "code": "DUPLICATE"}],
+            )
+
+        # Extract prefix for fleet_type lookup
+        import re
+        prefix_match = re.match(r"^([A-Z]+)", fleet_number.upper())
+        fleet_type = None
+        if prefix_match:
+            prefix = prefix_match.group(1)
+            type_lookup = (
+                client.table("fleet_number_prefixes")
+                .select("fleet_type")
+                .eq("prefix", prefix)
+                .execute()
+            )
+            if type_lookup.data:
+                fleet_type = type_lookup.data[0]["fleet_type"]
+
+        # Create new plant
+        plant_data = {
+            "fleet_number": fleet_number.upper(),
+            "description": description,
+            "fleet_type": fleet_type,
+            "status": "unverified",
+        }
+        plant_result = client.table("plants_master").insert(plant_data).execute()
+        new_plant = plant_result.data[0]
+
+        update_data = {
+            "plant_id": new_plant["id"],
+            "fleet_type": fleet_type,
+            "is_resolved": True,
+        }
+
+        logger.info(
+            "Created plant from PO fleet entry",
+            plant_id=new_plant["id"],
+            fleet_number=fleet_number.upper(),
+            fleet_id=str(fleet_id),
+            user_id=current_user.id,
+        )
+
+    elif action == "mark_category":
+        if not category_name:
+            raise ValidationError("category_name is required for mark_category action")
+
+        update_data = {
+            "is_category": True,
+            "category_name": category_name.upper(),
+            "is_resolved": True,
+        }
+
+    elif action == "mark_workshop":
+        update_data = {
+            "is_workshop": True,
+            "is_resolved": True,
+        }
+
+    # Update fleet entry
+    result = (
+        client.table("purchase_order_fleets")
+        .update(update_data)
+        .eq("id", str(fleet_id))
+        .execute()
+    )
+
+    logger.info(
+        "Resolved fleet entry",
+        fleet_id=str(fleet_id),
+        action=action,
+        user_id=current_user.id,
+    )
+
+    background_tasks.add_task(
+        audit_service.log,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        action="update",
+        table_name="purchase_order_fleets",
+        record_id=str(fleet_id),
+        old_values={"is_resolved": False},
+        new_values=update_data,
+        ip_address=get_client_ip(request),
+        description=f"Resolved fleet entry via {action}",
+    )
+
+    return {
+        "success": True,
+        "message": f"Fleet entry resolved via {action}",
+        "data": result.data[0] if result.data else None,
+    }
+
+
+# ---------- Line Items with Spare Parts ----------
+
+
+@router.post("/{po_id}/items-with-parts", status_code=201)
+async def add_item_and_create_spare_parts(
+    po_id: UUID,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+    description: str = Query(..., description="Item description"),
+    quantity: int = Query(1, ge=1),
+    unit_cost: float = Query(..., ge=0),
+    part_number: str | None = Query(None),
+    plant_ids: str | None = Query(None, description="Comma-separated plant UUIDs to create spare_parts for"),
+    distribute_cost: bool = Query(False, description="Split cost among plants (true) or duplicate full cost (false)"),
+) -> dict[str, Any]:
+    """Add a line item to PO and optionally create spare_parts records for plants.
+
+    This combines adding a line item with creating the corresponding spare_parts
+    records for one or more plants.
+
+    Args:
+        po_id: The purchase order UUID.
+        description: Item description.
+        quantity: Quantity.
+        unit_cost: Unit cost.
+        part_number: Part number.
+        plant_ids: Plants to create spare_parts for.
+        distribute_cost: If true, split cost among plants. If false, each plant gets full cost.
+
+    Returns:
+        Created line item and spare_parts.
+    """
+    client = get_supabase_admin_client()
+
+    # Verify PO exists and get details
+    po = (
+        client.table("purchase_orders")
+        .select("id, po_number, po_date, location_id, vat_percentage, discount_percentage")
+        .eq("id", str(po_id))
+        .single()
+        .execute()
+    )
+
+    if not po.data:
+        raise NotFoundError("Purchase order", str(po_id))
+
+    # Create line item
+    item_data = {
+        "purchase_order_id": str(po_id),
+        "description": description,
+        "quantity": quantity,
+        "unit_cost": unit_cost,
+        "part_number": part_number,
+    }
+
+    item_result = client.table("purchase_order_items").insert(item_data).execute()
+    created_item = item_result.data[0]
+
+    # Create spare_parts if plant_ids provided
+    created_parts = []
+    if plant_ids:
+        pids = [pid.strip() for pid in plant_ids.split(",") if pid.strip()]
+        plant_count = len(pids)
+
+        for pid in pids:
+            # Calculate cost per plant
+            if distribute_cost and plant_count > 1:
+                part_quantity = quantity // plant_count or 1
+                part_unit_cost = unit_cost
+            else:
+                part_quantity = quantity
+                part_unit_cost = unit_cost
+
+            part_data = {
+                "purchase_order_id": str(po_id),
+                "plant_id": pid,
+                "part_description": description,
+                "part_number": part_number,
+                "quantity": part_quantity,
+                "unit_cost": part_unit_cost,
+                "purchase_order_number": po.data["po_number"],
+                "po_date": po.data.get("po_date"),
+                "location_id": po.data.get("location_id"),
+                "vat_percentage": po.data.get("vat_percentage", 0),
+                "discount_percentage": po.data.get("discount_percentage", 0),
+                "created_by": current_user.id,
+            }
+
+            try:
+                part_result = client.table("spare_parts").insert(part_data).execute()
+                created_parts.append(part_result.data[0])
+            except Exception as e:
+                logger.warning("Failed to create spare_part", plant_id=pid, error=str(e))
+
+    logger.info(
+        "Created PO item with spare_parts",
+        po_id=str(po_id),
+        item_id=created_item["id"],
+        spare_parts_count=len(created_parts),
+        user_id=current_user.id,
+    )
+
+    background_tasks.add_task(
+        audit_service.log,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        action="create",
+        table_name="purchase_order_items",
+        record_id=created_item["id"],
+        new_values={**item_data, "spare_parts_created": len(created_parts)},
+        ip_address=get_client_ip(request),
+        description=f"Added item to PO {po.data['po_number']}: {description}",
+    )
+
+    return {
+        "success": True,
+        "data": {
+            "item": created_item,
+            "spare_parts": created_parts,
+        },
+        "meta": {
+            "item_total": float(created_item.get("total_cost") or 0),
+            "spare_parts_count": len(created_parts),
+            "distribute_cost": distribute_cost,
+        },
+    }
