@@ -19,7 +19,7 @@ from app.monitoring.logging import get_logger
 from app.services.audit_service import audit_service
 from app.services.fleet_parser import (
     parse_fleet_input,
-    resolve_location_from_req_no,
+    parse_multiple_req_nos,
     get_cost_classification,
 )
 
@@ -566,15 +566,15 @@ async def create_manual_purchase_order(
     po_date: date | None = Form(None),
     vendor: str | None = Form(None),
     vendor_address: str | None = Form(None),
-    req_no: str | None = Form(None),
-    location_id: UUID | None = Form(None),
+    req_no: str | None = Form(None, description="REQ NO(s), can be multiple: 'KWOI 2345, ABJ 2340'"),
+    location_ids: str | None = Form(None, description="Comma-separated location UUIDs"),
     subtotal: float | None = Form(None),
     discount_percentage: float = Form(default=0, ge=0, le=100),
     vat_percentage: float = Form(default=0, ge=0, le=100),
     other_costs: float = Form(default=0, ge=0),
     total_amount: float | None = Form(None),
     notes: str | None = Form(None),
-    fleet_numbers: str | None = Form(None, description="Comma-separated fleet numbers"),
+    fleet_numbers: str | None = Form(None, description="Comma-separated: 'T468, 463, LOW LOADER, WORKSHOP'"),
     document: UploadFile | None = File(None, description="Optional PO document (PDF, image)"),
 ) -> dict[str, Any]:
     """Create a purchase order from manual entry with optional document attachment.
@@ -582,25 +582,26 @@ async def create_manual_purchase_order(
     This is the main endpoint for manually entering PO data from physical documents
     (PDF scans, photos of hardcopy, etc.). The document can be attached in the same request.
 
-    Supports multi-fleet POs and workshop entries.
+    Supports:
+    - Multi-fleet POs (T468, 463, 466)
+    - Workshop/general entries (WORKSHOP, W/SHOP)
+    - Category entries (LOW LOADER, VOLVO, CONSUMABLES, PRECAST)
+    - Multiple locations per PO (KWOI 2345, ABJ 2340)
 
     Args:
-        request: The HTTP request.
-        background_tasks: Background task runner.
-        current_user: The authenticated admin user.
         po_number: Purchase order number.
         po_date: PO date.
         vendor: Vendor name.
         vendor_address: Vendor address.
-        req_no: Requisition number (auto-resolves location if prefix matches).
-        location_id: Location ID (optional if req_no has known prefix).
+        req_no: Requisition number(s) - can be multiple comma-separated.
+        location_ids: Comma-separated location UUIDs (user selects from dropdown).
         subtotal: Subtotal before tax/discount.
         discount_percentage: Discount percentage (0-100).
         vat_percentage: VAT percentage (0-100).
-        other_costs: Additional costs (shipping, handling, etc.).
+        other_costs: Additional costs.
         total_amount: Final total amount.
         notes: Additional notes.
-        fleet_numbers: Comma-separated fleet numbers (e.g., "T468, 463, WORKSHOP").
+        fleet_numbers: Comma-separated fleet entries.
         document: Optional document file (PDF, PNG, JPG).
 
     Returns:
@@ -622,10 +623,37 @@ async def create_manual_purchase_order(
             details=[{"field": "po_number", "message": "Already exists", "code": "DUPLICATE"}],
         )
 
-    # Try to resolve location from req_no if not provided
-    resolved_location_id = str(location_id) if location_id else None
-    if not resolved_location_id and req_no:
-        resolved_location_id = resolve_location_from_req_no(req_no)
+    # Parse location_ids (user-selected, no auto-resolution)
+    parsed_locations = []
+    primary_location_id = None
+    if location_ids:
+        loc_ids = [lid.strip() for lid in location_ids.split(",") if lid.strip()]
+        if loc_ids:
+            primary_location_id = loc_ids[0]
+            for lid in loc_ids:
+                parsed_locations.append({"location_id": lid, "req_no": None})
+
+    # Parse REQ NOs to associate with locations
+    parsed_req_nos = []
+    if req_no:
+        parsed_req_nos = parse_multiple_req_nos(req_no)
+        # Match REQ NOs to locations if we have them
+        for prn in parsed_req_nos:
+            # Find matching location in parsed_locations by location_id
+            matched = False
+            for pl in parsed_locations:
+                if prn["location_id"] and pl["location_id"] == prn["location_id"]:
+                    pl["req_no"] = prn["req_no"]
+                    matched = True
+                    break
+            if not matched and prn["location_id"]:
+                # Add location from REQ NO if not already in list
+                parsed_locations.append({
+                    "location_id": prn["location_id"],
+                    "req_no": prn["req_no"],
+                })
+                if not primary_location_id:
+                    primary_location_id = prn["location_id"]
 
     # Handle document upload if provided
     storage_path = None
@@ -639,7 +667,7 @@ async def create_manual_purchase_order(
             )
 
         file_content = await document.read()
-        location_folder = resolved_location_id or "general"
+        location_folder = primary_location_id or "general"
         date_folder = str(po_date) if po_date else "undated"
         storage_path = f"purchase-orders/{location_folder}/{date_folder}/{po_number.upper()}_{document.filename}"
 
@@ -665,7 +693,7 @@ async def create_manual_purchase_order(
         "vendor": vendor,
         "vendor_address": vendor_address,
         "req_no": req_no.upper() if req_no else None,
-        "location_id": resolved_location_id,
+        "location_id": primary_location_id,  # Primary location
         "subtotal": subtotal,
         "discount_percentage": discount_percentage,
         "vat_percentage": vat_percentage,
@@ -681,6 +709,25 @@ async def create_manual_purchase_order(
     created = result.data[0]
     po_id = created["id"]
 
+    # Create location associations for multi-location POs
+    locations_created = []
+    if len(parsed_locations) > 0:
+        for pl in parsed_locations:
+            try:
+                loc_data = {
+                    "purchase_order_id": po_id,
+                    "location_id": pl["location_id"],
+                    "req_no": pl.get("req_no"),
+                }
+                loc_result = (
+                    client.table("purchase_order_locations")
+                    .insert(loc_data)
+                    .execute()
+                )
+                locations_created.append(loc_result.data[0])
+            except Exception as e:
+                logger.warning("Failed to create PO location", error=str(e), location_id=pl["location_id"])
+
     # Parse and create fleet associations
     fleets_created = []
     if fleet_numbers:
@@ -692,6 +739,8 @@ async def create_manual_purchase_order(
                 "plant_id": pf["plant_id"],
                 "fleet_type": pf["fleet_type"],
                 "is_workshop": pf["is_workshop"],
+                "is_category": pf.get("is_category", False),
+                "category_name": pf.get("category_name"),
                 "is_resolved": pf["is_resolved"],
             }
             fleet_result = (
@@ -709,6 +758,7 @@ async def create_manual_purchase_order(
         po_id=po_id,
         po_number=po_number,
         fleets_count=len(fleets_created),
+        locations_count=len(locations_created),
         has_document=bool(storage_path),
         cost_type=cost_type,
         user_id=current_user.id,
@@ -721,7 +771,7 @@ async def create_manual_purchase_order(
         action="create",
         table_name="purchase_orders",
         record_id=po_id,
-        new_values={**po_data, "fleet_numbers": fleet_numbers},
+        new_values={**po_data, "fleet_numbers": fleet_numbers, "location_ids": location_ids},
         ip_address=get_client_ip(request),
         description=f"Manually created PO {po_number.upper()} ({cost_type})",
     )
@@ -731,14 +781,18 @@ async def create_manual_purchase_order(
         "data": {
             **created,
             "fleets": fleets_created,
+            "locations": locations_created,
             "cost_type": cost_type,
         },
         "meta": {
-            "fleets_resolved": sum(1 for f in fleets_created if f.get("is_resolved")),
-            "fleets_unresolved": sum(1 for f in fleets_created if not f.get("is_resolved")),
+            "fleets_resolved": sum(1 for f in fleets_created if f.get("plant_id")),
+            "fleets_unresolved": sum(1 for f in fleets_created if not f.get("plant_id") and not f.get("is_workshop") and not f.get("is_category")),
             "has_workshop": any(f.get("is_workshop") for f in fleets_created),
+            "has_category": any(f.get("is_category") for f in fleets_created),
+            "categories": [f.get("category_name") for f in fleets_created if f.get("is_category")],
+            "location_count": len(locations_created),
+            "is_multi_location": len(locations_created) > 1,
             "document_attached": bool(storage_path),
-            "location_auto_resolved": bool(not location_id and resolved_location_id),
         },
     }
 
@@ -1528,4 +1582,301 @@ async def remove_purchase_order_fleet(
     return {
         "success": True,
         "message": f"Fleet '{existing.data['fleet_number_raw']}' removed successfully",
+    }
+
+
+# ---------- Spare Parts Linkage ----------
+
+
+@router.get("/{po_id}/spare-parts")
+async def get_po_spare_parts(
+    po_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+) -> dict[str, Any]:
+    """Get spare parts linked to a purchase order.
+
+    Args:
+        po_id: The purchase order UUID.
+        current_user: The authenticated user.
+
+    Returns:
+        List of spare parts linked to this PO.
+    """
+    client = get_supabase_admin_client()
+
+    # Verify PO exists
+    po = (
+        client.table("purchase_orders")
+        .select("id, po_number")
+        .eq("id", str(po_id))
+        .single()
+        .execute()
+    )
+
+    if not po.data:
+        raise NotFoundError("Purchase order", str(po_id))
+
+    # Get linked spare parts
+    parts_result = (
+        client.table("spare_parts")
+        .select("*, plants_master(fleet_number, fleet_type, description)")
+        .eq("purchase_order_id", str(po_id))
+        .order("created_at", desc=True)
+        .execute()
+    )
+
+    # Transform data
+    parts = []
+    for part in parts_result.data or []:
+        plant_info = part.pop("plants_master", {}) or {}
+        parts.append({
+            **part,
+            "fleet_number": plant_info.get("fleet_number"),
+            "fleet_type": plant_info.get("fleet_type"),
+            "plant_description": plant_info.get("description"),
+        })
+
+    return {
+        "success": True,
+        "data": parts,
+        "meta": {
+            "po_number": po.data["po_number"],
+            "total_parts": len(parts),
+            "total_cost": sum(float(p.get("total_cost") or 0) for p in parts),
+        },
+    }
+
+
+@router.post("/{po_id}/spare-parts", status_code=201)
+async def link_spare_part_to_po(
+    po_id: UUID,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+    plant_id: UUID | None = Query(None, description="Plant this part was used on"),
+    part_description: str = Query(..., description="Description of the part"),
+    quantity: int = Query(1, ge=1),
+    unit_cost: float = Query(..., ge=0),
+    part_number: str | None = Query(None),
+    replaced_date: date | None = Query(None),
+    reason_for_change: str | None = Query(None),
+) -> dict[str, Any]:
+    """Create a spare part record linked to a purchase order.
+
+    Use this when entering parts from a PO. The part will be linked to the PO
+    and optionally to a specific plant.
+
+    Args:
+        po_id: The purchase order UUID.
+        plant_id: Optional plant that used this part.
+        part_description: Description of the part.
+        quantity: Quantity used.
+        unit_cost: Cost per unit.
+        part_number: Part number if known.
+        replaced_date: Date the part was replaced.
+        reason_for_change: Reason for the replacement.
+
+    Returns:
+        Created spare part record.
+    """
+    client = get_supabase_admin_client()
+
+    # Verify PO exists and get its details
+    po = (
+        client.table("purchase_orders")
+        .select("id, po_number, po_date, location_id, vat_percentage, discount_percentage")
+        .eq("id", str(po_id))
+        .single()
+        .execute()
+    )
+
+    if not po.data:
+        raise NotFoundError("Purchase order", str(po_id))
+
+    # Create spare part record
+    part_data = {
+        "purchase_order_id": str(po_id),
+        "plant_id": str(plant_id) if plant_id else None,
+        "part_description": part_description,
+        "part_number": part_number,
+        "quantity": quantity,
+        "unit_cost": unit_cost,
+        "replaced_date": str(replaced_date) if replaced_date else str(po.data.get("po_date")) if po.data.get("po_date") else None,
+        "reason_for_change": reason_for_change,
+        "purchase_order_number": po.data["po_number"],
+        "po_date": po.data.get("po_date"),
+        "location_id": po.data.get("location_id"),
+        "vat_percentage": po.data.get("vat_percentage", 0),
+        "discount_percentage": po.data.get("discount_percentage", 0),
+        "created_by": current_user.id,
+    }
+
+    result = client.table("spare_parts").insert(part_data).execute()
+    created = result.data[0]
+
+    logger.info(
+        "Spare part created from PO",
+        spare_part_id=created["id"],
+        po_id=str(po_id),
+        plant_id=str(plant_id) if plant_id else None,
+        user_id=current_user.id,
+    )
+
+    background_tasks.add_task(
+        audit_service.log,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        action="create",
+        table_name="spare_parts",
+        record_id=created["id"],
+        new_values=part_data,
+        ip_address=get_client_ip(request),
+        description=f"Created spare part from PO {po.data['po_number']}: {part_description}",
+    )
+
+    return {
+        "success": True,
+        "data": created,
+    }
+
+
+@router.get("/plant/{plant_id}/all-costs")
+async def get_plant_all_costs(
+    plant_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+    year: int | None = None,
+    include_shared: bool = Query(True, description="Include this plant's share of shared POs"),
+) -> dict[str, Any]:
+    """Get all maintenance costs for a plant from both spare_parts and purchase_orders.
+
+    This combines:
+    1. Direct spare_parts records for this plant
+    2. Direct POs (single plant only)
+    3. Shared POs (this plant's contribution, if include_shared=True)
+
+    Args:
+        plant_id: The plant UUID.
+        year: Filter by year.
+        include_shared: Include share of multi-fleet POs.
+
+    Returns:
+        Combined cost data from all sources.
+    """
+    client = get_supabase_admin_client()
+
+    # Verify plant exists
+    plant_result = (
+        client.table("plants_master")
+        .select("id, fleet_number, fleet_type, description")
+        .eq("id", str(plant_id))
+        .single()
+        .execute()
+    )
+
+    if not plant_result.data:
+        raise NotFoundError("Plant", str(plant_id))
+
+    plant = plant_result.data
+
+    # 1. Get direct spare_parts (not linked to a PO)
+    spare_query = (
+        client.table("spare_parts")
+        .select("*")
+        .eq("plant_id", str(plant_id))
+        .is_("purchase_order_id", "null")  # Only parts NOT from PO system
+    )
+    if year:
+        spare_query = spare_query.eq("year", year)
+    spare_result = spare_query.execute()
+    direct_parts = spare_result.data or []
+    direct_parts_total = sum(float(p.get("total_cost") or 0) for p in direct_parts)
+
+    # 2. Get spare_parts linked to POs (for this plant)
+    po_spare_query = (
+        client.table("spare_parts")
+        .select("*, purchase_orders(po_number, po_date, vendor)")
+        .eq("plant_id", str(plant_id))
+        .not_.is_("purchase_order_id", "null")
+    )
+    if year:
+        po_spare_query = po_spare_query.eq("year", year)
+    po_spare_result = po_spare_query.execute()
+    po_linked_parts = po_spare_result.data or []
+    po_linked_parts_total = sum(float(p.get("total_cost") or 0) for p in po_linked_parts)
+
+    # 3. Get POs associated with this plant
+    fleet_query = (
+        client.table("purchase_order_fleets")
+        .select("purchase_order_id")
+        .eq("plant_id", str(plant_id))
+    )
+    fleet_result = fleet_query.execute()
+    po_ids = [f["purchase_order_id"] for f in fleet_result.data] if fleet_result.data else []
+
+    direct_po_total = 0.0
+    shared_po_total = 0.0
+    shared_contribution = 0.0
+    pos_data = []
+
+    if po_ids:
+        po_query = (
+            client.table("v_purchase_order_costs")
+            .select("*")
+            .in_("id", po_ids)
+        )
+        if year:
+            po_query = po_query.eq("year", year)
+        po_result = po_query.execute()
+
+        for po in po_result.data or []:
+            amount = float(po.get("total_amount") or 0)
+            plant_count = int(po.get("plant_count") or 1)
+            cost_type = po.get("cost_type", "shared")
+
+            if cost_type == "direct":
+                direct_po_total += amount
+                contribution = amount
+            else:
+                shared_po_total += amount
+                contribution = amount / plant_count if plant_count > 0 and include_shared else 0
+                shared_contribution += contribution
+
+            pos_data.append({
+                "id": po["id"],
+                "po_number": po["po_number"],
+                "po_date": po["po_date"],
+                "vendor": po.get("vendor"),
+                "total_amount": amount,
+                "cost_type": cost_type,
+                "plant_count": plant_count,
+                "contribution": round(contribution, 2),
+            })
+
+    # Calculate totals
+    grand_total = direct_parts_total + po_linked_parts_total + direct_po_total + (shared_contribution if include_shared else 0)
+
+    return {
+        "success": True,
+        "data": {
+            "plant": plant,
+            "costs": {
+                "direct_spare_parts": round(direct_parts_total, 2),
+                "po_linked_spare_parts": round(po_linked_parts_total, 2),
+                "direct_po_total": round(direct_po_total, 2),
+                "shared_po_total": round(shared_po_total, 2),
+                "shared_contribution": round(shared_contribution, 2) if include_shared else 0,
+                "grand_total": round(grand_total, 2),
+            },
+            "breakdown": {
+                "spare_parts_count": len(direct_parts) + len(po_linked_parts),
+                "po_count": len(pos_data),
+                "direct_po_count": sum(1 for p in pos_data if p["cost_type"] == "direct"),
+                "shared_po_count": sum(1 for p in pos_data if p["cost_type"] == "shared"),
+            },
+            "purchase_orders": pos_data,
+        },
+        "meta": {
+            "year": year,
+            "include_shared": include_shared,
+        },
     }
