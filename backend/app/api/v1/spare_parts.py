@@ -306,8 +306,10 @@ async def create_spare_part(
     reason_for_change: str | None = None,
     unit_cost: float | None = None,
     quantity: int = 1,
-    vat_percentage: float = Query(default=0, ge=0, le=100, description="VAT percentage (0-100)"),
-    discount_percentage: float = Query(default=0, ge=0, le=100, description="Discount percentage (0-100)"),
+    vat_percentage: float | None = Query(default=None, ge=0, le=100, description="VAT percentage (0-100). Use this OR vat_amount."),
+    vat_amount: float | None = Query(default=None, ge=0, description="Absolute VAT amount. Use this OR vat_percentage."),
+    discount_percentage: float | None = Query(default=None, ge=0, le=100, description="Discount percentage (0-100). Use this OR discount_amount."),
+    discount_amount: float | None = Query(default=None, ge=0, description="Absolute discount amount. Use this OR discount_percentage."),
     other_costs: float = Query(default=0, ge=0, description="Additional costs (shipping, handling, etc.)"),
     purchase_order_number: str | None = Query(None, description="PO number from document"),
     po_date: str | None = Query(None, description="PO date (formats: 2026-01-13, 13-01-26, 13-January-26)"),
@@ -320,10 +322,16 @@ async def create_spare_part(
     This is the main endpoint for entering PO data. Each call creates one line item.
     For a PO with multiple items, call this endpoint multiple times with the same PO number.
 
-    Total cost is auto-calculated as: (unit_cost × quantity × (1 + VAT%) × (1 - discount%)) + other_costs
+    Total cost is auto-calculated as: subtotal + VAT - discount + other_costs
+    Where:
+    - subtotal = unit_cost × quantity
+    - VAT = vat_amount (if provided) OR subtotal × vat_percentage / 100
+    - discount = discount_amount (if provided) OR subtotal × discount_percentage / 100
 
-    You can provide either plant_id OR fleet_number. If fleet_number is provided,
-    the system will look up the plant_id automatically.
+    You can provide either:
+    - plant_id OR fleet_number (for identifying the plant)
+    - vat_percentage OR vat_amount (for VAT calculation)
+    - discount_percentage OR discount_amount (for discount calculation)
 
     Date formats accepted: 2026-01-13, 13-01-2026, 13/01/26, 13-January-26, 13-Jan-26
 
@@ -336,8 +344,10 @@ async def create_spare_part(
         reason_for_change: Why the part was replaced.
         unit_cost: Cost per unit.
         quantity: Number of parts.
-        vat_percentage: VAT percentage (0-100).
-        discount_percentage: Discount percentage (0-100).
+        vat_percentage: VAT percentage (0-100). Use this OR vat_amount.
+        vat_amount: Absolute VAT amount already calculated. Use this OR vat_percentage.
+        discount_percentage: Discount percentage (0-100). Use this OR discount_amount.
+        discount_amount: Absolute discount amount already calculated. Use this OR discount_percentage.
         other_costs: Additional costs (shipping, handling, etc.).
         purchase_order_number: PO number from the document.
         po_date: Date on the PO (used for both po_date and replaced_date).
@@ -403,6 +413,7 @@ async def create_spare_part(
         quarter = (month - 1) // 3 + 1
 
     # Create spare part (po_date = replaced_date, same thing)
+    # Use either percentage or absolute amount for VAT and discount
     part_data = {
         "plant_id": resolved_plant_id,
         "part_description": part_description,
@@ -412,8 +423,10 @@ async def create_spare_part(
         "reason_for_change": reason_for_change,
         "unit_cost": unit_cost,
         "quantity": quantity,
-        "vat_percentage": vat_percentage,
-        "discount_percentage": discount_percentage,
+        "vat_percentage": vat_percentage if vat_amount is None else 0,
+        "vat_amount": vat_amount,
+        "discount_percentage": discount_percentage if discount_amount is None else 0,
+        "discount_amount": discount_amount,
         "other_costs": other_costs,
         "purchase_order_number": purchase_order_number.upper() if purchase_order_number else None,
         "po_date": str(parsed_date) if parsed_date else None,
@@ -476,9 +489,11 @@ async def create_spare_parts_bulk(
     requisition_number: str | None = Query(None, description="REQ NO"),
     location_id: UUID | None = Query(None, description="Location UUID"),
     supplier: str | None = Query(None, description="Vendor name"),
-    vat_percentage: float = Query(default=0, ge=0, le=100),
-    discount_percentage: float = Query(default=0, ge=0, le=100),
-    items: str = Query(..., description="JSON array of items: [{description, quantity, unit_cost, part_number?}]"),
+    vat_percentage: float | None = Query(default=None, ge=0, le=100, description="VAT % (use this OR vat_amount)"),
+    vat_amount: float | None = Query(default=None, ge=0, description="Absolute VAT per item (use this OR vat_percentage)"),
+    discount_percentage: float | None = Query(default=None, ge=0, le=100, description="Discount % (use this OR discount_amount)"),
+    discount_amount: float | None = Query(default=None, ge=0, description="Absolute discount per item (use this OR discount_percentage)"),
+    items: str = Query(..., description="JSON array of items: [{description, quantity, unit_cost, part_number?, vat_amount?, discount_amount?}]"),
 ) -> dict[str, Any]:
     """Create multiple spare parts / PO line items at once.
 
@@ -487,6 +502,11 @@ async def create_spare_parts_bulk(
 
     Date formats accepted: 2026-01-13, 13-01-2026, 13/01/26, 13-January-26, 13-Jan-26
 
+    VAT and discount can be provided as:
+    - Percentages at the PO level (applied to all items)
+    - Absolute amounts at the PO level (applied to all items)
+    - Absolute amounts per item (in the items JSON array)
+
     Args:
         fleet_number: Fleet number (the plant this PO is for).
         purchase_order_number: PO number from document.
@@ -494,17 +514,21 @@ async def create_spare_parts_bulk(
         requisition_number: REQ NO.
         location_id: Location UUID.
         supplier: Vendor name.
-        vat_percentage: VAT % (applied to all items).
-        discount_percentage: Discount % (applied to all items).
+        vat_percentage: VAT % applied to all items (use this OR vat_amount).
+        vat_amount: Absolute VAT amount per item (use this OR vat_percentage).
+        discount_percentage: Discount % applied to all items (use this OR discount_amount).
+        discount_amount: Absolute discount amount per item (use this OR discount_percentage).
         items: JSON array of line items, each with:
             - description (required): Part description
             - quantity (optional, default 1): Quantity
             - unit_cost (optional): Unit cost
             - part_number (optional): Part number
+            - vat_amount (optional): Override VAT amount for this item
+            - discount_amount (optional): Override discount amount for this item
 
     Example items parameter:
         [{"description": "Filter", "quantity": 2, "unit_cost": 5000},
-         {"description": "Seal Kit", "quantity": 1, "unit_cost": 15000}]
+         {"description": "Seal Kit", "quantity": 1, "unit_cost": 15000, "vat_amount": 1125}]
 
     Returns:
         Created spare parts with total cost.
@@ -552,6 +576,10 @@ async def create_spare_parts_bulk(
         if not item.get("description"):
             continue  # Skip items without description
 
+        # Per-item amounts override PO-level amounts
+        item_vat_amount = item.get("vat_amount", vat_amount)
+        item_discount_amount = item.get("discount_amount", discount_amount)
+
         part_data = {
             "plant_id": plant_id,
             "part_description": item["description"],
@@ -564,8 +592,10 @@ async def create_spare_parts_bulk(
             "requisition_number": requisition_number.upper() if requisition_number else None,
             "location_id": str(location_id) if location_id else None,
             "supplier": supplier,
-            "vat_percentage": vat_percentage,
-            "discount_percentage": discount_percentage,
+            "vat_percentage": vat_percentage if item_vat_amount is None else 0,
+            "vat_amount": item_vat_amount,
+            "discount_percentage": discount_percentage if item_discount_amount is None else 0,
+            "discount_amount": item_discount_amount,
             "year": year,
             "month": month,
             "week_number": week_number,
