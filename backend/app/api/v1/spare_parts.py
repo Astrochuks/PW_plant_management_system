@@ -1,6 +1,6 @@
 """Spare parts management endpoints."""
 
-from datetime import date
+from datetime import date, datetime
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -19,6 +19,60 @@ from app.services.audit_service import audit_service
 
 router = APIRouter()
 logger = get_logger(__name__)
+
+
+def parse_flexible_date(date_str: str | None) -> date | None:
+    """Parse date from various formats.
+
+    Accepts:
+    - ISO format: 2026-01-13
+    - Day-Month-Year: 13-01-26, 13/01/26, 13-01-2026
+    - Day-MonthName-Year: 13-January-26, 13-Jan-2026
+
+    Args:
+        date_str: Date string in various formats.
+
+    Returns:
+        Parsed date or None.
+    """
+    if not date_str:
+        return None
+
+    if isinstance(date_str, date):
+        return date_str
+
+    date_str = date_str.strip()
+
+    # Try various formats
+    formats = [
+        "%Y-%m-%d",      # 2026-01-13
+        "%d-%m-%Y",      # 13-01-2026
+        "%d/%m/%Y",      # 13/01/2026
+        "%d-%m-%y",      # 13-01-26
+        "%d/%m/%y",      # 13/01/26
+        "%d-%B-%y",      # 13-January-26
+        "%d-%B-%Y",      # 13-January-2026
+        "%d-%b-%y",      # 13-Jan-26
+        "%d-%b-%Y",      # 13-Jan-2026
+        "%d %B %Y",      # 13 January 2026
+        "%d %B %y",      # 13 January 26
+        "%d %b %Y",      # 13 Jan 2026
+        "%d %b %y",      # 13 Jan 26
+        "%B %d, %Y",     # January 13, 2026
+        "%b %d, %Y",     # Jan 13, 2026
+    ]
+
+    for fmt in formats:
+        try:
+            return datetime.strptime(date_str, fmt).date()
+        except ValueError:
+            continue
+
+    # If nothing worked, raise error with helpful message
+    raise ValidationError(
+        f"Could not parse date '{date_str}'. Use format: YYYY-MM-DD (e.g., 2026-01-13) or DD-MM-YYYY (e.g., 13-01-2026)",
+        details=[{"field": "po_date", "message": "Invalid date format", "code": "INVALID_FORMAT"}],
+    )
 
 
 @router.get("")
@@ -247,7 +301,6 @@ async def create_spare_part(
     plant_id: UUID | None = Query(None, description="Plant UUID (required unless fleet_number provided)"),
     fleet_number: str | None = Query(None, description="Fleet number (alternative to plant_id)"),
     part_description: str = Query(..., description="Description of the part/item"),
-    replaced_date: date | None = Query(None, description="Date part was used/replaced"),
     part_number: str | None = None,
     supplier: str | None = Query(None, description="Vendor/supplier name"),
     reason_for_change: str | None = None,
@@ -257,7 +310,7 @@ async def create_spare_part(
     discount_percentage: float = Query(default=0, ge=0, le=100, description="Discount percentage (0-100)"),
     other_costs: float = Query(default=0, ge=0, description="Additional costs (shipping, handling, etc.)"),
     purchase_order_number: str | None = Query(None, description="PO number from document"),
-    po_date: date | None = Query(None, description="Date on the PO document"),
+    po_date: str | None = Query(None, description="PO date (formats: 2026-01-13, 13-01-26, 13-January-26)"),
     requisition_number: str | None = Query(None, description="REQ NO from PO (e.g., ABJ 340888)"),
     location_id: UUID | None = Query(None, description="Location/site UUID"),
     remarks: str | None = None,
@@ -272,11 +325,12 @@ async def create_spare_part(
     You can provide either plant_id OR fleet_number. If fleet_number is provided,
     the system will look up the plant_id automatically.
 
+    Date formats accepted: 2026-01-13, 13-01-2026, 13/01/26, 13-January-26, 13-Jan-26
+
     Args:
         plant_id: The plant UUID (use this OR fleet_number).
         fleet_number: Fleet number string (alternative to plant_id).
         part_description: Description of the part/item.
-        replaced_date: Date the part was replaced/used.
         part_number: Part number if known.
         supplier: Vendor/supplier name.
         reason_for_change: Why the part was replaced.
@@ -286,7 +340,7 @@ async def create_spare_part(
         discount_percentage: Discount percentage (0-100).
         other_costs: Additional costs (shipping, handling, etc.).
         purchase_order_number: PO number from the document.
-        po_date: Date on the PO document.
+        po_date: Date on the PO (used for both po_date and replaced_date).
         requisition_number: REQ NO (e.g., ABJ 340888, KWO 12345).
         location_id: Location/site UUID.
         remarks: Additional notes.
@@ -295,6 +349,9 @@ async def create_spare_part(
         Created spare part with ID and calculated total_cost.
     """
     client = get_supabase_admin_client()
+
+    # Parse the date (flexible format)
+    parsed_date = parse_flexible_date(po_date)
 
     # Resolve plant_id from fleet_number if needed
     resolved_plant_id = None
@@ -334,22 +391,22 @@ async def create_spare_part(
             details=[{"field": "plant_id", "message": "Required", "code": "REQUIRED"}],
         )
 
-    # Calculate time dimensions from po_date if provided
+    # Calculate time dimensions from date if provided
     year = None
     month = None
     week_number = None
     quarter = None
-    if po_date:
-        year = po_date.year
-        month = po_date.month
-        week_number = po_date.isocalendar()[1]
+    if parsed_date:
+        year = parsed_date.year
+        month = parsed_date.month
+        week_number = parsed_date.isocalendar()[1]
         quarter = (month - 1) // 3 + 1
 
-    # Create spare part
+    # Create spare part (po_date = replaced_date, same thing)
     part_data = {
         "plant_id": resolved_plant_id,
         "part_description": part_description,
-        "replaced_date": str(replaced_date) if replaced_date else str(po_date) if po_date else None,
+        "replaced_date": str(parsed_date) if parsed_date else None,
         "part_number": part_number,
         "supplier": supplier,
         "reason_for_change": reason_for_change,
@@ -359,7 +416,7 @@ async def create_spare_part(
         "discount_percentage": discount_percentage,
         "other_costs": other_costs,
         "purchase_order_number": purchase_order_number.upper() if purchase_order_number else None,
-        "po_date": str(po_date) if po_date else None,
+        "po_date": str(parsed_date) if parsed_date else None,
         "requisition_number": requisition_number.upper() if requisition_number else None,
         "location_id": str(location_id) if location_id else None,
         "year": year,
@@ -415,7 +472,7 @@ async def create_spare_parts_bulk(
     current_user: Annotated[CurrentUser, Depends(require_admin)],
     fleet_number: str = Query(..., description="Fleet number for all items"),
     purchase_order_number: str = Query(..., description="PO number for all items"),
-    po_date: date | None = Query(None, description="PO date"),
+    po_date: str | None = Query(None, description="PO date (formats: 2026-01-13, 13-01-26, 13-January-26)"),
     requisition_number: str | None = Query(None, description="REQ NO"),
     location_id: UUID | None = Query(None, description="Location UUID"),
     supplier: str | None = Query(None, description="Vendor name"),
@@ -427,6 +484,8 @@ async def create_spare_parts_bulk(
 
     Use this when entering a PO with multiple line items for a single plant.
     All items share the same PO number, plant, location, and financial terms.
+
+    Date formats accepted: 2026-01-13, 13-01-2026, 13/01/26, 13-January-26, 13-Jan-26
 
     Args:
         fleet_number: Fleet number (the plant this PO is for).
@@ -454,6 +513,9 @@ async def create_spare_parts_bulk(
 
     client = get_supabase_admin_client()
 
+    # Parse the date (flexible format)
+    parsed_date = parse_flexible_date(po_date)
+
     # Parse items JSON
     try:
         items_list = json.loads(items)
@@ -477,9 +539,9 @@ async def create_spare_parts_bulk(
     resolved_fleet_number = plant.data[0]["fleet_number"]
 
     # Calculate time dimensions
-    year = po_date.year if po_date else None
-    month = po_date.month if po_date else None
-    week_number = po_date.isocalendar()[1] if po_date else None
+    year = parsed_date.year if parsed_date else None
+    month = parsed_date.month if parsed_date else None
+    week_number = parsed_date.isocalendar()[1] if parsed_date else None
     quarter = (month - 1) // 3 + 1 if month else None
 
     # Create all spare parts
@@ -497,8 +559,8 @@ async def create_spare_parts_bulk(
             "quantity": item.get("quantity", 1),
             "unit_cost": item.get("unit_cost"),
             "purchase_order_number": purchase_order_number.upper(),
-            "po_date": str(po_date) if po_date else None,
-            "replaced_date": str(po_date) if po_date else None,
+            "po_date": str(parsed_date) if parsed_date else None,
+            "replaced_date": str(parsed_date) if parsed_date else None,
             "requisition_number": requisition_number.upper() if requisition_number else None,
             "location_id": str(location_id) if location_id else None,
             "supplier": supplier,
