@@ -82,30 +82,29 @@ async def list_spare_parts(
     limit: int = Query(20, ge=1, le=100),
     plant_id: UUID | None = None,
     fleet_number: str | None = None,
+    location_id: UUID | None = None,
     supplier: str | None = None,
+    po_number: str | None = Query(None, description="Filter by PO number"),
     date_from: date | None = None,
     date_to: date | None = None,
+    year: int | None = None,
+    month: int | None = None,
+    week: int | None = None,
+    quarter: int | None = None,
     search: str | None = None,
 ) -> dict[str, Any]:
-    """List spare parts with filtering and pagination.
+    """List spare parts (PO line items) with filtering and pagination.
 
-    Args:
-        current_user: The authenticated user.
-        page: Page number.
-        limit: Items per page.
-        plant_id: Filter by plant.
-        fleet_number: Filter by fleet number.
-        supplier: Filter by supplier name.
-        date_from: Filter by date range start.
-        date_to: Filter by date range end.
-        search: Search in part description.
-
-    Returns:
-        Paginated list of spare parts.
+    Filter by:
+    - plant_id or fleet_number (specific plant)
+    - location_id (specific site)
+    - po_number (specific PO)
+    - date_from/date_to (date range)
+    - year, month, week, quarter (time periods)
+    - supplier, search (text search)
     """
     client = get_supabase_admin_client()
 
-    # Use a view that includes plant info
     query = (
         client.table("spare_parts")
         .select("*, plants_master(fleet_number, description)", count="exact")
@@ -114,20 +113,26 @@ async def list_spare_parts(
     # Apply filters
     if plant_id:
         query = query.eq("plant_id", str(plant_id))
-
     if fleet_number:
-        # Use the Supabase join filter to avoid a separate query
         query = query.eq("plants_master.fleet_number", fleet_number.upper())
-
+    if location_id:
+        query = query.eq("location_id", str(location_id))
     if supplier:
         query = query.ilike("supplier", f"%{supplier}%")
-
+    if po_number:
+        query = query.ilike("purchase_order_number", f"%{po_number}%")
     if date_from:
         query = query.gte("replaced_date", str(date_from))
-
     if date_to:
         query = query.lte("replaced_date", str(date_to))
-
+    if year:
+        query = query.eq("year", year)
+    if month:
+        query = query.eq("month", month)
+    if week:
+        query = query.eq("week_number", week)
+    if quarter:
+        query = query.eq("quarter", quarter)
     if search:
         query = query.or_(f"part_description.ilike.%{search}%,part_number.ilike.%{search}%")
 
@@ -1139,10 +1144,13 @@ async def list_purchase_orders(
     search: str | None = None,
     cost_type: str | None = Query(None, pattern="^(direct|shared)$"),
     year: int | None = None,
+    month: int | None = None,
+    week: int | None = None,
+    quarter: int | None = None,
 ) -> dict[str, Any]:
     """List purchase orders (aggregated from spare_parts).
 
-    Returns PO-level summaries grouped by purchase_order_number.
+    Filter by date range, year, month, week, quarter, location, vendor, cost_type.
     """
     client = get_supabase_admin_client()
 
@@ -1162,6 +1170,12 @@ async def list_purchase_orders(
         query = query.eq("cost_type", cost_type)
     if year:
         query = query.eq("year", year)
+    if month:
+        query = query.eq("month", month)
+    if week:
+        query = query.eq("week_number", week)
+    if quarter:
+        query = query.eq("quarter", quarter)
 
     offset = (page - 1) * limit
     query = query.range(offset, offset + limit - 1)
@@ -1170,6 +1184,9 @@ async def list_purchase_orders(
     result = query.execute()
     total = result.count or 0
 
+    # Calculate totals for filtered data
+    total_amount = sum(float(po.get("total_amount") or 0) for po in result.data or [])
+
     return {
         "success": True,
         "data": result.data,
@@ -1177,6 +1194,7 @@ async def list_purchase_orders(
             "page": page,
             "limit": limit,
             "total": total,
+            "total_amount": round(total_amount, 2),
             "total_pages": (total + limit - 1) // limit if total > 0 else 0,
         },
     }
@@ -1382,5 +1400,159 @@ async def get_overall_summary(
             "year": year,
             "month": month,
             "location_id": str(location_id) if location_id else None,
+        },
+    }
+
+
+@router.get("/analytics/by-period")
+async def get_costs_by_period(
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+    period: str = Query(..., pattern="^(week|month|quarter|year)$", description="Period type"),
+    year: int = Query(..., description="Year to analyze"),
+    plant_id: UUID | None = None,
+    location_id: UUID | None = None,
+) -> dict[str, Any]:
+    """Get costs grouped by period (week, month, quarter, year).
+
+    Returns totals for each week/month/quarter in the specified year,
+    useful for trend analysis and charts.
+    """
+    client = get_supabase_admin_client()
+
+    # Determine the grouping column
+    period_column = {
+        "week": "week_number",
+        "month": "month",
+        "quarter": "quarter",
+        "year": "year",
+    }[period]
+
+    query = (
+        client.table("spare_parts")
+        .select(f"{period_column}, total_cost, plant_id, purchase_order_number")
+        .eq("year", year)
+    )
+
+    if plant_id:
+        query = query.eq("plant_id", str(plant_id))
+    if location_id:
+        query = query.eq("location_id", str(location_id))
+
+    result = query.execute()
+    data = result.data or []
+
+    # Group by period
+    period_totals: dict[int, dict] = {}
+    for item in data:
+        p = item.get(period_column)
+        if p is None:
+            continue
+        if p not in period_totals:
+            period_totals[p] = {"total_cost": 0, "items_count": 0, "po_numbers": set()}
+        period_totals[p]["total_cost"] += float(item.get("total_cost") or 0)
+        period_totals[p]["items_count"] += 1
+        if item.get("purchase_order_number"):
+            period_totals[p]["po_numbers"].add(item["purchase_order_number"])
+
+    # Convert to list
+    periods = []
+    for p in sorted(period_totals.keys()):
+        periods.append({
+            period: p,
+            "total_cost": round(period_totals[p]["total_cost"], 2),
+            "items_count": period_totals[p]["items_count"],
+            "po_count": len(period_totals[p]["po_numbers"]),
+        })
+
+    grand_total = sum(p["total_cost"] for p in periods)
+
+    return {
+        "success": True,
+        "data": periods,
+        "meta": {
+            "period_type": period,
+            "year": year,
+            "plant_id": str(plant_id) if plant_id else None,
+            "location_id": str(location_id) if location_id else None,
+            "grand_total": round(grand_total, 2),
+            "periods_count": len(periods),
+        },
+    }
+
+
+@router.get("/analytics/year-over-year")
+async def get_year_over_year(
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+    years: str = Query(..., description="Comma-separated years to compare, e.g., '2025,2026'"),
+    plant_id: UUID | None = None,
+    location_id: UUID | None = None,
+    group_by: str = Query("month", pattern="^(month|quarter)$"),
+) -> dict[str, Any]:
+    """Compare costs year-over-year.
+
+    Returns monthly or quarterly totals for each year for comparison.
+    """
+    client = get_supabase_admin_client()
+
+    year_list = [int(y.strip()) for y in years.split(",") if y.strip().isdigit()]
+    if not year_list:
+        raise ValidationError("At least one valid year is required")
+
+    period_column = "month" if group_by == "month" else "quarter"
+
+    query = (
+        client.table("spare_parts")
+        .select(f"year, {period_column}, total_cost, purchase_order_number")
+        .in_("year", year_list)
+    )
+
+    if plant_id:
+        query = query.eq("plant_id", str(plant_id))
+    if location_id:
+        query = query.eq("location_id", str(location_id))
+
+    result = query.execute()
+    data = result.data or []
+
+    # Group by year and period
+    year_data: dict[int, dict[int, dict]] = {y: {} for y in year_list}
+    for item in data:
+        y = item.get("year")
+        p = item.get(period_column)
+        if y is None or p is None or y not in year_data:
+            continue
+        if p not in year_data[y]:
+            year_data[y][p] = {"total_cost": 0, "items_count": 0, "po_numbers": set()}
+        year_data[y][p]["total_cost"] += float(item.get("total_cost") or 0)
+        year_data[y][p]["items_count"] += 1
+        if item.get("purchase_order_number"):
+            year_data[y][p]["po_numbers"].add(item["purchase_order_number"])
+
+    # Format response
+    comparison = []
+    max_period = 12 if group_by == "month" else 4
+    for p in range(1, max_period + 1):
+        row = {group_by: p}
+        for y in year_list:
+            if p in year_data[y]:
+                row[str(y)] = round(year_data[y][p]["total_cost"], 2)
+            else:
+                row[str(y)] = 0
+        comparison.append(row)
+
+    # Yearly totals
+    yearly_totals = {}
+    for y in year_list:
+        yearly_totals[str(y)] = round(sum(d["total_cost"] for d in year_data[y].values()), 2)
+
+    return {
+        "success": True,
+        "data": comparison,
+        "meta": {
+            "years": year_list,
+            "group_by": group_by,
+            "plant_id": str(plant_id) if plant_id else None,
+            "location_id": str(location_id) if location_id else None,
+            "yearly_totals": yearly_totals,
         },
     }
