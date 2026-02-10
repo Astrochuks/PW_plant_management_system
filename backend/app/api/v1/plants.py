@@ -387,7 +387,7 @@ async def export_plants_excel(
     """Export plants to Excel file.
 
     Columns: Fleet Number, Description, Fleet Type, Make, Model, Location,
-    Physical Verification, Remarks
+    State, Physical Verification, Remarks
 
     Args:
         current_user: The authenticated user.
@@ -415,7 +415,7 @@ async def export_plants_excel(
     while True:
         query = (
             client.table("plants_master")
-            .select("fleet_number, description, fleet_type, make, model, current_location_id, physical_verification, remarks, condition, locations(name)")
+            .select("fleet_number, description, fleet_type, make, model, current_location_id, physical_verification, remarks, condition, locations(name, state)")
             .order("fleet_type")
             .order("fleet_number")
             .range(offset, offset + batch_size - 1)
@@ -457,6 +457,7 @@ async def export_plants_excel(
         "Make",
         "Model",
         "Location",
+        "State",
         "Physical Verification",
         "Remarks",
     ]
@@ -483,8 +484,11 @@ async def export_plants_excel(
     # Write data
     for row_idx, plant in enumerate(plants, 2):
         location_name = None
+        state_name = None
         if plant.get("locations"):
-            location_name = plant["locations"].get("name") if isinstance(plant["locations"], dict) else None
+            loc = plant["locations"] if isinstance(plant["locations"], dict) else {}
+            location_name = loc.get("name")
+            state_name = loc.get("state")
 
         row_data = [
             plant.get("fleet_number"),
@@ -493,6 +497,7 @@ async def export_plants_excel(
             plant.get("make"),
             plant.get("model"),
             location_name,
+            state_name,
             "Yes" if plant.get("physical_verification") else "No",
             plant.get("remarks"),
         ]
@@ -503,7 +508,7 @@ async def export_plants_excel(
             cell.alignment = Alignment(vertical="center", wrap_text=True)
 
     # Set column widths
-    column_widths = [15, 30, 25, 15, 15, 20, 18, 40]
+    column_widths = [15, 30, 25, 15, 15, 20, 12, 18, 40]
     for col_idx, width in enumerate(column_widths, 1):
         ws.column_dimensions[get_column_letter(col_idx)].width = width
 
