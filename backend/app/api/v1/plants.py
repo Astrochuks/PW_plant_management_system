@@ -381,6 +381,7 @@ async def export_plants_excel(
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
     exclude_not_seen: bool = Query(True, description="Exclude plants with 'not seen' in remarks"),
     location_id: UUID | None = Query(None, description="Filter by location"),
+    state: str | None = Query(None, description="Filter by state (e.g., 'Kaduna', 'FCT', 'Ogun')"),
     fleet_type: str | None = Query(None, description="Filter by fleet type"),
     condition: str | None = Query(None, pattern="^(good|faulty|needs_repair|scrap)$"),
 ) -> Any:
@@ -393,6 +394,7 @@ async def export_plants_excel(
         current_user: The authenticated user.
         exclude_not_seen: If true, exclude plants with 'not seen' in remarks.
         location_id: Filter by location.
+        state: Filter by state.
         fleet_type: Filter by fleet type.
         condition: Filter by condition (for filtering, not shown in export).
 
@@ -406,6 +408,17 @@ async def export_plants_excel(
     from openpyxl.utils import get_column_letter
 
     client = get_supabase_admin_client()
+
+    # If filtering by state, get location IDs for that state first
+    state_location_ids = None
+    if state:
+        state_locs = (
+            client.table("locations")
+            .select("id")
+            .ilike("state", state)
+            .execute()
+        )
+        state_location_ids = [loc["id"] for loc in (state_locs.data or [])]
 
     # Fetch all records using pagination (Supabase default limit is 1000)
     plants = []
@@ -427,6 +440,13 @@ async def export_plants_excel(
 
         if location_id:
             query = query.eq("current_location_id", str(location_id))
+        elif state_location_ids is not None:
+            # Filter by locations in the specified state
+            if state_location_ids:
+                query = query.in_("current_location_id", state_location_ids)
+            else:
+                # No locations found for this state, return empty
+                break
 
         if fleet_type:
             query = query.ilike("fleet_type", f"%{fleet_type}%")
@@ -613,6 +633,7 @@ async def list_plants(
     status: str | None = Query(None, pattern="^(working|standby|breakdown|missing|stolen|unverified|in_transit|off_hire)$"),
     condition: str | None = Query(None, pattern="^(good|faulty|needs_repair|scrap)$", description="Filter by physical condition"),
     location_id: UUID | None = None,
+    state: str | None = Query(None, description="Filter by state (e.g., 'Kaduna', 'FCT', 'Ogun')"),
     fleet_type: str | None = Query(None, description="Filter by fleet type name"),
     search: str | None = None,
     verified_only: bool = False,
@@ -628,6 +649,7 @@ async def list_plants(
         status: Filter by operational status (working, standby, breakdown, off_hire, in_transit, etc.).
         condition: Filter by physical condition (good, faulty, needs_repair, scrap).
         location_id: Filter by location.
+        state: Filter by state.
         fleet_type: Filter by fleet type name.
         search: Search in fleet_number, description.
         verified_only: Only show verified plants.
@@ -638,6 +660,17 @@ async def list_plants(
         Paginated list of plants with summary stats.
     """
     client = get_supabase_admin_client()
+
+    # If filtering by state, get location IDs for that state first
+    state_location_ids = None
+    if state:
+        state_locs = (
+            client.table("locations")
+            .select("id")
+            .ilike("state", state)
+            .execute()
+        )
+        state_location_ids = [loc["id"] for loc in (state_locs.data or [])]
 
     # Use the view for summary data
     query = client.table("v_plants_summary").select("*", count="exact")
@@ -658,6 +691,16 @@ async def list_plants(
         query = query.is_("current_location_id", "null")
     elif location_id:
         query = query.eq("current_location_id", str(location_id))
+    elif state_location_ids is not None:
+        # Filter by locations in the specified state
+        if state_location_ids:
+            query = query.in_("current_location_id", state_location_ids)
+        else:
+            # No locations found for this state, return empty
+            return PlantListResponse(
+                data=[],
+                meta={"page": page, "limit": limit, "total": 0, "total_pages": 0, "has_more": False},
+            )
 
     if fleet_type:
         query = query.ilike("fleet_type", f"%{fleet_type}%")
