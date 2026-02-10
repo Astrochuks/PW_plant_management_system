@@ -10,6 +10,7 @@ from app.api.v1 import (
     locations,
     fleet_types,
     spare_parts,
+    suppliers,
     reports,
     notifications,
     audit,
@@ -26,6 +27,7 @@ api_router.include_router(uploads.router, prefix="/uploads", tags=["Uploads"])
 api_router.include_router(locations.router, prefix="/locations", tags=["Locations"])
 api_router.include_router(fleet_types.router, prefix="/fleet-types", tags=["Fleet Types"])
 api_router.include_router(spare_parts.router, prefix="/spare-parts", tags=["Spare Parts / Purchase Orders"])
+api_router.include_router(suppliers.router, prefix="/suppliers", tags=["Suppliers"])
 api_router.include_router(reports.router, prefix="/reports", tags=["Reports"])
 api_router.include_router(notifications.router, prefix="/notifications", tags=["Notifications"])
 api_router.include_router(audit.router, prefix="/audit", tags=["Audit"])

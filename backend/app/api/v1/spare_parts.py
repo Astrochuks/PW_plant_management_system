@@ -652,7 +652,8 @@ async def create_spare_parts_bulk(
     po_date: str | None = Query(None, description="Date (13-January-26, 2026-01-13, etc.)"),
     requisition_number: str | None = Query(None, description="REQ NO"),
     location_id: UUID | None = Query(None, description="Location UUID"),
-    supplier: str | None = Query(None, description="Vendor name"),
+    supplier_id: UUID | None = Query(None, description="Supplier UUID (preferred)"),
+    supplier: str | None = Query(None, description="Vendor name (will resolve to supplier_id)"),
     vat_percentage: float | None = Query(None, ge=0, le=100, description="VAT %"),
     vat_amount: float | None = Query(None, ge=0, description="Total VAT amount"),
     discount_percentage: float | None = Query(None, ge=0, le=100, description="Discount %"),
@@ -684,6 +685,48 @@ async def create_spare_parts_bulk(
     from app.services.fleet_parser import parse_fleet_input, get_cost_classification
 
     client = get_supabase_admin_client()
+
+    # Check for duplicate PO - block if exists
+    po_upper = purchase_order_number.upper().strip()
+    existing_po = (
+        client.table("spare_parts")
+        .select("id, purchase_order_number")
+        .eq("purchase_order_number", po_upper)
+        .limit(1)
+        .execute()
+    )
+
+    if existing_po.data:
+        raise ValidationError(
+            f"PO '{po_upper}' already exists. Use PATCH /spare-parts/{{id}} to edit existing line items.",
+            details=[{"field": "purchase_order_number", "message": "Already exists", "code": "DUPLICATE_PO"}],
+        )
+
+    # Resolve supplier_id from supplier name if not provided directly
+    resolved_supplier_id = None
+    resolved_supplier_name = None
+
+    if supplier_id:
+        # Verify supplier exists
+        sup = client.table("suppliers").select("id, name").eq("id", str(supplier_id)).execute()
+        if sup.data:
+            resolved_supplier_id = str(supplier_id)
+            resolved_supplier_name = sup.data[0]["name"]
+        else:
+            raise ValidationError(f"Supplier with ID '{supplier_id}' not found")
+    elif supplier:
+        # Try to find existing supplier by name
+        sup = client.table("suppliers").select("id, name").ilike("name", supplier.strip()).execute()
+        if sup.data:
+            resolved_supplier_id = sup.data[0]["id"]
+            resolved_supplier_name = sup.data[0]["name"]
+        else:
+            # Create new supplier
+            new_sup = client.table("suppliers").insert({"name": supplier.strip()}).execute()
+            if new_sup.data:
+                resolved_supplier_id = new_sup.data[0]["id"]
+                resolved_supplier_name = new_sup.data[0]["name"]
+                logger.info("Created new supplier", supplier_name=supplier.strip())
 
     # Parse the date
     parsed_date = parse_flexible_date(po_date)
@@ -785,7 +828,8 @@ async def create_spare_parts_bulk(
                 "replaced_date": str(parsed_date) if parsed_date else None,
                 "requisition_number": requisition_number.upper() if requisition_number else None,
                 "location_id": str(location_id) if location_id else None,
-                "supplier": supplier,
+                "supplier_id": resolved_supplier_id,
+                "supplier": resolved_supplier_name,
                 "vat_amount": round(item_vat, 2) if item_vat > 0 else None,
                 "discount_amount": round(item_discount, 2) if item_discount > 0 else None,
                 "other_costs": round(item_other, 2) if item_other > 0 else None,
@@ -1138,6 +1182,7 @@ async def list_purchase_orders(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     location_id: UUID | None = None,
+    supplier_id: UUID | None = Query(None, description="Filter by supplier"),
     date_from: date | None = None,
     date_to: date | None = None,
     vendor: str | None = None,
@@ -1147,10 +1192,13 @@ async def list_purchase_orders(
     month: int | None = None,
     week: int | None = None,
     quarter: int | None = None,
+    sort_by: str = Query("po_date", pattern="^(po_date|created_at)$", description="Sort by: po_date (default) or created_at (recently added)"),
+    sort_order: str = Query("desc", pattern="^(asc|desc)$", description="Sort order: asc or desc"),
 ) -> dict[str, Any]:
     """List purchase orders (aggregated from spare_parts).
 
-    Filter by date range, year, month, week, quarter, location, vendor, cost_type.
+    Filter by date range, year, month, week, quarter, location, vendor, supplier, cost_type.
+    Sort by po_date (PO date) or created_at (recently added).
     """
     client = get_supabase_admin_client()
 
@@ -1158,6 +1206,8 @@ async def list_purchase_orders(
 
     if location_id:
         query = query.eq("location_id", str(location_id))
+    if supplier_id:
+        query = query.eq("supplier_id", str(supplier_id))
     if date_from:
         query = query.gte("po_date", str(date_from))
     if date_to:
@@ -1179,7 +1229,7 @@ async def list_purchase_orders(
 
     offset = (page - 1) * limit
     query = query.range(offset, offset + limit - 1)
-    query = query.order("po_date", desc=True)
+    query = query.order(sort_by, desc=(sort_order == "desc"))
 
     result = query.execute()
     total = result.count or 0
