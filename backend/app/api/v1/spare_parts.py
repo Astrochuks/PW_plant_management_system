@@ -180,18 +180,23 @@ async def autocomplete_suppliers(
     """
     client = get_supabase_admin_client()
 
-    result = client.rpc(
-        "search_distinct_values",
-        {
-            "p_table": "spare_parts",
-            "p_column": "supplier",
-            "p_search": q,
-            "p_limit": limit,
-        },
-    ).execute()
+    try:
+        result = client.rpc(
+            "search_distinct_values",
+            {
+                "p_table": "spare_parts",
+                "p_column": "supplier",
+                "p_search": q,
+                "p_limit": limit,
+            },
+        ).execute()
 
-    # Fallback if RPC doesn't exist - use direct query
-    if not result.data and result.data != []:
+        # Extract just the values from the RPC result
+        suggestions = [row.get("value") for row in (result.data or []) if row.get("value")]
+        return {"success": True, "data": suggestions}
+
+    except Exception:
+        # Fallback if RPC fails - use direct query
         result = (
             client.table("spare_parts")
             .select("supplier")
@@ -211,8 +216,6 @@ async def autocomplete_suppliers(
                 if len(suggestions) >= limit:
                     break
         return {"success": True, "data": suggestions}
-
-    return {"success": True, "data": result.data or []}
 
 
 @router.get("/autocomplete/descriptions")
@@ -234,18 +237,23 @@ async def autocomplete_descriptions(
     """
     client = get_supabase_admin_client()
 
-    result = client.rpc(
-        "search_distinct_values",
-        {
-            "p_table": "spare_parts",
-            "p_column": "part_description",
-            "p_search": q,
-            "p_limit": limit,
-        },
-    ).execute()
+    try:
+        result = client.rpc(
+            "search_distinct_values",
+            {
+                "p_table": "spare_parts",
+                "p_column": "part_description",
+                "p_search": q,
+                "p_limit": limit,
+            },
+        ).execute()
 
-    # Fallback if RPC doesn't exist - use direct query
-    if not result.data and result.data != []:
+        # Extract just the values from the RPC result
+        suggestions = [row.get("value") for row in (result.data or []) if row.get("value")]
+        return {"success": True, "data": suggestions}
+
+    except Exception:
+        # Fallback if RPC fails - use direct query
         result = (
             client.table("spare_parts")
             .select("part_description")
@@ -264,8 +272,6 @@ async def autocomplete_descriptions(
                 if len(suggestions) >= limit:
                     break
         return {"success": True, "data": suggestions}
-
-    return {"success": True, "data": result.data or []}
 
 
 @router.get("/autocomplete/po-numbers")
