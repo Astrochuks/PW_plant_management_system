@@ -645,7 +645,7 @@ async def create_spare_parts_bulk(
     vat_amount: float | None = Query(default=None, ge=0, description="Absolute VAT per item (use this OR vat_percentage)"),
     discount_percentage: float | None = Query(default=None, ge=0, le=100, description="Discount % (use this OR discount_amount)"),
     discount_amount: float | None = Query(default=None, ge=0, description="Absolute discount per item (use this OR discount_percentage)"),
-    items: str = Query(..., description="JSON array of items: [{description, quantity, unit_cost, part_number?, vat_amount?, discount_amount?}]"),
+    items: str = Query(..., description="Items in JSON or simple format. Simple: description|qty|cost|part_no separated by semicolons"),
 ) -> dict[str, Any]:
     """Create multiple spare parts / PO line items at once.
 
@@ -654,10 +654,21 @@ async def create_spare_parts_bulk(
 
     Date formats accepted: 2026-01-13, 13-01-2026, 13/01/26, 13-January-26, 13-Jan-26
 
+    **Items Format Options:**
+
+    1. SIMPLE FORMAT (recommended for manual entry):
+       description|quantity|unit_cost|part_number
+       Separate multiple items with semicolons (;)
+
+       Example:
+       NOZZLE SET CAT|6|415000|170-5181;TIPS|8|35000|1U3352;PIN|8|12000|114-0358
+
+    2. JSON FORMAT:
+       [{"description": "Filter", "quantity": 2, "unit_cost": 5000, "part_number": "ABC123"}]
+
     VAT and discount can be provided as:
     - Percentages at the PO level (applied to all items)
     - Absolute amounts at the PO level (applied to all items)
-    - Absolute amounts per item (in the items JSON array)
 
     Args:
         fleet_number: Fleet number (the plant this PO is for).
@@ -670,17 +681,13 @@ async def create_spare_parts_bulk(
         vat_amount: Absolute VAT amount per item (use this OR vat_percentage).
         discount_percentage: Discount % applied to all items (use this OR discount_amount).
         discount_amount: Absolute discount amount per item (use this OR discount_percentage).
-        items: JSON array of line items, each with:
-            - description (required): Part description
-            - quantity (optional, default 1): Quantity
-            - unit_cost (optional): Unit cost
-            - part_number (optional): Part number
-            - vat_amount (optional): Override VAT amount for this item
-            - discount_amount (optional): Override discount amount for this item
+        items: Line items in simple or JSON format.
 
-    Example items parameter:
-        [{"description": "Filter", "quantity": 2, "unit_cost": 5000},
-         {"description": "Seal Kit", "quantity": 1, "unit_cost": 15000, "vat_amount": 1125}]
+    Simple format example:
+        NOZZLE SET CAT|6|415000|170-5181;TIPS|8|35000|1U3352
+
+    JSON format example:
+        [{"description": "Filter", "quantity": 2, "unit_cost": 5000}]
 
     Returns:
         Created spare parts with total cost.
@@ -692,13 +699,52 @@ async def create_spare_parts_bulk(
     # Parse the date (flexible format)
     parsed_date = parse_flexible_date(po_date)
 
-    # Parse items JSON
-    try:
-        items_list = json.loads(items)
-        if not isinstance(items_list, list) or not items_list:
-            raise ValidationError("items must be a non-empty JSON array")
-    except json.JSONDecodeError as e:
-        raise ValidationError(f"Invalid JSON in items parameter: {str(e)}")
+    # Parse items - support both JSON and simple pipe-separated format
+    items_list = []
+    items_stripped = items.strip()
+
+    if items_stripped.startswith("["):
+        # JSON format
+        try:
+            items_list = json.loads(items_stripped)
+            if not isinstance(items_list, list) or not items_list:
+                raise ValidationError("items must be a non-empty JSON array")
+        except json.JSONDecodeError as e:
+            raise ValidationError(f"Invalid JSON in items parameter: {str(e)}")
+    else:
+        # Simple format: description|quantity|unit_cost|part_number;next_item...
+        # Split by semicolon for multiple items
+        item_strings = [s.strip() for s in items_stripped.split(";") if s.strip()]
+
+        for item_str in item_strings:
+            parts = [p.strip() for p in item_str.split("|")]
+            if not parts or not parts[0]:
+                continue  # Skip empty items
+
+            item_dict = {"description": parts[0]}
+
+            # Parse quantity (default 1)
+            if len(parts) > 1 and parts[1]:
+                try:
+                    item_dict["quantity"] = int(parts[1])
+                except ValueError:
+                    item_dict["quantity"] = 1
+
+            # Parse unit_cost
+            if len(parts) > 2 and parts[2]:
+                try:
+                    item_dict["unit_cost"] = float(parts[2])
+                except ValueError:
+                    pass
+
+            # Parse part_number
+            if len(parts) > 3 and parts[3]:
+                item_dict["part_number"] = parts[3]
+
+            items_list.append(item_dict)
+
+        if not items_list:
+            raise ValidationError("No valid items found. Use format: description|quantity|unit_cost|part_number separated by semicolons")
 
     # Look up plant by fleet number
     plant = (
