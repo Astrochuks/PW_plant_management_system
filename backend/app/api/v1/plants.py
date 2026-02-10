@@ -376,6 +376,151 @@ async def get_fleet_utilization(
     }
 
 
+@router.get("/export/excel")
+async def export_plants_excel(
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+    exclude_not_seen: bool = Query(True, description="Exclude plants with 'not seen' in remarks"),
+    location_id: UUID | None = Query(None, description="Filter by location"),
+    fleet_type: str | None = Query(None, description="Filter by fleet type"),
+    condition: str | None = Query(None, pattern="^(good|faulty|needs_repair|scrap)$"),
+) -> Any:
+    """Export plants to Excel file.
+
+    Columns: Fleet Number, Description, Fleet Type, Make, Model, Location,
+    Physical Verification, Remarks, Condition
+
+    Args:
+        current_user: The authenticated user.
+        exclude_not_seen: If true, exclude plants with 'not seen' in remarks.
+        location_id: Filter by location.
+        fleet_type: Filter by fleet type.
+        condition: Filter by condition.
+
+    Returns:
+        Excel file download.
+    """
+    import io
+    from fastapi.responses import StreamingResponse
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    client = get_supabase_admin_client()
+
+    # Build query
+    query = (
+        client.table("plants_master")
+        .select("fleet_number, description, fleet_type, make, model, current_location_id, physical_verification, remarks, condition, locations(name)")
+        .order("fleet_type")
+        .order("fleet_number")
+    )
+
+    # Apply filters
+    if exclude_not_seen:
+        query = query.or_("remarks.not.ilike.%not seen%,remarks.is.null")
+
+    if location_id:
+        query = query.eq("current_location_id", str(location_id))
+
+    if fleet_type:
+        query = query.ilike("fleet_type", f"%{fleet_type}%")
+
+    if condition:
+        query = query.eq("condition", condition)
+
+    result = query.execute()
+    plants = result.data or []
+
+    # Create Excel workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Plants"
+
+    # Define headers
+    headers = [
+        "Fleet Number",
+        "Description",
+        "Fleet Type",
+        "Make",
+        "Model",
+        "Location",
+        "Physical Verification",
+        "Remarks",
+        "Condition",
+    ]
+
+    # Style definitions
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+    header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    thin_border = Border(
+        left=Side(style="thin"),
+        right=Side(style="thin"),
+        top=Side(style="thin"),
+        bottom=Side(style="thin"),
+    )
+
+    # Write headers
+    for col, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_alignment
+        cell.border = thin_border
+
+    # Write data
+    for row_idx, plant in enumerate(plants, 2):
+        location_name = None
+        if plant.get("locations"):
+            location_name = plant["locations"].get("name") if isinstance(plant["locations"], dict) else None
+
+        row_data = [
+            plant.get("fleet_number"),
+            plant.get("description"),
+            plant.get("fleet_type"),
+            plant.get("make"),
+            plant.get("model"),
+            location_name,
+            "Yes" if plant.get("physical_verification") else "No",
+            plant.get("remarks"),
+            plant.get("condition"),
+        ]
+
+        for col_idx, value in enumerate(row_data, 1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=value)
+            cell.border = thin_border
+            cell.alignment = Alignment(vertical="center", wrap_text=True)
+
+    # Set column widths
+    column_widths = [15, 30, 25, 15, 15, 20, 18, 40, 12]
+    for col_idx, width in enumerate(column_widths, 1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+
+    # Freeze header row
+    ws.freeze_panes = "A2"
+
+    # Save to buffer
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+
+    # Generate filename
+    from datetime import datetime
+    filename = f"plants_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+
+    logger.info(
+        "Plants exported to Excel",
+        plants_count=len(plants),
+        user_id=current_user.id,
+    )
+
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
 @router.get("/stats")
 async def get_plant_stats(
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
