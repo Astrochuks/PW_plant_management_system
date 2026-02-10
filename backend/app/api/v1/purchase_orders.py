@@ -1,6 +1,6 @@
 """Purchase order management endpoints."""
 
-from datetime import date
+from datetime import date, datetime
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -23,12 +23,338 @@ from app.services.fleet_parser import (
     get_cost_classification,
 )
 
+
+def parse_flexible_date(date_str: str | None) -> date | None:
+    """Parse date from various formats."""
+    if not date_str:
+        return None
+    if isinstance(date_str, date):
+        return date_str
+
+    date_str = date_str.strip()
+    formats = [
+        "%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%d-%m-%y", "%d/%m/%y",
+        "%d-%B-%y", "%d-%B-%Y", "%d-%b-%y", "%d-%b-%Y",
+        "%d %B %Y", "%d %B %y", "%d %b %Y", "%d %b %y",
+        "%B %d, %Y", "%b %d, %Y",
+    ]
+    for fmt in formats:
+        try:
+            return datetime.strptime(date_str, fmt).date()
+        except ValueError:
+            continue
+    raise ValidationError(f"Could not parse date '{date_str}'")
+
+
+def parse_items_input(items_str: str) -> list[dict]:
+    """Parse items from simple or JSON format."""
+    import json
+
+    items_list = []
+    items_stripped = items_str.strip()
+
+    if not items_stripped:
+        return []
+
+    if items_stripped.startswith("["):
+        # JSON format
+        try:
+            items_list = json.loads(items_stripped)
+            if not isinstance(items_list, list):
+                raise ValidationError("items must be a JSON array")
+        except json.JSONDecodeError as e:
+            raise ValidationError(f"Invalid JSON: {str(e)}")
+    else:
+        # Simple format: description|quantity|unit_cost|part_number;next...
+        item_strings = [s.strip() for s in items_stripped.split(";") if s.strip()]
+
+        for item_str in item_strings:
+            parts = [p.strip() for p in item_str.split("|")]
+            if not parts or not parts[0]:
+                continue
+
+            item_dict = {"description": parts[0]}
+            if len(parts) > 1 and parts[1]:
+                try:
+                    item_dict["quantity"] = int(parts[1])
+                except ValueError:
+                    item_dict["quantity"] = 1
+            if len(parts) > 2 and parts[2]:
+                try:
+                    item_dict["unit_cost"] = float(parts[2])
+                except ValueError:
+                    pass
+            if len(parts) > 3 and parts[3]:
+                item_dict["part_number"] = parts[3]
+
+            items_list.append(item_dict)
+
+    return items_list
+
 router = APIRouter()
 logger = get_logger(__name__)
 
 
 # Valid file extensions for PO document attachments
 ALLOWED_PO_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".xlsx", ".xls"}
+
+
+@router.post("/entry", status_code=201)
+async def create_purchase_order_entry(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+    po_number: str = Query(..., description="PO number from document"),
+    po_date: str | None = Query(None, description="Date (formats: 2026-01-13, 13-01-26, 13-January-26)"),
+    vendor: str | None = Query(None, description="Vendor/supplier name"),
+    fleet_numbers: str = Query(..., description="Fleet(s): T468, 463, WORKSHOP, LOW LOADER"),
+    items: str = Query(..., description="Items: desc|qty|cost|part_no;next... OR JSON array"),
+    location_id: UUID | None = Query(None, description="Location UUID (select from dropdown)"),
+    req_no: str | None = Query(None, description="REQ NO(s): KWOI 2345, ABJ 2340"),
+    vat_percentage: float | None = Query(None, ge=0, le=100, description="VAT % (use this OR vat_amount)"),
+    vat_amount: float | None = Query(None, ge=0, description="Total VAT amount"),
+    discount_percentage: float | None = Query(None, ge=0, le=100, description="Discount %"),
+    discount_amount: float | None = Query(None, ge=0, description="Total discount amount"),
+    other_costs: float = Query(default=0, ge=0, description="Shipping, handling, etc."),
+    notes: str | None = Query(None, description="Additional notes"),
+) -> dict[str, Any]:
+    """
+    **UNIFIED PO ENTRY ENDPOINT**
+
+    This is the main endpoint for entering ALL purchase orders - single or multi-fleet,
+    workshop costs, category entries, everything.
+
+    **Fleet Numbers Examples:**
+    - Single fleet: `T468`
+    - Multiple fleets: `T468, 463, 466` (463, 466 inherit T prefix)
+    - Workshop: `WORKSHOP` or `W/SHOP`
+    - Categories: `LOW LOADER`, `VOLVO`, `CONSUMABLES`, `PRECAST`
+    - Mixed: `T468, 463, WORKSHOP, LOW LOADER`
+
+    **Items Format (Simple - recommended):**
+    ```
+    NOZZLE SET|6|415000|170-5181;TIPS|8|35000|1U3352;PIN|8|12000
+    ```
+    Format: description|quantity|unit_cost|part_number (separated by semicolons)
+
+    **Items Format (JSON):**
+    ```json
+    [{"description": "NOZZLE SET", "quantity": 6, "unit_cost": 415000, "part_number": "170-5181"}]
+    ```
+
+    **Date Formats Accepted:**
+    2026-01-13, 13-01-2026, 13/01/26, 13-January-26, 13-Jan-26
+
+    **What Gets Created:**
+    1. `purchase_orders` record (PO header)
+    2. `spare_parts` records (line items, linked to PO)
+    3. `purchase_order_fleets` records (fleet associations)
+    4. Cost classification: 'direct' (single plant) or 'shared' (multi-fleet/workshop/category)
+    """
+    client = get_supabase_admin_client()
+
+    # Parse date
+    parsed_date = parse_flexible_date(po_date)
+
+    # Parse items
+    items_list = parse_items_input(items)
+    if not items_list:
+        raise ValidationError("At least one item is required")
+
+    # Parse fleet numbers
+    parsed_fleets = parse_fleet_input(fleet_numbers)
+    if not parsed_fleets:
+        raise ValidationError("At least one fleet number is required")
+
+    # Check for duplicate PO
+    existing = (
+        client.table("purchase_orders")
+        .select("id")
+        .eq("po_number", po_number.upper())
+        .execute()
+    )
+    if existing.data:
+        raise ValidationError(
+            f"PO {po_number.upper()} already exists",
+            details=[{"field": "po_number", "code": "DUPLICATE"}],
+        )
+
+    # Determine cost type
+    cost_type = get_cost_classification(parsed_fleets)
+
+    # Calculate time dimensions
+    year = parsed_date.year if parsed_date else None
+    month = parsed_date.month if parsed_date else None
+    week_number = parsed_date.isocalendar()[1] if parsed_date else None
+    quarter = (month - 1) // 3 + 1 if month else None
+
+    # Calculate totals
+    subtotal = sum(
+        (item.get("unit_cost") or 0) * (item.get("quantity") or 1)
+        for item in items_list
+    )
+
+    # Calculate VAT and discount
+    if vat_amount is not None:
+        calculated_vat = vat_amount
+        effective_vat_pct = (vat_amount / subtotal * 100) if subtotal > 0 else 0
+    else:
+        effective_vat_pct = vat_percentage or 0
+        calculated_vat = subtotal * effective_vat_pct / 100
+
+    if discount_amount is not None:
+        calculated_discount = discount_amount
+        effective_discount_pct = (discount_amount / subtotal * 100) if subtotal > 0 else 0
+    else:
+        effective_discount_pct = discount_percentage or 0
+        calculated_discount = subtotal * effective_discount_pct / 100
+
+    total_amount = subtotal + calculated_vat - calculated_discount + other_costs
+
+    # Create PO header
+    po_data = {
+        "po_number": po_number.upper(),
+        "po_date": str(parsed_date) if parsed_date else None,
+        "vendor": vendor,
+        "req_no": req_no.upper() if req_no else None,
+        "location_id": str(location_id) if location_id else None,
+        "subtotal": round(subtotal, 2),
+        "vat_percentage": round(effective_vat_pct, 2),
+        "discount_percentage": round(effective_discount_pct, 2),
+        "other_costs": other_costs,
+        "total_amount": round(total_amount, 2),
+        "notes": notes,
+        "cost_type": cost_type,
+        "year": year,
+        "month": month,
+        "week_number": week_number,
+        "quarter": quarter,
+        "created_by": current_user.id,
+    }
+
+    po_result = client.table("purchase_orders").insert(po_data).execute()
+    created_po = po_result.data[0]
+    po_id = created_po["id"]
+
+    # Create fleet associations
+    fleets_created = []
+    resolved_plant_ids = []
+    for pf in parsed_fleets:
+        fleet_data = {
+            "purchase_order_id": po_id,
+            "fleet_number_raw": pf["fleet_number_raw"],
+            "plant_id": pf["plant_id"],
+            "fleet_type": pf["fleet_type"],
+            "is_workshop": pf["is_workshop"],
+            "is_category": pf.get("is_category", False),
+            "category_name": pf.get("category_name"),
+            "is_resolved": pf["is_resolved"],
+        }
+        fleet_result = client.table("purchase_order_fleets").insert(fleet_data).execute()
+        fleets_created.append(fleet_result.data[0])
+        if pf["plant_id"]:
+            resolved_plant_ids.append(pf["plant_id"])
+
+    # Create spare_parts records (line items) for each resolved plant
+    # If multiple plants, items are associated with each plant
+    # If no resolved plants (workshop/category only), create items without plant_id
+    items_created = []
+
+    # Determine which plant_ids to create items for
+    plant_ids_for_items = resolved_plant_ids if resolved_plant_ids else [None]
+
+    # Distribute VAT/discount per item proportionally
+    for plant_id in plant_ids_for_items:
+        for item in items_list:
+            item_subtotal = (item.get("unit_cost") or 0) * (item.get("quantity") or 1)
+
+            # Proportional VAT/discount for this item
+            if subtotal > 0:
+                item_vat = calculated_vat * (item_subtotal / subtotal) / len(plant_ids_for_items)
+                item_discount = calculated_discount * (item_subtotal / subtotal) / len(plant_ids_for_items)
+            else:
+                item_vat = 0
+                item_discount = 0
+
+            spare_part_data = {
+                "plant_id": plant_id,
+                "purchase_order_id": po_id,
+                "purchase_order_number": po_number.upper(),
+                "part_description": item.get("description"),
+                "part_number": item.get("part_number"),
+                "quantity": item.get("quantity", 1),
+                "unit_cost": item.get("unit_cost"),
+                "vat_amount": round(item_vat, 2) if item_vat > 0 else None,
+                "discount_amount": round(item_discount, 2) if item_discount > 0 else None,
+                "vat_percentage": 0,  # Using amounts instead
+                "discount_percentage": 0,
+                "supplier": vendor,
+                "replaced_date": str(parsed_date) if parsed_date else None,
+                "po_date": str(parsed_date) if parsed_date else None,
+                "requisition_number": req_no.upper() if req_no else None,
+                "location_id": str(location_id) if location_id else None,
+                "year": year,
+                "month": month,
+                "week_number": week_number,
+                "quarter": quarter,
+                "created_by": current_user.id,
+            }
+
+            item_result = client.table("spare_parts").insert(spare_part_data).execute()
+            items_created.append(item_result.data[0])
+
+    # Calculate total from created items
+    total_from_items = sum(float(i.get("total_cost") or 0) for i in items_created)
+
+    logger.info(
+        "PO entry created",
+        po_id=po_id,
+        po_number=po_number.upper(),
+        cost_type=cost_type,
+        fleets_count=len(fleets_created),
+        items_count=len(items_created),
+        plants_count=len(resolved_plant_ids),
+        total_amount=total_amount,
+        user_id=current_user.id,
+    )
+
+    background_tasks.add_task(
+        audit_service.log,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        action="create",
+        table_name="purchase_orders",
+        record_id=po_id,
+        new_values={"po_number": po_number, "fleet_numbers": fleet_numbers, "items_count": len(items_list)},
+        ip_address=get_client_ip(request),
+        description=f"Created PO {po_number.upper()} - {cost_type} - {len(items_list)} items",
+    )
+
+    return {
+        "success": True,
+        "data": {
+            "purchase_order": created_po,
+            "fleets": fleets_created,
+            "items": items_created,
+        },
+        "meta": {
+            "po_id": po_id,
+            "po_number": po_number.upper(),
+            "cost_type": cost_type,
+            "fleets_count": len(fleets_created),
+            "items_count": len(items_created),
+            "plants_resolved": len(resolved_plant_ids),
+            "plants_unresolved": sum(1 for f in fleets_created if not f.get("plant_id") and not f.get("is_workshop") and not f.get("is_category")),
+            "has_workshop": any(f.get("is_workshop") for f in fleets_created),
+            "has_category": any(f.get("is_category") for f in fleets_created),
+            "subtotal": round(subtotal, 2),
+            "vat": round(calculated_vat, 2),
+            "discount": round(calculated_discount, 2),
+            "other_costs": other_costs,
+            "total": round(total_amount, 2),
+            "total_from_items": round(total_from_items, 2),
+        },
+    }
 
 
 @router.get("")
