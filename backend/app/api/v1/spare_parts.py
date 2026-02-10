@@ -1123,3 +1123,264 @@ async def delete_spare_part(
         "success": True,
         "message": "Spare part deleted successfully",
     }
+
+
+# ============== PO-LEVEL ENDPOINTS ==============
+
+@router.get("/pos")
+async def list_purchase_orders(
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    location_id: UUID | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    vendor: str | None = None,
+    search: str | None = None,
+    cost_type: str | None = Query(None, pattern="^(direct|shared)$"),
+    year: int | None = None,
+) -> dict[str, Any]:
+    """List purchase orders (aggregated from spare_parts).
+
+    Returns PO-level summaries grouped by purchase_order_number.
+    """
+    client = get_supabase_admin_client()
+
+    query = client.table("v_purchase_orders_summary").select("*", count="exact")
+
+    if location_id:
+        query = query.eq("location_id", str(location_id))
+    if date_from:
+        query = query.gte("po_date", str(date_from))
+    if date_to:
+        query = query.lte("po_date", str(date_to))
+    if vendor:
+        query = query.ilike("vendor", f"%{vendor}%")
+    if search:
+        query = query.or_(f"po_number.ilike.%{search}%,vendor.ilike.%{search}%")
+    if cost_type:
+        query = query.eq("cost_type", cost_type)
+    if year:
+        query = query.eq("year", year)
+
+    offset = (page - 1) * limit
+    query = query.range(offset, offset + limit - 1)
+    query = query.order("po_date", desc=True)
+
+    result = query.execute()
+    total = result.count or 0
+
+    return {
+        "success": True,
+        "data": result.data,
+        "meta": {
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "total_pages": (total + limit - 1) // limit if total > 0 else 0,
+        },
+    }
+
+
+@router.get("/plant/{plant_id}/costs")
+async def get_plant_costs(
+    plant_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+    year: int | None = None,
+    month: int | None = None,
+    quarter: int | None = None,
+    week: int | None = None,
+) -> dict[str, Any]:
+    """Get maintenance costs for a specific plant.
+
+    Filter by year, month, quarter, or week for time-based analysis.
+    """
+    client = get_supabase_admin_client()
+
+    # Get plant info
+    plant_result = (
+        client.table("plants_master")
+        .select("id, fleet_number, description, fleet_type, current_location_id, locations(name)")
+        .eq("id", str(plant_id))
+        .single()
+        .execute()
+    )
+
+    if not plant_result.data:
+        raise NotFoundError("Plant", str(plant_id))
+
+    plant = plant_result.data
+    location_info = plant.pop("locations", {}) or {}
+    plant["current_location"] = location_info.get("name")
+
+    # Get costs using RPC
+    costs_result = client.rpc(
+        "get_plant_costs_by_period",
+        {
+            "p_plant_id": str(plant_id),
+            "p_year": year,
+            "p_month": month,
+            "p_quarter": quarter,
+            "p_week": week,
+        },
+    ).execute()
+
+    costs = costs_result.data[0] if costs_result.data else {
+        "total_cost": 0,
+        "parts_count": 0,
+        "po_count": 0,
+    }
+
+    # Get recent spare parts for this plant
+    parts_query = (
+        client.table("spare_parts")
+        .select("id, part_description, quantity, total_cost, purchase_order_number, replaced_date, supplier")
+        .eq("plant_id", str(plant_id))
+    )
+
+    if year:
+        parts_query = parts_query.eq("year", year)
+    if month:
+        parts_query = parts_query.eq("month", month)
+    if quarter:
+        parts_query = parts_query.eq("quarter", quarter)
+    if week:
+        parts_query = parts_query.eq("week_number", week)
+
+    parts_query = parts_query.order("replaced_date", desc=True).limit(20)
+    parts_result = parts_query.execute()
+
+    return {
+        "success": True,
+        "data": {
+            "plant": plant,
+            "costs": {
+                "total_cost": float(costs.get("total_cost") or 0),
+                "parts_count": int(costs.get("parts_count") or 0),
+                "po_count": int(costs.get("po_count") or 0),
+            },
+            "recent_parts": parts_result.data or [],
+        },
+        "meta": {
+            "year": year,
+            "month": month,
+            "quarter": quarter,
+            "week": week,
+        },
+    }
+
+
+@router.get("/location/{location_id}/costs")
+async def get_location_costs(
+    location_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+    year: int | None = None,
+    month: int | None = None,
+) -> dict[str, Any]:
+    """Get maintenance costs for a specific location/site."""
+    client = get_supabase_admin_client()
+
+    # Get location info
+    location_result = (
+        client.table("locations")
+        .select("id, name")
+        .eq("id", str(location_id))
+        .single()
+        .execute()
+    )
+
+    if not location_result.data:
+        raise NotFoundError("Location", str(location_id))
+
+    location = location_result.data
+
+    # Get costs for this location
+    query = (
+        client.table("spare_parts")
+        .select("total_cost, plant_id, is_workshop, is_category")
+        .eq("location_id", str(location_id))
+    )
+
+    if year:
+        query = query.eq("year", year)
+    if month:
+        query = query.eq("month", month)
+
+    result = query.execute()
+    data = result.data or []
+
+    total_cost = sum(float(r.get("total_cost") or 0) for r in data)
+    direct_cost = sum(float(r.get("total_cost") or 0) for r in data if r.get("plant_id") and not r.get("is_workshop") and not r.get("is_category"))
+    workshop_cost = sum(float(r.get("total_cost") or 0) for r in data if r.get("is_workshop"))
+    category_cost = sum(float(r.get("total_cost") or 0) for r in data if r.get("is_category"))
+
+    return {
+        "success": True,
+        "data": {
+            "location": location,
+            "costs": {
+                "total_cost": round(total_cost, 2),
+                "direct_cost": round(direct_cost, 2),
+                "workshop_cost": round(workshop_cost, 2),
+                "category_cost": round(category_cost, 2),
+            },
+            "items_count": len(data),
+            "plants_count": len(set(r.get("plant_id") for r in data if r.get("plant_id"))),
+        },
+        "meta": {
+            "year": year,
+            "month": month,
+        },
+    }
+
+
+@router.get("/summary")
+async def get_overall_summary(
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+    year: int | None = None,
+    month: int | None = None,
+    location_id: UUID | None = None,
+) -> dict[str, Any]:
+    """Get overall maintenance cost summary."""
+    client = get_supabase_admin_client()
+
+    query = client.table("spare_parts").select("total_cost, plant_id, is_workshop, is_category, location_id")
+
+    if year:
+        query = query.eq("year", year)
+    if month:
+        query = query.eq("month", month)
+    if location_id:
+        query = query.eq("location_id", str(location_id))
+
+    result = query.execute()
+    data = result.data or []
+
+    total_cost = sum(float(r.get("total_cost") or 0) for r in data)
+    direct_cost = sum(float(r.get("total_cost") or 0) for r in data if r.get("plant_id") and not r.get("is_workshop") and not r.get("is_category"))
+    workshop_cost = sum(float(r.get("total_cost") or 0) for r in data if r.get("is_workshop"))
+    category_cost = sum(float(r.get("total_cost") or 0) for r in data if r.get("is_category"))
+
+    # Get distinct counts
+    po_numbers = set(r.get("purchase_order_number") for r in data if r.get("purchase_order_number"))
+    plant_ids = set(r.get("plant_id") for r in data if r.get("plant_id"))
+    location_ids = set(r.get("location_id") for r in data if r.get("location_id"))
+
+    return {
+        "success": True,
+        "data": {
+            "total_cost": round(total_cost, 2),
+            "direct_cost": round(direct_cost, 2),
+            "workshop_cost": round(workshop_cost, 2),
+            "category_cost": round(category_cost, 2),
+            "items_count": len(data),
+            "po_count": len(po_numbers),
+            "plants_count": len(plant_ids),
+            "locations_count": len(location_ids),
+        },
+        "meta": {
+            "year": year,
+            "month": month,
+            "location_id": str(location_id) if location_id else None,
+        },
+    }
