@@ -97,19 +97,27 @@ async def autocomplete_suppliers(
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
     q: str = Query(..., min_length=1, description="Search query"),
     limit: int = Query(10, ge=1, le=50),
+    fuzzy: bool = Query(True, description="Include fuzzy matches"),
 ) -> dict[str, Any]:
     """Get supplier suggestions for autocomplete.
+
+    Uses exact matching first, then fuzzy matching if enabled.
 
     Args:
         q: Search query.
         limit: Maximum suggestions.
+        fuzzy: Include fuzzy matches (default: True).
 
     Returns:
-        List of matching suppliers with id and name.
+        List of matching suppliers with id, name, and match_type.
     """
     client = get_supabase_admin_client()
 
-    result = (
+    suggestions = []
+    seen_ids = set()
+
+    # Step 1: Exact matches (contains)
+    exact_result = (
         client.table("suppliers")
         .select("id, name")
         .ilike("name", f"%{q}%")
@@ -119,9 +127,37 @@ async def autocomplete_suppliers(
         .execute()
     )
 
+    for sup in exact_result.data or []:
+        if sup["id"] not in seen_ids:
+            suggestions.append({
+                "id": sup["id"],
+                "name": sup["name"],
+                "match_type": "exact",
+            })
+            seen_ids.add(sup["id"])
+
+    # Step 2: Fuzzy matches (if enabled and need more results)
+    if fuzzy and len(suggestions) < limit:
+        fuzzy_result = client.rpc(
+            "find_similar_supplier",
+            {"p_name": q, "p_threshold": 0.25}
+        ).execute()
+
+        for sup in fuzzy_result.data or []:
+            if sup["id"] not in seen_ids:
+                suggestions.append({
+                    "id": sup["id"],
+                    "name": sup["name"],
+                    "match_type": "fuzzy",
+                    "similarity": round(sup["similarity"], 2),
+                })
+                seen_ids.add(sup["id"])
+                if len(suggestions) >= limit:
+                    break
+
     return {
         "success": True,
-        "data": result.data or [],
+        "data": suggestions,
     }
 
 

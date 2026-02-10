@@ -705,6 +705,7 @@ async def create_spare_parts_bulk(
     # Resolve supplier_id from supplier name if not provided directly
     resolved_supplier_id = None
     resolved_supplier_name = None
+    supplier_matched_by = None  # "exact", "fuzzy", or "new"
 
     if supplier_id:
         # Verify supplier exists
@@ -712,21 +713,45 @@ async def create_spare_parts_bulk(
         if sup.data:
             resolved_supplier_id = str(supplier_id)
             resolved_supplier_name = sup.data[0]["name"]
+            supplier_matched_by = "exact"
         else:
             raise ValidationError(f"Supplier with ID '{supplier_id}' not found")
     elif supplier:
-        # Try to find existing supplier by name
-        sup = client.table("suppliers").select("id, name").ilike("name", supplier.strip()).execute()
+        supplier_input = supplier.strip()
+
+        # Step 1: Try exact match (case-insensitive)
+        sup = client.table("suppliers").select("id, name").ilike("name", supplier_input).execute()
         if sup.data:
             resolved_supplier_id = sup.data[0]["id"]
             resolved_supplier_name = sup.data[0]["name"]
+            supplier_matched_by = "exact"
         else:
-            # Create new supplier
-            new_sup = client.table("suppliers").insert({"name": supplier.strip()}).execute()
-            if new_sup.data:
-                resolved_supplier_id = new_sup.data[0]["id"]
-                resolved_supplier_name = new_sup.data[0]["name"]
-                logger.info("Created new supplier", supplier_name=supplier.strip())
+            # Step 2: Try fuzzy matching using pg_trgm similarity
+            fuzzy_result = client.rpc(
+                "find_similar_supplier",
+                {"p_name": supplier_input, "p_threshold": 0.3}
+            ).execute()
+
+            if fuzzy_result.data and len(fuzzy_result.data) > 0:
+                # Use the best fuzzy match
+                best_match = fuzzy_result.data[0]
+                resolved_supplier_id = best_match["id"]
+                resolved_supplier_name = best_match["name"]
+                supplier_matched_by = "fuzzy"
+                logger.info(
+                    "Fuzzy matched supplier",
+                    input=supplier_input,
+                    matched_to=best_match["name"],
+                    similarity=best_match["similarity"],
+                )
+            else:
+                # Step 3: No match found - create new supplier
+                new_sup = client.table("suppliers").insert({"name": supplier_input}).execute()
+                if new_sup.data:
+                    resolved_supplier_id = new_sup.data[0]["id"]
+                    resolved_supplier_name = new_sup.data[0]["name"]
+                    supplier_matched_by = "new"
+                    logger.info("Created new supplier", supplier_name=supplier_input)
 
     # Parse the date
     parsed_date = parse_flexible_date(po_date)
@@ -891,6 +916,11 @@ async def create_spare_parts_bulk(
             "discount": round(total_discount, 2),
             "other_costs": other_costs,
             "total_cost": round(total_cost_sum, 2),
+            "supplier": {
+                "id": resolved_supplier_id,
+                "name": resolved_supplier_name,
+                "matched_by": supplier_matched_by,  # "exact", "fuzzy", or "new"
+            } if resolved_supplier_id else None,
         },
     }
 
