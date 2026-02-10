@@ -388,7 +388,10 @@ async def get_spare_parts_stats(
 async def get_top_suppliers(
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
     limit: int = Query(10, ge=1, le=50),
-    year: int | None = None,
+    year: int | None = Query(None, description="Filter by year"),
+    month: int | None = Query(None, ge=1, le=12, description="Filter by month"),
+    quarter: int | None = Query(None, ge=1, le=4, description="Filter by quarter"),
+    location_id: UUID | None = Query(None, description="Filter by location"),
 ) -> dict[str, Any]:
     """Get top suppliers by total spend.
 
@@ -396,15 +399,24 @@ async def get_top_suppliers(
         current_user: The authenticated user.
         limit: Number of suppliers to return.
         year: Filter by year.
+        month: Filter by month.
+        quarter: Filter by quarter.
+        location_id: Filter by location.
 
     Returns:
-        List of top suppliers with spend amounts.
+        List of top suppliers with spend amounts and PO count.
     """
     client = get_supabase_admin_client()
 
     result = client.rpc(
         "get_top_suppliers",
-        {"p_limit": limit, "p_year": year},
+        {
+            "p_limit": limit,
+            "p_year": year,
+            "p_month": month,
+            "p_quarter": quarter,
+            "p_location_id": str(location_id) if location_id else None,
+        },
     ).execute()
 
     return {
