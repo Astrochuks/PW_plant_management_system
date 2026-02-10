@@ -83,7 +83,8 @@ async def list_spare_parts(
     plant_id: UUID | None = None,
     fleet_number: str | None = None,
     location_id: UUID | None = None,
-    supplier: str | None = None,
+    supplier_id: UUID | None = Query(None, description="Filter by supplier ID"),
+    supplier: str | None = Query(None, description="Filter by supplier name (text search)"),
     po_number: str | None = Query(None, description="Filter by PO number"),
     date_from: date | None = None,
     date_to: date | None = None,
@@ -98,16 +99,17 @@ async def list_spare_parts(
     Filter by:
     - plant_id or fleet_number (specific plant)
     - location_id (specific site)
+    - supplier_id or supplier (by supplier)
     - po_number (specific PO)
     - date_from/date_to (date range)
     - year, month, week, quarter (time periods)
-    - supplier, search (text search)
+    - search (text search in part description/number)
     """
     client = get_supabase_admin_client()
 
     query = (
         client.table("spare_parts")
-        .select("*, plants_master(fleet_number, description)", count="exact")
+        .select("*, plants_master(fleet_number, description), suppliers(id, name)", count="exact")
     )
 
     # Apply filters
@@ -117,7 +119,9 @@ async def list_spare_parts(
         query = query.eq("plants_master.fleet_number", fleet_number.upper())
     if location_id:
         query = query.eq("location_id", str(location_id))
-    if supplier:
+    if supplier_id:
+        query = query.eq("supplier_id", str(supplier_id))
+    elif supplier:
         query = query.ilike("supplier", f"%{supplier}%")
     if po_number:
         query = query.ilike("purchase_order_number", f"%{po_number}%")
@@ -144,14 +148,23 @@ async def list_spare_parts(
     result = query.execute()
     total = result.count or 0
 
-    # Transform data to include fleet_number
+    # Transform data to include fleet_number and normalized supplier
     parts = []
     for item in result.data:
         item["fleet_number"] = item.get("plants_master", {}).get("fleet_number") if item.get("plants_master") else None
         item["plant_description"] = item.get("plants_master", {}).get("description") if item.get("plants_master") else None
-        item["supplier_name"] = item.get("supplier")  # supplier is stored as text, not FK
+
+        # Use normalized supplier name from suppliers table, fall back to text field
+        suppliers_data = item.get("suppliers") or {}
+        if suppliers_data:
+            item["supplier_name"] = suppliers_data.get("name")
+        else:
+            item["supplier_name"] = item.get("supplier")
+
         if "plants_master" in item:
             del item["plants_master"]
+        if "suppliers" in item:
+            del item["suppliers"]
         parts.append(item)
 
     return {
@@ -164,63 +177,6 @@ async def list_spare_parts(
             "total_pages": (total + limit - 1) // limit if total > 0 else 0,
         },
     }
-
-
-@router.get("/autocomplete/suppliers")
-async def autocomplete_suppliers(
-    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
-    q: str = Query(..., min_length=1, description="Search query"),
-    limit: int = Query(10, ge=1, le=50),
-) -> dict[str, Any]:
-    """Get supplier suggestions for autocomplete.
-
-    Returns distinct supplier names matching the search query.
-
-    Args:
-        q: Search query (minimum 1 character).
-        limit: Maximum suggestions to return.
-
-    Returns:
-        List of matching supplier names.
-    """
-    client = get_supabase_admin_client()
-
-    try:
-        result = client.rpc(
-            "search_distinct_values",
-            {
-                "p_table": "spare_parts",
-                "p_column": "supplier",
-                "p_search": q,
-                "p_limit": limit,
-            },
-        ).execute()
-
-        # Extract just the values from the RPC result
-        suggestions = [row.get("value") for row in (result.data or []) if row.get("value")]
-        return {"success": True, "data": suggestions}
-
-    except Exception:
-        # Fallback if RPC fails - use direct query
-        result = (
-            client.table("spare_parts")
-            .select("supplier")
-            .ilike("supplier", f"%{q}%")
-            .not_.is_("supplier", "null")
-            .limit(limit * 3)  # Get more to account for duplicates
-            .execute()
-        )
-        # Get distinct values
-        seen = set()
-        suggestions = []
-        for row in result.data or []:
-            val = row.get("supplier")
-            if val and val not in seen:
-                seen.add(val)
-                suggestions.append(val)
-                if len(suggestions) >= limit:
-                    break
-        return {"success": True, "data": suggestions}
 
 
 @router.get("/autocomplete/descriptions")
@@ -451,47 +407,6 @@ async def get_high_cost_plants(
     return {
         "success": True,
         "data": result.data,
-    }
-
-
-@router.get("/{part_id}")
-async def get_spare_part(
-    part_id: UUID,
-    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
-) -> dict[str, Any]:
-    """Get a single spare part by ID.
-
-    Args:
-        part_id: The spare part UUID.
-        current_user: The authenticated user.
-
-    Returns:
-        Spare part details.
-    """
-    client = get_supabase_admin_client()
-
-    result = (
-        client.table("spare_parts")
-        .select("*, plants_master(fleet_number, description)")
-        .eq("id", str(part_id))
-        .single()
-        .execute()
-    )
-
-    if not result.data:
-        raise NotFoundError("Spare part", str(part_id))
-
-    # Transform data
-    data = result.data
-    data["fleet_number"] = data.get("plants_master", {}).get("fleet_number") if data.get("plants_master") else None
-    data["plant_description"] = data.get("plants_master", {}).get("description") if data.get("plants_master") else None
-    data["supplier_name"] = data.get("supplier")  # supplier is stored as text, not FK
-    if "plants_master" in data:
-        del data["plants_master"]
-
-    return {
-        "success": True,
-        "data": data,
     }
 
 
@@ -1033,13 +948,13 @@ async def get_spare_parts_by_po(
         po_number: The purchase order number.
 
     Returns:
-        List of spare parts with plant info and totals.
+        List of spare parts with plant info, supplier info, and totals.
     """
     client = get_supabase_admin_client()
 
     result = (
         client.table("spare_parts")
-        .select("*, plants_master(fleet_number, description)")
+        .select("*, plants_master(fleet_number, description), suppliers(id, name)")
         .ilike("purchase_order_number", po_number)
         .order("created_at")
         .execute()
@@ -1047,10 +962,23 @@ async def get_spare_parts_by_po(
 
     parts = []
     total_cost = 0
+    supplier_info = None
+
     for item in result.data or []:
         plant_info = item.pop("plants_master", {}) or {}
+        suppliers_data = item.pop("suppliers", {}) or {}
+
         item["fleet_number"] = plant_info.get("fleet_number")
         item["plant_description"] = plant_info.get("description")
+
+        # Use normalized supplier name from suppliers table, fall back to text field
+        if suppliers_data:
+            item["supplier_name"] = suppliers_data.get("name")
+            if not supplier_info:
+                supplier_info = {"id": suppliers_data.get("id"), "name": suppliers_data.get("name")}
+        else:
+            item["supplier_name"] = item.get("supplier")
+
         parts.append(item)
         total_cost += float(item.get("total_cost") or 0)
 
@@ -1062,6 +990,7 @@ async def get_spare_parts_by_po(
             "items_count": len(parts),
             "total_cost": round(total_cost, 2),
             "distinct_plants": len(set(p.get("plant_id") for p in parts if p.get("plant_id"))),
+            "supplier": supplier_info,
         },
     }
 
@@ -1674,4 +1603,56 @@ async def get_year_over_year(
             "location_id": str(location_id) if location_id else None,
             "yearly_totals": yearly_totals,
         },
+    }
+
+
+# ============== SINGLE PART BY ID (must be last to avoid route conflicts) ==============
+
+@router.get("/{part_id}")
+async def get_spare_part(
+    part_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+) -> dict[str, Any]:
+    """Get a single spare part by ID.
+
+    Args:
+        part_id: The spare part UUID.
+        current_user: The authenticated user.
+
+    Returns:
+        Spare part details with plant and supplier info.
+    """
+    client = get_supabase_admin_client()
+
+    result = (
+        client.table("spare_parts")
+        .select("*, plants_master(fleet_number, description), suppliers(id, name)")
+        .eq("id", str(part_id))
+        .single()
+        .execute()
+    )
+
+    if not result.data:
+        raise NotFoundError("Spare part", str(part_id))
+
+    # Transform data
+    data = result.data
+    data["fleet_number"] = data.get("plants_master", {}).get("fleet_number") if data.get("plants_master") else None
+    data["plant_description"] = data.get("plants_master", {}).get("description") if data.get("plants_master") else None
+
+    # Get supplier name from suppliers table (normalized) or fall back to text field
+    suppliers_info = data.get("suppliers")
+    if suppliers_info:
+        data["supplier_name"] = suppliers_info.get("name")
+    else:
+        data["supplier_name"] = data.get("supplier")  # fallback to text field
+
+    if "plants_master" in data:
+        del data["plants_master"]
+    if "suppliers" in data:
+        del data["suppliers"]
+
+    return {
+        "success": True,
+        "data": data,
     }
