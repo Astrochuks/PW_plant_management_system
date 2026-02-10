@@ -387,14 +387,14 @@ async def export_plants_excel(
     """Export plants to Excel file.
 
     Columns: Fleet Number, Description, Fleet Type, Make, Model, Location,
-    Physical Verification, Remarks, Condition
+    Physical Verification, Remarks
 
     Args:
         current_user: The authenticated user.
         exclude_not_seen: If true, exclude plants with 'not seen' in remarks.
         location_id: Filter by location.
         fleet_type: Filter by fleet type.
-        condition: Filter by condition.
+        condition: Filter by condition (for filtering, not shown in export).
 
     Returns:
         Excel file download.
@@ -459,7 +459,6 @@ async def export_plants_excel(
         "Location",
         "Physical Verification",
         "Remarks",
-        "Condition",
     ]
 
     # Style definitions
@@ -496,7 +495,6 @@ async def export_plants_excel(
             location_name,
             "Yes" if plant.get("physical_verification") else "No",
             plant.get("remarks"),
-            plant.get("condition"),
         ]
 
         for col_idx, value in enumerate(row_data, 1):
@@ -505,7 +503,7 @@ async def export_plants_excel(
             cell.alignment = Alignment(vertical="center", wrap_text=True)
 
     # Set column widths
-    column_widths = [15, 30, 25, 15, 15, 20, 18, 40, 12]
+    column_widths = [15, 30, 25, 15, 15, 20, 18, 40]
     for col_idx, width in enumerate(column_widths, 1):
         ws.column_dimensions[get_column_letter(col_idx)].width = width
 
