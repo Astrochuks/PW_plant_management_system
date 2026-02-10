@@ -327,15 +327,26 @@ async def autocomplete_po_numbers(
 @router.get("/stats")
 async def get_spare_parts_stats(
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
-    year: int | None = None,
-    location_id: UUID | None = None,
+    year: int | None = Query(None, description="Filter by year"),
+    month: int | None = Query(None, ge=1, le=12, description="Filter by month (1-12)"),
+    week: int | None = Query(None, ge=1, le=53, description="Filter by week (1-53)"),
+    quarter: int | None = Query(None, ge=1, le=4, description="Filter by quarter (1-4)"),
+    location_id: UUID | None = Query(None, description="Filter by location"),
+    supplier_id: UUID | None = Query(None, description="Filter by supplier"),
 ) -> dict[str, Any]:
     """Get spare parts statistics.
+
+    Returns overall stats (total_parts, total_spend, etc.) plus stats
+    for the filtered period (parts_in_period, spend_in_period).
 
     Args:
         current_user: The authenticated user.
         year: Filter by year.
-        location_id: Filter by plant location.
+        month: Filter by month (1-12).
+        week: Filter by week number (1-53).
+        quarter: Filter by quarter (1-4).
+        location_id: Filter by location.
+        supplier_id: Filter by supplier.
 
     Returns:
         Aggregate statistics for spare parts.
@@ -347,13 +358,29 @@ async def get_spare_parts_stats(
         "get_spare_parts_stats",
         {
             "p_year": year,
+            "p_month": month,
+            "p_week": week,
+            "p_quarter": quarter,
             "p_location_id": str(location_id) if location_id else None,
+            "p_supplier_id": str(supplier_id) if supplier_id else None,
         },
     ).execute()
 
+    data = result.data[0] if result.data else {}
+
     return {
         "success": True,
-        "data": result.data[0] if result.data else {},
+        "data": data,
+        "meta": {
+            "filters": {
+                "year": year,
+                "month": month,
+                "week": week,
+                "quarter": quarter,
+                "location_id": str(location_id) if location_id else None,
+                "supplier_id": str(supplier_id) if supplier_id else None,
+            },
+        },
     }
 
 
