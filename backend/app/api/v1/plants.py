@@ -407,29 +407,42 @@ async def export_plants_excel(
 
     client = get_supabase_admin_client()
 
-    # Build query
-    query = (
-        client.table("plants_master")
-        .select("fleet_number, description, fleet_type, make, model, current_location_id, physical_verification, remarks, condition, locations(name)")
-        .order("fleet_type")
-        .order("fleet_number")
-    )
+    # Fetch all records using pagination (Supabase default limit is 1000)
+    plants = []
+    batch_size = 1000
+    offset = 0
 
-    # Apply filters
-    if exclude_not_seen:
-        query = query.or_("remarks.not.ilike.%not seen%,remarks.is.null")
+    while True:
+        query = (
+            client.table("plants_master")
+            .select("fleet_number, description, fleet_type, make, model, current_location_id, physical_verification, remarks, condition, locations(name)")
+            .order("fleet_type")
+            .order("fleet_number")
+            .range(offset, offset + batch_size - 1)
+        )
 
-    if location_id:
-        query = query.eq("current_location_id", str(location_id))
+        # Apply filters
+        if exclude_not_seen:
+            query = query.or_("remarks.not.ilike.%not seen%,remarks.is.null")
 
-    if fleet_type:
-        query = query.ilike("fleet_type", f"%{fleet_type}%")
+        if location_id:
+            query = query.eq("current_location_id", str(location_id))
 
-    if condition:
-        query = query.eq("condition", condition)
+        if fleet_type:
+            query = query.ilike("fleet_type", f"%{fleet_type}%")
 
-    result = query.execute()
-    plants = result.data or []
+        if condition:
+            query = query.eq("condition", condition)
+
+        result = query.execute()
+        batch = result.data or []
+        plants.extend(batch)
+
+        # If we got less than batch_size, we've reached the end
+        if len(batch) < batch_size:
+            break
+
+        offset += batch_size
 
     # Create Excel workbook
     wb = Workbook()
