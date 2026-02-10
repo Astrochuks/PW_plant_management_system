@@ -1,0 +1,213 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * PW Nigeria Ltd - Design System
+ * Brand Colors:
+ * - Primary Gold: #ffbf36
+ * - Dark/Black: #101415
+ * - White: #ffffff
+ */
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+}
+
+:root {
+  --radius: 0.5rem;
+
+  /* Brand Colors - PW Nigeria Gold */
+  --brand: #ffbf36;
+  --brand-foreground: #101415;
+
+  /* Background & Foreground */
+  --background: #ffffff;
+  --foreground: #101415;
+
+  /* Card */
+  --card: #ffffff;
+  --card-foreground: #101415;
+
+  /* Popover */
+  --popover: #ffffff;
+  --popover-foreground: #101415;
+
+  /* Primary - Using brand gold for primary actions */
+  --primary: #ffbf36;
+  --primary-foreground: #101415;
+
+  /* Secondary */
+  --secondary: #f4f4f5;
+  --secondary-foreground: #101415;
+
+  /* Muted */
+  --muted: #f4f4f5;
+  --muted-foreground: #71717a;
+
+  /* Accent */
+  --accent: #f4f4f5;
+  --accent-foreground: #101415;
+
+  /* Status Colors */
+  --destructive: #ef4444;
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --info: #3b82f6;
+
+  /* Border & Input */
+  --border: #e4e4e7;
+  --input: #e4e4e7;
+  --ring: #ffbf36;
+
+  /* Chart Colors - Harmonized with brand */
+  --chart-1: #ffbf36;
+  --chart-2: #3b82f6;
+  --chart-3: #22c55e;
+  --chart-4: #f59e0b;
+  --chart-5: #8b5cf6;
+
+  /* Sidebar */
+  --sidebar: #fafafa;
+  --sidebar-foreground: #101415;
+  --sidebar-primary: #ffbf36;
+  --sidebar-primary-foreground: #101415;
+  --sidebar-accent: #f4f4f5;
+  --sidebar-accent-foreground: #101415;
+  --sidebar-border: #e4e4e7;
+  --sidebar-ring: #ffbf36;
+}
+
+.dark {
+  /* Brand Colors - Gold stays the same in dark mode */
+  --brand: #ffbf36;
+  --brand-foreground: #101415;
+
+  /* Background & Foreground */
+  --background: #101415;
+  --foreground: #fafafa;
+
+  /* Card - Slightly elevated from background */
+  --card: #1a1d1e;
+  --card-foreground: #fafafa;
+
+  /* Popover */
+  --popover: #1a1d1e;
+  --popover-foreground: #fafafa;
+
+  /* Primary - Gold works great in dark mode */
+  --primary: #ffbf36;
+  --primary-foreground: #101415;
+
+  /* Secondary */
+  --secondary: #232728;
+  --secondary-foreground: #fafafa;
+
+  /* Muted */
+  --muted: #232728;
+  --muted-foreground: #a1a1aa;
+
+  /* Accent */
+  --accent: #232728;
+  --accent-foreground: #fafafa;
+
+  /* Status Colors - Slightly brighter for dark mode */
+  --destructive: #f87171;
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --info: #60a5fa;
+
+  /* Border & Input */
+  --border: #2d3133;
+  --input: #2d3133;
+  --ring: #ffbf36;
+
+  /* Chart Colors */
+  --chart-1: #ffbf36;
+  --chart-2: #60a5fa;
+  --chart-3: #4ade80;
+  --chart-4: #fbbf24;
+  --chart-5: #a78bfa;
+
+  /* Sidebar */
+  --sidebar: #1a1d1e;
+  --sidebar-foreground: #fafafa;
+  --sidebar-primary: #ffbf36;
+  --sidebar-primary-foreground: #101415;
+  --sidebar-accent: #232728;
+  --sidebar-accent-foreground: #fafafa;
+  --sidebar-border: #2d3133;
+  --sidebar-ring: #ffbf36;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+/* Custom utility classes */
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  /* Brand gradient for special elements */
+  .bg-brand-gradient {
+    background: linear-gradient(135deg, #ffbf36 0%, #e6ac31 100%);
+  }
+
+  /* Smooth transitions for theme switching */
+  .theme-transition {
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+  }
+}

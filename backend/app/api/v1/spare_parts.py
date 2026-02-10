@@ -641,130 +641,90 @@ async def create_spare_parts_bulk(
     request: Request,
     background_tasks: BackgroundTasks,
     current_user: Annotated[CurrentUser, Depends(require_admin)],
-    fleet_number: str = Query(..., description="Fleet number for all items"),
-    purchase_order_number: str = Query(..., description="PO number for all items"),
-    po_date: str | None = Query(None, description="PO date (formats: 2026-01-13, 13-01-26, 13-January-26)"),
+    fleet_numbers: str = Query(..., description="Fleet(s): T468, 463, WORKSHOP, LOW LOADER"),
+    purchase_order_number: str = Query(..., description="PO number"),
+    items: str = Query(..., description="Items: desc|qty|cost|part_no;next..."),
+    po_date: str | None = Query(None, description="Date (13-January-26, 2026-01-13, etc.)"),
     requisition_number: str | None = Query(None, description="REQ NO"),
     location_id: UUID | None = Query(None, description="Location UUID"),
     supplier: str | None = Query(None, description="Vendor name"),
-    vat_percentage: float | None = Query(default=None, ge=0, le=100, description="VAT % (use this OR vat_amount)"),
-    vat_amount: float | None = Query(default=None, ge=0, description="Absolute VAT per item (use this OR vat_percentage)"),
-    discount_percentage: float | None = Query(default=None, ge=0, le=100, description="Discount % (use this OR discount_amount)"),
-    discount_amount: float | None = Query(default=None, ge=0, description="Absolute discount per item (use this OR discount_percentage)"),
-    items: str = Query(..., description="Items in JSON or simple format. Simple: description|qty|cost|part_no separated by semicolons"),
+    vat_percentage: float | None = Query(None, ge=0, le=100, description="VAT %"),
+    vat_amount: float | None = Query(None, ge=0, description="Total VAT amount"),
+    discount_percentage: float | None = Query(None, ge=0, le=100, description="Discount %"),
+    discount_amount: float | None = Query(None, ge=0, description="Total discount amount"),
+    other_costs: float = Query(default=0, ge=0, description="Other costs"),
 ) -> dict[str, Any]:
-    """Create multiple spare parts / PO line items at once.
+    """
+    **UNIFIED PO ENTRY - Handles ALL scenarios**
 
-    Use this when entering a PO with multiple line items for a single plant.
-    All items share the same PO number, plant, location, and financial terms.
+    - Single fleet: `T468`
+    - Multiple fleets: `T468, 463, 466`
+    - Workshop: `WORKSHOP` or `W/SHOP`
+    - Categories: `LOW LOADER`, `VOLVO`, `CONSUMABLES`
+    - Mixed: `T468, WORKSHOP, LOW LOADER`
 
-    Date formats accepted: 2026-01-13, 13-01-2026, 13/01/26, 13-January-26, 13-Jan-26
+    **Items Format:**
+    ```
+    NOZZLE SET|6|415000|170-5181;TIPS|8|35000|1U3352
+    ```
+    Format: description|quantity|unit_cost|part_number (semicolon-separated)
 
-    **Items Format Options:**
+    **Date Formats:** 2026-01-13, 13-01-26, 13-January-26, 13/01/26
 
-    1. SIMPLE FORMAT (recommended for manual entry):
-       description|quantity|unit_cost|part_number
-       Separate multiple items with semicolons (;)
-
-       Example:
-       NOZZLE SET CAT|6|415000|170-5181;TIPS|8|35000|1U3352;PIN|8|12000|114-0358
-
-    2. JSON FORMAT:
-       [{"description": "Filter", "quantity": 2, "unit_cost": 5000, "part_number": "ABC123"}]
-
-    VAT and discount can be provided as:
-    - Percentages at the PO level (applied to all items)
-    - Absolute amounts at the PO level (applied to all items)
-
-    Args:
-        fleet_number: Fleet number (the plant this PO is for).
-        purchase_order_number: PO number from document.
-        po_date: Date on the PO.
-        requisition_number: REQ NO.
-        location_id: Location UUID.
-        supplier: Vendor name.
-        vat_percentage: VAT % applied to all items (use this OR vat_amount).
-        vat_amount: Absolute VAT amount per item (use this OR vat_percentage).
-        discount_percentage: Discount % applied to all items (use this OR discount_amount).
-        discount_amount: Absolute discount amount per item (use this OR discount_percentage).
-        items: Line items in simple or JSON format.
-
-    Simple format example:
-        NOZZLE SET CAT|6|415000|170-5181;TIPS|8|35000|1U3352
-
-    JSON format example:
-        [{"description": "Filter", "quantity": 2, "unit_cost": 5000}]
-
-    Returns:
-        Created spare parts with total cost.
+    **Cost Classification:**
+    - `direct`: Single resolved plant, no workshop/category
+    - `shared`: Multiple plants, or has workshop, or has category
     """
     import json
+    from app.services.fleet_parser import parse_fleet_input, get_cost_classification
 
     client = get_supabase_admin_client()
 
-    # Parse the date (flexible format)
+    # Parse the date
     parsed_date = parse_flexible_date(po_date)
 
-    # Parse items - support both JSON and simple pipe-separated format
+    # Parse items
     items_list = []
     items_stripped = items.strip()
 
     if items_stripped.startswith("["):
-        # JSON format
         try:
             items_list = json.loads(items_stripped)
             if not isinstance(items_list, list) or not items_list:
                 raise ValidationError("items must be a non-empty JSON array")
         except json.JSONDecodeError as e:
-            raise ValidationError(f"Invalid JSON in items parameter: {str(e)}")
+            raise ValidationError(f"Invalid JSON: {str(e)}")
     else:
-        # Simple format: description|quantity|unit_cost|part_number;next_item...
-        # Split by semicolon for multiple items
         item_strings = [s.strip() for s in items_stripped.split(";") if s.strip()]
-
         for item_str in item_strings:
             parts = [p.strip() for p in item_str.split("|")]
             if not parts or not parts[0]:
-                continue  # Skip empty items
-
+                continue
             item_dict = {"description": parts[0]}
-
-            # Parse quantity (default 1)
             if len(parts) > 1 and parts[1]:
                 try:
                     item_dict["quantity"] = int(parts[1])
                 except ValueError:
                     item_dict["quantity"] = 1
-
-            # Parse unit_cost
             if len(parts) > 2 and parts[2]:
                 try:
                     item_dict["unit_cost"] = float(parts[2])
                 except ValueError:
                     pass
-
-            # Parse part_number
             if len(parts) > 3 and parts[3]:
                 item_dict["part_number"] = parts[3]
-
             items_list.append(item_dict)
 
         if not items_list:
-            raise ValidationError("No valid items found. Use format: description|quantity|unit_cost|part_number separated by semicolons")
+            raise ValidationError("No valid items. Format: description|qty|cost|part_no;next...")
 
-    # Look up plant by fleet number
-    plant = (
-        client.table("plants_master")
-        .select("id, fleet_number")
-        .eq("fleet_number", fleet_number.upper())
-        .execute()
-    )
+    # Parse fleet numbers (handles T468, 463, WORKSHOP, LOW LOADER, etc.)
+    parsed_fleets = parse_fleet_input(fleet_numbers)
+    if not parsed_fleets:
+        raise ValidationError("At least one fleet entry is required")
 
-    if not plant.data:
-        raise NotFoundError("Plant with fleet number", fleet_number.upper())
-
-    plant_id = plant.data[0]["id"]
-    resolved_fleet_number = plant.data[0]["fleet_number"]
+    # Determine cost type
+    cost_type = get_cost_classification(parsed_fleets)
 
     # Calculate time dimensions
     year = parsed_date.year if parsed_date else None
@@ -772,52 +732,84 @@ async def create_spare_parts_bulk(
     week_number = parsed_date.isocalendar()[1] if parsed_date else None
     quarter = (month - 1) // 3 + 1 if month else None
 
-    # Create all spare parts
+    # Calculate subtotal for VAT/discount distribution
+    subtotal = sum((item.get("unit_cost") or 0) * (item.get("quantity") or 1) for item in items_list)
+
+    # Calculate VAT and discount totals
+    if vat_amount is not None:
+        total_vat = vat_amount
+    else:
+        total_vat = subtotal * (vat_percentage or 0) / 100
+
+    if discount_amount is not None:
+        total_discount = discount_amount
+    else:
+        total_discount = subtotal * (discount_percentage or 0) / 100
+
+    # Create spare parts for each fleet entry × each item
     created_parts = []
-    total_cost = 0
+    total_cost_sum = 0
 
-    for item in items_list:
-        if not item.get("description"):
-            continue  # Skip items without description
+    for fleet in parsed_fleets:
+        for item in items_list:
+            item_subtotal = (item.get("unit_cost") or 0) * (item.get("quantity") or 1)
 
-        # Per-item amounts override PO-level amounts
-        item_vat_amount = item.get("vat_amount", vat_amount)
-        item_discount_amount = item.get("discount_amount", discount_amount)
+            # Distribute VAT/discount proportionally
+            if subtotal > 0:
+                item_vat = total_vat * (item_subtotal / subtotal) / len(parsed_fleets)
+                item_discount = total_discount * (item_subtotal / subtotal) / len(parsed_fleets)
+                item_other = other_costs * (item_subtotal / subtotal) / len(parsed_fleets)
+            else:
+                item_vat = 0
+                item_discount = 0
+                item_other = 0
 
-        part_data = {
-            "plant_id": plant_id,
-            "part_description": item["description"],
-            "part_number": item.get("part_number"),
-            "quantity": item.get("quantity", 1),
-            "unit_cost": item.get("unit_cost"),
-            "purchase_order_number": purchase_order_number.upper(),
-            "po_date": str(parsed_date) if parsed_date else None,
-            "replaced_date": str(parsed_date) if parsed_date else None,
-            "requisition_number": requisition_number.upper() if requisition_number else None,
-            "location_id": str(location_id) if location_id else None,
-            "supplier": supplier,
-            "vat_percentage": vat_percentage if item_vat_amount is None else 0,
-            "vat_amount": item_vat_amount,
-            "discount_percentage": discount_percentage if item_discount_amount is None else 0,
-            "discount_amount": item_discount_amount,
-            "year": year,
-            "month": month,
-            "week_number": week_number,
-            "quarter": quarter,
-            "created_by": current_user.id,
-        }
+            part_data = {
+                "plant_id": fleet["plant_id"],  # None for workshop/category
+                "fleet_number_raw": fleet["fleet_number_raw"],
+                "is_workshop": fleet["is_workshop"],
+                "is_category": fleet.get("is_category", False),
+                "category_name": fleet.get("category_name"),
+                "cost_type": cost_type,
+                "part_description": item["description"],
+                "part_number": item.get("part_number"),
+                "quantity": item.get("quantity", 1),
+                "unit_cost": item.get("unit_cost"),
+                "purchase_order_number": purchase_order_number.upper(),
+                "po_date": str(parsed_date) if parsed_date else None,
+                "replaced_date": str(parsed_date) if parsed_date else None,
+                "requisition_number": requisition_number.upper() if requisition_number else None,
+                "location_id": str(location_id) if location_id else None,
+                "supplier": supplier,
+                "vat_amount": round(item_vat, 2) if item_vat > 0 else None,
+                "discount_amount": round(item_discount, 2) if item_discount > 0 else None,
+                "other_costs": round(item_other, 2) if item_other > 0 else None,
+                "vat_percentage": 0,
+                "discount_percentage": 0,
+                "year": year,
+                "month": month,
+                "week_number": week_number,
+                "quarter": quarter,
+                "created_by": current_user.id,
+            }
 
-        result = client.table("spare_parts").insert(part_data).execute()
-        created = result.data[0]
-        created_parts.append(created)
-        total_cost += float(created.get("total_cost") or 0)
+            result = client.table("spare_parts").insert(part_data).execute()
+            created = result.data[0]
+            created_parts.append(created)
+            total_cost_sum += float(created.get("total_cost") or 0)
+
+    # Get resolved fleet numbers for response
+    resolved_fleets = [f["fleet_number_raw"] for f in parsed_fleets]
+    plants_resolved = [f for f in parsed_fleets if f["plant_id"]]
 
     logger.info(
-        "Bulk spare parts created",
-        count=len(created_parts),
-        fleet_number=resolved_fleet_number,
-        po_number=purchase_order_number,
-        total_cost=total_cost,
+        "PO bulk entry created",
+        po_number=purchase_order_number.upper(),
+        fleets=resolved_fleets,
+        items_count=len(items_list),
+        records_created=len(created_parts),
+        cost_type=cost_type,
+        total_cost=total_cost_sum,
         user_id=current_user.id,
     )
 
@@ -828,26 +820,86 @@ async def create_spare_parts_bulk(
         action="create",
         table_name="spare_parts",
         record_id=purchase_order_number.upper(),
-        new_values={
-            "po_number": purchase_order_number,
-            "fleet_number": resolved_fleet_number,
-            "items_count": len(created_parts),
-            "total_cost": total_cost,
-        },
+        new_values={"po_number": purchase_order_number, "fleets": resolved_fleets, "items": len(items_list)},
         ip_address=get_client_ip(request),
-        description=f"Bulk created {len(created_parts)} items for {resolved_fleet_number} from PO {purchase_order_number}",
+        description=f"PO {purchase_order_number.upper()}: {len(items_list)} items for {', '.join(resolved_fleets)}",
     )
 
     return {
         "success": True,
         "data": created_parts,
         "meta": {
-            "items_created": len(created_parts),
-            "total_cost": round(total_cost, 2),
-            "fleet_number": resolved_fleet_number,
             "po_number": purchase_order_number.upper(),
+            "cost_type": cost_type,
+            "fleets": resolved_fleets,
+            "fleets_resolved": len(plants_resolved),
+            "has_workshop": any(f["is_workshop"] for f in parsed_fleets),
+            "has_category": any(f.get("is_category") for f in parsed_fleets),
+            "items_count": len(items_list),
+            "records_created": len(created_parts),
+            "subtotal": round(subtotal, 2),
+            "vat": round(total_vat, 2),
+            "discount": round(total_discount, 2),
+            "other_costs": other_costs,
+            "total_cost": round(total_cost_sum, 2),
         },
     }
+
+
+# Keep old endpoint name for backwards compatibility
+@router.post("/entry", status_code=201)
+async def create_spare_parts_entry(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+    fleet_numbers: str = Query(..., description="Fleet(s): T468, 463, WORKSHOP, LOW LOADER"),
+    purchase_order_number: str = Query(..., description="PO number"),
+    items: str = Query(..., description="Items: desc|qty|cost|part_no;next..."),
+    po_date: str | None = Query(None),
+    requisition_number: str | None = Query(None),
+    location_id: UUID | None = Query(None),
+    supplier: str | None = Query(None),
+    vat_percentage: float | None = Query(None, ge=0, le=100),
+    vat_amount: float | None = Query(None, ge=0),
+    discount_percentage: float | None = Query(None, ge=0, le=100),
+    discount_amount: float | None = Query(None, ge=0),
+    other_costs: float = Query(default=0, ge=0),
+) -> dict[str, Any]:
+    """Alias for /bulk - use /bulk instead."""
+    return await create_spare_parts_bulk(
+        request, background_tasks, current_user,
+        fleet_numbers, purchase_order_number, items, po_date,
+        requisition_number, location_id, supplier,
+        vat_percentage, vat_amount, discount_percentage, discount_amount, other_costs,
+    )
+
+
+# Legacy endpoint for single fleet - redirects to bulk
+@router.post("/legacy-bulk", status_code=201, include_in_schema=False)
+async def create_spare_parts_legacy(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+    fleet_number: str = Query(...),
+    purchase_order_number: str = Query(...),
+    items: str = Query(...),
+    po_date: str | None = Query(None),
+    requisition_number: str | None = Query(None),
+    location_id: UUID | None = Query(None),
+    supplier: str | None = Query(None),
+    vat_percentage: float | None = Query(None, ge=0, le=100),
+    vat_amount: float | None = Query(None, ge=0),
+    discount_percentage: float | None = Query(None, ge=0, le=100),
+    discount_amount: float | None = Query(None, ge=0),
+    other_costs: float = Query(default=0, ge=0),
+) -> dict[str, Any]:
+    """Legacy endpoint - use /bulk with fleet_numbers instead."""
+    return await create_spare_parts_bulk(
+        request, background_tasks, current_user,
+        fleet_number, purchase_order_number, items, po_date,
+        requisition_number, location_id, supplier,
+        vat_percentage, vat_amount, discount_percentage, discount_amount, other_costs,
+    )
 
 
 @router.get("/by-po/{po_number}")

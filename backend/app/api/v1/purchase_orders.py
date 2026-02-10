@@ -371,6 +371,8 @@ async def list_purchase_orders(
 ) -> dict[str, Any]:
     """List purchase orders with filtering and pagination.
 
+    Returns PO summaries aggregated from spare_parts table.
+
     Args:
         current_user: The authenticated user.
         page: Page number.
@@ -387,8 +389,9 @@ async def list_purchase_orders(
     """
     client = get_supabase_admin_client()
 
+    # Use the new view that aggregates from spare_parts
     query = (
-        client.table("v_purchase_order_costs")
+        client.table("v_purchase_orders_summary")
         .select("*", count="exact")
     )
 
