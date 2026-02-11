@@ -943,29 +943,76 @@ async def create_plant(
 @router.patch("/{plant_id}")
 async def update_plant(
     plant_id: UUID,
-    plant: PlantUpdate,
     request: Request,
     background_tasks: BackgroundTasks,
     current_user: Annotated[CurrentUser, Depends(require_admin)],
+    description: str | None = Query(None, description="Equipment description"),
+    fleet_type: str | None = Query(None, description="Fleet type (e.g., TRUCKS, EXCAVATOR)"),
+    make: str | None = Query(None, description="Manufacturer (e.g., TOYOTA, CAT)"),
+    model: str | None = Query(None, description="Model name/number"),
+    chassis_number: str | None = Query(None, description="Chassis/VIN number"),
+    year_of_manufacture: int | None = Query(None, ge=1900, le=2100, description="Year manufactured"),
+    purchase_year: int | None = Query(None, ge=1900, le=2100, description="Year purchased"),
+    purchase_cost: float | None = Query(None, ge=0, description="Purchase cost"),
+    serial_m: str | None = Query(None, description="Mechanical serial number"),
+    serial_e: str | None = Query(None, description="Electrical serial number"),
+    remarks: str | None = Query(None, description="Additional remarks"),
+    current_location_id: UUID | None = Query(None, description="Current location UUID"),
+    status: str | None = Query(None, pattern="^(working|standby|breakdown|faulty|scrap|missing|stolen|unverified|in_transit|off_hire)$", description="Operational status"),
+    condition: str | None = Query(None, pattern="^(good|faulty|needs_repair|scrap)$", description="Physical condition"),
+    physical_verification: bool | None = Query(None, description="Has been physically verified"),
 ) -> dict[str, Any]:
-    """Update an existing plant.
+    """Update an existing plant - only provide the fields you want to change.
+
+    **Example:** To update just purchase_cost and purchase_year:
+    ```
+    PATCH /plants/{id}?purchase_cost=5000000&purchase_year=2023
+    ```
 
     Args:
         plant_id: The plant UUID.
-        plant: Updated plant data.
-        request: The HTTP request.
-        background_tasks: Background task runner.
-        current_user: The authenticated admin user.
+        All other parameters are optional - only provide what you want to change.
 
     Returns:
-        Updated plant.
+        Updated plant with all fields.
     """
     client = get_supabase_admin_client()
 
-    # Update only provided fields
-    update_data = plant.model_dump(exclude_none=True, mode="json")
+    # Build update data from provided parameters only
+    update_data = {}
+    if description is not None:
+        update_data["description"] = description
+    if fleet_type is not None:
+        update_data["fleet_type"] = fleet_type
+    if make is not None:
+        update_data["make"] = make
+    if model is not None:
+        update_data["model"] = model
+    if chassis_number is not None:
+        update_data["chassis_number"] = chassis_number
+    if year_of_manufacture is not None:
+        update_data["year_of_manufacture"] = year_of_manufacture
+    if purchase_year is not None:
+        update_data["purchase_year"] = purchase_year
+    if purchase_cost is not None:
+        update_data["purchase_cost"] = purchase_cost
+    if serial_m is not None:
+        update_data["serial_m"] = serial_m
+    if serial_e is not None:
+        update_data["serial_e"] = serial_e
+    if remarks is not None:
+        update_data["remarks"] = remarks
+    if current_location_id is not None:
+        update_data["current_location_id"] = str(current_location_id)
+    if status is not None:
+        update_data["status"] = status
+    if condition is not None:
+        update_data["condition"] = condition
+    if physical_verification is not None:
+        update_data["physical_verification"] = physical_verification
+
     if not update_data:
-        raise ValidationError("No fields to update")
+        raise ValidationError("No fields to update. Provide at least one field.")
 
     # Fetch current values for the fields being changed (for audit diff)
     fields_to_fetch = ",".join(["id", "fleet_number"] + list(update_data.keys()))
@@ -1013,9 +1060,21 @@ async def update_plant(
         description=f"Updated plant {fleet_number}: {', '.join(update_data.keys())}",
     )
 
+    # Return full plant data from view
+    updated = (
+        client.table("v_plants_summary")
+        .select("*")
+        .eq("id", str(plant_id))
+        .single()
+        .execute()
+    )
+
     return {
         "success": True,
-        "data": result.data[0],
+        "data": updated.data,
+        "meta": {
+            "updated_fields": [k for k in update_data.keys() if k != "updated_at"],
+        },
     }
 
 
