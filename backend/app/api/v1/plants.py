@@ -792,33 +792,26 @@ async def create_plant(
     """
     client = get_supabase_admin_client()
 
-    # Check for duplicate fleet number
-    existing = (
-        client.table("plants_master")
-        .select("id")
-        .eq("fleet_number", plant.fleet_number)
-        .execute()
-    )
-
-    if existing.data:
-        raise ValidationError(
-            "Plant with this fleet number already exists",
-            details=[{"field": "fleet_number", "message": "Already exists", "code": "DUPLICATE"}],
-        )
-
-    # Auto-resolve fleet_type from fleet number prefix if not provided
+    # Prepare plant data — mode="json" converts UUIDs to strings for Supabase
+    # fleet_type is auto-resolved by database trigger if not provided
     plant_data = plant.model_dump(exclude_none=True, mode="json")
-    if not plant_data.get("fleet_type"):
-        resolved = client.rpc("resolve_fleet_type", {"p_fleet_number": plant.fleet_number}).execute()
-        if resolved.data:
-            plant_data["fleet_type"] = resolved.data
 
-    # Create plant — mode="json" converts UUIDs to strings for Supabase
-    result = (
-        client.table("plants_master")
-        .insert(plant_data)
-        .execute()
-    )
+    # Insert with duplicate check in one operation
+    # Use upsert with ignoreDuplicates=False to get error on conflict
+    try:
+        result = (
+            client.table("plants_master")
+            .insert(plant_data)
+            .execute()
+        )
+    except Exception as e:
+        error_msg = str(e).lower()
+        if "duplicate" in error_msg or "unique" in error_msg or "already exists" in error_msg:
+            raise ValidationError(
+                "Plant with this fleet number already exists",
+                details=[{"field": "fleet_number", "message": "Already exists", "code": "DUPLICATE"}],
+            )
+        raise
 
     created = result.data[0]
 
