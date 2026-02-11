@@ -2,9 +2,9 @@
 
 from datetime import date, datetime
 from typing import Annotated, Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, UploadFile, File
 
 from app.api.v1.auth import get_client_ip
 from app.core.database import get_supabase_admin_client
@@ -627,13 +627,22 @@ async def create_spare_parts_bulk(
     ```
     NOZZLE SET|6|415000|170-5181;TIPS|8|35000|1U3352
     ```
-    Format: description|quantity|unit_cost|part_number (semicolon-separated)
+    Format: `description|quantity|unit_cost|part_number|fleet` (semicolon-separated)
+
+    **Per-Item Fleet Assignment (5th field):**
+    - If fleet specified: Item is DIRECT cost to that specific plant
+    - If fleet omitted: Item is SHARED across all fleets listed in fleet_numbers
+
+    **Examples:**
+    - `Battery|1|50000||T468;Filter|1|30000||T469` - Direct to specific plants
+    - `Hydraulic Oil|10|5000||` - Shared across all listed fleets
+    - Mixed: `Battery|1|50000||T468;Oil|10|5000||` - Battery direct, Oil shared
 
     **Date Formats:** 2026-01-13, 13-01-26, 13-January-26, 13/01/26
 
     **Cost Classification:**
-    - `direct`: Single resolved plant, no workshop/category
-    - `shared`: Multiple plants, or has workshop, or has category
+    - `direct`: Single resolved plant OR item has specific fleet assigned
+    - `shared`: Multiple plants without specific assignment
     """
     import json
     from app.services.fleet_parser import parse_fleet_input, get_cost_classification
@@ -740,10 +749,13 @@ async def create_spare_parts_bulk(
                     pass
             if len(parts) > 3 and parts[3]:
                 item_dict["part_number"] = parts[3]
+            # 5th field: specific fleet for this item (makes it a direct cost)
+            if len(parts) > 4 and parts[4]:
+                item_dict["item_fleet"] = parts[4].upper()
             items_list.append(item_dict)
 
         if not items_list:
-            raise ValidationError("No valid items. Format: description|qty|cost|part_no;next...")
+            raise ValidationError("No valid items. Format: description|qty|cost|part_no|fleet;next...")
 
     # Parse fleet numbers (handles T468, 463, WORKSHOP, LOW LOADER, etc.)
     parsed_fleets = parse_fleet_input(fleet_numbers)
@@ -773,31 +785,111 @@ async def create_spare_parts_bulk(
     else:
         total_discount = subtotal * (discount_percentage or 0) / 100
 
-    # Create spare parts for each fleet entry × each item
+    # Separate items into direct (has item_fleet) and shared (no item_fleet)
+    direct_items = [item for item in items_list if item.get("item_fleet")]
+    shared_items = [item for item in items_list if not item.get("item_fleet")]
+
+    # Build a fleet lookup from parsed_fleets
+    fleet_lookup = {}
+    for fleet in parsed_fleets:
+        fleet_lookup[fleet["fleet_number_raw"]] = fleet
+        # Also try to match by the resolved fleet number pattern
+        if fleet.get("plant_id"):
+            # Try to find the plant's fleet_number
+            plant_result = client.table("plants_master").select("fleet_number").eq("id", fleet["plant_id"]).execute()
+            if plant_result.data:
+                fleet_lookup[plant_result.data[0]["fleet_number"]] = fleet
+
     created_parts = []
     total_cost_sum = 0
+    direct_count = 0
+    shared_count = 0
 
+    # Process DIRECT items (specific fleet per item)
+    for item in direct_items:
+        item_fleet = item["item_fleet"]
+        item_subtotal = (item.get("unit_cost") or 0) * (item.get("quantity") or 1)
+
+        # Find the fleet info for this item
+        fleet = fleet_lookup.get(item_fleet)
+
+        # If item_fleet not in parsed_fleets, try to resolve it
+        if not fleet:
+            from app.services.fleet_parser import parse_fleet_input
+            resolved = parse_fleet_input(item_fleet)
+            if resolved and resolved[0].get("plant_id"):
+                fleet = resolved[0]
+
+        if not fleet:
+            logger.warning(f"Could not resolve fleet '{item_fleet}' for item '{item['description']}'")
+            continue
+
+        # Distribute VAT/discount proportionally based on item's share of subtotal
+        if subtotal > 0:
+            item_vat = total_vat * (item_subtotal / subtotal)
+            item_discount = total_discount * (item_subtotal / subtotal)
+            item_other = other_costs * (item_subtotal / subtotal)
+        else:
+            item_vat = item_discount = item_other = 0
+
+        part_data = {
+            "plant_id": fleet.get("plant_id"),
+            "assigned_plant_id": fleet.get("plant_id"),  # Direct assignment
+            "fleet_number_raw": item_fleet,
+            "is_workshop": fleet.get("is_workshop", False),
+            "is_category": fleet.get("is_category", False),
+            "category_name": fleet.get("category_name"),
+            "cost_type": "direct",  # Direct cost since fleet is specified
+            "part_description": item["description"],
+            "part_number": item.get("part_number"),
+            "quantity": item.get("quantity", 1),
+            "unit_cost": item.get("unit_cost"),
+            "purchase_order_number": purchase_order_number.upper(),
+            "po_date": str(parsed_date) if parsed_date else None,
+            "replaced_date": str(parsed_date) if parsed_date else None,
+            "requisition_number": requisition_number.upper() if requisition_number else None,
+            "location_id": str(location_id) if location_id else None,
+            "supplier_id": resolved_supplier_id,
+            "supplier": resolved_supplier_name,
+            "vat_amount": round(item_vat, 2) if item_vat > 0 else None,
+            "discount_amount": round(item_discount, 2) if item_discount > 0 else None,
+            "other_costs": round(item_other, 2) if item_other > 0 else None,
+            "vat_percentage": 0,
+            "discount_percentage": 0,
+            "year": year,
+            "month": month,
+            "week_number": week_number,
+            "quarter": quarter,
+            "created_by": current_user.id,
+        }
+
+        result = client.table("spare_parts").insert(part_data).execute()
+        created = result.data[0]
+        created_parts.append(created)
+        total_cost_sum += float(created.get("total_cost") or 0)
+        direct_count += 1
+
+    # Process SHARED items (no specific fleet - shared across all parsed_fleets)
     for fleet in parsed_fleets:
-        for item in items_list:
+        for item in shared_items:
             item_subtotal = (item.get("unit_cost") or 0) * (item.get("quantity") or 1)
 
-            # Distribute VAT/discount proportionally
+            # Distribute VAT/discount proportionally, then divide by number of fleets
             if subtotal > 0:
                 item_vat = total_vat * (item_subtotal / subtotal) / len(parsed_fleets)
                 item_discount = total_discount * (item_subtotal / subtotal) / len(parsed_fleets)
                 item_other = other_costs * (item_subtotal / subtotal) / len(parsed_fleets)
             else:
-                item_vat = 0
-                item_discount = 0
-                item_other = 0
+                item_vat = item_discount = item_other = 0
 
             part_data = {
-                "plant_id": fleet["plant_id"],  # None for workshop/category
+                "plant_id": fleet["plant_id"],  # The fleet this record is associated with
+                "assigned_plant_id": None,  # NULL = shared cost
                 "fleet_number_raw": fleet["fleet_number_raw"],
                 "is_workshop": fleet["is_workshop"],
                 "is_category": fleet.get("is_category", False),
                 "category_name": fleet.get("category_name"),
-                "cost_type": cost_type,
+                "cost_type": cost_type,  # 'shared' if multiple fleets
                 "part_description": item["description"],
                 "part_number": item.get("part_number"),
                 "quantity": item.get("quantity", 1),
@@ -825,6 +917,7 @@ async def create_spare_parts_bulk(
             created = result.data[0]
             created_parts.append(created)
             total_cost_sum += float(created.get("total_cost") or 0)
+            shared_count += 1
 
     # Get resolved fleet numbers for response
     resolved_fleets = [f["fleet_number_raw"] for f in parsed_fleets]
@@ -864,7 +957,11 @@ async def create_spare_parts_bulk(
             "has_workshop": any(f["is_workshop"] for f in parsed_fleets),
             "has_category": any(f.get("is_category") for f in parsed_fleets),
             "items_count": len(items_list),
+            "direct_items": len(direct_items),
+            "shared_items": len(shared_items),
             "records_created": len(created_parts),
+            "direct_records": direct_count,
+            "shared_records": shared_count,
             "subtotal": round(subtotal, 2),
             "vat": round(total_vat, 2),
             "discount": round(total_discount, 2),
@@ -992,6 +1089,387 @@ async def get_spare_parts_by_po(
             "distinct_plants": len(set(p.get("plant_id") for p in parts if p.get("plant_id"))),
             "supplier": supplier_info,
         },
+    }
+
+
+@router.patch("/by-po/{po_number}")
+async def update_po(
+    po_number: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+    po_date: str | None = Query(None, description="New PO date"),
+    supplier_id: UUID | None = Query(None, description="New supplier UUID"),
+    vat_amount: float | None = Query(None, ge=0, description="New VAT amount (replaces existing)"),
+    discount_amount: float | None = Query(None, ge=0, description="New discount amount"),
+    location_id: UUID | None = Query(None, description="New location UUID"),
+    requisition_number: str | None = Query(None, description="New REQ number"),
+) -> dict[str, Any]:
+    """Update PO-level details for all line items in a PO.
+
+    This updates shared fields across all items in the PO.
+    For individual item updates, use PATCH /spare-parts/{part_id}.
+
+    Args:
+        po_number: The PO number to update.
+        po_date: New PO date.
+        supplier_id: New supplier.
+        vat_amount: New total VAT (will be distributed proportionally).
+        discount_amount: New total discount (will be distributed proportionally).
+        location_id: New location.
+        requisition_number: New REQ number.
+
+    Returns:
+        Updated PO summary.
+    """
+    client = get_supabase_admin_client()
+
+    # Get existing PO items
+    existing = (
+        client.table("spare_parts")
+        .select("id, total_cost, unit_cost, quantity")
+        .ilike("purchase_order_number", po_number)
+        .execute()
+    )
+
+    if not existing.data:
+        raise NotFoundError("PO", po_number)
+
+    update_data = {}
+    if po_date:
+        parsed_date = parse_flexible_date(po_date)
+        update_data["po_date"] = str(parsed_date) if parsed_date else None
+        update_data["replaced_date"] = str(parsed_date) if parsed_date else None
+        if parsed_date:
+            update_data["year"] = parsed_date.year
+            update_data["month"] = parsed_date.month
+            update_data["week_number"] = parsed_date.isocalendar()[1]
+            update_data["quarter"] = (parsed_date.month - 1) // 3 + 1
+
+    if supplier_id:
+        sup = client.table("suppliers").select("id, name").eq("id", str(supplier_id)).execute()
+        if not sup.data:
+            raise NotFoundError("Supplier", str(supplier_id))
+        update_data["supplier_id"] = str(supplier_id)
+        update_data["supplier"] = sup.data[0]["name"]
+
+    if location_id:
+        loc = client.table("locations").select("id").eq("id", str(location_id)).execute()
+        if not loc.data:
+            raise NotFoundError("Location", str(location_id))
+        update_data["location_id"] = str(location_id)
+
+    if requisition_number is not None:
+        update_data["requisition_number"] = requisition_number.upper() if requisition_number else None
+
+    # Handle VAT/discount redistribution
+    if vat_amount is not None or discount_amount is not None:
+        subtotal = sum((item.get("unit_cost") or 0) * (item.get("quantity") or 1) for item in existing.data)
+
+        for item in existing.data:
+            item_subtotal = (item.get("unit_cost") or 0) * (item.get("quantity") or 1)
+            item_update = {}
+
+            if vat_amount is not None and subtotal > 0:
+                item_update["vat_amount"] = round(vat_amount * (item_subtotal / subtotal), 2)
+            if discount_amount is not None and subtotal > 0:
+                item_update["discount_amount"] = round(discount_amount * (item_subtotal / subtotal), 2)
+
+            if item_update:
+                client.table("spare_parts").update(item_update).eq("id", item["id"]).execute()
+
+    # Apply common updates to all items
+    if update_data:
+        client.table("spare_parts").update(update_data).ilike("purchase_order_number", po_number).execute()
+
+    logger.info(
+        "PO updated",
+        po_number=po_number.upper(),
+        updated_fields=list(update_data.keys()),
+        items_count=len(existing.data),
+        user_id=current_user.id,
+    )
+
+    background_tasks.add_task(
+        audit_service.log,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        action="update",
+        table_name="spare_parts",
+        record_id=po_number.upper(),
+        new_values=update_data,
+        ip_address=get_client_ip(request),
+        description=f"Updated PO {po_number.upper()}: {', '.join(update_data.keys())}",
+    )
+
+    return {
+        "success": True,
+        "message": f"Updated {len(existing.data)} items in PO {po_number.upper()}",
+        "updated_fields": list(update_data.keys()),
+    }
+
+
+@router.delete("/by-po/{po_number}")
+async def delete_po(
+    po_number: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+) -> dict[str, Any]:
+    """Delete an entire PO and all its line items.
+
+    Args:
+        po_number: The PO number to delete.
+
+    Returns:
+        Success message with count of deleted items.
+    """
+    client = get_supabase_admin_client()
+
+    # Get existing PO items for audit
+    existing = (
+        client.table("spare_parts")
+        .select("id, part_description, total_cost")
+        .ilike("purchase_order_number", po_number)
+        .execute()
+    )
+
+    if not existing.data:
+        raise NotFoundError("PO", po_number)
+
+    items_count = len(existing.data)
+    total_cost = sum(float(item.get("total_cost") or 0) for item in existing.data)
+
+    # Delete all items
+    client.table("spare_parts").delete().ilike("purchase_order_number", po_number).execute()
+
+    logger.info(
+        "PO deleted",
+        po_number=po_number.upper(),
+        items_deleted=items_count,
+        total_cost=total_cost,
+        user_id=current_user.id,
+    )
+
+    background_tasks.add_task(
+        audit_service.log,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        action="delete",
+        table_name="spare_parts",
+        record_id=po_number.upper(),
+        old_values={"items_count": items_count, "total_cost": total_cost},
+        ip_address=get_client_ip(request),
+        description=f"Deleted PO {po_number.upper()} ({items_count} items, ₦{total_cost:,.2f})",
+    )
+
+    return {
+        "success": True,
+        "message": f"Deleted PO {po_number.upper()}",
+        "details": {
+            "items_deleted": items_count,
+            "total_cost_deleted": round(total_cost, 2),
+        },
+    }
+
+
+@router.post("/by-po/{po_number}/document")
+async def upload_po_document(
+    po_number: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+    file: UploadFile = File(..., description="PO document (PDF or image)"),
+) -> dict[str, Any]:
+    """Upload a document for a PO.
+
+    Accepts PDF, JPEG, PNG files. Overwrites existing document if any.
+
+    Args:
+        po_number: The PO number.
+        file: The document file.
+
+    Returns:
+        Document URL and metadata.
+    """
+    client = get_supabase_admin_client()
+
+    # Verify PO exists
+    existing = (
+        client.table("spare_parts")
+        .select("id")
+        .ilike("purchase_order_number", po_number)
+        .limit(1)
+        .execute()
+    )
+
+    if not existing.data:
+        raise NotFoundError("PO", po_number)
+
+    # Validate file type
+    allowed_types = ["application/pdf", "image/jpeg", "image/png", "image/jpg"]
+    if file.content_type not in allowed_types:
+        raise ValidationError(
+            f"Invalid file type: {file.content_type}. Allowed: PDF, JPEG, PNG",
+            details=[{"field": "file", "message": "Invalid file type", "code": "INVALID_TYPE"}],
+        )
+
+    # Generate unique filename
+    ext = file.filename.split(".")[-1] if file.filename and "." in file.filename else "pdf"
+    unique_filename = f"po-documents/{po_number.upper()}/{uuid4()}.{ext}"
+
+    # Read file content
+    file_content = await file.read()
+
+    # Upload to Supabase Storage
+    try:
+        storage = client.storage.from_("documents")
+        storage.upload(
+            unique_filename,
+            file_content,
+            {"content-type": file.content_type},
+        )
+        # Get public URL
+        document_url = storage.get_public_url(unique_filename)
+    except Exception as e:
+        logger.error("Failed to upload document", error=str(e), po_number=po_number)
+        raise ValidationError(f"Failed to upload document: {str(e)}")
+
+    # Update all items in this PO with the document URL
+    client.table("spare_parts").update({
+        "document_url": document_url,
+        "document_name": file.filename,
+        "document_uploaded_at": "now()",
+    }).ilike("purchase_order_number", po_number).execute()
+
+    logger.info(
+        "PO document uploaded",
+        po_number=po_number.upper(),
+        filename=file.filename,
+        user_id=current_user.id,
+    )
+
+    background_tasks.add_task(
+        audit_service.log,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        action="upload",
+        table_name="spare_parts",
+        record_id=po_number.upper(),
+        new_values={"document_name": file.filename, "document_url": document_url},
+        ip_address=get_client_ip(request),
+        description=f"Uploaded document for PO {po_number.upper()}: {file.filename}",
+    )
+
+    return {
+        "success": True,
+        "data": {
+            "po_number": po_number.upper(),
+            "document_url": document_url,
+            "document_name": file.filename,
+        },
+    }
+
+
+@router.get("/by-po/{po_number}/document")
+async def get_po_document(
+    po_number: str,
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+) -> dict[str, Any]:
+    """Get the document URL for a PO.
+
+    Args:
+        po_number: The PO number.
+
+    Returns:
+        Document URL and metadata if exists.
+    """
+    client = get_supabase_admin_client()
+
+    result = (
+        client.table("spare_parts")
+        .select("document_url, document_name, document_uploaded_at")
+        .ilike("purchase_order_number", po_number)
+        .not_.is_("document_url", "null")
+        .limit(1)
+        .execute()
+    )
+
+    if not result.data or not result.data[0].get("document_url"):
+        raise NotFoundError("Document for PO", po_number)
+
+    doc = result.data[0]
+    return {
+        "success": True,
+        "data": {
+            "po_number": po_number.upper(),
+            "document_url": doc["document_url"],
+            "document_name": doc["document_name"],
+            "uploaded_at": doc["document_uploaded_at"],
+        },
+    }
+
+
+@router.delete("/by-po/{po_number}/document")
+async def delete_po_document(
+    po_number: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+) -> dict[str, Any]:
+    """Delete the document for a PO.
+
+    Args:
+        po_number: The PO number.
+
+    Returns:
+        Success message.
+    """
+    client = get_supabase_admin_client()
+
+    # Get current document info
+    result = (
+        client.table("spare_parts")
+        .select("document_url, document_name")
+        .ilike("purchase_order_number", po_number)
+        .not_.is_("document_url", "null")
+        .limit(1)
+        .execute()
+    )
+
+    if not result.data or not result.data[0].get("document_url"):
+        raise NotFoundError("Document for PO", po_number)
+
+    old_doc = result.data[0]
+
+    # Clear document fields
+    client.table("spare_parts").update({
+        "document_url": None,
+        "document_name": None,
+        "document_uploaded_at": None,
+    }).ilike("purchase_order_number", po_number).execute()
+
+    logger.info(
+        "PO document deleted",
+        po_number=po_number.upper(),
+        user_id=current_user.id,
+    )
+
+    background_tasks.add_task(
+        audit_service.log,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        action="delete",
+        table_name="spare_parts",
+        record_id=po_number.upper(),
+        old_values={"document_name": old_doc["document_name"]},
+        ip_address=get_client_ip(request),
+        description=f"Deleted document for PO {po_number.upper()}",
+    )
+
+    return {
+        "success": True,
+        "message": f"Document deleted for PO {po_number.upper()}",
     }
 
 
@@ -1181,10 +1659,12 @@ async def list_purchase_orders(
     limit: int = Query(20, ge=1, le=100),
     location_id: UUID | None = None,
     supplier_id: UUID | None = Query(None, description="Filter by supplier"),
+    plant_id: UUID | None = Query(None, description="Filter by plant (shows POs containing this plant)"),
+    fleet_number: str | None = Query(None, description="Filter by fleet number"),
     date_from: date | None = None,
     date_to: date | None = None,
     vendor: str | None = None,
-    search: str | None = None,
+    search: str | None = Query(None, description="Search in PO number, vendor, or part descriptions"),
     cost_type: str | None = Query(None, pattern="^(direct|shared)$"),
     year: int | None = None,
     month: int | None = None,
@@ -1196,11 +1676,58 @@ async def list_purchase_orders(
     """List purchase orders (aggregated from spare_parts).
 
     Filter by date range, year, month, week, quarter, location, vendor, supplier, cost_type.
+    Filter by plant_id or fleet_number to find POs that include a specific plant.
+    Search in PO numbers, vendor names, or part descriptions.
     Sort by po_date (PO date) or created_at (recently added).
     """
     client = get_supabase_admin_client()
 
+    # If filtering by plant, first get PO numbers that include this plant
+    plant_po_numbers = None
+    if plant_id or fleet_number:
+        plant_query = client.table("spare_parts").select("purchase_order_number")
+        if plant_id:
+            plant_query = plant_query.eq("plant_id", str(plant_id))
+        elif fleet_number:
+            # Look up plant_id from fleet_number
+            plant = client.table("plants_master").select("id").eq("fleet_number", fleet_number.upper()).execute()
+            if plant.data:
+                plant_query = plant_query.eq("plant_id", plant.data[0]["id"])
+            else:
+                # No plant found, return empty
+                return {
+                    "success": True,
+                    "data": [],
+                    "meta": {"page": page, "limit": limit, "total": 0, "total_amount": 0, "total_pages": 0},
+                }
+        plant_query = plant_query.not_.is_("purchase_order_number", "null")
+        plant_result = plant_query.execute()
+        plant_po_numbers = list(set(p["purchase_order_number"] for p in (plant_result.data or [])))
+        if not plant_po_numbers:
+            return {
+                "success": True,
+                "data": [],
+                "meta": {"page": page, "limit": limit, "total": 0, "total_amount": 0, "total_pages": 0},
+            }
+
+    # If searching in descriptions, get matching PO numbers
+    if search:
+        desc_query = (
+            client.table("spare_parts")
+            .select("purchase_order_number")
+            .ilike("part_description", f"%{search}%")
+            .not_.is_("purchase_order_number", "null")
+            .execute()
+        )
+        desc_po_numbers = list(set(p["purchase_order_number"] for p in (desc_query.data or [])))
+    else:
+        desc_po_numbers = None
+
     query = client.table("v_purchase_orders_summary").select("*", count="exact")
+
+    # Apply plant filter
+    if plant_po_numbers is not None:
+        query = query.in_("po_number", plant_po_numbers)
 
     if location_id:
         query = query.eq("location_id", str(location_id))
@@ -1213,7 +1740,11 @@ async def list_purchase_orders(
     if vendor:
         query = query.ilike("vendor", f"%{vendor}%")
     if search:
-        query = query.or_(f"po_number.ilike.%{search}%,vendor.ilike.%{search}%")
+        # Search in PO number, vendor, OR part descriptions (via desc_po_numbers)
+        if desc_po_numbers:
+            query = query.or_(f"po_number.ilike.%{search}%,vendor.ilike.%{search}%,po_number.in.({','.join(desc_po_numbers)})")
+        else:
+            query = query.or_(f"po_number.ilike.%{search}%,vendor.ilike.%{search}%")
     if cost_type:
         query = query.eq("cost_type", cost_type)
     if year:
@@ -1332,6 +1863,64 @@ async def get_plant_costs(
             "month": month,
             "quarter": quarter,
             "week": week,
+        },
+    }
+
+
+@router.get("/plant/{plant_id}/shared-costs")
+async def get_plant_shared_costs(
+    plant_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+) -> dict[str, Any]:
+    """Get shared costs for a specific plant.
+
+    Returns POs where this plant shares costs with other plants.
+    Note: Shared costs are NOT included in the plant's total_maintenance_cost.
+
+    Args:
+        plant_id: The plant UUID.
+
+    Returns:
+        List of shared POs with details.
+    """
+    client = get_supabase_admin_client()
+
+    # Verify plant exists
+    plant = (
+        client.table("plants_master")
+        .select("id, fleet_number, description")
+        .eq("id", str(plant_id))
+        .single()
+        .execute()
+    )
+
+    if not plant.data:
+        raise NotFoundError("Plant", str(plant_id))
+
+    # Get shared costs using the function
+    result = client.rpc(
+        "get_plant_shared_costs",
+        {"p_plant_id": str(plant_id)}
+    ).execute()
+
+    shared_costs = []
+    for idx, po in enumerate(result.data or [], 1):
+        shared_costs.append({
+            "label": f"Shared Cost {idx}",
+            "po_number": po.get("po_number"),
+            "po_date": po.get("po_date"),
+            "total_amount": float(po.get("total_amount") or 0),
+            "supplier": po.get("supplier_name"),
+            "shared_with": po.get("shared_with") or [],
+            "items": po.get("items") or [],
+        })
+
+    return {
+        "success": True,
+        "data": {
+            "plant": plant.data,
+            "shared_costs": shared_costs,
+            "shared_costs_count": len(shared_costs),
         },
     }
 
