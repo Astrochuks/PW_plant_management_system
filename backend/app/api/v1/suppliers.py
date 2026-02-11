@@ -42,7 +42,8 @@ async def list_suppliers(
     """
     client = get_supabase_admin_client()
 
-    query = client.table("suppliers").select("*", count="exact")
+    # Use view with pre-aggregated stats for performance
+    query = client.table("v_supplier_stats").select("*", count="exact")
 
     if active_only:
         query = query.eq("is_active", True)
@@ -57,32 +58,9 @@ async def list_suppliers(
     result = query.execute()
     total = result.count or 0
 
-    # Get PO counts for each supplier
-    suppliers_with_stats = []
-    for supplier in result.data or []:
-        # Count items and POs for this supplier
-        stats = (
-            client.table("spare_parts")
-            .select("purchase_order_number", count="exact")
-            .eq("supplier_id", supplier["id"])
-            .execute()
-        )
-
-        po_numbers = set(
-            item["purchase_order_number"]
-            for item in (stats.data or [])
-            if item.get("purchase_order_number")
-        )
-
-        suppliers_with_stats.append({
-            **supplier,
-            "items_count": stats.count or 0,
-            "po_count": len(po_numbers),
-        })
-
     return {
         "success": True,
-        "data": suppliers_with_stats,
+        "data": result.data or [],
         "meta": {
             "page": page,
             "limit": limit,
@@ -173,12 +151,13 @@ async def get_supplier(
         current_user: The authenticated user.
 
     Returns:
-        Supplier details with PO history.
+        Supplier details with stats.
     """
     client = get_supabase_admin_client()
 
+    # Use view with pre-aggregated stats
     result = (
-        client.table("suppliers")
+        client.table("v_supplier_stats")
         .select("*")
         .eq("id", str(supplier_id))
         .single()
@@ -188,29 +167,9 @@ async def get_supplier(
     if not result.data:
         raise NotFoundError("Supplier", str(supplier_id))
 
-    # Get PO stats
-    po_stats = (
-        client.table("spare_parts")
-        .select("purchase_order_number, total_cost")
-        .eq("supplier_id", str(supplier_id))
-        .execute()
-    )
-
-    po_numbers = set()
-    total_spend = 0
-    for item in po_stats.data or []:
-        if item.get("purchase_order_number"):
-            po_numbers.add(item["purchase_order_number"])
-        total_spend += float(item.get("total_cost") or 0)
-
     return {
         "success": True,
-        "data": {
-            **result.data,
-            "items_count": len(po_stats.data or []),
-            "po_count": len(po_numbers),
-            "total_spend": round(total_spend, 2),
-        },
+        "data": result.data,
     }
 
 
