@@ -625,91 +625,137 @@ async def get_plant_stats(
 # ============================================================================
 
 
-@router.get("", response_model=PlantListResponse)
+@router.get("")
 async def list_plants(
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
     page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
-    status: str | None = Query(None, pattern="^(working|standby|breakdown|missing|stolen|unverified|in_transit|off_hire)$"),
-    condition: str | None = Query(None, pattern="^(good|faulty|needs_repair|scrap)$", description="Filter by physical condition"),
+    limit: int = Query(20, ge=1, le=500),
+    status: str | None = Query(None, description="Filter by status(es). Comma-separated for multiple: working,standby,breakdown"),
+    condition: str | None = Query(None, description="Filter by condition(s). Comma-separated: good,faulty,needs_repair,scrap"),
     location_id: UUID | None = None,
     state: str | None = Query(None, description="Filter by state (e.g., 'Kaduna', 'FCT', 'Ogun')"),
-    fleet_type: str | None = Query(None, description="Filter by fleet type name"),
+    fleet_type: str | None = Query(None, description="Filter by fleet type(s). Comma-separated: TRUCKS,EXCAVATOR"),
     search: str | None = None,
     verified_only: bool = False,
     unknown_location: bool = Query(False, description="Filter for plants with unknown/NULL location"),
     in_transit: bool = Query(False, description="Filter for plants currently in transit"),
-) -> PlantListResponse:
-    """List plants with filtering and pagination.
+    columns: str | None = Query(
+        None,
+        description="Comma-separated list of columns to return. Default: all. Example: fleet_number,status,current_location,fleet_type",
+    ),
+    sort_by: str = Query("fleet_number", description="Column to sort by"),
+    sort_order: str = Query("asc", pattern="^(asc|desc)$", description="Sort order: asc or desc"),
+) -> dict[str, Any]:
+    """List plants with filtering, pagination, and column selection.
+
+    **Multi-value filters:** Use comma-separated values to filter by multiple options.
+    - `status=working,standby` - Plants that are working OR standby
+    - `condition=good,faulty` - Plants in good OR faulty condition
+    - `fleet_type=TRUCKS,EXCAVATOR` - Trucks OR Excavators
+
+    **Column selection:** Use `columns` to select which fields to return.
+    - `columns=fleet_number,status,current_location` - Only these 3 fields
+    - Useful for exports and customized views
+
+    **Available columns:**
+    id, fleet_number, description, fleet_type, make, model, chassis_number,
+    year_of_manufacture, purchase_year, purchase_cost, serial_m, serial_e,
+    status, condition, physical_verification, current_location_id, current_location,
+    state_id, state, state_code, last_verified_date, remarks, created_at, updated_at,
+    total_maintenance_cost, parts_replaced_count, last_maintenance_date, shared_po_count
 
     Args:
-        current_user: The authenticated user.
         page: Page number.
-        limit: Items per page.
-        status: Filter by operational status (working, standby, breakdown, off_hire, in_transit, etc.).
-        condition: Filter by physical condition (good, faulty, needs_repair, scrap).
-        location_id: Filter by location.
-        state: Filter by state.
-        fleet_type: Filter by fleet type name.
+        limit: Items per page (max 500 for exports).
+        status: Filter by status(es) - comma-separated.
+        condition: Filter by condition(s) - comma-separated.
+        location_id: Filter by location UUID.
+        state: Filter by state name.
+        fleet_type: Filter by fleet type(s) - comma-separated.
         search: Search in fleet_number, description.
         verified_only: Only show verified plants.
-        unknown_location: If true, only show plants with NULL current_location_id.
-        in_transit: If true, only show plants with in_transit status.
+        unknown_location: Only plants with NULL location.
+        in_transit: Only plants in transit.
+        columns: Comma-separated columns to return.
+        sort_by: Column to sort by.
+        sort_order: asc or desc.
 
     Returns:
-        Paginated list of plants with summary stats.
+        Paginated list of plants (with selected columns if specified).
     """
     client = get_supabase_admin_client()
+
+    # Parse multi-value filters
+    status_list = [s.strip() for s in status.split(",")] if status else None
+    condition_list = [c.strip() for c in condition.split(",")] if condition else None
+    fleet_type_list = [f.strip() for f in fleet_type.split(",")] if fleet_type else None
 
     # If filtering by state, get location IDs for that state first
     state_location_ids = None
     if state:
         state_locs = (
             client.table("locations")
-            .select("id")
-            .ilike("state", state)
+            .select("id, state_id, states(name)")
+            .ilike("states.name", f"%{state}%")
             .execute()
         )
-        state_location_ids = [loc["id"] for loc in (state_locs.data or [])]
+        state_location_ids = [loc["id"] for loc in (state_locs.data or []) if loc.get("states")]
+
+    # Build select clause based on columns parameter
+    if columns:
+        column_list = [c.strip() for c in columns.split(",")]
+        # Always include id for consistency
+        if "id" not in column_list:
+            column_list.insert(0, "id")
+        select_clause = ",".join(column_list)
+    else:
+        select_clause = "*"
 
     # Use the view for summary data
-    query = client.table("v_plants_summary").select("*", count="exact")
+    query = client.table("v_plants_summary").select(select_clause, count="exact")
 
-    # Apply filters
+    # Apply status filter (multi-value)
     if in_transit:
-        # Override status filter if in_transit is specified
         query = query.eq("status", "in_transit")
-    elif status:
-        query = query.eq("status", status)
+    elif status_list:
+        if len(status_list) == 1:
+            query = query.eq("status", status_list[0])
+        else:
+            query = query.in_("status", status_list)
 
-    # Filter by physical condition
-    if condition:
-        query = query.eq("condition", condition)
+    # Apply condition filter (multi-value)
+    if condition_list:
+        if len(condition_list) == 1:
+            query = query.eq("condition", condition_list[0])
+        else:
+            query = query.in_("condition", condition_list)
 
+    # Apply fleet_type filter (multi-value with ILIKE for partial matching)
+    if fleet_type_list:
+        if len(fleet_type_list) == 1:
+            query = query.ilike("fleet_type", f"%{fleet_type_list[0]}%")
+        else:
+            # Build OR condition for multiple fleet types
+            or_conditions = ",".join([f"fleet_type.ilike.%{ft}%" for ft in fleet_type_list])
+            query = query.or_(or_conditions)
+
+    # Location filters
     if unknown_location:
-        # Filter for plants with NULL current_location_id
         query = query.is_("current_location_id", "null")
     elif location_id:
         query = query.eq("current_location_id", str(location_id))
     elif state_location_ids is not None:
-        # Filter by locations in the specified state
         if state_location_ids:
             query = query.in_("current_location_id", state_location_ids)
         else:
-            # No locations found for this state, return empty
-            return PlantListResponse(
-                data=[],
-                meta={"page": page, "limit": limit, "total": 0, "total_pages": 0, "has_more": False},
-            )
-
-    if fleet_type:
-        query = query.ilike("fleet_type", f"%{fleet_type}%")
+            return {
+                "success": True,
+                "data": [],
+                "meta": {"page": page, "limit": limit, "total": 0, "total_pages": 0, "has_more": False},
+            }
 
     if search:
-        # Full-text search
-        query = query.or_(
-            f"fleet_number.ilike.%{search}%,description.ilike.%{search}%"
-        )
+        query = query.or_(f"fleet_number.ilike.%{search}%,description.ilike.%{search}%")
 
     if verified_only:
         query = query.eq("physical_verification", True)
@@ -718,25 +764,69 @@ async def list_plants(
     offset = (page - 1) * limit
     query = query.range(offset, offset + limit - 1)
 
-    # Order by fleet_number
-    query = query.order("fleet_number")
+    # Sorting
+    query = query.order(sort_by, desc=(sort_order == "desc"))
 
     result = query.execute()
-
-    # Create response
-    plants = [PlantSummary(**p) for p in result.data]
     total = result.count or 0
 
-    return PlantListResponse(
-        data=plants,
-        meta={
+    return {
+        "success": True,
+        "data": result.data or [],
+        "meta": {
             "page": page,
             "limit": limit,
             "total": total,
             "total_pages": (total + limit - 1) // limit if total > 0 else 0,
             "has_more": page * limit < total,
+            "columns": columns.split(",") if columns else "all",
+            "filters": {
+                "status": status_list,
+                "condition": condition_list,
+                "fleet_type": fleet_type_list,
+                "location_id": str(location_id) if location_id else None,
+                "state": state,
+                "verified_only": verified_only,
+                "unknown_location": unknown_location,
+                "in_transit": in_transit,
+            },
         },
+    }
+
+
+@router.get("/by-fleet/{fleet_number}")
+async def get_plant_by_fleet(
+    fleet_number: str,
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+) -> dict[str, Any]:
+    """Get a single plant by fleet number.
+
+    Args:
+        fleet_number: The fleet number (e.g., P453, T468, E25).
+        current_user: The authenticated user.
+
+    Returns:
+        Plant details with related data.
+    """
+    client = get_supabase_admin_client()
+
+    # Normalize fleet number (uppercase, no extra spaces)
+    normalized = " ".join(fleet_number.upper().split())
+
+    result = (
+        client.table("v_plants_summary")
+        .select("*")
+        .eq("fleet_number", normalized)
+        .execute()
     )
+
+    if not result.data:
+        raise NotFoundError("Plant with fleet number", fleet_number)
+
+    return {
+        "success": True,
+        "data": result.data[0],
+    }
 
 
 @router.get("/{plant_id}")

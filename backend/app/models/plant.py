@@ -17,6 +17,7 @@ class PlantBase(BaseModel):
     model: str | None = Field(None, max_length=100)
     chassis_number: str | None = Field(None, max_length=100)
     year_of_manufacture: int | None = Field(None, ge=1900, le=2100)
+    purchase_year: int | None = Field(None, ge=1900, le=2100, description="Year the plant was purchased")
     purchase_cost: float | None = Field(None, ge=0)
     serial_m: str | None = Field(None, max_length=100)
     serial_e: str | None = Field(None, max_length=100)
@@ -45,6 +46,7 @@ class PlantUpdate(BaseModel):
     model: str | None = None
     chassis_number: str | None = None
     year_of_manufacture: int | None = None
+    purchase_year: int | None = Field(None, ge=1900, le=2100, description="Year the plant was purchased")
     purchase_cost: float | None = None
     serial_m: str | None = None
     serial_e: str | None = None
@@ -53,6 +55,11 @@ class PlantUpdate(BaseModel):
     status: str | None = Field(
         None,
         pattern="^(working|standby|breakdown|faulty|scrap|missing|stolen|unverified|in_transit|off_hire)$",
+    )
+    condition: str | None = Field(
+        None,
+        pattern="^(good|faulty|needs_repair|scrap)$",
+        description="Physical condition of the plant",
     )
     physical_verification: bool | None = None
 
@@ -85,16 +92,30 @@ class PlantSummary(BaseModel):
     fleet_type: str | None = None
     make: str | None = None
     model: str | None = None
+    chassis_number: str | None = None
+    year_of_manufacture: int | None = None
+    purchase_year: int | None = None
+    purchase_cost: float | None = None
+    serial_m: str | None = None
+    serial_e: str | None = None
     status: str | None = None
+    condition: str | None = None
     physical_verification: bool | None = None
-    current_location: str | None = None
     current_location_id: UUID | None = None
+    current_location: str | None = None
     state_id: UUID | None = None
     state: str | None = None
     state_code: str | None = None
+    last_verified_date: date | None = None
+    last_verified_year: int | None = None
+    last_verified_week: int | None = None
+    remarks: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
     total_maintenance_cost: float = 0
     parts_replaced_count: int = 0
     last_maintenance_date: date | None = None
+    shared_po_count: int = 0
 
     class Config:
         from_attributes = True
