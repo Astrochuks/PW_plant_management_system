@@ -68,6 +68,9 @@ class Plant(PlantBase):
 
     # Joined fields
     current_location: str | None = None
+    state_id: UUID | None = None
+    state: str | None = None
+    state_code: str | None = None
 
     class Config:
         from_attributes = True
@@ -86,6 +89,9 @@ class PlantSummary(BaseModel):
     physical_verification: bool | None = None
     current_location: str | None = None
     current_location_id: UUID | None = None
+    state_id: UUID | None = None
+    state: str | None = None
+    state_code: str | None = None
     total_maintenance_cost: float = 0
     parts_replaced_count: int = 0
     last_maintenance_date: date | None = None
