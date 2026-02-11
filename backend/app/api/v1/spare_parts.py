@@ -107,9 +107,10 @@ async def list_spare_parts(
     """
     client = get_supabase_admin_client()
 
+    # Use explicit FK hint since there are 2 FKs to plants_master (plant_id, assigned_plant_id)
     query = (
         client.table("spare_parts")
-        .select("*, plants_master(fleet_number, description), suppliers(id, name)", count="exact")
+        .select("*, plants_master!spare_parts_plant_id_fkey(fleet_number, description), suppliers(id, name)", count="exact")
     )
 
     # Apply filters
@@ -1049,9 +1050,10 @@ async def get_spare_parts_by_po(
     """
     client = get_supabase_admin_client()
 
+    # Use explicit FK hint since there are 2 FKs to plants_master (plant_id, assigned_plant_id)
     result = (
         client.table("spare_parts")
-        .select("*, plants_master(fleet_number, description), suppliers(id, name)")
+        .select("*, plants_master!spare_parts_plant_id_fkey(fleet_number, description), suppliers(id, name)")
         .ilike("purchase_order_number", po_number)
         .order("created_at")
         .execute()
@@ -2213,9 +2215,10 @@ async def get_spare_part(
     """
     client = get_supabase_admin_client()
 
+    # Use explicit FK hint since there are 2 FKs to plants_master (plant_id, assigned_plant_id)
     result = (
         client.table("spare_parts")
-        .select("*, plants_master(fleet_number, description), suppliers(id, name)")
+        .select("*, plants_master!spare_parts_plant_id_fkey(fleet_number, description), suppliers(id, name)")
         .eq("id", str(part_id))
         .single()
         .execute()
