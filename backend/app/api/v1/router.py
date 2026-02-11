@@ -7,6 +7,7 @@ from app.api.v1 import (
     auth,
     plants,
     uploads,
+    states,
     locations,
     fleet_types,
     spare_parts,
@@ -24,7 +25,8 @@ api_router.include_router(health.router, prefix="/health", tags=["Health"])
 api_router.include_router(auth.router, prefix="/auth", tags=["Authentication"])
 api_router.include_router(plants.router, prefix="/plants", tags=["Plants"])
 api_router.include_router(uploads.router, prefix="/uploads", tags=["Uploads"])
-api_router.include_router(locations.router, prefix="/locations", tags=["Locations"])
+api_router.include_router(states.router, prefix="/states", tags=["States"])
+api_router.include_router(locations.router, prefix="/locations", tags=["Sites"])
 api_router.include_router(fleet_types.router, prefix="/fleet-types", tags=["Fleet Types"])
 api_router.include_router(spare_parts.router, prefix="/spare-parts", tags=["Spare Parts / Purchase Orders"])
 api_router.include_router(suppliers.router, prefix="/suppliers", tags=["Suppliers"])

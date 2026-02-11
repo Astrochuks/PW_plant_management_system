@@ -88,18 +88,20 @@ async def create_location(
     request: Request,
     background_tasks: BackgroundTasks,
     current_user: Annotated[CurrentUser, Depends(require_admin)],
-    name: str,
+    name: str = Query(..., min_length=2, description="Site name"),
+    state_id: UUID | None = Query(None, description="State UUID (required for proper hierarchy)"),
 ) -> dict[str, Any]:
-    """Create a new location.
+    """Create a new site (location).
 
     Args:
         request: The HTTP request.
         background_tasks: Background task runner.
         current_user: The authenticated admin user.
-        name: Location name.
+        name: Site name.
+        state_id: The state this site belongs to.
 
     Returns:
-        Created location with ID.
+        Created site with ID.
     """
     client = get_supabase_admin_client()
 
@@ -113,11 +115,28 @@ async def create_location(
 
     if existing.data:
         raise ValidationError(
-            "Location with this name already exists",
+            "Site with this name already exists",
             details=[{"field": "name", "message": "Already exists", "code": "DUPLICATE"}],
         )
 
-    location_data = {"name": name.upper()}
+    # Verify state exists if provided
+    state_name = None
+    if state_id:
+        state = (
+            client.table("states")
+            .select("id, name")
+            .eq("id", str(state_id))
+            .execute()
+        )
+        if not state.data:
+            raise NotFoundError("State", str(state_id))
+        state_name = state.data[0]["name"]
+
+    location_data = {
+        "name": name.upper(),
+        "state_id": str(state_id) if state_id else None,
+        "state": state_name,  # Keep text field in sync for backwards compatibility
+    }
 
     result = (
         client.table("locations")
@@ -128,9 +147,10 @@ async def create_location(
     created = result.data[0]
 
     logger.info(
-        "Location created",
+        "Site created",
         location_id=created["id"],
         name=name,
+        state_id=str(state_id) if state_id else None,
         user_id=current_user.id,
     )
 
@@ -143,7 +163,7 @@ async def create_location(
         record_id=created["id"],
         new_values=location_data,
         ip_address=get_client_ip(request),
-        description=f"Created location {name.upper()}",
+        description=f"Created site {name.upper()}" + (f" in {state_name}" if state_name else ""),
     )
 
     return {
@@ -158,39 +178,55 @@ async def update_location(
     request: Request,
     background_tasks: BackgroundTasks,
     current_user: Annotated[CurrentUser, Depends(require_admin)],
-    name: str | None = None,
+    name: str | None = Query(None, min_length=2),
+    state_id: UUID | None = Query(None, description="New state UUID"),
 ) -> dict[str, Any]:
-    """Update an existing location.
+    """Update an existing site (location).
 
     Args:
-        location_id: The location UUID.
+        location_id: The site UUID.
         request: The HTTP request.
         background_tasks: Background task runner.
         current_user: The authenticated admin user.
-        name: New location name.
+        name: New site name.
+        state_id: New state UUID.
 
     Returns:
-        Updated location.
+        Updated site.
     """
     client = get_supabase_admin_client()
 
-    if name is None:
+    update_data = {}
+    if name is not None:
+        update_data["name"] = name.upper()
+    if state_id is not None:
+        # Verify state exists
+        state = (
+            client.table("states")
+            .select("id, name")
+            .eq("id", str(state_id))
+            .execute()
+        )
+        if not state.data:
+            raise NotFoundError("State", str(state_id))
+        update_data["state_id"] = str(state_id)
+        update_data["state"] = state.data[0]["name"]  # Keep text field in sync
+
+    if not update_data:
         raise ValidationError("No fields to update")
 
-    update_data = {"name": name.upper()}
-
-    # Fetch current name for audit diff
+    # Fetch current values for audit diff
     existing = (
         client.table("locations")
-        .select("id, name")
+        .select("id, name, state_id, state")
         .eq("id", str(location_id))
         .execute()
     )
 
     if not existing.data:
-        raise NotFoundError("Location", str(location_id))
+        raise NotFoundError("Site", str(location_id))
 
-    old_name = existing.data[0]["name"]
+    old_values = {k: existing.data[0].get(k) for k in update_data}
 
     result = (
         client.table("locations")
@@ -200,10 +236,9 @@ async def update_location(
     )
 
     logger.info(
-        "Location updated",
+        "Site updated",
         location_id=str(location_id),
-        old_name=old_name,
-        new_name=name.upper(),
+        updated_fields=list(update_data.keys()),
         user_id=current_user.id,
     )
 
@@ -214,10 +249,10 @@ async def update_location(
         action="update",
         table_name="locations",
         record_id=str(location_id),
-        old_values={"name": old_name},
+        old_values=old_values,
         new_values=update_data,
         ip_address=get_client_ip(request),
-        description=f"Updated location {old_name} → {name.upper()}",
+        description=f"Updated site {existing.data[0]['name']}",
     )
 
     return {
