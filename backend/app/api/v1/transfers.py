@@ -276,9 +276,17 @@ async def get_transfer_stats(
     Uses a single RPC that scans plant_transfers once with COUNT FILTER
     instead of 4-5 separate COUNT queries.
     """
+    since_dt = None
+    if since:
+        from datetime import datetime as _dt
+        try:
+            since_dt = _dt.fromisoformat(since.replace("Z", "+00:00"))
+        except ValueError:
+            since_dt = None
+
     raw = await fetchval(
         "SELECT get_transfer_stats_summary($1::timestamptz)",
-        since,
+        since_dt,
     )
 
     stats = (json.loads(raw) if isinstance(raw, str) else raw) if raw else {}

@@ -371,9 +371,9 @@ async def export_maintenance(
     params: list[Any] = []
 
     if year:
-        params.append(f"{year}-01-01")
+        params.append(date(year, 1, 1))
         conditions.append(f"sp.replaced_date >= ${len(params)}::date")
-        params.append(f"{year}-12-31")
+        params.append(date(year, 12, 31))
         conditions.append(f"sp.replaced_date <= ${len(params)}::date")
 
     if plant_id:

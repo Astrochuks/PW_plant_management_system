@@ -118,10 +118,10 @@ async def list_spare_parts(
         params.append(f"%{po_number}%")
         conds.append(f"sp.purchase_order_number ILIKE ${len(params)}")
     if date_from:
-        params.append(str(date_from))
+        params.append(date_from)
         conds.append(f"sp.replaced_date >= ${len(params)}::date")
     if date_to:
-        params.append(str(date_to))
+        params.append(date_to)
         conds.append(f"sp.replaced_date <= ${len(params)}::date")
     if year:
         params.append(year)
@@ -370,7 +370,7 @@ async def create_spare_part(
            RETURNING *""",
         resolved_plant_id,
         part_description,
-        str(parsed_date) if parsed_date else None,
+        parsed_date,
         part_number,
         supplier,
         reason_for_change,
@@ -382,7 +382,7 @@ async def create_spare_part(
         discount_amount,
         other_costs,
         purchase_order_number.upper() if purchase_order_number else None,
-        str(parsed_date) if parsed_date else None,
+        parsed_date,
         requisition_number.upper() if requisition_number else None,
         str(location_id) if location_id else None,
         calc_year, calc_month, calc_week, calc_quarter,
@@ -576,7 +576,7 @@ async def create_spare_parts_bulk(
     direct_count = 0
     shared_count = 0
 
-    date_str = str(parsed_date) if parsed_date else None
+    date_val = parsed_date
 
     # Process DIRECT items
     for item in direct_items:
@@ -623,7 +623,7 @@ async def create_spare_parts_bulk(
             item.get("quantity", 1),
             item.get("unit_cost"),
             po_upper,
-            date_str,
+            date_val,
             requisition_number.upper() if requisition_number else None,
             str(location_id) if location_id else None,
             str(resolved_supplier_id) if resolved_supplier_id else None,
@@ -674,7 +674,7 @@ async def create_spare_parts_bulk(
                 item.get("quantity", 1),
                 item.get("unit_cost"),
                 po_upper,
-                date_str,
+                date_val,
                 requisition_number.upper() if requisition_number else None,
                 str(location_id) if location_id else None,
                 str(resolved_supplier_id) if resolved_supplier_id else None,
@@ -869,10 +869,10 @@ async def update_po(
     if po_date:
         parsed_date = parse_flexible_date(po_date)
         if parsed_date:
-            params.append(str(parsed_date))
+            params.append(parsed_date)
             n = len(params)
             set_parts.extend([f"po_date = ${n}::date", f"replaced_date = ${n}::date"])
-            update_data["po_date"] = str(parsed_date)
+            update_data["po_date"] = parsed_date
             params.append(parsed_date.year)
             set_parts.append(f"year = ${len(params)}")
             params.append(parsed_date.month)
@@ -1151,7 +1151,7 @@ async def update_spare_part(
     if part_description is not None:
         update_fields["part_description"] = part_description
     if replaced_date is not None:
-        update_fields["replaced_date"] = str(replaced_date)
+        update_fields["replaced_date"] = replaced_date
     if part_number is not None:
         update_fields["part_number"] = part_number
     if supplier is not None:
@@ -1317,10 +1317,10 @@ async def list_purchase_orders(
         params.append(str(supplier_id))
         conds.append(f"supplier_id = ${len(params)}::uuid")
     if date_from:
-        params.append(str(date_from))
+        params.append(date_from)
         conds.append(f"po_date >= ${len(params)}::date")
     if date_to:
-        params.append(str(date_to))
+        params.append(date_to)
         conds.append(f"po_date <= ${len(params)}::date")
     if vendor:
         params.append(f"%{vendor}%")
