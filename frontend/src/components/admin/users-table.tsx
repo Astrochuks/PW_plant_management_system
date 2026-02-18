@@ -130,7 +130,7 @@ export function UsersTable({ users, isLoading }: UsersTableProps) {
                 </TableCell>
                 <TableCell>
                   {user.is_active ? (
-                    <Badge variant="outline" className="bg-green-50 border-green-200">
+                    <Badge variant="outline" className="bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-900 dark:text-emerald-200 dark:border-emerald-800">
                       Active
                     </Badge>
                   ) : (

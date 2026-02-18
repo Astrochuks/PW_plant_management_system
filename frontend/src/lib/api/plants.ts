@@ -299,9 +299,18 @@ export async function getPlantWeeklyRecords(plantId: string): Promise<WeeklyUsag
  */
 export interface PlantEvent {
   id: string
+  plant_id: string
   event_type: string
-  description: string
-  details?: Record<string, any>
+  event_date: string | null
+  year: number | null
+  week_number: number | null
+  from_location_id: string | null
+  to_location_id: string | null
+  from_location_name: string | null
+  to_location_name: string | null
+  details: Record<string, any> | null
+  remarks: string | null
+  acknowledged: boolean
   created_at: string
 }
 
