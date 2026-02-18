@@ -414,7 +414,7 @@ async def get_location_plants(
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
-    status: str | None = Query(None, pattern="^(working|standby|breakdown|faulty|scrap|missing|stolen|unverified|in_transit|off_hire)$"),
+    status: str | None = Query(None, pattern="^(working|standby|under_repair|breakdown|faulty|scrap|missing|off_hire|gpm_assessment|unverified)$"),
 ) -> dict[str, Any]:
     """Get plants at a specific location.
 
@@ -551,7 +551,7 @@ async def get_location_usage(
     # Build query for weekly records at this location
     query = (
         client.table("plant_weekly_records")
-        .select("hours_worked, standby_hours, breakdown_hours, off_hire, year, week_number")
+        .select("hours_worked, standby_hours, breakdown_hours, off_hire, year, week_number, plant_id")
         .eq("location_id", str(location_id))
     )
 

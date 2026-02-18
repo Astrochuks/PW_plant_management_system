@@ -6,9 +6,55 @@ Provides both anonymous (user-context) and admin (service role) clients.
 from functools import lru_cache
 from typing import Any
 
+from httpx import Client as HttpxClient, Timeout
 from supabase import Client, create_client
+from supabase.lib.client_options import SyncClientOptions
 
 from app.config import get_settings
+
+
+def _build_timeout() -> Timeout:
+    """Build httpx Timeout from settings."""
+    settings = get_settings()
+    return Timeout(
+        connect=5.0,  # TCP + SSL handshake
+        read=float(settings.supabase_postgrest_timeout),
+        write=float(settings.supabase_postgrest_timeout),
+        pool=5.0,
+    )
+
+
+@lru_cache
+def _shared_httpx_client() -> HttpxClient:
+    """Shared httpx client with connection pooling.
+
+    A single pool reuses TCP+TLS connections across requests,
+    avoiding ~200-400ms handshake overhead per request.
+    Thread-safe: httpx.Client supports concurrent requests.
+
+    HTTP/2 multiplexing allows all 3 parallel login calls to
+    share a single TCP connection instead of opening 3 separate ones.
+    """
+    return HttpxClient(
+        timeout=_build_timeout(),
+        http2=True,
+    )
+
+
+def _client_options(*, shared_pool: bool = True) -> SyncClientOptions:
+    """Build SyncClientOptions with configured timeouts.
+
+    Args:
+        shared_pool: Use the shared httpx connection pool (default True).
+            Set False only if the caller needs an isolated transport.
+    """
+    settings = get_settings()
+    return SyncClientOptions(
+        postgrest_client_timeout=settings.supabase_postgrest_timeout,
+        storage_client_timeout=settings.supabase_storage_timeout,
+        function_client_timeout=settings.supabase_function_timeout,
+        httpx_client=_shared_httpx_client() if shared_pool else HttpxClient(timeout=_build_timeout()),
+    )
 
 
 @lru_cache
@@ -25,6 +71,7 @@ def get_supabase_client() -> Client:
     return create_client(
         settings.supabase_url,
         settings.supabase_anon_key,
+        options=_client_options(),
     )
 
 
@@ -39,6 +86,7 @@ def get_supabase_admin_client() -> Client:
     return create_client(
         settings.supabase_url,
         settings.supabase_service_role_key,
+        options=_client_options(),
     )
 
 
@@ -58,6 +106,7 @@ def create_auth_client() -> Client:
     return create_client(
         settings.supabase_url,
         settings.supabase_anon_key,
+        options=_client_options(),
     )
 
 

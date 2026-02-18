@@ -5,10 +5,9 @@
  * Displays location stats in a card format
  */
 
-import { MapPin, Truck, CheckCircle, Wrench } from 'lucide-react';
+import { MapPin, Truck, CheckCircle } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
 import type { LocationStats } from '@/hooks/use-locations';
 
 interface LocationCardProps {
@@ -17,8 +16,6 @@ interface LocationCardProps {
 }
 
 export function LocationCard({ location, onClick }: LocationCardProps) {
-  const verificationPercent = Math.round(location.verification_rate * 100);
-
   return (
     <Card
       className={onClick ? 'cursor-pointer hover:border-primary/50 transition-colors' : ''}
@@ -32,9 +29,9 @@ export function LocationCard({ location, onClick }: LocationCardProps) {
             </div>
             <div>
               <CardTitle className="text-base">{location.location_name}</CardTitle>
-              {location.location_code && (
-                <span className="text-xs text-muted-foreground font-mono">
-                  {location.location_code}
+              {location.state_name && (
+                <span className="text-xs text-muted-foreground">
+                  {location.state_name}
                 </span>
               )}
             </div>
@@ -45,60 +42,34 @@ export function LocationCard({ location, onClick }: LocationCardProps) {
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Plant Status Breakdown */}
+        {/* Plant Condition Breakdown */}
         <div className="grid grid-cols-3 gap-2 text-center">
-          <div className="bg-success/10 rounded-lg p-2">
-            <p className="text-lg font-bold text-success">{location.active_plants}</p>
-            <p className="text-[10px] text-muted-foreground">Active</p>
+          <div className="bg-emerald-50 dark:bg-emerald-950 rounded-lg p-2">
+            <p className="text-lg font-bold text-emerald-600">{location.working_plants}</p>
+            <p className="text-[10px] text-muted-foreground">Working</p>
           </div>
-          <div className="bg-muted rounded-lg p-2">
-            <p className="text-lg font-bold text-muted-foreground">{location.archived_plants}</p>
-            <p className="text-[10px] text-muted-foreground">Archived</p>
+          <div className="bg-amber-50 dark:bg-amber-950 rounded-lg p-2">
+            <p className="text-lg font-bold text-amber-600">{location.standby_plants}</p>
+            <p className="text-[10px] text-muted-foreground">Standby</p>
           </div>
-          <div className="bg-muted rounded-lg p-2">
-            <p className="text-lg font-bold text-muted-foreground">{location.disposed_plants}</p>
-            <p className="text-[10px] text-muted-foreground">Disposed</p>
+          <div className="bg-red-50 dark:bg-red-950 rounded-lg p-2">
+            <p className="text-lg font-bold text-red-600">{location.breakdown_plants}</p>
+            <p className="text-[10px] text-muted-foreground">Breakdown</p>
           </div>
         </div>
 
-        {/* Verification Progress */}
-        <div className="space-y-1">
-          <div className="flex items-center justify-between text-sm">
-            <span className="flex items-center gap-1 text-muted-foreground">
-              <CheckCircle className="h-3 w-3" />
-              Verification
-            </span>
-            <span className="font-medium">{verificationPercent}%</span>
+        {/* Additional Stats */}
+        <div className="flex items-center justify-between pt-2 border-t text-sm">
+          <div className="flex items-center gap-1 text-muted-foreground">
+            <Truck className="h-3 w-3" />
+            Off Hire: <span className="font-medium text-foreground">{location.off_hire_plants}</span>
           </div>
-          <Progress value={verificationPercent} className="h-2" />
-          <p className="text-[10px] text-muted-foreground">
-            {location.verified_plants} of {location.total_plants} verified
-          </p>
-        </div>
-
-        {/* Maintenance Stats */}
-        <div className="flex items-center justify-between pt-2 border-t">
-          <div className="flex items-center gap-1 text-sm text-muted-foreground">
-            <Wrench className="h-3 w-3" />
-            Maintenance
-          </div>
-          <div className="text-right">
-            <p className="text-sm font-medium">{formatCurrency(location.total_maintenance_cost)}</p>
-            <p className="text-[10px] text-muted-foreground">
-              {location.total_parts_replaced} parts replaced
-            </p>
+          <div className="flex items-center gap-1 text-muted-foreground">
+            <CheckCircle className="h-3 w-3" />
+            Unverified: <span className="font-medium text-foreground">{location.unverified_plants}</span>
           </div>
         </div>
       </CardContent>
     </Card>
   );
-}
-
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-NG', {
-    style: 'currency',
-    currency: 'NGN',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount);
 }

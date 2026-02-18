@@ -11,7 +11,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.core.security import CurrentUser, require_admin
+from app.core.security import CurrentUser, require_admin, require_management_or_admin
 from app.services.transfer_service import get_transfer_service
 
 router = APIRouter(prefix="/transfers", tags=["Transfers"])
@@ -19,7 +19,7 @@ router = APIRouter(prefix="/transfers", tags=["Transfers"])
 
 @router.get("")
 async def list_transfers(
-    current_user: Annotated[CurrentUser, Depends(require_admin)],
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
     status: str | None = Query(None, description="Filter by status: pending, confirmed, cancelled"),
     plant_id: UUID | None = Query(None, description="Filter by plant ID"),
     location_id: UUID | None = Query(None, description="Filter by location (source or destination)"),
@@ -47,32 +47,53 @@ async def list_transfers(
         if plant_id:
             query = query.eq("plant_id", str(plant_id))
 
+        if location_id:
+            query = query.or_(
+                f"from_location_id.eq.{str(location_id)},to_location_id.eq.{str(location_id)}"
+            )
+
         result = query.execute()
 
-        # Enrich with plant and location data
+        # Batch collect IDs for enrichment (avoid N+1 queries)
+        transfers_list = result.data or []
+        plant_ids = list({t["plant_id"] for t in transfers_list if t.get("plant_id")})
+        location_ids = list({
+            lid for t in transfers_list
+            for lid in [t.get("from_location_id"), t.get("to_location_id")]
+            if lid
+        })
+        submission_ids = list({t["source_submission_id"] for t in transfers_list if t.get("source_submission_id")})
+
+        # Batch fetch plants
+        plants_map: dict[str, dict] = {}
+        if plant_ids:
+            plants_result = service.client.table("plants_master").select("id, fleet_number, description").in_("id", plant_ids).execute()
+            plants_map = {p["id"]: p for p in (plants_result.data or [])}
+
+        # Batch fetch locations
+        locations_map: dict[str, dict] = {}
+        if location_ids:
+            locs_result = service.client.table("locations").select("id, name").in_("id", location_ids).execute()
+            locations_map = {loc["id"]: loc for loc in (locs_result.data or [])}
+
+        # Batch fetch source submissions for week info
+        submissions_map: dict[str, dict] = {}
+        if submission_ids:
+            subs_result = service.client.table("weekly_report_submissions").select("id, year, week_number, week_ending_date").in_("id", submission_ids).execute()
+            submissions_map = {s["id"]: s for s in (subs_result.data or [])}
+
+        # Enrich transfers
         enriched_data = []
-        for transfer in result.data or []:
-            # Get plant info
-            plant = None
-            if transfer.get("plant_id"):
-                plant_result = service.client.table("plants_master").select("id, fleet_number, description").eq("id", transfer["plant_id"]).execute()
-                plant = plant_result.data[0] if plant_result.data else None
-
-            # Get location names
-            from_loc = None
-            to_loc = None
-            if transfer.get("from_location_id"):
-                loc_result = service.client.table("locations").select("id, name").eq("id", transfer["from_location_id"]).execute()
-                from_loc = loc_result.data[0] if loc_result.data else None
-            if transfer.get("to_location_id"):
-                loc_result = service.client.table("locations").select("id, name").eq("id", transfer["to_location_id"]).execute()
-                to_loc = loc_result.data[0] if loc_result.data else None
-
+        for transfer in transfers_list:
+            sub = submissions_map.get(transfer.get("source_submission_id", ""), {})
             enriched_data.append({
                 **transfer,
-                "plant": plant,
-                "from_location": from_loc,
-                "to_location": to_loc,
+                "plant": plants_map.get(transfer.get("plant_id")),
+                "from_location": locations_map.get(transfer.get("from_location_id")),
+                "to_location": locations_map.get(transfer.get("to_location_id")),
+                "source_week": sub.get("week_number"),
+                "source_year": sub.get("year"),
+                "week_ending_date": sub.get("week_ending_date"),
             })
 
         # Get total count
@@ -81,6 +102,10 @@ async def list_transfers(
             count_query = count_query.eq("status", status)
         if plant_id:
             count_query = count_query.eq("plant_id", str(plant_id))
+        if location_id:
+            count_query = count_query.or_(
+                f"from_location_id.eq.{str(location_id)},to_location_id.eq.{str(location_id)}"
+            )
         count_result = count_query.execute()
 
         return {
@@ -99,7 +124,7 @@ async def list_transfers(
 
 @router.get("/pending")
 async def list_pending_transfers(
-    current_user: Annotated[CurrentUser, Depends(require_admin)],
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
     location_id: UUID | None = Query(None, description="Filter by location"),
 ) -> dict[str, Any]:
     """List pending transfers awaiting confirmation.
@@ -121,7 +146,7 @@ async def list_pending_transfers(
 @router.get("/plant/{plant_id}")
 async def get_plant_transfers(
     plant_id: UUID,
-    current_user: Annotated[CurrentUser, Depends(require_admin)],
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
     limit: int = Query(20, ge=1, le=100),
 ) -> dict[str, Any]:
     """Get transfer history for a specific plant."""
@@ -139,7 +164,7 @@ async def get_plant_transfers(
 @router.get("/{transfer_id}")
 async def get_transfer(
     transfer_id: UUID,
-    current_user: Annotated[CurrentUser, Depends(require_admin)],
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
 ) -> dict[str, Any]:
     """Get details of a specific transfer."""
     service = get_transfer_service()
@@ -267,7 +292,8 @@ async def cancel_transfer(
 
 @router.get("/stats/summary")
 async def get_transfer_stats(
-    current_user: Annotated[CurrentUser, Depends(require_admin)],
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+    since: str | None = Query(None, description="ISO timestamp — count transfers created after this time"),
 ) -> dict[str, Any]:
     """Get summary statistics for transfers."""
     service = get_transfer_service()
@@ -288,6 +314,17 @@ async def get_transfer_stats(
         .execute()
     )
 
+    # Count new transfers since a given timestamp (for badge counts)
+    new_since = 0
+    if since:
+        new_since_result = (
+            service.client.table("plant_transfers")
+            .select("id", count="exact")
+            .gt("created_at", since)
+            .execute()
+        )
+        new_since = new_since_result.count or 0
+
     return {
         "success": True,
         "data": {
@@ -295,5 +332,6 @@ async def get_transfer_stats(
             "confirmed": confirmed.count,
             "cancelled": cancelled.count,
             "recent_7_days": recent.count,
+            "new_since": new_since,
         },
     }

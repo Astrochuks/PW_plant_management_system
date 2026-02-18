@@ -1,7 +1,7 @@
 """AI-powered remarks parser using Google Gemini.
 
 Extracts structured information from free-text plant remarks including:
-- Plant status (working, standby, breakdown, faulty, etc.)
+- Plant condition (operational, standby, breakdown, etc.)
 - Transfer information (inbound/outbound, location)
 - Condition notes
 """
@@ -16,41 +16,86 @@ from app.monitoring.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Lazy import to avoid startup errors if API key not configured
-_genai = None
-_model = None
+# Lazy imports to avoid startup errors if API keys not configured
+_openai_client = None
+_gemini_model = None
+
+# Commented out Gemini - kept for future fallback if needed
+# _genai = None
+# _model = None
 
 
-def _get_model():
-    """Get or initialize the Gemini model."""
-    global _genai, _model
+def _get_openai_client():
+    """Get or initialize the OpenAI client."""
+    global _openai_client
 
-    if _model is not None:
-        return _model
+    if _openai_client is not None:
+        return _openai_client
 
     settings = get_settings()
-    if not settings.gemini_api_key:
-        logger.warning("Gemini API key not configured, using fallback parser")
+    if not settings.openai_api_key:
+        logger.warning("OpenAI API key not configured")
         return None
 
     try:
-        import google.generativeai as genai
-        _genai = genai
-        genai.configure(api_key=settings.gemini_api_key)
-        _model = genai.GenerativeModel("gemini-2.5-flash")
-        logger.info("Gemini model initialized successfully")
-        return _model
+        from openai import OpenAI
+        _openai_client = OpenAI(api_key=settings.openai_api_key)
+        logger.info("OpenAI client initialized successfully")
+        return _openai_client
+    except Exception as e:
+        logger.error("Failed to initialize OpenAI client", error=str(e))
+        return None
+
+
+def _get_gemini_model():
+    """Get or initialize the Gemini model (fallback, commented out).
+
+    Kept for future use if OpenAI quota is exceeded.
+    """
+    global _gemini_model
+
+    if _gemini_model is not None:
+        return _gemini_model
+
+    settings = get_settings()
+    if not settings.gemini_api_key:
+        logger.debug("Gemini API key not configured")
+        return None
+
+    try:
+        # Commented out Gemini initialization
+        # import google.generativeai as genai
+        # genai.configure(api_key=settings.gemini_api_key)
+        # _gemini_model = genai.GenerativeModel("gemini-2.0-flash")
+        # logger.info("Gemini model initialized successfully")
+        # return _gemini_model
+        logger.info("Gemini is disabled (kept for future fallback)")
+        return None
     except Exception as e:
         logger.error("Failed to initialize Gemini model", error=str(e))
         return None
+
+
+# Valid condition values
+VALID_CONDITIONS = [
+    "working",        # Working normally, in use (was "operational")
+    "standby",        # Available but not currently in use
+    "under_repair",   # Being repaired or maintained
+    "breakdown",      # Not working due to fault/damage
+    "faulty",         # Has a fault but still partially functional
+    "scrap",          # Written off, decommissioned
+    "missing",        # Cannot be found or verified
+    "off_hire",       # Contractually not available
+    "gpm_assessment", # Needs GPM assessment/review
+    "unverified",     # Cannot determine from available data
+]
 
 
 @dataclass
 class ParsedRemarks:
     """Structured data extracted from plant remarks."""
 
-    status: str  # Operational: working, standby, breakdown, off_hire, missing, in_transit, unverified
-    condition: str  # Physical: good, faulty, needs_repair, scrap
+    condition: str  # One of VALID_CONDITIONS
     transfer_detected: bool
     transfer_direction: str | None  # inbound, outbound, or None
     transfer_location: str | None  # Location name extracted from remarks
@@ -61,7 +106,6 @@ class ParsedRemarks:
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
-            "status": self.status,
             "condition": self.condition,
             "transfer_detected": self.transfer_detected,
             "transfer_direction": self.transfer_direction,
@@ -72,103 +116,126 @@ class ParsedRemarks:
         }
 
 
-PARSE_PROMPT = """Analyze this plant/equipment remark from a weekly report and extract structured information.
+PARSE_PROMPT = """You are analyzing plant/equipment remarks from a weekly report.
 
-Remark: "{remarks}"
-Hours worked this week: {hours_worked}
+Plant: {fleet_number}
+Remarks: "{remarks}"
+Hours worked: {hours_worked}
 Standby hours: {standby_hours}
 Breakdown hours: {breakdown_hours}
-Off hire flag: {off_hire}
+Off hire (from column): {off_hire}
+Transfer from (column): {transfer_from}
+Transfer to (column): {transfer_to}
 
-Extract the following as JSON:
+Based on ALL the information above, determine:
+
+1. CONDITION - The current state of this plant:
+   - "operational" - Working normally, in use
+   - "standby" - Available but idle, in workshop without issues, parked
+   - "under_repair" - Being repaired, sent for rebore, strip in progress, awaiting parts
+   - "breakdown" - Missing parts (no engine, no compressor), fire/burned, engine removed
+   - "scrap" - Written off, decommissioned
+   - "missing" - Cannot be found or verified
+   - "off_hire" - Contractually not available
+   - "gpm_assessment" - Needs GPM assessment/review
+   - "unverified" - Cannot determine, "for checking", just "from X" with no other info
+
+2. TRANSFER - Only track OUTBOUND transfers (going TO another location)
+   - ONLY set transfer_detected=true if plant is being sent TO another location
+   - "FROM X" in remarks does NOT count as a transfer - the plant is already here
+   - transfer_to column indicates outbound transfer
+   - Ignore transfer_from column for transfer detection
+
+3. CONDITION NOTES - Brief summary of any issues or context
+
+CONDITION EXAMPLES:
+- "no engine and no compressor" → breakdown (missing parts)
+- "engine block sent for rebore" → under_repair (active repair)
+- "behind plant workshop" or "in workshop" (no issue mentioned) → standby
+- "engine removed workshop" → breakdown (engine removed = missing part)
+- "burned/fire" → breakdown
+- "stand by (from bauchi)" → standby (the "from" is just origin info)
+- "from bauchi" (nothing else) → unverified (no status info)
+- "for checking" or "to be verified" → unverified
+- "require gpm assessment" → gpm_assessment
+
+IMPORTANT:
+- The off_hire COLUMN takes precedence - if true, condition is "off_hire"
+- "FROM X" in remarks just tells us where plant came from, NOT a transfer to track
+- Only transfer_to column or "transferred to X" in remarks = outbound transfer
+- If hours_worked > 0, plant is at least operational enough to work
+- "problem (fixed)" means it WAS broken but is now operational
+
+Return JSON:
 {{
-  "status": "working|standby|breakdown|off_hire|in_transit|unverified",
-  "condition": "good|faulty|needs_repair|scrap",
+  "condition": "one of the values above",
   "transfer_detected": true or false,
-  "transfer_direction": "inbound" or "outbound" or null,
-  "transfer_location": "location name" or null,
-  "transfer_date": "date mentioned" or null,
-  "condition_notes": "brief summary of issues" or null,
+  "transfer_direction": "outbound" or null,
+  "transfer_location": "destination location name" or null,
+  "condition_notes": "brief summary" or null,
   "confidence": 0.0 to 1.0
 }}
-
-STATUS is the OPERATIONAL state (what is the plant doing):
-- "working" = actively being used (has working hours)
-- "standby" = available but not in use (only standby hours)
-- "breakdown" = not operational due to mechanical failure
-- "off_hire" = not available for use (contractually off hire)
-- "in_transit" = being transferred to another location
-- "unverified" = cannot determine from data
-
-CONDITION is the PHYSICAL state (what shape is the plant in):
-- "good" = no issues reported, operating normally
-- "faulty" = has issues but may still be operational
-- "needs_repair" = requires maintenance or repair
-- "scrap" = beyond repair, write-off
-
-Rules for STATUS:
-1. If off_hire is true or "OFF HIRE" in remarks → "off_hire"
-2. If "transferred" or "sent to" in remarks → "in_transit"
-3. If breakdown_hours > hours_worked → "breakdown"
-4. If hours_worked = 0 AND standby_hours > 0 → "standby"
-5. If hours_worked > 0 → "working"
-6. Default to "unverified" if unclear
-
-Rules for CONDITION:
-1. If "SCRAP" or "SCRAPPED" in remarks → "scrap"
-2. If "problem" or "fault" or "issue" mentioned WITHOUT "(fixed)" → "faulty"
-3. If "repair" or "maintenance" mentioned → "needs_repair"
-4. If "problem (fixed)" or issue resolved → "good"
-5. Default to "good" if no issues mentioned
-
-IMPORTANT: A plant can be FAULTY but still WORKING (has issues but operational).
-Example: "Engine problem but working" → status="working", condition="faulty"
-
-Rules for transfers:
-- "received from X" or "from X" → inbound transfer
-- "transferred to X" or "sent to X" → outbound transfer
 
 Return ONLY valid JSON, no markdown formatting or code blocks."""
 
 
-BATCH_PARSE_PROMPT = """Analyze these plant/equipment remarks from a weekly report and extract structured information for each.
+BATCH_PARSE_PROMPT = """You are analyzing plant/equipment remarks from a weekly report.
 
 {plants_text}
 
-For EACH plant, extract:
-{{
-  "fleet_number": "the fleet number",
-  "status": "working|standby|breakdown|off_hire|in_transit|unverified",
-  "condition": "good|faulty|needs_repair|scrap",
-  "transfer_detected": true or false,
-  "transfer_direction": "inbound" or "outbound" or null,
-  "transfer_location": "location name" or null,
-  "transfer_date": "date mentioned" or null,
-  "condition_notes": "brief summary of issues" or null,
-  "confidence": 0.0 to 1.0
-}}
+For EACH plant, determine:
 
-STATUS is OPERATIONAL state (what is the plant doing):
-- "working" = has working hours
-- "standby" = only standby hours
-- "breakdown" = breakdown hours > working hours
-- "off_hire" = marked off hire
-- "in_transit" = being transferred
-- "unverified" = unclear
+1. CONDITION - The current state:
+   - "operational" - Working normally, in use
+   - "standby" - Available but idle, in workshop without issues, parked
+   - "under_repair" - Being repaired, sent for rebore, strip in progress, awaiting parts
+   - "breakdown" - Missing parts (no engine, no compressor), fire/burned, engine removed
+   - "scrap" - Written off, decommissioned
+   - "missing" - Cannot be found or verified
+   - "off_hire" - Contractually not available
+   - "gpm_assessment" - Needs GPM assessment/review
+   - "unverified" - Cannot determine, "for checking", just "from X" with no other info
 
-CONDITION is PHYSICAL state (what shape is it in):
-- "good" = no issues
-- "faulty" = has issues but may work
-- "needs_repair" = requires maintenance
-- "scrap" = beyond repair
+2. TRANSFER - Only track OUTBOUND transfers
+   - ONLY set transfer_detected=true if plant is being sent TO another location
+   - "FROM X" does NOT count as transfer - plant is already at current location
+   - Ignore transfer_from column
 
-IMPORTANT: A plant can be FAULTY but WORKING (issues but operational).
+3. CONDITION NOTES - Brief summary of issues
 
-Rules for transfers:
-- "received from X" or "from X" → inbound transfer
-- "transferred to X" or "sent to X" → outbound transfer
+CONDITION EXAMPLES:
+- "no engine and no compressor" → breakdown
+- "engine block sent for rebore" → under_repair
+- "behind plant workshop" (no issue) → standby
+- "engine removed workshop" → breakdown
+- "burned/fire" → breakdown
+- "stand by (from bauchi)" → standby
+- "from bauchi" (nothing else) → unverified
+- "for checking" → unverified
+- "require gpm assessment" → gpm_assessment
 
-Return ONLY a JSON array with one object per plant. No markdown or explanation."""
+IMPORTANT:
+- off_hire COLUMN = true means condition is "off_hire"
+- "FROM X" is just origin info, NOT a transfer to track
+- Only "transferred to X" or transfer_to column = outbound transfer
+- hours_worked > 0 means plant is operational enough to work
+- "problem (fixed)" = operational
+
+Return a JSON array:
+[
+  {{
+    "fleet_number": "the fleet number",
+    "condition": "one of the values above",
+    "transfer_detected": true or false,
+    "transfer_direction": "outbound" or null,
+    "transfer_location": "destination location" or null,
+    "condition_notes": "brief summary" or null,
+    "confidence": 0.0 to 1.0
+  }},
+  ...
+]
+
+Return ONLY valid JSON array, no markdown or explanation."""
 
 
 def fallback_parse(
@@ -177,83 +244,163 @@ def fallback_parse(
     standby_hours: float,
     breakdown_hours: float,
     off_hire: bool,
+    transfer_from: str | None = None,
+    transfer_to: str | None = None,
 ) -> ParsedRemarks:
-    """Simple fallback parser using keyword detection.
+    """Smart fallback parser using pattern detection.
 
     Used when Gemini API is unavailable or fails.
+    Patterns based on actual plant management terminology.
     """
     remarks_upper = (remarks or "").upper().strip()
+    # Normalize: remove extra spaces
+    remarks_normalized = " ".join(remarks_upper.split())
 
     # Default values
-    status = "working"
-    condition = "good"
+    condition = "unverified"
     transfer_detected = False
     transfer_direction = None
     transfer_location = None
     condition_notes = None
 
-    # Determine CONDITION first (physical state)
-    if "SCRAP" in remarks_upper:
-        condition = "scrap"
-    elif any(kw in remarks_upper for kw in ["PROBLEM", "FAULT", "ISSUE", "DEFECT", "DAMAGE"]):
-        if "(FIXED)" in remarks_upper or "(REPAIRED)" in remarks_upper or "FIXED" in remarks_upper:
-            condition = "good"
-            condition_notes = "Issue was fixed"
-        else:
-            condition = "faulty"
-            condition_notes = "Has reported issue"
-    elif any(kw in remarks_upper for kw in ["REPAIR", "MAINTENANCE", "SERVICE"]):
-        condition = "needs_repair"
-        condition_notes = "Requires maintenance"
+    # 1. OFF HIRE COLUMN takes precedence
+    if off_hire:
+        return ParsedRemarks(
+            condition="off_hire",
+            transfer_detected=False,
+            transfer_direction=None,
+            transfer_location=None,
+            transfer_date=None,
+            condition_notes="Off hire flag set",
+            confidence=0.9,
+        )
 
-    # Determine STATUS (operational state)
-    if off_hire or "OFF HIRE" in remarks_upper or "OFFHIRE" in remarks_upper:
-        status = "off_hire"
-    elif any(kw in remarks_upper for kw in ["TRANSFERRED TO", "SENT TO", "MOVED TO", "GOING TO"]):
-        status = "in_transit"
+    # 2. Only track OUTBOUND transfers (transfer_to column)
+    # Inbound transfers (transfer_from) just mean plant is at current location
+    if transfer_to:
         transfer_detected = True
         transfer_direction = "outbound"
-        # Try to extract location
-        for pattern in [r"TRANSFERRED TO\s+(\w+)", r"SENT TO\s+(\w+)", r"MOVED TO\s+(\w+)"]:
-            match = re.search(pattern, remarks_upper)
-            if match:
-                transfer_location = match.group(1)
-                break
-    elif any(kw in remarks_upper for kw in ["RECEIVED FROM", "FROM ", "ARRIVED FROM"]):
-        transfer_detected = True
-        transfer_direction = "inbound"
-        for pattern in [r"RECEIVED FROM\s+(\w+)", r"FROM\s+(\w+)", r"ARRIVED FROM\s+(\w+)"]:
-            match = re.search(pattern, remarks_upper)
-            if match:
-                transfer_location = match.group(1)
-                break
-        # Inbound transfer - derive status from hours
+        transfer_location = transfer_to
+
+    # 3. Determine CONDITION from remarks - ORDER MATTERS (most specific first)
+
+    # Check for "TO BE VERIFIED" or "FOR CHECKING" first
+    if "TO BE VERIFIED" in remarks_normalized or "FOR CHECKING" in remarks_normalized:
+        condition = "unverified"
+        condition_notes = "Awaiting verification"
+
+    # GPM Assessment
+    elif "GPM" in remarks_normalized or "REQUIRE" in remarks_normalized and "ASSESSMENT" in remarks_normalized:
+        condition = "gpm_assessment"
+        condition_notes = "Requires GPM assessment"
+
+    # SCRAP / decommissioned
+    elif any(kw in remarks_normalized for kw in ["SCRAP", "WRITE OFF", "DECOMMISSION", "CONDEMNED"]):
+        condition = "scrap"
+        condition_notes = "Plant scrapped/decommissioned"
+
+    # MISSING / not seen
+    elif any(kw in remarks_normalized for kw in ["MISSING", "NOT SEEN", "NOT FOUND", "CANNOT LOCATE"]):
+        condition = "missing"
+        condition_notes = "Plant not found/verified"
+
+    # OFF HIRE in remarks
+    elif "OFF HIRE" in remarks_normalized or "OFFHIRE" in remarks_normalized:
+        condition = "off_hire"
+        condition_notes = "Off hire mentioned in remarks"
+
+    # BREAKDOWN patterns - missing parts, burned, fire, removed parts
+    elif any(kw in remarks_normalized for kw in [
+        "NO ENGINE", "NO COMPRESSOR", "NO COIL", "NO PUMP", "NO BATTERY",
+        "ENGINE REMOVED", "COMPRESSOR REMOVED", "REMOVED",
+        "BURNED", "FIRE", "BURNT", "GUTTED",
+        "ENGINE BLOCK", "CRACKED", "SEIZED",
+        "NO TYRE", "NO TRACK", "NO BUCKET",
+    ]):
+        condition = "breakdown"
+        condition_notes = "Missing parts or fire damage"
+
+    # UNDER REPAIR patterns - active repair work
+    elif any(kw in remarks_normalized for kw in [
+        "SENT FOR", "FOR REBORE", "FOR REPAIRS", "FOR REPAIR",
+        "STRIP", "STRIPPING", "IN PROGRESS", "WORKING ON",
+        "UNDER REPAIR", "UNDER MAINTENANCE", "BEING REPAIRED",
+        "AWAITING PARTS", "WAITING FOR PARTS", "PARTS ORDERED",
+    ]):
+        condition = "under_repair"
+        condition_notes = "Under repair/maintenance"
+
+    # STANDBY patterns - in workshop/location without issues
+    elif any(kw in remarks_normalized for kw in [
+        "PLANT WORKSHOP", "BEHIND WORKSHOP", "IN WORKSHOP", "AT WORKSHOP",
+        "BEHIND PLANT", "STAND BY", "STANDBY", "ON STANDBY",
+        "IDLE", "AVAILABLE", "PARKED",
+    ]):
+        # Check if there's also an issue mentioned - if so, it's breakdown
+        issue_keywords = ["NO ENGINE", "NO COMPRESSOR", "REMOVED", "BURNED", "FAULT", "BROKEN"]
+        has_issue = any(kw in remarks_normalized for kw in issue_keywords)
+        if has_issue:
+            condition = "breakdown"
+            condition_notes = "In workshop with issues"
+        else:
+            condition = "standby"
+            condition_notes = "Available/on standby"
+
+    # Repair completed
+    elif any(kw in remarks_normalized for kw in ["(FIXED)", "(COMPLETED)", "(REPAIRED)", "FIXED", "REPAIRED"]):
+        condition = "operational"
+        condition_notes = "Repair completed"
+
+    # Generic problem/fault keywords
+    elif any(kw in remarks_normalized for kw in ["PROBLEM", "FAULT", "BROKEN", "DEFECT", "DAMAGE", "ISSUE", "FAULTY"]):
         if hours_worked > 0:
-            status = "working"
-        elif standby_hours > 0:
-            status = "standby"
-    # Derive status from hours
-    elif breakdown_hours > hours_worked and breakdown_hours > 0:
-        status = "breakdown"
-    elif hours_worked == 0 and standby_hours > 0:
-        status = "standby"
-    elif hours_worked > 0:
-        status = "working"
-    elif condition == "scrap":
-        # Scrap plants are typically not operational
-        status = "breakdown"
+            condition = "operational"
+            condition_notes = "Has issue but operational"
+        else:
+            condition = "breakdown"
+            condition_notes = "Has reported issue"
+
+    # "FROM (location)" with no other context = unverified
+    elif re.match(r"^FROM\s+\w+$", remarks_normalized) or re.match(r"^FROM\s+\w+\s+\w+$", remarks_normalized):
+        # Just "FROM BAUCHI" or "FROM FOKE QUARRY" with nothing else
+        condition = "unverified"
+        condition_notes = "Transferred in, status unknown"
+
+    # No clear keywords - derive from hours
     else:
-        status = "unverified"
+        if breakdown_hours > hours_worked and breakdown_hours > 0:
+            condition = "breakdown"
+            condition_notes = "Breakdown hours exceed working hours"
+        elif hours_worked > 0:
+            condition = "operational"
+            condition_notes = None
+        elif standby_hours > 0:
+            condition = "standby"
+            condition_notes = "On standby"
+        else:
+            condition = "unverified"
+            condition_notes = "No clear data available"
+
+    # Check for OUTBOUND transfers in remarks if not in columns
+    # We only track outbound (going TO), not inbound (coming FROM)
+    if not transfer_detected:
+        if any(kw in remarks_normalized for kw in ["TRANSFERRED TO", "SENT TO", "MOVED TO", "GOING TO", "TO BE TRANSFERRED TO"]):
+            transfer_detected = True
+            transfer_direction = "outbound"
+            for pattern in [r"TRANSFERRED TO\s+(\w+)", r"SENT TO\s+(\w+)", r"MOVED TO\s+(\w+)", r"GOING TO\s+(\w+)"]:
+                match = re.search(pattern, remarks_normalized)
+                if match:
+                    transfer_location = match.group(1)
+                    break
 
     return ParsedRemarks(
-        status=status,
         condition=condition,
         transfer_detected=transfer_detected,
         transfer_direction=transfer_direction,
         transfer_location=transfer_location,
         transfer_date=None,
         condition_notes=condition_notes,
-        confidence=0.5,  # Lower confidence for fallback
+        confidence=0.6,  # Slightly higher confidence with improved patterns
     )
 
 
@@ -263,46 +410,89 @@ async def parse_remarks(
     standby_hours: float = 0,
     breakdown_hours: float = 0,
     off_hire: bool = False,
+    transfer_from: str | None = None,
+    transfer_to: str | None = None,
+    fleet_number: str = "",
 ) -> ParsedRemarks:
-    """Parse a single plant's remarks using AI.
+    """Parse a single plant's remarks using AI (OpenAI ChatGPT).
 
     Args:
         remarks: The free-text remarks from the report.
         hours_worked: Hours worked this week.
         standby_hours: Standby hours this week.
         breakdown_hours: Breakdown hours this week.
-        off_hire: Whether the plant is marked off hire.
+        off_hire: Whether the plant is marked off hire (from column).
+        transfer_from: Transfer from column value.
+        transfer_to: Transfer to column value.
+        fleet_number: The fleet number for context.
 
     Returns:
         ParsedRemarks with extracted information.
     """
-    model = _get_model()
+    # Try OpenAI first
+    client = _get_openai_client()
 
-    if model is None:
-        return fallback_parse(remarks, hours_worked, standby_hours, breakdown_hours, off_hire)
+    if client is None:
+        # Try Gemini as fallback (if configured)
+        # gemini_model = _get_gemini_model()
+        # if gemini_model is None:
+        return fallback_parse(
+            remarks, hours_worked, standby_hours, breakdown_hours,
+            off_hire, transfer_from, transfer_to
+        )
 
     try:
         prompt = PARSE_PROMPT.format(
+            fleet_number=fleet_number,
             remarks=remarks or "",
             hours_worked=hours_worked,
             standby_hours=standby_hours,
             breakdown_hours=breakdown_hours,
             off_hire=off_hire,
+            transfer_from=transfer_from or "(not specified)",
+            transfer_to=transfer_to or "(not specified)",
         )
 
-        response = await model.generate_content_async(prompt)
-        result_text = response.text.strip()
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",  # More cost-effective than gpt-4
+            messages=[
+                {"role": "system", "content": "You are a plant management expert analyzing equipment remarks. Return only valid JSON."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.3,
+            max_tokens=500,
+        )
 
-        # Clean up response (remove markdown if present)
+        result_text = response.choices[0].message.content.strip()
+
+        # Clean up response - remove markdown, comments, and extract JSON
         if result_text.startswith("```"):
             result_text = re.sub(r"^```(?:json)?\n?", "", result_text)
             result_text = re.sub(r"\n?```$", "", result_text)
 
+        # Try to extract JSON object if there's surrounding text
+        # Look for { to find start of JSON object
+        json_start = result_text.find('{')
+        if json_start > 0:
+            result_text = result_text[json_start:]
+
+        # Remove common JSON issues from LLM responses
+        # Remove trailing commas before } or ]
+        result_text = re.sub(r',(\s*[}\]])', r'\1', result_text)
+        # Remove comments (// style)
+        result_text = re.sub(r'//.*?$', '', result_text, flags=re.MULTILINE)
+        # Remove comments (/* */ style)
+        result_text = re.sub(r'/\*.*?\*/', '', result_text, flags=re.DOTALL)
+
         data = json.loads(result_text)
 
+        # Validate condition value
+        condition = data.get("condition", "unverified")
+        if condition not in VALID_CONDITIONS:
+            condition = "unverified"
+
         return ParsedRemarks(
-            status=data.get("status", "working"),
-            condition=data.get("condition", "good"),
+            condition=condition,
             transfer_detected=data.get("transfer_detected", False),
             transfer_direction=data.get("transfer_direction"),
             transfer_location=data.get("transfer_location"),
@@ -311,17 +501,33 @@ async def parse_remarks(
             confidence=float(data.get("confidence", 0.8)),
         )
 
-    except Exception as e:
+    except json.JSONDecodeError as e:
         logger.warning(
-            "AI parsing failed, using fallback",
+            "OpenAI response contained invalid JSON, using fallback",
             error=str(e),
             remarks=remarks[:100] if remarks else None,
         )
-        return fallback_parse(remarks, hours_worked, standby_hours, breakdown_hours, off_hire)
+        return fallback_parse(
+            remarks, hours_worked, standby_hours, breakdown_hours,
+            off_hire, transfer_from, transfer_to
+        )
+    except Exception as e:
+        logger.warning(
+            "OpenAI parsing failed, using fallback",
+            error=str(e),
+            remarks=remarks[:100] if remarks else None,
+        )
+        return fallback_parse(
+            remarks, hours_worked, standby_hours, breakdown_hours,
+            off_hire, transfer_from, transfer_to
+        )
 
 
 async def parse_remarks_batch(plants_data: list[dict]) -> dict[str, ParsedRemarks]:
-    """Parse multiple plants' remarks in a single API call for efficiency.
+    """Parse multiple plants' remarks in batches for efficiency (OpenAI ChatGPT).
+
+    Splits large batches into smaller chunks (max 150 plants per batch) to avoid
+    response issues and timeouts.
 
     Args:
         plants_data: List of dicts with keys:
@@ -331,6 +537,8 @@ async def parse_remarks_batch(plants_data: list[dict]) -> dict[str, ParsedRemark
             - standby_hours: float
             - breakdown_hours: float
             - off_hire: bool
+            - transfer_from: str | None (optional)
+            - transfer_to: str | None (optional)
 
     Returns:
         Dict mapping fleet_number to ParsedRemarks.
@@ -338,10 +546,10 @@ async def parse_remarks_batch(plants_data: list[dict]) -> dict[str, ParsedRemark
     if not plants_data:
         return {}
 
-    model = _get_model()
+    client = _get_openai_client()
 
-    # If no model, use fallback for all
-    if model is None:
+    # If no OpenAI client, use fallback for all
+    if client is None:
         results = {}
         for plant in plants_data:
             results[plant["fleet_number"]] = fallback_parse(
@@ -350,93 +558,153 @@ async def parse_remarks_batch(plants_data: list[dict]) -> dict[str, ParsedRemark
                 plant.get("standby_hours", 0),
                 plant.get("breakdown_hours", 0),
                 plant.get("off_hire", False),
+                plant.get("transfer_from"),
+                plant.get("transfer_to"),
             )
         return results
 
-    try:
-        # Build batch prompt
-        plants_text = ""
-        for i, plant in enumerate(plants_data, 1):
-            plants_text += f"""
+    # Split into smaller batches to avoid response issues
+    # Max 50 plants per batch for reliable responses
+    batch_size = 50
+    results = {}
+    batches_processed = 0
+    batches_failed = 0
+
+    for batch_start in range(0, len(plants_data), batch_size):
+        batch_end = min(batch_start + batch_size, len(plants_data))
+        batch_plants = plants_data[batch_start:batch_end]
+
+        try:
+            # Build batch prompt for this chunk
+            plants_text = ""
+            for i, plant in enumerate(batch_plants, 1):
+                plants_text += f"""
 Plant {i}:
   Fleet Number: {plant["fleet_number"]}
   Remarks: {plant.get("remarks") or "(no remarks)"}
   Hours worked: {plant.get("hours_worked", 0)}
   Standby hours: {plant.get("standby_hours", 0)}
   Breakdown hours: {plant.get("breakdown_hours", 0)}
-  Off hire: {plant.get("off_hire", False)}
+  Off hire (column): {plant.get("off_hire", False)}
+  Transfer from (column): {plant.get("transfer_from") or "(not specified)"}
+  Transfer to (column): {plant.get("transfer_to") or "(not specified)"}
 """
 
-        prompt = BATCH_PARSE_PROMPT.format(plants_text=plants_text)
+            prompt = BATCH_PARSE_PROMPT.format(plants_text=plants_text)
 
-        response = await model.generate_content_async(prompt)
-        result_text = response.text.strip()
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "You are a plant management expert analyzing equipment remarks. Return only valid JSON array."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3,
+                max_tokens=4000,  # Increased for larger batches
+            )
 
-        # Clean up response
-        if result_text.startswith("```"):
-            result_text = re.sub(r"^```(?:json)?\n?", "", result_text)
-            result_text = re.sub(r"\n?```$", "", result_text)
+            result_text = response.choices[0].message.content.strip()
 
-        data_list = json.loads(result_text)
+            # Clean up response - remove markdown, comments, and extract JSON
+            if result_text.startswith("```"):
+                result_text = re.sub(r"^```(?:json)?\n?", "", result_text)
+                result_text = re.sub(r"\n?```$", "", result_text)
 
-        results = {}
-        for data in data_list:
-            fleet_number = data.get("fleet_number", "").upper()
-            if fleet_number:
-                results[fleet_number] = ParsedRemarks(
-                    status=data.get("status", "working"),
-                    condition=data.get("condition", "good"),
-                    transfer_detected=data.get("transfer_detected", False),
-                    transfer_direction=data.get("transfer_direction"),
-                    transfer_location=data.get("transfer_location"),
-                    transfer_date=data.get("transfer_date"),
-                    condition_notes=data.get("condition_notes"),
-                    confidence=float(data.get("confidence", 0.8)),
-                )
+            # Try to extract JSON array if there's surrounding text
+            json_start = result_text.find('[')
+            if json_start > 0:
+                result_text = result_text[json_start:]
 
-        # Fill in any missing with fallback
-        for plant in plants_data:
-            fn = plant["fleet_number"].upper()
-            if fn not in results:
-                results[fn] = fallback_parse(
-                    plant.get("remarks"),
-                    plant.get("hours_worked", 0),
-                    plant.get("standby_hours", 0),
-                    plant.get("breakdown_hours", 0),
-                    plant.get("off_hire", False),
-                )
+            # Find matching ] at the end
+            json_end = result_text.rfind(']')
+            if json_end > 0:
+                result_text = result_text[:json_end + 1]
 
-        logger.info(
-            "Batch parsed remarks",
-            total=len(plants_data),
-            ai_parsed=len([r for r in results.values() if r.confidence > 0.5]),
-        )
+            # Remove common JSON issues from LLM responses
+            # Remove trailing commas before } or ]
+            result_text = re.sub(r',(\s*[}\]])', r'\1', result_text)
+            # Remove comments (// style)
+            result_text = re.sub(r'//.*?$', '', result_text, flags=re.MULTILINE)
+            # Remove comments (/* */ style)
+            result_text = re.sub(r'/\*.*?\*/', '', result_text, flags=re.DOTALL)
 
-        return results
+            data_list = json.loads(result_text)
 
-    except Exception as e:
-        logger.warning("Batch AI parsing failed, using fallback for all", error=str(e))
-        results = {}
-        for plant in plants_data:
-            results[plant["fleet_number"]] = fallback_parse(
+            # Process this batch's results
+            for data in data_list:
+                fleet_number = str(data.get("fleet_number", "")).upper().replace(" ", "")
+                if fleet_number:
+                    condition = data.get("condition", "unverified")
+                    if condition not in VALID_CONDITIONS:
+                        condition = "unverified"
+
+                    results[fleet_number] = ParsedRemarks(
+                        condition=condition,
+                        transfer_detected=data.get("transfer_detected", False),
+                        transfer_direction=data.get("transfer_direction"),
+                        transfer_location=data.get("transfer_location"),
+                        transfer_date=data.get("transfer_date"),
+                        condition_notes=data.get("condition_notes"),
+                        confidence=float(data.get("confidence", 0.8)),
+                    )
+
+            batches_processed += 1
+
+        except Exception as e:
+            # This batch failed - use fallback for these plants only
+            batches_failed += 1
+            logger.warning(
+                "Batch failed, using fallback for this batch",
+                error=str(e),
+                batch_start=batch_start,
+                batch_size=len(batch_plants),
+            )
+            for plant in batch_plants:
+                fn = plant["fleet_number"].upper().replace(" ", "")
+                if fn not in results:
+                    results[fn] = fallback_parse(
+                        plant.get("remarks"),
+                        plant.get("hours_worked", 0),
+                        plant.get("standby_hours", 0),
+                        plant.get("breakdown_hours", 0),
+                        plant.get("off_hire", False),
+                        plant.get("transfer_from"),
+                        plant.get("transfer_to"),
+                    )
+
+    # Fill in any missing with fallback
+    for plant in plants_data:
+        fn = plant["fleet_number"].upper().replace(" ", "")
+        if fn not in results:
+            results[fn] = fallback_parse(
                 plant.get("remarks"),
                 plant.get("hours_worked", 0),
                 plant.get("standby_hours", 0),
                 plant.get("breakdown_hours", 0),
                 plant.get("off_hire", False),
+                plant.get("transfer_from"),
+                plant.get("transfer_to"),
             )
-        return results
+
+    logger.info(
+        "Batch parsed remarks (OpenAI)",
+        total=len(plants_data),
+        batches_processed=batches_processed,
+        batches_failed=batches_failed,
+        ai_parsed=len([r for r in results.values() if r.confidence > 0.5]),
+    )
+
+    return results
 
 
-def derive_status_and_condition(
+def derive_condition(
     parsed: ParsedRemarks,
     hours_worked: float,
     standby_hours: float,
     breakdown_hours: float,
     off_hire: bool,
     physical_verification: bool | None = None,
-) -> tuple[str, str]:
-    """Derive final plant status and condition combining AI parsing with hours data.
+) -> str:
+    """Derive final plant condition combining AI parsing with explicit data.
 
     This provides a second layer of validation on top of AI parsing.
 
@@ -445,32 +713,65 @@ def derive_status_and_condition(
         hours_worked: Hours worked this week.
         standby_hours: Standby hours this week.
         breakdown_hours: Breakdown hours this week.
-        off_hire: Whether marked off hire.
+        off_hire: Whether marked off hire (from column).
         physical_verification: Physical verification status.
 
     Returns:
-        Tuple of (status, condition).
+        Final condition string.
     """
-    # Start with AI-derived condition
-    condition = parsed.condition
-
-    # Derive STATUS (operational state)
+    # 1. OFF HIRE COLUMN takes absolute precedence
     if off_hire:
-        status = "off_hire"
-    elif parsed.transfer_direction == "outbound":
-        status = "in_transit"
-    elif breakdown_hours > hours_worked and breakdown_hours > 0:
-        status = "breakdown"
-    elif hours_worked == 0 and standby_hours > 0:
-        status = "standby"
-    elif hours_worked > 0:
-        status = "working"
-    elif condition == "scrap":
-        # Scrap plants are typically not operational
-        status = "breakdown"
-    else:
-        status = parsed.status if parsed.status in ("working", "standby", "breakdown", "off_hire", "in_transit") else "unverified"
+        return "off_hire"
 
+    # 2. If AI has high confidence, trust it
+    if parsed.confidence >= 0.7:
+        return parsed.condition
+
+    # 3. Fallback to hours-based derivation
+    if breakdown_hours > hours_worked and breakdown_hours > 0:
+        return "breakdown"
+    elif hours_worked > 0:
+        return "operational"
+    elif standby_hours > 0:
+        return "standby"
+
+    # 4. Use AI result even with lower confidence
+    if parsed.condition and parsed.condition in VALID_CONDITIONS:
+        return parsed.condition
+
+    return "unverified"
+
+
+# Backwards compatibility - deprecated functions
+def derive_status_and_condition(
+    parsed: ParsedRemarks,
+    hours_worked: float,
+    standby_hours: float,
+    breakdown_hours: float,
+    off_hire: bool,
+    physical_verification: bool | None = None,
+) -> tuple[str, str]:
+    """DEPRECATED: Use derive_condition instead.
+
+    Returns tuple of (status, condition) for backwards compatibility.
+    Now both values are the same since we unified them.
+    """
+    condition = derive_condition(
+        parsed, hours_worked, standby_hours, breakdown_hours, off_hire, physical_verification
+    )
+    # Map condition to old status values for backwards compatibility
+    status_map = {
+        "operational": "working",
+        "standby": "standby",
+        "breakdown": "breakdown",
+        "under_repair": "breakdown",
+        "scrap": "breakdown",
+        "missing": "missing",
+        "off_hire": "off_hire",
+        "gpm_assessment": "unverified",
+        "unverified": "unverified",
+    }
+    status = status_map.get(condition, "unverified")
     return status, condition
 
 
@@ -482,22 +783,7 @@ def derive_status_from_data(
     off_hire: bool,
     physical_verification: bool | None = None,
 ) -> str:
-    """Derive final plant status combining AI parsing with hours data.
-
-    DEPRECATED: Use derive_status_and_condition instead for both fields.
-    This is kept for backwards compatibility.
-
-    Args:
-        parsed: AI-parsed remarks result.
-        hours_worked: Hours worked this week.
-        standby_hours: Standby hours this week.
-        breakdown_hours: Breakdown hours this week.
-        off_hire: Whether marked off hire.
-        physical_verification: Physical verification status.
-
-    Returns:
-        Final status string.
-    """
+    """DEPRECATED: Use derive_condition instead."""
     status, _ = derive_status_and_condition(
         parsed, hours_worked, standby_hours, breakdown_hours, off_hire, physical_verification
     )

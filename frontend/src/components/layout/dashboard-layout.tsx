@@ -9,6 +9,7 @@ import { useRouter } from 'next/navigation';
 import { Sidebar } from './sidebar';
 import { Header } from './header';
 import { useAuth } from '@/providers/auth-provider';
+import { useLocations, useFleetTypes } from '@/hooks/use-plants';
 import { cn } from '@/lib/utils';
 import { Loader2 } from 'lucide-react';
 import Image from 'next/image';
@@ -38,6 +39,12 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
     localStorage.setItem('sidebar-collapsed', JSON.stringify(newState));
   };
 
+  // Prefetch locations & fleet types as soon as user is authenticated.
+  // These are used on the plants page and rarely change — fetching them
+  // here means they're already cached when the user navigates to /plants.
+  useLocations();
+  useFleetTypes();
+
   // Redirect to login if not authenticated
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -53,7 +60,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
           <div className="w-16 h-16 relative">
             <Image
               src="/images/logo.png"
-              alt="PW Nigeria"
+              alt="P.W. Nigeria"
               fill
               className="object-contain"
             />

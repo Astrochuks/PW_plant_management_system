@@ -6,7 +6,7 @@
  * Right: Login form
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -37,8 +37,7 @@ const loginSchema = z.object({
     .email('Please enter a valid email address'),
   password: z
     .string()
-    .min(1, 'Password is required')
-    .min(6, 'Password must be at least 6 characters'),
+    .min(1, 'Password is required'),
 });
 
 type LoginFormValues = z.infer<typeof loginSchema>;
@@ -48,6 +47,11 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const { login } = useAuth();
   const router = useRouter();
+
+  // Prefetch the dashboard route so it's already compiled when login succeeds
+  useEffect(() => {
+    router.prefetch('/');
+  }, [router]);
 
   const form = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
@@ -106,7 +110,7 @@ export default function LoginPage() {
               <div className="w-32 h-32 relative">
                 <Image
                   src="/images/logo.png"
-                  alt="PW Nigeria Logo"
+                  alt="P.W. Nigeria Logo"
                   fill
                   className="object-contain"
                   priority
@@ -116,7 +120,7 @@ export default function LoginPage() {
 
             {/* Company Name */}
             <h1 className="text-4xl font-bold text-white tracking-tight mb-3">
-              PW NIGERIA LTD
+              P.W. NIGERIA LTD.
             </h1>
 
             {/* Tagline */}
@@ -127,58 +131,42 @@ export default function LoginPage() {
             {/* Separator */}
             <div className="w-24 h-1 bg-[#ffbf36] rounded-full mt-8 mb-8" />
 
-            {/* Description */}
-            <p className="text-gray-400 text-center max-w-md leading-relaxed">
-              Comprehensive plant and equipment management system for tracking 
-              and maintaining your fleet across all project sites.
-            </p>
-          </div>
-
-          {/* Stats or Features */}
-          <div className="mt-16 grid grid-cols-3 gap-8 text-center">
-            <div>
-              <div className="text-3xl font-bold text-[#ffbf36]">250+</div>
-              <div className="text-sm text-gray-500 mt-1">Plants Tracked</div>
-            </div>
-            <div>
-              <div className="text-3xl font-bold text-[#ffbf36]">20+</div>
-              <div className="text-sm text-gray-500 mt-1">Active Sites</div>
-            </div>
-            <div>
-              <div className="text-3xl font-bold text-[#ffbf36]">99.9%</div>
-              <div className="text-sm text-gray-500 mt-1">Uptime</div>
-            </div>
+            {/* System Name */}
+            <h2 className="text-xl font-semibold text-white tracking-wide">
+              PLANT MANAGEMENT SYSTEM
+            </h2>
           </div>
         </div>
 
         {/* Footer */}
         <div className="absolute bottom-8 left-0 right-0 text-center">
           <p className="text-gray-600 text-sm">
-            © {new Date().getFullYear()} PW Nigeria Ltd. All rights reserved.
+            © {new Date().getFullYear()} P.W. Nigeria Ltd. All rights reserved.
           </p>
         </div>
       </div>
 
       {/* Right Panel - Login Form */}
-      <div className="w-full lg:w-1/2 flex items-center justify-center p-8 bg-background">
-        <div className="w-full max-w-md">
+      <div className="w-full lg:w-1/2 flex items-center justify-center p-4 sm:p-8 bg-background min-h-screen">
+        <div className="w-full max-w-md mx-auto">
           {/* Mobile Logo - Only shown on smaller screens */}
-          <div className="lg:hidden flex flex-col items-center mb-10">
+          <div className="lg:hidden flex flex-col items-center mb-10 text-center">
             <div className="w-20 h-20 relative mb-4">
               <Image
                 src="/images/logo.png"
-                alt="PW Nigeria Logo"
+                alt="P.W. Nigeria Logo"
                 fill
                 className="object-contain"
                 priority
               />
             </div>
-            <h1 className="text-2xl font-bold text-foreground">PW NIGERIA LTD</h1>
+            <h1 className="text-2xl font-bold text-foreground">P.W. NIGERIA LTD.</h1>
             <p className="text-sm text-[#ffbf36]">Your Engineering Partner in Africa</p>
+            <p className="text-xs text-muted-foreground mt-1 tracking-wide">PLANT MANAGEMENT SYSTEM</p>
           </div>
 
           {/* Form Header */}
-          <div className="mb-8">
+          <div className="mb-8 text-center">
             <h2 className="text-2xl font-semibold text-foreground tracking-tight">
               Welcome back
             </h2>
@@ -280,7 +268,7 @@ export default function LoginPage() {
           </Form>
 
           {/* Help Text */}
-          <div className="mt-8 pt-6 border-t border-border text-center">
+          <div className="mt-8 pt-6 border-t border-border text-center lg:text-center">
             <p className="text-sm text-muted-foreground">
               Need help accessing your account?{' '}
               <a
@@ -307,12 +295,15 @@ function ThemeToggle() {
   const [mounted, setMounted] = useState(false);
   const { theme, setTheme } = useThemeState();
 
-  // Avoid hydration mismatch
-  useState(() => {
+  // Avoid hydration mismatch - only render after client mount
+  useEffect(() => {
     setMounted(true);
-  });
+  }, []);
 
-  if (!mounted) return null;
+  // Return placeholder with same dimensions to avoid layout shift
+  if (!mounted) {
+    return <span className="text-xs text-muted-foreground opacity-0">Loading...</span>;
+  }
 
   return (
     <button
@@ -328,19 +319,17 @@ function ThemeToggle() {
 function useThemeState() {
   const [theme, setThemeState] = useState<string>('light');
 
-  useState(() => {
-    if (typeof window !== 'undefined') {
-      const savedTheme = localStorage.getItem('pw-theme') || 'light';
-      setThemeState(savedTheme);
-    }
-  });
+  useEffect(() => {
+    const savedTheme = localStorage.getItem('pw-theme') || 'light';
+    setThemeState(savedTheme);
+    // Also apply the theme class on initial load
+    document.documentElement.classList.toggle('dark', savedTheme === 'dark');
+  }, []);
 
   const setTheme = (newTheme: string) => {
     setThemeState(newTheme);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('pw-theme', newTheme);
-      document.documentElement.classList.toggle('dark', newTheme === 'dark');
-    }
+    localStorage.setItem('pw-theme', newTheme);
+    document.documentElement.classList.toggle('dark', newTheme === 'dark');
   };
 
   return { theme, setTheme };

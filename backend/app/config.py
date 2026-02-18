@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     supabase_jwt_secret: str | None = None  # From Supabase dashboard > Settings > API > JWT Secret
     user_cache_ttl_seconds: int = 300  # How long to cache user data (5 min default)
 
+    # Supabase Client Timeouts (seconds)
+    supabase_postgrest_timeout: int = 10  # PostgREST / RPC calls (default was 120s)
+    supabase_storage_timeout: int = 20  # Storage uploads/downloads
+    supabase_function_timeout: int = 10  # Edge functions
+
     # Rate Limiting
     rate_limit_requests: int = 100  # requests per minute
     rate_limit_upload: int = 10  # uploads per minute
@@ -63,8 +68,11 @@ class Settings(BaseSettings):
     metrics_enabled: bool = True
     metrics_flush_interval_seconds: int = 60
 
-    # AI - Google Gemini
-    gemini_api_key: str | None = Field(default=None, description="Google Gemini API key for remarks parsing")
+    # AI - Google Gemini (deprecated but kept for fallback)
+    gemini_api_key: str | None = Field(default=None, description="Google Gemini API key for remarks parsing (fallback)")
+
+    # AI - OpenAI ChatGPT
+    openai_api_key: str | None = Field(default=None, description="OpenAI API key for remarks parsing (primary)")
 
     @field_validator("cors_origins", mode="before")
     @classmethod

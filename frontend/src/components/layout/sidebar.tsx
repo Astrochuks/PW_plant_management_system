@@ -6,24 +6,28 @@
 
 import Link from 'next/link';
 import Image from 'next/image';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
 import {
   LayoutDashboard,
   Truck,
-  Wrench,
-  FileText,
   MapPin,
-  Settings,
-  Users,
   Upload,
-  Bell,
-  ChevronLeft,
-  ChevronRight,
+  Users,
+  ArrowRightLeft,
+  PanelLeftClose,
+  PanelLeft,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { useAuth } from '@/providers/auth-provider';
+import { useTransferStats } from '@/hooks/use-transfers';
 
 interface SidebarProps {
   collapsed: boolean;
@@ -42,66 +46,103 @@ const mainNavItems = [
     icon: Truck,
   },
   {
-    title: 'Spare Parts',
-    href: '/spare-parts',
-    icon: Wrench,
-  },
-  {
-    title: 'Reports',
-    href: '/reports',
-    icon: FileText,
-  },
-  {
-    title: 'Locations',
+    title: 'Sites',
     href: '/locations',
     icon: MapPin,
   },
 ];
 
+// Visible to both management and admin
+const managementNavItems = [
+  {
+    title: 'Transfers',
+    href: '/transfers',
+    icon: ArrowRightLeft,
+    badgeKey: 'transfers' as const,
+  },
+];
+
+// Admin-only items
 const adminNavItems = [
   {
-    title: 'Uploads',
+    title: 'Upload',
     href: '/uploads',
     icon: Upload,
   },
   {
     title: 'Users',
-    href: '/users',
+    href: '/admin/users',
     icon: Users,
-  },
-  {
-    title: 'Settings',
-    href: '/settings',
-    icon: Settings,
   },
 ];
 
 export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
+  const isManagement = user?.role === 'management';
+  const showManagementItems = isAdmin || isManagement;
+
+  // Track last visit to transfers page for badge count
+  const TRANSFERS_LAST_SEEN_KEY = 'transfers_last_seen_at';
+  const [lastSeenAt, setLastSeenAt] = useState<string | undefined>(undefined);
+
+  // Load last seen timestamp from localStorage on mount
+  useEffect(() => {
+    const stored = localStorage.getItem(TRANSFERS_LAST_SEEN_KEY);
+    setLastSeenAt(stored || undefined);
+  }, []);
+
+  // When user navigates to /transfers, save the current time
+  useEffect(() => {
+    if (pathname.startsWith('/transfers')) {
+      const now = new Date().toISOString();
+      localStorage.setItem(TRANSFERS_LAST_SEEN_KEY, now);
+      setLastSeenAt(now);
+    }
+  }, [pathname]);
+
+  // Fetch transfer stats with "since" to get new_since count
+  const { data: transferStats } = useTransferStats(lastSeenAt);
+  const newTransfers = transferStats?.data?.new_since ?? 0;
+
+  const badgeCounts: Record<string, number> = {
+    transfers: newTransfers,
+  };
+
+  // Prefetch all nav routes so page transitions are instant
+  useEffect(() => {
+    mainNavItems.forEach((item) => router.prefetch(item.href));
+    if (showManagementItems) {
+      managementNavItems.forEach((item) => router.prefetch(item.href));
+    }
+    if (isAdmin) {
+      adminNavItems.forEach((item) => router.prefetch(item.href));
+    }
+  }, [router, isAdmin, showManagementItems]);
 
   return (
     <aside
       className={cn(
-        'fixed left-0 top-0 z-40 h-screen bg-sidebar border-r border-sidebar-border transition-all duration-300',
+        'fixed left-0 top-0 z-40 h-screen bg-sidebar border-r border-sidebar-border transition-all duration-300 flex flex-col',
         collapsed ? 'w-[70px]' : 'w-[240px]'
       )}
     >
       {/* Logo Section */}
-      <div className="flex h-16 items-center justify-between px-4 border-b border-sidebar-border">
-        <Link href="/" className="flex items-center gap-3">
-          <div className="relative w-10 h-10 flex-shrink-0">
+      <div className="flex h-[72px] items-center justify-between px-3 border-b border-sidebar-border">
+        <Link href="/" className="flex items-center gap-2.5">
+          <div className="relative w-[46px] h-[46px] flex-shrink-0">
             <Image
               src="/images/logo.png"
-              alt="PW Nigeria"
+              alt="P.W. Nigeria Ltd."
               fill
               className="object-contain"
             />
           </div>
           {!collapsed && (
             <div className="flex flex-col">
-              <span className="font-bold text-sm text-sidebar-foreground">PW NIGERIA</span>
+              <span className="font-bold text-[13px] leading-tight text-sidebar-foreground">P.W. NIGERIA LTD.</span>
               <span className="text-[10px] text-muted-foreground">Plant Management</span>
             </div>
           )}
@@ -109,11 +150,11 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
       </div>
 
       {/* Navigation */}
-      <nav className="flex flex-col gap-1 p-3">
+      <nav className="flex-1 flex flex-col gap-1 p-3 overflow-y-auto">
         {/* Main Navigation */}
         <div className="space-y-1">
           {!collapsed && (
-            <span className="text-xs font-medium text-muted-foreground px-3 py-2">
+            <span className="text-xs font-medium text-muted-foreground px-3 py-2 block">
               MAIN MENU
             </span>
           )}
@@ -129,13 +170,42 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           ))}
         </div>
 
+        {/* Management Navigation (visible to management + admin) */}
+        {showManagementItems && (
+          <>
+            <Separator className="my-3" />
+            <div className="space-y-1">
+              {!collapsed && (
+                <span className="text-xs font-medium text-muted-foreground px-3 py-2 block">
+                  MANAGEMENT
+                </span>
+              )}
+              {managementNavItems.map((item) => {
+                const badgeKey = 'badgeKey' in item ? item.badgeKey : undefined;
+                const badge = badgeKey ? badgeCounts[badgeKey] : 0;
+                return (
+                  <NavItem
+                    key={item.href}
+                    href={item.href}
+                    icon={item.icon}
+                    title={item.title}
+                    isActive={pathname.startsWith(item.href)}
+                    collapsed={collapsed}
+                    badge={badge}
+                  />
+                );
+              })}
+            </div>
+          </>
+        )}
+
         {/* Admin Navigation */}
         {isAdmin && (
           <>
             <Separator className="my-3" />
             <div className="space-y-1">
               {!collapsed && (
-                <span className="text-xs font-medium text-muted-foreground px-3 py-2">
+                <span className="text-xs font-medium text-muted-foreground px-3 py-2 block">
                   ADMINISTRATION
                 </span>
               )}
@@ -154,26 +224,35 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         )}
       </nav>
 
-      {/* Collapse Toggle */}
-      <div className="absolute bottom-4 left-0 right-0 px-3">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onToggle}
-          className={cn(
-            'w-full justify-center text-muted-foreground hover:text-sidebar-foreground',
-            collapsed && 'px-2'
+      {/* Collapse Toggle - Always visible at bottom */}
+      <div className="border-t border-sidebar-border p-3">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onToggle}
+              className={cn(
+                'w-full justify-center text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent',
+                collapsed ? 'px-2' : 'gap-2'
+              )}
+            >
+              {collapsed ? (
+                <PanelLeft className="h-4 w-4" />
+              ) : (
+                <>
+                  <PanelLeftClose className="h-4 w-4" />
+                  <span>Collapse Sidebar</span>
+                </>
+              )}
+            </Button>
+          </TooltipTrigger>
+          {collapsed && (
+            <TooltipContent side="right">
+              Expand Sidebar
+            </TooltipContent>
           )}
-        >
-          {collapsed ? (
-            <ChevronRight className="h-4 w-4" />
-          ) : (
-            <>
-              <ChevronLeft className="h-4 w-4 mr-2" />
-              <span>Collapse</span>
-            </>
-          )}
-        </Button>
+        </Tooltip>
       </div>
     </aside>
   );
@@ -185,23 +264,55 @@ interface NavItemProps {
   title: string;
   isActive: boolean;
   collapsed: boolean;
+  badge?: number;
 }
 
-function NavItem({ href, icon: Icon, title, isActive, collapsed }: NavItemProps) {
-  return (
+function NavItem({ href, icon: Icon, title, isActive, collapsed, badge }: NavItemProps) {
+  const linkContent = (
     <Link
       href={href}
       className={cn(
-        'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
+        'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors relative',
         isActive
           ? 'bg-sidebar-primary text-sidebar-primary-foreground'
           : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
         collapsed && 'justify-center px-2'
       )}
-      title={collapsed ? title : undefined}
     >
       <Icon className={cn('h-5 w-5 flex-shrink-0', isActive && 'text-sidebar-primary-foreground')} />
-      {!collapsed && <span>{title}</span>}
+      {!collapsed && (
+        <span className="flex-1">{title}</span>
+      )}
+      {badge != null && badge > 0 && (
+        <span
+          className={cn(
+            'inline-flex items-center justify-center rounded-full text-[10px] font-bold leading-none',
+            collapsed
+              ? 'absolute -top-1 -right-1 h-4 min-w-[16px] px-0.5 bg-red-500 text-white'
+              : 'h-5 min-w-[20px] px-1.5 bg-red-500 text-white'
+          )}
+        >
+          {badge > 99 ? '99+' : badge}
+        </span>
+      )}
     </Link>
   );
+
+  if (collapsed) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          {linkContent}
+        </TooltipTrigger>
+        <TooltipContent side="right">
+          {title}
+          {badge != null && badge > 0 && (
+            <span className="ml-1 text-red-400">({badge})</span>
+          )}
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  return linkContent;
 }

@@ -33,7 +33,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useLocation, useLocationPlants } from '@/hooks/use-locations';
+import { useLocationDetail, useLocationPlants } from '@/hooks/use-locations';
+import type { PlantCondition } from '@/lib/api/plants';
 
 interface LocationDetailModalProps {
   locationId: string | null;
@@ -43,19 +44,19 @@ interface LocationDetailModalProps {
 export function LocationDetailModal({ locationId, onClose }: LocationDetailModalProps) {
   const modalRef = useRef<HTMLDivElement>(null);
   const [page, setPage] = useState(1);
-  const [statusFilter, setStatusFilter] = useState<string>('');
+  const [conditionFilter, setConditionFilter] = useState<string>('');
 
-  const { data: location, isLoading: locationLoading } = useLocation(locationId);
+  const { data: location, isLoading: locationLoading } = useLocationDetail(locationId);
   const { data: plantsData, isLoading: plantsLoading } = useLocationPlants(locationId, {
     page,
     limit: 10,
-    status: statusFilter || undefined,
+    condition: conditionFilter || undefined,
   });
 
   // Reset page when filters change
   useEffect(() => {
     setPage(1);
-  }, [statusFilter]);
+  }, [conditionFilter]);
 
   // Close on escape key
   useEffect(() => {
@@ -119,17 +120,24 @@ export function LocationDetailModal({ locationId, onClose }: LocationDetailModal
         {/* Filters */}
         <div className="p-4 border-b">
           <Select
-            value={statusFilter || 'all'}
-            onValueChange={(value) => setStatusFilter(value === 'all' ? '' : value)}
+            value={conditionFilter || 'all'}
+            onValueChange={(value) => setConditionFilter(value === 'all' ? '' : value)}
           >
-            <SelectTrigger className="w-[140px]">
-              <SelectValue placeholder="Status" />
+            <SelectTrigger className="w-[160px]">
+              <SelectValue placeholder="Condition" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Status</SelectItem>
-              <SelectItem value="active">Active</SelectItem>
-              <SelectItem value="archived">Archived</SelectItem>
-              <SelectItem value="disposed">Disposed</SelectItem>
+              <SelectItem value="all">All Conditions</SelectItem>
+              <SelectItem value="working">Working</SelectItem>
+              <SelectItem value="standby">Standby</SelectItem>
+              <SelectItem value="under_repair">Under Repair</SelectItem>
+              <SelectItem value="breakdown">Breakdown</SelectItem>
+              <SelectItem value="faulty">Faulty</SelectItem>
+              <SelectItem value="scrap">Scrap</SelectItem>
+              <SelectItem value="missing">Missing</SelectItem>
+              <SelectItem value="off_hire">Off Hire</SelectItem>
+              <SelectItem value="gpm_assessment">GPM Assessment</SelectItem>
+              <SelectItem value="unverified">Unverified</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -149,10 +157,10 @@ export function LocationDetailModal({ locationId, onClose }: LocationDetailModal
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-[120px]">Fleet #</TableHead>
+                    <TableHead className="w-[120px]">Fleet Number</TableHead>
                     <TableHead>Description</TableHead>
                     <TableHead className="w-[150px]">Type</TableHead>
-                    <TableHead className="w-[100px]">Status</TableHead>
+                    <TableHead className="w-[120px]">Condition</TableHead>
                     <TableHead className="w-[80px] text-center">Verified</TableHead>
                     <TableHead className="w-[120px] text-right">Maintenance</TableHead>
                   </TableRow>
@@ -170,7 +178,7 @@ export function LocationDetailModal({ locationId, onClose }: LocationDetailModal
                         {plant.fleet_type || '-'}
                       </TableCell>
                       <TableCell>
-                        <StatusBadge status={plant.status} />
+                        <ConditionBadge condition={plant.condition} />
                       </TableCell>
                       <TableCell className="text-center">
                         {plant.physical_verification ? (
@@ -230,17 +238,26 @@ export function LocationDetailModal({ locationId, onClose }: LocationDetailModal
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
-  switch (status) {
-    case 'active':
-      return <Badge className="bg-success text-white">Active</Badge>;
-    case 'archived':
-      return <Badge variant="secondary">Archived</Badge>;
-    case 'disposed':
-      return <Badge className="bg-muted text-muted-foreground">Disposed</Badge>;
-    default:
-      return <Badge variant="secondary">{status}</Badge>;
-  }
+const CONDITION_STYLES: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline'; className?: string }> = {
+  working: { label: 'Working', variant: 'default', className: 'bg-emerald-600 hover:bg-emerald-600 text-white' },
+  standby: { label: 'Standby', variant: 'secondary', className: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200' },
+  under_repair: { label: 'Under Repair', variant: 'secondary', className: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' },
+  breakdown: { label: 'Breakdown', variant: 'destructive' },
+  faulty: { label: 'Faulty', variant: 'secondary', className: 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200' },
+  scrap: { label: 'Scrap', variant: 'secondary', className: 'bg-gray-200 text-gray-600 dark:bg-gray-800 dark:text-gray-400' },
+  missing: { label: 'Missing', variant: 'destructive', className: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' },
+  off_hire: { label: 'Off Hire', variant: 'outline' },
+  gpm_assessment: { label: 'GPM Assessment', variant: 'secondary', className: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200' },
+  unverified: { label: 'Unverified', variant: 'outline', className: 'text-muted-foreground' },
+};
+
+function ConditionBadge({ condition }: { condition: PlantCondition | null }) {
+  const style = CONDITION_STYLES[condition || 'unverified'] || CONDITION_STYLES.unverified;
+  return (
+    <Badge variant={style.variant} className={style.className}>
+      {style.label}
+    </Badge>
+  );
 }
 
 function PlantTableSkeleton() {
@@ -249,10 +266,10 @@ function PlantTableSkeleton() {
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead className="w-[120px]">Fleet #</TableHead>
+            <TableHead className="w-[120px]">Fleet Number</TableHead>
             <TableHead>Description</TableHead>
             <TableHead className="w-[150px]">Type</TableHead>
-            <TableHead className="w-[100px]">Status</TableHead>
+            <TableHead className="w-[120px]">Condition</TableHead>
             <TableHead className="w-[80px] text-center">Verified</TableHead>
             <TableHead className="w-[120px] text-right">Maintenance</TableHead>
           </TableRow>

@@ -17,6 +17,16 @@ from app.monitoring.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _is_separator_line(value: str) -> bool:
+    """Check if a value is just a separator line (underscores, dashes, etc.)."""
+    if not value:
+        return True
+    # Remove all separator characters and whitespace
+    cleaned = re.sub(r'[\s_\-=\.]+', '', value)
+    # If nothing left, it's a separator line
+    return len(cleaned) == 0
+
+
 def _extract_value_after_separator(cell_value: str, labels: list[str]) -> str | None:
     """Extract value after a label and separator from a single cell.
 
@@ -44,7 +54,8 @@ def _extract_value_after_separator(cell_value: str, labels: list[str]) -> str | 
             # Remove leading separators (-, :, etc.) and whitespace
             after_label = re.sub(r'^[\s\-:]+', '', after_label).strip()
 
-            if after_label and len(after_label) >= 2:
+            # Skip if it's a separator line (underscores, dashes, etc.)
+            if after_label and len(after_label) >= 2 and not _is_separator_line(after_label):
                 return after_label
 
     return None
@@ -91,7 +102,8 @@ def extract_weekly_report_metadata(file_content: bytes) -> dict[str, Any]:
                             for k in range(j + 1, len(row)):
                                 if pd.notna(row[k]):
                                     loc = str(row[k]).strip()
-                                    if loc in ("-", ":", "-:", ":-"):
+                                    # Skip separators and separator lines
+                                    if loc in ("-", ":", "-:", ":-") or _is_separator_line(loc):
                                         continue
                                     if loc and "SITE" not in loc.upper() and len(loc) > 2:
                                         result["location_name"] = loc.upper()
@@ -211,6 +223,11 @@ def lookup_location_by_name(location_name: str) -> dict[str, Any] | None:
         Dict with location 'id' and 'name', or None if not found.
     """
     if not location_name:
+        return None
+
+    # Skip separator lines (underscores, dashes, etc.)
+    if _is_separator_line(location_name):
+        logger.warning("Skipping separator line as location name", value=location_name[:50])
         return None
 
     client = get_supabase_admin_client()
@@ -336,65 +353,18 @@ def extract_weekly_report_preview(file_content: bytes, max_rows: int = 10) -> di
     }
 
     try:
-        # Column mapping (same as ETL worker)
-        column_map = {
-            "s/n": "serial_number",
-            "s/no": "serial_number",
-            "sn": "serial_number",
-            "serial no": "serial_number",
-            "serial number": "serial_number",
-            "fleet no": "fleet_number",
-            "fleet no.": "fleet_number",
-            "fleet number": "fleet_number",
-            "fleet_no": "fleet_number",
-            "fleetnumber": "fleet_number",
-            "equipment description": "description",
-            "equipment_description": "description",
-            "description": "description",
-            "fleetdescription": "description",
-            "fleet description": "description",
-            "physical verification": "physical_verification",
-            "physical_verification": "physical_verification",
-            "physical plant verification": "physical_verification",
-            "physical plant\nverification": "physical_verification",
-            "p.p.v": "physical_verification",
-            "ppv": "physical_verification",
-            "hours worked": "hours_worked",
-            "hours_worked": "hours_worked",
-            "hrs worked": "hours_worked",
-            "working hours": "hours_worked",
-            "s/b hour": "standby_hours",
-            "s/b hours": "standby_hours",
-            "standby hours": "standby_hours",
-            "standby_hours": "standby_hours",
-            "sb hour": "standby_hours",
-            "b/d hour": "breakdown_hours",
-            "b/d hours": "breakdown_hours",
-            "breakdown hours": "breakdown_hours",
-            "breakdown_hours": "breakdown_hours",
-            "bd hour": "breakdown_hours",
-            "off hire": "off_hire",
-            "off_hire": "off_hire",
-            "offhire": "off_hire",
-            "remarks": "remarks",
-            "remark": "remarks",
-        }
+        # Reuse column map and mapping logic from ETL worker (single source of truth)
+        from app.workers.etl_worker import find_header_row, map_columns, WEEKLY_COLUMN_MAP
 
-        # Read with header row (typically row 4)
-        df = pd.read_excel(io.BytesIO(file_content), sheet_name=0, header=3)
+        # Auto-detect header row
+        header_row = find_header_row(file_content)
+        df = pd.read_excel(io.BytesIO(file_content), sheet_name=0, header=header_row)
 
         # Map columns
-        rename_map = {}
-        for col in df.columns:
-            col_normalized = str(col).lower().strip()
-            col_no_newline = col_normalized.replace("\n", " ").replace("  ", " ")
-            if col_normalized in column_map:
-                rename_map[col] = column_map[col_normalized]
-            elif col_no_newline in column_map:
-                rename_map[col] = column_map[col_no_newline]
-
-        df = df.rename(columns=rename_map)
-        result["columns_found"] = list(rename_map.values())
+        old_cols = set(df.columns)
+        df = map_columns(df, WEEKLY_COLUMN_MAP)
+        mapped_cols = [c for c in df.columns if c not in old_cols or c in WEEKLY_COLUMN_MAP.values()]
+        result["columns_found"] = [c for c in df.columns if c in WEEKLY_COLUMN_MAP.values()]
 
         # Check for required columns
         if "fleet_number" not in df.columns:

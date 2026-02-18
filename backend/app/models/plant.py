@@ -52,14 +52,10 @@ class PlantUpdate(BaseModel):
     serial_e: str | None = None
     remarks: str | None = None
     current_location_id: UUID | None = None
-    status: str | None = Field(
-        None,
-        pattern="^(working|standby|breakdown|faulty|scrap|missing|stolen|unverified|in_transit|off_hire)$",
-    )
     condition: str | None = Field(
         None,
-        pattern="^(good|faulty|needs_repair|scrap)$",
-        description="Physical condition of the plant",
+        pattern="^(working|standby|under_repair|breakdown|faulty|scrap|missing|off_hire|gpm_assessment|unverified)$",
+        description="Unified condition field for the plant",
     )
     physical_verification: bool | None = None
 
@@ -68,7 +64,7 @@ class Plant(PlantBase):
     """Full plant model with all fields."""
 
     id: UUID
-    status: str
+    condition: str  # Unified condition field
     physical_verification: bool
     created_at: datetime
     updated_at: datetime
@@ -78,6 +74,10 @@ class Plant(PlantBase):
     state_id: UUID | None = None
     state: str | None = None
     state_code: str | None = None
+
+    # Pending transfer info
+    pending_transfer_id: UUID | None = None
+    pending_transfer_to_location: str | None = None
 
     class Config:
         from_attributes = True
@@ -98,8 +98,7 @@ class PlantSummary(BaseModel):
     purchase_cost: float | None = None
     serial_m: str | None = None
     serial_e: str | None = None
-    status: str | None = None
-    condition: str | None = None
+    condition: str | None = None  # Unified condition field
     physical_verification: bool | None = None
     current_location_id: UUID | None = None
     current_location: str | None = None
@@ -116,6 +115,9 @@ class PlantSummary(BaseModel):
     parts_replaced_count: int = 0
     last_maintenance_date: date | None = None
     shared_po_count: int = 0
+    # Pending transfer info
+    pending_transfer_to_id: UUID | None = None
+    pending_transfer_to_location: str | None = None
 
     class Config:
         from_attributes = True

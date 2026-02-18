@@ -1,6 +1,8 @@
 """Authentication and user management endpoints."""
 
+import asyncio
 import re
+import time
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
@@ -18,8 +20,8 @@ from app.services.auth_service import auth_service
 def validate_password_strength(password: str) -> str:
     """Validate password meets complexity requirements."""
     errors = []
-    if len(password) < 12:
-        errors.append("at least 12 characters")
+    if len(password) < 6:
+        errors.append("at least 6 characters")
     if not re.search(r"[A-Z]", password):
         errors.append("at least one uppercase letter")
     if not re.search(r"[a-z]", password):
@@ -67,7 +69,7 @@ class LoginRequest(BaseModel):
     """Login request body."""
 
     email: EmailStr
-    password: str = Field(..., min_length=8)
+    password: str = Field(..., min_length=1)
 
 
 class LoginResponse(BaseModel):
@@ -108,21 +110,62 @@ async def login(
     ip_address = get_client_ip(request)
     user_agent = get_user_agent(request)
 
-    # Check rate limits BEFORE attempting authentication (1 DB call)
-    auth_service.check_rate_limit(credentials.email, ip_address)
+    t0 = time.perf_counter()
 
-    try:
-        # Fresh client per login - prevents session race conditions
-        auth_client = create_auth_client()
+    # Run ALL THREE network calls in parallel:
+    #   1. Rate-limit check (RPC → Supabase)
+    #   2. Supabase Auth sign-in (Auth API → Supabase)
+    #   3. Fetch user details by email (PostgREST → Supabase)
+    # Each is ~500-1700ms due to network latency. Running sequentially = ~2.5s.
+    # Running in parallel = ~max(all three) ≈ 1.7s → saves ~800ms.
+    auth_client = create_auth_client()
+    admin_client = get_supabase_admin_client()
 
-        # Authenticate with Supabase
-        response = auth_client.auth.sign_in_with_password({
+    def _sign_in():
+        return auth_client.auth.sign_in_with_password({
             "email": credentials.email,
             "password": credentials.password,
         })
 
+    def _rate_limit():
+        auth_service.check_rate_limit(credentials.email, ip_address)
+
+    def _fetch_user():
+        return (
+            admin_client.table("users")
+            .select("id, email, role, full_name, is_active, must_change_password")
+            .eq("email", credentials.email)
+            .single()
+            .execute()
+        )
+
+    rate_limit_result, sign_in_result, user_fetch_result = await asyncio.gather(
+        asyncio.to_thread(_rate_limit),
+        asyncio.to_thread(_sign_in),
+        asyncio.to_thread(_fetch_user),
+        return_exceptions=True,
+    )
+
+    t1 = time.perf_counter()
+    logger.info("login_timing", step="parallel_all", duration_ms=round((t1 - t0) * 1000, 1))
+
+    # Check rate limit first — if it raised, propagate
+    if isinstance(rate_limit_result, Exception):
+        raise rate_limit_result
+
+    # Check sign-in result
+    if isinstance(sign_in_result, Exception):
+        background_tasks.add_task(
+            auth_service.record_login,
+            credentials.email, ip_address, False, "invalid_credentials",
+            None, user_agent, {"reason": "invalid_credentials"}
+        )
+        raise AuthenticationError("Invalid credentials")
+
+    response = sign_in_result
+
+    try:
         if not response.session:
-            # Log in background - don't slow the response
             background_tasks.add_task(
                 auth_service.record_login,
                 credentials.email, ip_address, False, "invalid_credentials",
@@ -133,15 +176,20 @@ async def login(
         session = response.session
         user = response.user
 
-        # Get user details from our users table (admin client for service query)
-        admin_client = get_supabase_admin_client()
-        user_data = (
-            admin_client.table("users")
-            .select("id, email, role, full_name, is_active, must_change_password")
-            .eq("id", user.id)
-            .single()
-            .execute()
-        )
+        # Use pre-fetched user data (already retrieved in parallel)
+        if isinstance(user_fetch_result, Exception):
+            # Fallback: fetch by ID if email fetch failed
+            user_data = (
+                admin_client.table("users")
+                .select("id, email, role, full_name, is_active, must_change_password")
+                .eq("id", user.id)
+                .single()
+                .execute()
+            )
+        else:
+            user_data = user_fetch_result
+
+        logger.info("login_timing", step="total", duration_ms=round((time.perf_counter() - t0) * 1000, 1))
 
         if not user_data.data:
             background_tasks.add_task(
@@ -159,16 +207,20 @@ async def login(
             )
             raise AuthenticationError("User account is deactivated")
 
-        # Update last login
-        admin_client.table("users").update({
-            "last_login_at": "now()"
-        }).eq("id", user.id).execute()
+        # Update last login + log success in background (don't block response)
+        def _post_login(uid: str, email: str, ip: str | None, ua: str | None, role: str) -> None:
+            try:
+                post_client = get_supabase_admin_client()
+                post_client.table("users").update({
+                    "last_login_at": "now()"
+                }).eq("id", uid).execute()
+            except Exception:
+                pass  # Non-critical
+            auth_service.record_login(email, ip, True, None, uid, ua, {"role": role})
 
-        # Log success in background
         background_tasks.add_task(
-            auth_service.record_login,
-            credentials.email, ip_address, True, None,
-            str(user.id), user_agent, {"role": user_data.data["role"]}
+            _post_login,
+            str(user.id), credentials.email, ip_address, user_agent, user_data.data["role"]
         )
 
         return LoginResponse(
@@ -271,12 +323,16 @@ async def refresh_token(
 async def logout(
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     request: Request,
+    background_tasks: BackgroundTasks,
 ) -> dict[str, bool]:
     """Logout current user and invalidate session.
+
+    Responds instantly — session revocation and logging run in background.
 
     Args:
         current_user: The authenticated user.
         request: FastAPI request object.
+        background_tasks: FastAPI background tasks.
 
     Returns:
         Logout confirmation.
@@ -284,18 +340,23 @@ async def logout(
     ip_address = get_client_ip(request)
     user_agent = get_user_agent(request)
 
-    try:
-        # Sign out via admin API (doesn't corrupt shared client state)
-        admin_client = get_supabase_admin_client()
-        admin_client.auth.admin.sign_out(current_user.id)
-    except Exception as e:
-        # Sign-out failure is not critical — JWT expires naturally
-        logger.warning("Admin sign-out call failed", error=str(e), user_id=current_user.id)
+    # Run session revocation + logging in background so response is instant
+    def _background_logout(user_id: str, email: str, ip: str | None, ua: str | None) -> None:
+        try:
+            admin_client = get_supabase_admin_client()
+            admin_client.auth.admin.sign_out(user_id)
+        except Exception:
+            # Sign-out failure is not critical — JWT expires naturally
+            pass
 
-    # Log logout event
-    auth_service.log_auth_event(
-        "logout", current_user.email, user_id=current_user.id,
-        ip_address=ip_address, user_agent=user_agent
+        auth_service.log_auth_event(
+            "logout", email, user_id=user_id,
+            ip_address=ip, user_agent=ua
+        )
+
+    background_tasks.add_task(
+        _background_logout,
+        current_user.id, current_user.email, ip_address, user_agent
     )
 
     logger.info(
@@ -401,7 +462,7 @@ class ChangePasswordRequest(BaseModel):
     """Change password request body."""
 
     current_password: str
-    new_password: str = Field(..., min_length=12)
+    new_password: str = Field(..., min_length=6)
 
     @field_validator("new_password")
     @classmethod
@@ -475,6 +536,40 @@ async def change_password(
     except Exception as e:
         logger.error("Password change failed", error=str(e), user_id=current_user.id)
         raise ValidationError("Password change failed")
+
+
+@router.post("/skip-password-change")
+async def skip_password_change(
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> dict[str, bool]:
+    """Skip password change for now.
+
+    Allows users to continue with their temporary password and change it later.
+    Sets must_change_password to False so the password change dialog won't appear on next login.
+
+    Args:
+        current_user: The authenticated user.
+
+    Returns:
+        Success confirmation.
+    """
+    try:
+        admin_client = get_supabase_admin_client()
+        admin_client.table("users").update({
+            "must_change_password": False,
+            "updated_at": "now()",
+        }).eq("id", current_user.id).execute()
+
+        logger.info(
+            "User skipped password change",
+            user_id=current_user.id,
+        )
+
+        return {"success": True}
+
+    except Exception as e:
+        logger.error("Failed to skip password change", error=str(e), user_id=current_user.id)
+        raise ValidationError("Failed to skip password change")
 
 
 # ============================================================================
@@ -643,7 +738,7 @@ class CreateUserRequest(BaseModel):
     """Request body for creating a new user."""
 
     email: EmailStr
-    password: str = Field(..., min_length=12, description="Temporary password")
+    password: str = Field(..., min_length=6, description="Temporary password")
     full_name: str = Field(..., min_length=2, max_length=255)
     role: Literal["admin", "management"] = "management"
 
@@ -664,7 +759,7 @@ class UpdateUserRequest(BaseModel):
 class ResetPasswordRequest(BaseModel):
     """Request body for admin password reset."""
 
-    new_password: str = Field(..., min_length=12)
+    new_password: str = Field(..., min_length=6)
 
     @field_validator("new_password")
     @classmethod

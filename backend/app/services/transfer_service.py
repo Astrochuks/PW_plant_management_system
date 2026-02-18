@@ -155,10 +155,11 @@ class TransferService:
                     to_location=to_location_raw,
                 )
 
-                # Update plant with pending transfer
+                # Update plant with pending transfer ONLY - don't change location or condition
+                # Per the plan: location stays at source until confirmed at destination
+                # The pending_transfer_id tracks where the plant is going
                 self.client.table("plants_master").update({
                     "pending_transfer_id": transfer["id"],
-                    "status": "in_transit",
                 }).eq("id", str(plant_id)).execute()
 
                 return transfer
@@ -292,16 +293,22 @@ class TransferService:
 
         try:
             # Find pending transfers for these plants going to this location
-            result = (
-                self.client.table("plant_transfers")
-                .select("*")
-                .in_("plant_id", plant_ids)
-                .eq("to_location_id", str(location_id))
-                .eq("status", "pending")
-                .execute()
-            )
+            # Batch the query to avoid URL length limits with many plant IDs
+            all_transfers = []
+            batch_size = 50
+            for i in range(0, len(plant_ids), batch_size):
+                batch_ids = plant_ids[i:i + batch_size]
+                result = (
+                    self.client.table("plant_transfers")
+                    .select("*")
+                    .in_("plant_id", batch_ids)
+                    .eq("to_location_id", str(location_id))
+                    .eq("status", "pending")
+                    .execute()
+                )
+                all_transfers.extend(result.data or [])
 
-            for transfer in result.data or []:
+            for transfer in all_transfers:
                 # Confirm the transfer
                 update_result = (
                     self.client.table("plant_transfers")

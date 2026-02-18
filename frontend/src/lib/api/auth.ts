@@ -37,18 +37,19 @@ export async function login(credentials: LoginCredentials): Promise<LoginRespons
   return response.data;
 }
 
-export async function logout(): Promise<void> {
-  try {
-    await apiClient.post('/auth/logout');
-  } catch (error) {
-    // Even if logout fails on server, clear local state
-    console.error('Logout error:', error);
-  } finally {
-    // Clear local storage
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('access_token');
-      localStorage.removeItem('user');
-    }
+export function logout(): void {
+  // Fire-and-forget: tell the server to revoke the session but don't wait for it.
+  // The JWT expires naturally; clearing local storage is what actually logs the user out.
+  const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+  if (token) {
+    apiClient.post('/auth/logout').catch(() => {
+      // Server-side revocation is best-effort — not critical for logout UX
+    });
+  }
+  // Clear local storage immediately
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('user');
   }
 }
 

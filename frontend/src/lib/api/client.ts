@@ -89,17 +89,32 @@ export interface ApiError {
 // Helper function to extract error message
 export function getErrorMessage(error: unknown): string {
   if (axios.isAxiosError(error)) {
-    const axiosError = error as AxiosError<ApiError>;
-    if (axiosError.response?.data?.detail) {
-      const detail = axiosError.response.data.detail;
+    const data = error.response?.data;
+
+    // Our backend format: { success: false, error: { message: "..." } }
+    if (data?.error?.message) {
+      return data.error.message;
+    }
+
+    // FastAPI validation format: { detail: "..." | [...] }
+    if (data?.detail) {
+      const detail = data.detail;
       if (typeof detail === 'string') {
         return detail;
       }
       if (Array.isArray(detail)) {
-        return detail.map((d) => d.message).join(', ');
+        return detail.map((d: { message?: string; msg?: string }) => d.message || d.msg).join(', ');
       }
     }
-    return axiosError.message;
+
+    // Friendly fallbacks instead of "Request failed with status code 401"
+    const status = error.response?.status;
+    if (status === 401) return 'Invalid email or password';
+    if (status === 403) return 'You do not have permission to do this';
+    if (status === 404) return 'Resource not found';
+    if (status === 429) return 'Too many attempts. Please wait and try again';
+
+    return error.message;
   }
   if (error instanceof Error) {
     return error.message;

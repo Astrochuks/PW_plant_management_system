@@ -166,7 +166,7 @@ async def get_state_plants(
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=200),
-    status: str | None = Query(None, pattern="^(working|standby|breakdown|faulty|scrap|missing|stolen|unverified|in_transit|off_hire)$"),
+    status: str | None = Query(None, pattern="^(working|standby|under_repair|breakdown|faulty|scrap|missing|off_hire|gpm_assessment|unverified)$"),
     fleet_type: str | None = None,
 ) -> dict[str, Any]:
     """Get all plants in a state (across all sites).

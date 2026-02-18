@@ -9,25 +9,38 @@ import apiClient from './client';
 
 export interface DashboardPlantStats {
   total_plants: number;
-  active_plants: number;
-  archived_plants: number;
-  disposed_plants: number;
+  working_plants: number;
+  standby_plants: number;
+  under_repair_plants: number;
+  breakdown_plants: number;
+  faulty_plants: number;
+  missing_plants: number;
+  scrap_plants: number;
+  off_hire_plants: number;
+  gpm_assessment_plants: number;
+  unverified_condition_plants: number;
   verified_plants: number;
   unverified_plants: number;
-  plants_with_breakdowns: number;
-  off_hire_plants: number;
 }
 
 export interface LocationStat {
-  location_id: string;
+  id: string;
   location_name: string;
-  active_plants: number;
-  archived_plants: number;
+  state_id: string | null;
+  state_name: string | null;
+  state_code: string | null;
+  region: string | null;
   total_plants: number;
-  verified_plants: number;
-  verification_rate: number;
-  total_maintenance_cost: number;
-  total_parts_replaced: number;
+  working_plants: number;
+  standby_plants: number;
+  under_repair_plants: number;
+  breakdown_plants: number;
+  faulty_plants: number;
+  missing_plants: number;
+  scrap_plants: number;
+  off_hire_plants: number;
+  gpm_assessment_plants: number;
+  unverified_plants: number;
 }
 
 export interface RecentSubmission {

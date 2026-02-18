@@ -55,7 +55,7 @@ async def get_dashboard_summary(
     # Get pending notifications count
     notifications = (
         client.table("notifications")
-        .select("id", count="exact")
+        .select("id", count="estimated")
         .eq("read", False)
         .eq("target_role", current_user.role)
         .execute()

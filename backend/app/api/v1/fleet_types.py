@@ -32,15 +32,26 @@ async def list_fleet_types(
     client = get_supabase_admin_client()
 
     result = (
-        client.table("fleet_types")
-        .select("id, name, description, created_at")
-        .order("name")
+        client.table("fleet_number_prefixes")
+        .select("id, fleet_type, prefix, created_at")
+        .order("fleet_type")
         .execute()
     )
 
+    # Transform fleet_type to name for API response
+    data = [
+        {
+            "id": item["id"],
+            "name": item["fleet_type"],
+            "prefix": item["prefix"],
+            "created_at": item["created_at"],
+        }
+        for item in result.data
+    ]
+
     return {
         "success": True,
-        "data": result.data,
+        "data": data,
     }
 
 
@@ -61,8 +72,8 @@ async def get_fleet_type(
     client = get_supabase_admin_client()
 
     result = (
-        client.table("fleet_types")
-        .select("id, name, description, created_at")
+        client.table("fleet_number_prefixes")
+        .select("id, fleet_type, prefix, created_at")
         .eq("id", str(fleet_type_id))
         .single()
         .execute()
@@ -71,9 +82,17 @@ async def get_fleet_type(
     if not result.data:
         raise NotFoundError("Fleet type", str(fleet_type_id))
 
+    # Transform fleet_type to name for API response
+    data = {
+        "id": result.data["id"],
+        "name": result.data["fleet_type"],
+        "prefix": result.data["prefix"],
+        "created_at": result.data["created_at"],
+    }
+
     return {
         "success": True,
-        "data": result.data,
+        "data": data,
     }
 
 
@@ -94,30 +113,38 @@ async def get_fleet_type_plants(
     client = get_supabase_admin_client()
 
     # Get fleet type
-    fleet_type = (
-        client.table("fleet_types")
-        .select("id, name")
+    fleet_type_result = (
+        client.table("fleet_number_prefixes")
+        .select("id, fleet_type")
         .eq("id", str(fleet_type_id))
         .single()
         .execute()
     )
 
-    if not fleet_type.data:
+    if not fleet_type_result.data:
         raise NotFoundError("Fleet type", str(fleet_type_id))
+
+    fleet_type_name = fleet_type_result.data["fleet_type"]
 
     # Get plant count
     plants = (
         client.table("plants_master")
         .select("id", count="exact")
-        .eq("fleet_type", fleet_type.data.get("name", ""))
+        .eq("fleet_type", fleet_type_name)
         .not_.is_("status", "null")
         .execute()
     )
 
+    # Transform for API response
+    fleet_type_data = {
+        "id": fleet_type_result.data["id"],
+        "name": fleet_type_name,
+    }
+
     return {
         "success": True,
         "data": {
-            "fleet_type": fleet_type.data,
+            "fleet_type": fleet_type_data,
             "plant_count": plants.count or 0,
         },
     }

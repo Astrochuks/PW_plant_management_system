@@ -2,7 +2,7 @@
  * Dashboard data hooks using React Query
  */
 
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import {
   getDashboardSummary,
   getFleetSummary,
@@ -22,15 +22,15 @@ export const dashboardKeys = {
 };
 
 /**
- * Hook to fetch dashboard summary stats
+ * Hook to fetch dashboard summary stats.
+ * Uses keepPreviousData so the dashboard doesn't flash empty on revisit.
  */
 export function useDashboardSummary() {
   return useQuery({
     queryKey: dashboardKeys.summary(),
     queryFn: getDashboardSummary,
-    staleTime: 5 * 60 * 1000, // 5 minutes - data doesn't change frequently
-    refetchOnWindowFocus: false, // Don't refetch on tab switch
-    // No auto-refetch - user can manually refresh
+    staleTime: 5 * 60 * 1000,
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -41,8 +41,8 @@ export function useFleetSummary(locationId?: string) {
   return useQuery({
     queryKey: dashboardKeys.fleetSummary(locationId),
     queryFn: () => getFleetSummary(locationId),
-    staleTime: 5 * 60 * 1000, // 5 minutes
-    refetchOnWindowFocus: false,
+    staleTime: 5 * 60 * 1000,
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -60,8 +60,8 @@ export function usePlantEvents(params?: {
   return useQuery({
     queryKey: dashboardKeys.events(params),
     queryFn: () => getPlantEvents(params),
-    staleTime: 2 * 60 * 1000, // 2 minutes - events may update more often
-    refetchOnWindowFocus: false,
+    staleTime: 2 * 60 * 1000,
+    placeholderData: keepPreviousData,
   });
 }
 

@@ -22,6 +22,7 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { usePlant } from '@/hooks/use-plants';
+import type { PlantCondition } from '@/lib/api/plants';
 
 interface PlantDetailModalProps {
   plantId: string | null;
@@ -78,7 +79,7 @@ export function PlantDetailModal({ plantId, onClose }: PlantDetailModalProps) {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <StatusBadge status={plant.status} />
+                <ConditionBadge condition={plant.condition} />
                 {plant.physical_verification ? (
                   <Badge variant="outline" className="text-success border-success">
                     <CheckCircle className="h-3 w-3 mr-1" />
@@ -112,7 +113,7 @@ export function PlantDetailModal({ plantId, onClose }: PlantDetailModalProps) {
               <div className="grid grid-cols-2 gap-4">
                 <DetailItem
                   icon={MapPin}
-                  label="Current Location"
+                  label="Current Site"
                   value={plant.current_location || 'Not assigned'}
                 />
                 <DetailItem
@@ -229,17 +230,26 @@ function DetailItem({
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
-  switch (status) {
-    case 'active':
-      return <Badge className="bg-success text-white">Active</Badge>;
-    case 'archived':
-      return <Badge variant="secondary">Archived</Badge>;
-    case 'disposed':
-      return <Badge className="bg-muted text-muted-foreground">Disposed</Badge>;
-    default:
-      return <Badge variant="secondary">{status}</Badge>;
-  }
+const CONDITION_STYLES: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline'; className?: string }> = {
+  working: { label: 'Working', variant: 'default', className: 'bg-emerald-600 hover:bg-emerald-600 text-white' },
+  standby: { label: 'Standby', variant: 'secondary', className: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200' },
+  under_repair: { label: 'Under Repair', variant: 'secondary', className: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' },
+  breakdown: { label: 'Breakdown', variant: 'destructive' },
+  faulty: { label: 'Faulty', variant: 'secondary', className: 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200' },
+  scrap: { label: 'Scrap', variant: 'secondary', className: 'bg-gray-200 text-gray-600 dark:bg-gray-800 dark:text-gray-400' },
+  missing: { label: 'Missing', variant: 'destructive', className: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' },
+  off_hire: { label: 'Off Hire', variant: 'outline' },
+  gpm_assessment: { label: 'GPM Assessment', variant: 'secondary', className: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200' },
+  unverified: { label: 'Unverified', variant: 'outline', className: 'text-muted-foreground' },
+};
+
+function ConditionBadge({ condition }: { condition: PlantCondition | null }) {
+  const style = CONDITION_STYLES[condition || 'unverified'] || CONDITION_STYLES.unverified;
+  return (
+    <Badge variant={style.variant} className={style.className}>
+      {style.label}
+    </Badge>
+  );
 }
 
 function PlantDetailSkeleton({ onClose }: { onClose: () => void }) {

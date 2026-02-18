@@ -60,7 +60,7 @@ async def list_plant_events(
 
     query = (
         client.table("plant_events")
-        .select("*, plants_master(fleet_number, description)", count="exact")
+        .select("*, plants_master(fleet_number, description)", count="estimated")
     )
 
     if event_type:
@@ -179,7 +179,7 @@ async def acknowledge_event(
 async def search_plants(
     query: str,
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
-    status: str | None = None,
+    condition: str | None = Query(None, pattern="^(working|standby|under_repair|breakdown|faulty|scrap|missing|off_hire|gpm_assessment|unverified)$"),
     location_id: UUID | None = None,
     fleet_type: str | None = Query(None, description="Filter by fleet type name"),
     limit: int = Query(20, ge=1, le=100),
@@ -189,7 +189,7 @@ async def search_plants(
     Args:
         query: Search query.
         current_user: The authenticated user.
-        status: Filter by status.
+        condition: Filter by condition (working, standby, breakdown, etc.).
         location_id: Filter by location.
         fleet_type: Filter by fleet type name.
         limit: Maximum results.
@@ -203,7 +203,7 @@ async def search_plants(
         "search_plants",
         {
             "p_search_term": query,
-            "p_status": status,
+            "p_condition": condition,
             "p_location_id": str(location_id) if location_id else None,
             "p_fleet_type": fleet_type,
             "p_limit": limit,
@@ -320,8 +320,7 @@ async def get_fleet_utilization(
     limit: int = Query(20, ge=1, le=100),
     location_id: UUID | None = None,
     fleet_type: str | None = Query(None, description="Filter by fleet type name"),
-    status: str | None = Query(None, pattern="^(working|standby|breakdown|missing|stolen|unverified|in_transit|off_hire)$"),
-    condition: str | None = Query(None, pattern="^(good|faulty|needs_repair|scrap)$", description="Filter by physical condition"),
+    condition: str | None = Query(None, pattern="^(working|standby|under_repair|breakdown|faulty|scrap|missing|off_hire|gpm_assessment|unverified)$", description="Filter by condition"),
     search: str | None = None,
 ) -> dict[str, Any]:
     """Get fleet utilization view with comprehensive stats.
@@ -332,8 +331,7 @@ async def get_fleet_utilization(
         limit: Items per page.
         location_id: Filter by location.
         fleet_type: Filter by fleet type name.
-        status: Filter by operational status (working, standby, breakdown, off_hire, etc.).
-        condition: Filter by physical condition (good, faulty, needs_repair, scrap).
+        condition: Filter by condition (working, standby, breakdown, off_hire, etc.).
         search: Search in fleet_number or description.
 
     Returns:
@@ -343,15 +341,13 @@ async def get_fleet_utilization(
 
     query = (
         client.table("v_plant_utilization")
-        .select("*", count="exact")
+        .select("*", count="estimated")
     )
 
     if location_id:
         query = query.eq("current_location_id", str(location_id))
     if fleet_type:
         query = query.ilike("fleet_type", f"%{fleet_type}%")
-    if status:
-        query = query.eq("status", status)
     if condition:
         query = query.eq("condition", condition)
     if search:
@@ -382,21 +378,24 @@ async def export_plants_excel(
     exclude_not_seen: bool = Query(True, description="Exclude plants with 'not seen' in remarks"),
     location_id: UUID | None = Query(None, description="Filter by location"),
     state: str | None = Query(None, description="Filter by state (e.g., 'Kaduna', 'FCT', 'Ogun')"),
-    fleet_type: str | None = Query(None, description="Filter by fleet type"),
-    condition: str | None = Query(None, pattern="^(good|faulty|needs_repair|scrap)$"),
+    fleet_type: str | None = Query(None, description="Filter by fleet type(s), comma-separated"),
+    condition: str | None = Query(None, description="Filter by condition(s), comma-separated: working,standby,breakdown"),
+    search: str | None = Query(None, description="Search in fleet_number or description"),
+    verified_only: bool = Query(False, description="Only include physically verified plants"),
+    columns: str | None = Query(None, description="Comma-separated columns to export. Default: all standard columns"),
 ) -> Any:
-    """Export plants to Excel file.
-
-    Columns: Fleet Number, Description, Fleet Type, Make, Model, Location,
-    State, Physical Verification, Remarks
+    """Export plants to Excel file with optional column and filter selection.
 
     Args:
         current_user: The authenticated user.
         exclude_not_seen: If true, exclude plants with 'not seen' in remarks.
         location_id: Filter by location.
         state: Filter by state.
-        fleet_type: Filter by fleet type.
-        condition: Filter by condition (for filtering, not shown in export).
+        fleet_type: Filter by fleet type(s), comma-separated.
+        condition: Filter by condition(s), comma-separated.
+        search: Search in fleet_number or description.
+        verified_only: Only include physically verified plants.
+        columns: Comma-separated columns to include in export.
 
     Returns:
         Excel file download.
@@ -409,16 +408,13 @@ async def export_plants_excel(
 
     client = get_supabase_admin_client()
 
-    # If filtering by state, get location IDs for that state first
-    state_location_ids = None
-    if state:
-        state_locs = (
-            client.table("locations")
-            .select("id")
-            .ilike("state", state)
-            .execute()
-        )
-        state_location_ids = [loc["id"] for loc in (state_locs.data or [])]
+    # Use v_plants_summary which has all computed fields (maintenance cost, etc.)
+    select_fields = (
+        "fleet_number, description, fleet_type, make, model, "
+        "current_location, state, condition, physical_verification, "
+        "chassis_number, year_of_manufacture, purchase_year, purchase_cost, "
+        "total_maintenance_cost, parts_replaced_count, last_maintenance_date, remarks"
+    )
 
     # Fetch all records using pagination (Supabase default limit is 1000)
     plants = []
@@ -427,8 +423,8 @@ async def export_plants_excel(
 
     while True:
         query = (
-            client.table("plants_master")
-            .select("fleet_number, description, fleet_type, make, model, current_location_id, physical_verification, remarks, condition, locations(name, state)")
+            client.table("v_plants_summary")
+            .select(select_fields)
             .order("fleet_type")
             .order("fleet_number")
             .range(offset, offset + batch_size - 1)
@@ -440,19 +436,30 @@ async def export_plants_excel(
 
         if location_id:
             query = query.eq("current_location_id", str(location_id))
-        elif state_location_ids is not None:
-            # Filter by locations in the specified state
-            if state_location_ids:
-                query = query.in_("current_location_id", state_location_ids)
-            else:
-                # No locations found for this state, return empty
-                break
+
+        if state:
+            query = query.ilike("state", state)
 
         if fleet_type:
-            query = query.ilike("fleet_type", f"%{fleet_type}%")
+            fleet_type_list = [f.strip() for f in fleet_type.split(",")]
+            if len(fleet_type_list) == 1:
+                query = query.ilike("fleet_type", f"%{fleet_type_list[0]}%")
+            else:
+                or_conditions = ",".join([f"fleet_type.ilike.%{ft}%" for ft in fleet_type_list])
+                query = query.or_(or_conditions)
 
         if condition:
-            query = query.eq("condition", condition)
+            condition_list = [c.strip() for c in condition.split(",")]
+            if len(condition_list) == 1:
+                query = query.eq("condition", condition_list[0])
+            else:
+                query = query.in_("condition", condition_list)
+
+        if search:
+            query = query.or_(f"fleet_number.ilike.%{search}%,description.ilike.%{search}%")
+
+        if verified_only:
+            query = query.eq("physical_verification", True)
 
         result = query.execute()
         batch = result.data or []
@@ -464,76 +471,107 @@ async def export_plants_excel(
 
         offset += batch_size
 
+    # All available export columns with their config
+    # Data comes from v_plants_summary — all fields are direct (no nested joins)
+    all_export_columns = [
+        {"key": "fleet_number", "header": "Fleet Number", "width": 15, "getter": lambda p: p.get("fleet_number")},
+        {"key": "description", "header": "Description", "width": 30, "getter": lambda p: p.get("description")},
+        {"key": "fleet_type", "header": "Fleet Type", "width": 25, "getter": lambda p: p.get("fleet_type")},
+        {"key": "make", "header": "Make", "width": 15, "getter": lambda p: p.get("make")},
+        {"key": "model", "header": "Model", "width": 15, "getter": lambda p: p.get("model")},
+        {"key": "current_location", "header": "Location", "width": 20, "getter": lambda p: p.get("current_location")},
+        {"key": "state", "header": "State", "width": 12, "getter": lambda p: p.get("state")},
+        {"key": "condition", "header": "Condition", "width": 15, "getter": lambda p: (p.get("condition") or "").replace("_", " ").title()},
+        {"key": "physical_verification", "header": "Physical Verification", "width": 18, "getter": lambda p: "Yes" if p.get("physical_verification") else "No"},
+        {"key": "chassis_number", "header": "Chassis Number", "width": 20, "getter": lambda p: p.get("chassis_number")},
+        {"key": "year_of_manufacture", "header": "Year of Manufacture", "width": 18, "getter": lambda p: p.get("year_of_manufacture")},
+        {"key": "purchase_year", "header": "Purchase Year", "width": 14, "getter": lambda p: p.get("purchase_year")},
+        {"key": "purchase_cost", "header": "Purchase Cost", "width": 15, "getter": lambda p: p.get("purchase_cost")},
+        {"key": "total_maintenance_cost", "header": "Maintenance Cost", "width": 16, "getter": lambda p: p.get("total_maintenance_cost")},
+        {"key": "parts_replaced_count", "header": "Parts Replaced", "width": 14, "getter": lambda p: p.get("parts_replaced_count")},
+        {"key": "last_maintenance_date", "header": "Last Maintenance", "width": 16, "getter": lambda p: p.get("last_maintenance_date")},
+        {"key": "remarks", "header": "Remarks", "width": 40, "getter": lambda p: p.get("remarks")},
+    ]
+
+    # Filter to requested columns (or use default set)
+    if columns:
+        requested = {c.strip() for c in columns.split(",")}
+        export_cols = [c for c in all_export_columns if c["key"] in requested]
+    else:
+        # Default columns (original set)
+        default_keys = {"fleet_number", "description", "fleet_type", "make", "model", "current_location", "state", "physical_verification", "remarks"}
+        export_cols = [c for c in all_export_columns if c["key"] in default_keys]
+
     # Create Excel workbook
     wb = Workbook()
     ws = wb.active
     ws.title = "Plants"
 
-    # Define headers
-    headers = [
-        "Fleet Number",
-        "Description",
-        "Fleet Type",
-        "Make",
-        "Model",
-        "Location",
-        "State",
-        "Physical Verification",
-        "Remarks",
-    ]
-
-    # Style definitions
-    header_font = Font(bold=True, color="FFFFFF")
-    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+    # Style definitions — PW brand gold matching the frontend table
+    title_font = Font(bold=True, size=14, color="101415")
+    header_font = Font(bold=True, size=10, color="101415")
+    header_fill = PatternFill(start_color="FFBF36", end_color="FFBF36", fill_type="solid")
     header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    thin_border = Border(
-        left=Side(style="thin"),
-        right=Side(style="thin"),
-        top=Side(style="thin"),
-        bottom=Side(style="thin"),
+    cell_border = Border(
+        left=Side(style="thin", color="808080"),
+        right=Side(style="thin", color="808080"),
+        top=Side(style="thin", color="808080"),
+        bottom=Side(style="thin", color="808080"),
+    )
+    header_border = Border(
+        left=Side(style="medium", color="606060"),
+        right=Side(style="medium", color="606060"),
+        top=Side(style="medium", color="606060"),
+        bottom=Side(style="medium", color="606060"),
     )
 
-    # Write headers
-    for col, header in enumerate(headers, 1):
-        cell = ws.cell(row=1, column=col, value=header)
+    # Row 1: P.W. NIGERIA LTD. branding with logo
+    ws.row_dimensions[1].height = 55
+    # Add logo if available
+    logo_added = False
+    try:
+        from pathlib import Path
+        from openpyxl.drawing.image import Image as XlImage
+        logo_path = Path(__file__).resolve().parents[4] / "frontend" / "public" / "images" / "logo.png"
+        logger.info("Excel export logo path", logo_path=str(logo_path), exists=logo_path.exists())
+        if logo_path.exists():
+            logo = XlImage(str(logo_path))
+            logo.width = 50
+            logo.height = 50
+            ws.add_image(logo, "A1")
+            logo_added = True
+            logger.info("Excel logo added successfully")
+    except Exception as exc:
+        logger.warning("Failed to add logo to Excel export", error=str(exc))
+    # Brand text — column B if logo present, else column A
+    text_col = 2 if logo_added else 1
+    ws.merge_cells(start_row=1, start_column=text_col, end_row=1, end_column=len(export_cols))
+    brand_cell = ws.cell(row=1, column=text_col, value="P.W. NIGERIA LTD. — Plant Register")
+    brand_cell.font = title_font
+    brand_cell.alignment = Alignment(vertical="center")
+
+    # Row 2: Column headers
+    for col_idx, col_def in enumerate(export_cols, 1):
+        cell = ws.cell(row=2, column=col_idx, value=col_def["header"])
         cell.font = header_font
         cell.fill = header_fill
         cell.alignment = header_alignment
-        cell.border = thin_border
+        cell.border = header_border
 
     # Write data
-    for row_idx, plant in enumerate(plants, 2):
-        location_name = None
-        state_name = None
-        if plant.get("locations"):
-            loc = plant["locations"] if isinstance(plant["locations"], dict) else {}
-            location_name = loc.get("name")
-            state_name = loc.get("state")
-
-        row_data = [
-            plant.get("fleet_number"),
-            plant.get("description"),
-            plant.get("fleet_type"),
-            plant.get("make"),
-            plant.get("model"),
-            location_name,
-            state_name,
-            "Yes" if plant.get("physical_verification") else "No",
-            plant.get("remarks"),
-        ]
-
-        for col_idx, value in enumerate(row_data, 1):
+    for row_idx, plant in enumerate(plants, 3):
+        for col_idx, col_def in enumerate(export_cols, 1):
+            value = col_def["getter"](plant)
             cell = ws.cell(row=row_idx, column=col_idx, value=value)
-            cell.border = thin_border
+            cell.border = cell_border
             cell.alignment = Alignment(vertical="center", wrap_text=True)
 
     # Set column widths
-    column_widths = [15, 30, 25, 15, 15, 20, 12, 18, 40]
-    for col_idx, width in enumerate(column_widths, 1):
-        ws.column_dimensions[get_column_letter(col_idx)].width = width
+    for col_idx, col_def in enumerate(export_cols, 1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = col_def["width"]
 
-    # Freeze header row
-    ws.freeze_panes = "A2"
+    # Freeze header rows (title + column headers)
+    ws.freeze_panes = "A3"
 
     # Save to buffer
     buffer = io.BytesIO()
@@ -562,7 +600,7 @@ async def get_plant_stats(
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
     location_id: UUID | None = None,
 ) -> dict[str, Any]:
-    """Get plant counts grouped by status and condition.
+    """Get plant counts grouped by condition.
 
     Useful for dashboard widgets showing fleet overview.
 
@@ -571,12 +609,12 @@ async def get_plant_stats(
         location_id: Optional filter by location.
 
     Returns:
-        Counts by status, condition, and combined status+condition.
+        Counts by condition (working, standby, breakdown, off_hire, etc.).
     """
     client = get_supabase_admin_client()
 
-    # Build base query
-    query = client.table("plants_master").select("status, condition", count="exact")
+    # Build base query - now only uses condition (unified field)
+    query = client.table("plants_master").select("condition", count="estimated")
 
     if location_id:
         query = query.eq("current_location_id", str(location_id))
@@ -584,39 +622,88 @@ async def get_plant_stats(
     result = query.execute()
     total = result.count or 0
 
-    # Count by status
-    status_counts = {}
+    # Count by condition only (unified field)
     condition_counts = {}
-    combined_counts = {}
 
     for plant in result.data or []:
-        status = plant.get("status") or "unverified"
-        condition = plant.get("condition") or "good"
-
-        status_counts[status] = status_counts.get(status, 0) + 1
+        condition = plant.get("condition") or "unverified"
         condition_counts[condition] = condition_counts.get(condition, 0) + 1
-
-        combined_key = f"{status}:{condition}"
-        combined_counts[combined_key] = combined_counts.get(combined_key, 0) + 1
 
     # Count plants with unknown location
     unknown_location_result = (
         client.table("plants_master")
-        .select("id", count="exact")
+        .select("id", count="estimated")
         .is_("current_location_id", "null")
         .execute()
     )
     unknown_location_count = unknown_location_result.count or 0
 
+    # Count plants with pending transfers
+    pending_transfer_result = (
+        client.table("plants_master")
+        .select("id", count="estimated")
+        .not_.is_("pending_transfer_id", "null")
+        .execute()
+    )
+    pending_transfer_count = pending_transfer_result.count or 0
+
     return {
         "success": True,
         "data": {
             "total": total,
-            "by_status": status_counts,
             "by_condition": condition_counts,
-            "by_status_and_condition": combined_counts,
             "unknown_location": unknown_location_count,
+            "pending_transfers": pending_transfer_count,
         },
+    }
+
+
+@router.get("/filtered-stats")
+async def get_filtered_plant_stats(
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+    condition: str | None = Query(None, description="Filter by condition(s), comma-separated"),
+    location_id: UUID | None = None,
+    state: str | None = Query(None, description="Filter by state"),
+    fleet_type: str | None = Query(None, description="Filter by fleet type(s), comma-separated"),
+    search: str | None = None,
+    verified_only: bool = False,
+    unknown_location: bool = Query(False),
+    pending_transfer: bool = Query(False),
+) -> dict[str, Any]:
+    """Get aggregated plant stats matching current filters.
+
+    Returns condition breakdown, location breakdown, and fleet type breakdown
+    for the filtered plant set. Uses a database RPC for fast GROUP BY aggregation.
+    """
+    client = get_supabase_admin_client()
+
+    # Parse multi-value filters
+    condition_list = [c.strip() for c in condition.split(",")] if condition else None
+    fleet_type_list = [f.strip() for f in fleet_type.split(",")] if fleet_type else None
+
+    # Call the database RPC — all aggregation done in PostgreSQL
+    rpc_params: dict[str, Any] = {
+        "p_verified_only": verified_only,
+        "p_unknown_location": unknown_location,
+        "p_pending_transfer": pending_transfer,
+    }
+    if condition_list:
+        rpc_params["p_condition"] = condition_list
+    if location_id:
+        rpc_params["p_location_id"] = str(location_id)
+    if fleet_type_list:
+        rpc_params["p_fleet_type"] = fleet_type_list
+    if state:
+        rpc_params["p_state"] = state
+    if search:
+        rpc_params["p_search"] = search
+
+    result = client.rpc("get_filtered_plant_stats", rpc_params).execute()
+    stats = result.data if result.data else {"total": 0, "by_condition": {}, "by_location": {}, "by_fleet_type": {}, "by_state_fleet_type": {}}
+
+    return {
+        "success": True,
+        "data": stats,
     }
 
 
@@ -630,18 +717,17 @@ async def list_plants(
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=500),
-    status: str | None = Query(None, description="Filter by status(es). Comma-separated for multiple: working,standby,breakdown"),
-    condition: str | None = Query(None, description="Filter by condition(s). Comma-separated: good,faulty,needs_repair,scrap"),
+    condition: str | None = Query(None, description="Filter by condition(s). Comma-separated: working,standby,breakdown,off_hire"),
     location_id: UUID | None = None,
     state: str | None = Query(None, description="Filter by state (e.g., 'Kaduna', 'FCT', 'Ogun')"),
     fleet_type: str | None = Query(None, description="Filter by fleet type(s). Comma-separated: TRUCKS,EXCAVATOR"),
     search: str | None = None,
     verified_only: bool = False,
     unknown_location: bool = Query(False, description="Filter for plants with unknown/NULL location"),
-    in_transit: bool = Query(False, description="Filter for plants currently in transit"),
+    pending_transfer: bool = Query(False, description="Filter for plants with pending transfers"),
     columns: str | None = Query(
         None,
-        description="Comma-separated list of columns to return. Default: all. Example: fleet_number,status,current_location,fleet_type",
+        description="Comma-separated list of columns to return. Default: all. Example: fleet_number,condition,current_location,fleet_type",
     ),
     sort_by: str = Query("fleet_number", description="Column to sort by"),
     sort_order: str = Query("asc", pattern="^(asc|desc)$", description="Sort order: asc or desc"),
@@ -649,25 +735,27 @@ async def list_plants(
     """List plants with filtering, pagination, and column selection.
 
     **Multi-value filters:** Use comma-separated values to filter by multiple options.
-    - `status=working,standby` - Plants that are working OR standby
-    - `condition=good,faulty` - Plants in good OR faulty condition
+    - `condition=working,standby` - Plants that are working OR standby
     - `fleet_type=TRUCKS,EXCAVATOR` - Trucks OR Excavators
 
     **Column selection:** Use `columns` to select which fields to return.
-    - `columns=fleet_number,status,current_location` - Only these 3 fields
+    - `columns=fleet_number,condition,current_location` - Only these 3 fields
     - Useful for exports and customized views
 
     **Available columns:**
     id, fleet_number, description, fleet_type, make, model, chassis_number,
     year_of_manufacture, purchase_year, purchase_cost, serial_m, serial_e,
-    status, condition, physical_verification, current_location_id, current_location,
+    condition, physical_verification, current_location_id, current_location,
     state_id, state, state_code, last_verified_date, remarks, created_at, updated_at,
-    total_maintenance_cost, parts_replaced_count, last_maintenance_date, shared_po_count
+    total_maintenance_cost, parts_replaced_count, last_maintenance_date, shared_po_count,
+    pending_transfer_to_id, pending_transfer_to_location
+
+    **Condition values:**
+    working, standby, under_repair, breakdown, scrap, missing, off_hire, gpm_assessment, unverified
 
     Args:
         page: Page number.
         limit: Items per page (max 500 for exports).
-        status: Filter by status(es) - comma-separated.
         condition: Filter by condition(s) - comma-separated.
         location_id: Filter by location UUID.
         state: Filter by state name.
@@ -675,7 +763,7 @@ async def list_plants(
         search: Search in fleet_number, description.
         verified_only: Only show verified plants.
         unknown_location: Only plants with NULL location.
-        in_transit: Only plants in transit.
+        pending_transfer: Only plants with pending transfers.
         columns: Comma-separated columns to return.
         sort_by: Column to sort by.
         sort_order: asc or desc.
@@ -686,7 +774,6 @@ async def list_plants(
     client = get_supabase_admin_client()
 
     # Parse multi-value filters
-    status_list = [s.strip() for s in status.split(",")] if status else None
     condition_list = [c.strip() for c in condition.split(",")] if condition else None
     fleet_type_list = [f.strip() for f in fleet_type.split(",")] if fleet_type else None
 
@@ -712,19 +799,12 @@ async def list_plants(
         select_clause = "*"
 
     # Use the view for summary data
-    query = client.table("v_plants_summary").select(select_clause, count="exact")
+    query = client.table("v_plants_summary").select(select_clause, count="estimated")
 
-    # Apply status filter (multi-value)
-    if in_transit:
-        query = query.eq("status", "in_transit")
-    elif status_list:
-        if len(status_list) == 1:
-            query = query.eq("status", status_list[0])
-        else:
-            query = query.in_("status", status_list)
-
-    # Apply condition filter (multi-value)
-    if condition_list:
+    # Apply condition filter (multi-value) - unified field
+    if pending_transfer:
+        query = query.not_.is_("pending_transfer_to_id", "null")
+    elif condition_list:
         if len(condition_list) == 1:
             query = query.eq("condition", condition_list[0])
         else:
@@ -781,14 +861,13 @@ async def list_plants(
             "has_more": page * limit < total,
             "columns": columns.split(",") if columns else "all",
             "filters": {
-                "status": status_list,
                 "condition": condition_list,
                 "fleet_type": fleet_type_list,
                 "location_id": str(location_id) if location_id else None,
                 "state": state,
                 "verified_only": verified_only,
                 "unknown_location": unknown_location,
-                "in_transit": in_transit,
+                "pending_transfer": pending_transfer,
             },
         },
     }
@@ -901,6 +980,13 @@ async def create_plant(
                 "Plant with this fleet number already exists",
                 details=[{"field": "fleet_number", "message": "Already exists", "code": "DUPLICATE"}],
             )
+        if "violates check constraint" in error_msg:
+            logger.error("Check constraint violation on plant create", error=str(e))
+            raise ValidationError(
+                "Invalid data: a field value is not allowed. Please check all fields and try again.",
+                details=[{"message": str(e), "code": "CONSTRAINT_VIOLATION"}],
+            )
+        logger.error("Unexpected error creating plant", error=str(e))
         raise
 
     created = result.data[0]
@@ -958,8 +1044,7 @@ async def update_plant(
     serial_e: str | None = Query(None, description="Electrical serial number"),
     remarks: str | None = Query(None, description="Additional remarks"),
     current_location_id: UUID | None = Query(None, description="Current location UUID"),
-    status: str | None = Query(None, pattern="^(working|standby|breakdown|faulty|scrap|missing|stolen|unverified|in_transit|off_hire)$", description="Operational status"),
-    condition: str | None = Query(None, pattern="^(good|faulty|needs_repair|scrap)$", description="Physical condition"),
+    condition: str | None = Query(None, pattern="^(working|standby|under_repair|breakdown|faulty|scrap|missing|off_hire|gpm_assessment|unverified)$", description="Plant condition"),
     physical_verification: bool | None = Query(None, description="Has been physically verified"),
 ) -> dict[str, Any]:
     """Update an existing plant - only provide the fields you want to change.
@@ -1004,8 +1089,6 @@ async def update_plant(
         update_data["remarks"] = remarks
     if current_location_id is not None:
         update_data["current_location_id"] = str(current_location_id)
-    if status is not None:
-        update_data["status"] = status
     if condition is not None:
         update_data["condition"] = condition
     if physical_verification is not None:
@@ -1291,7 +1374,7 @@ async def get_plant_weekly_records(
 
     query = (
         client.table("plant_weekly_records")
-        .select("*, locations!plant_weekly_records_location_id_fkey(name)", count="exact")
+        .select("*, locations!plant_weekly_records_location_id_fkey(name)", count="estimated")
         .eq("plant_id", str(plant_id))
     )
 

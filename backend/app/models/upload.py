@@ -86,9 +86,9 @@ class UploadStatusResponse(BaseModel):
     records_created: int | None = None
     records_updated: int | None = None
 
-    # Errors (when failed or partial)
-    errors: list[dict[str, Any]] | None = None
-    warnings: list[dict[str, Any]] | None = None
+    # Errors (when failed or partial) - can be list of strings or dicts
+    errors: list[str] | list[dict[str, Any]] | None = None
+    warnings: list[str] | list[dict[str, Any]] | None = None
 
 
 class WeeklyReportSubmission(BaseModel):

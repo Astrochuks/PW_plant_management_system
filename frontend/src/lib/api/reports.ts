@@ -193,13 +193,13 @@ export async function getUnverifiedPlants(params: {
  */
 export async function exportPlants(params: {
   format?: 'json' | 'csv';
-  status?: string;
+  condition?: string;
   location_id?: string;
 } = {}): Promise<{ data: string | unknown[]; format: string; count: number }> {
   const queryParams: Record<string, string> = {};
 
   if (params.format) queryParams.format = params.format;
-  if (params.status) queryParams.status = params.status;
+  if (params.condition) queryParams.condition = params.condition;
   if (params.location_id) queryParams.location_id = params.location_id;
 
   const response = await apiClient.get<{

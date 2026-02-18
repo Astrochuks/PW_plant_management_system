@@ -24,7 +24,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (credentials: LoginCredentials) => Promise<void>;
-  logout: () => Promise<void>;
+  logout: () => void;
   refreshUser: () => Promise<void>;
 }
 
@@ -39,65 +39,32 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
 
-  // Check authentication on mount
+  // Restore auth state from localStorage on mount (no network call)
   useEffect(() => {
-    const initAuth = async () => {
-      try {
-        // First check localStorage for saved user
-        const savedUser = getSavedUser();
-        if (savedUser && checkIsAuthenticated()) {
-          setUser(savedUser);
-          // Verify token is still valid by fetching current user
-          try {
-            const currentUser = await getCurrentUser();
-            setUser(currentUser);
-          } catch {
-            // Token invalid, clear auth
-            setUser(null);
-            if (typeof window !== 'undefined') {
-              localStorage.removeItem('access_token');
-              localStorage.removeItem('user');
-            }
-          }
-        }
-      } catch (error) {
-        console.error('Auth init error:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    initAuth();
+    const savedUser = getSavedUser();
+    if (savedUser && checkIsAuthenticated()) {
+      setUser(savedUser);
+    }
+    setIsLoading(false);
   }, []);
 
   const login = useCallback(async (credentials: LoginCredentials) => {
-    setIsLoading(true);
+    // Don't set isLoading here — it triggers the dashboard's full-screen spinner.
+    // The login page has its own loading state for the button.
     try {
       const response = await apiLogin(credentials);
       saveAuthData(response);
       setUser(response.user);
-      router.push('/'); // Redirect to dashboard
+      router.replace('/'); // replace so login page isn't in back-history
     } catch (error) {
       throw new Error(getErrorMessage(error));
-    } finally {
-      setIsLoading(false);
     }
   }, [router]);
 
-  const logout = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      await apiLogout();
-      setUser(null);
-      router.push('/login');
-    } catch (error) {
-      console.error('Logout error:', error);
-      // Still clear local state even if API call fails
-      setUser(null);
-      router.push('/login');
-    } finally {
-      setIsLoading(false);
-    }
+  const logout = useCallback(() => {
+    apiLogout(); // Fire-and-forget (clears localStorage + sends server request)
+    setUser(null);
+    router.push('/login');
   }, [router]);
 
   const refreshUser = useCallback(async () => {
