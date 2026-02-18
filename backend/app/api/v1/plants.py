@@ -602,7 +602,8 @@ async def get_plant_stats(
 ) -> dict[str, Any]:
     """Get plant counts grouped by condition.
 
-    Useful for dashboard widgets showing fleet overview.
+    Uses a single RPC that scans plants_master once with COUNT FILTER
+    instead of 3 separate queries.
 
     Args:
         current_user: The authenticated user.
@@ -613,47 +614,20 @@ async def get_plant_stats(
     """
     client = get_supabase_admin_client()
 
-    # Build base query - now only uses condition (unified field)
-    query = client.table("plants_master").select("condition", count="estimated")
+    result = client.rpc(
+        "get_plant_filter_stats",
+        {"p_location_id": str(location_id) if location_id else None},
+    ).execute()
 
-    if location_id:
-        query = query.eq("current_location_id", str(location_id))
-
-    result = query.execute()
-    total = result.count or 0
-
-    # Count by condition only (unified field)
-    condition_counts = {}
-
-    for plant in result.data or []:
-        condition = plant.get("condition") or "unverified"
-        condition_counts[condition] = condition_counts.get(condition, 0) + 1
-
-    # Count plants with unknown location
-    unknown_location_result = (
-        client.table("plants_master")
-        .select("id", count="estimated")
-        .is_("current_location_id", "null")
-        .execute()
-    )
-    unknown_location_count = unknown_location_result.count or 0
-
-    # Count plants with pending transfers
-    pending_transfer_result = (
-        client.table("plants_master")
-        .select("id", count="estimated")
-        .not_.is_("pending_transfer_id", "null")
-        .execute()
-    )
-    pending_transfer_count = pending_transfer_result.count or 0
+    stats = result.data if result.data else {}
 
     return {
         "success": True,
         "data": {
-            "total": total,
-            "by_condition": condition_counts,
-            "unknown_location": unknown_location_count,
-            "pending_transfers": pending_transfer_count,
+            "total": stats.get("total", 0),
+            "by_condition": stats.get("by_condition", {}),
+            "unknown_location": stats.get("unknown_location", 0),
+            "pending_transfers": stats.get("pending_transfers", 0),
         },
     }
 

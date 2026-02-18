@@ -33,10 +33,10 @@ async def list_transfers(
     service = get_transfer_service()
 
     try:
-        # Use simpler query to avoid join issues
+        # Use count="exact" on main query to avoid a duplicate count query
         query = (
             service.client.table("plant_transfers")
-            .select("*")
+            .select("*", count="exact")
             .order("created_at", desc=True)
             .range(offset, offset + limit - 1)
         )
@@ -96,23 +96,11 @@ async def list_transfers(
                 "week_ending_date": sub.get("week_ending_date"),
             })
 
-        # Get total count
-        count_query = service.client.table("plant_transfers").select("id", count="exact")
-        if status:
-            count_query = count_query.eq("status", status)
-        if plant_id:
-            count_query = count_query.eq("plant_id", str(plant_id))
-        if location_id:
-            count_query = count_query.or_(
-                f"from_location_id.eq.{str(location_id)},to_location_id.eq.{str(location_id)}"
-            )
-        count_result = count_query.execute()
-
         return {
             "success": True,
             "data": enriched_data,
             "pagination": {
-                "total": count_result.count,
+                "total": result.count,
                 "limit": limit,
                 "offset": offset,
             },
@@ -295,43 +283,27 @@ async def get_transfer_stats(
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
     since: str | None = Query(None, description="ISO timestamp — count transfers created after this time"),
 ) -> dict[str, Any]:
-    """Get summary statistics for transfers."""
+    """Get summary statistics for transfers.
+
+    Uses a single RPC that scans plant_transfers once with COUNT FILTER
+    instead of 4-5 separate COUNT queries.
+    """
     service = get_transfer_service()
 
-    # Get counts by status
-    pending = service.client.table("plant_transfers").select("id", count="exact").eq("status", "pending").execute()
-    confirmed = service.client.table("plant_transfers").select("id", count="exact").eq("status", "confirmed").execute()
-    cancelled = service.client.table("plant_transfers").select("id", count="exact").eq("status", "cancelled").execute()
+    result = service.client.rpc(
+        "get_transfer_stats_summary",
+        {"p_since": since},
+    ).execute()
 
-    # Get recent transfers (last 7 days)
-    from datetime import datetime, timedelta
-    week_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
-
-    recent = (
-        service.client.table("plant_transfers")
-        .select("id", count="exact")
-        .gte("created_at", week_ago)
-        .execute()
-    )
-
-    # Count new transfers since a given timestamp (for badge counts)
-    new_since = 0
-    if since:
-        new_since_result = (
-            service.client.table("plant_transfers")
-            .select("id", count="exact")
-            .gt("created_at", since)
-            .execute()
-        )
-        new_since = new_since_result.count or 0
+    stats = result.data if result.data else {}
 
     return {
         "success": True,
         "data": {
-            "pending": pending.count,
-            "confirmed": confirmed.count,
-            "cancelled": cancelled.count,
-            "recent_7_days": recent.count,
-            "new_since": new_since,
+            "pending": stats.get("pending", 0),
+            "confirmed": stats.get("confirmed", 0),
+            "cancelled": stats.get("cancelled", 0),
+            "recent_7_days": stats.get("recent_7_days", 0),
+            "new_since": stats.get("new_since", 0),
         },
     }

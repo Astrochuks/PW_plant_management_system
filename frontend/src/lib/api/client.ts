@@ -14,8 +14,11 @@ const apiClient: AxiosInstance = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 30000, // 30 second timeout
+  timeout: 10000, // 10 second timeout — surfaces errors faster
 });
+
+// Guard against multiple 401 redirects firing simultaneously
+let isRedirecting = false;
 
 // Request interceptor - adds auth token to requests
 apiClient.interceptors.request.use(
@@ -42,13 +45,13 @@ apiClient.interceptors.response.use(
     if (error.response) {
       const status = error.response.status;
       
-      // Unauthorized - clear token and redirect to login
+      // Unauthorized - clear token and redirect to login (once)
       if (status === 401) {
         if (typeof window !== 'undefined') {
           localStorage.removeItem('access_token');
           localStorage.removeItem('user');
-          // Only redirect if not already on login page
-          if (!window.location.pathname.includes('/login')) {
+          if (!isRedirecting && !window.location.pathname.includes('/login')) {
+            isRedirecting = true;
             window.location.href = '/login';
           }
         }

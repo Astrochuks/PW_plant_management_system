@@ -5,6 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 
+from app.core import cache
 from app.core.database import get_supabase_admin_client
 from app.core.exceptions import NotFoundError
 from app.core.security import (
@@ -15,6 +16,8 @@ from app.monitoring.logging import get_logger
 
 router = APIRouter()
 logger = get_logger(__name__)
+
+FLEET_TYPES_CACHE_KEY = "fleet_types:list"
 
 
 @router.get("")
@@ -29,6 +32,11 @@ async def list_fleet_types(
     Returns:
         List of fleet types ordered by name.
     """
+    # Serve from cache if available (fleet types almost never change)
+    cached = cache.get(FLEET_TYPES_CACHE_KEY)
+    if cached is not None:
+        return cached
+
     client = get_supabase_admin_client()
 
     result = (
@@ -49,10 +57,12 @@ async def list_fleet_types(
         for item in result.data
     ]
 
-    return {
+    response = {
         "success": True,
         "data": data,
     }
+    cache.put(FLEET_TYPES_CACHE_KEY, response, ttl_seconds=600)  # 10 min
+    return response
 
 
 @router.get("/{fleet_type_id}")

@@ -41,7 +41,8 @@ export function usePendingTransfers(locationId?: string) {
   return useQuery({
     queryKey: transfersKeys.pending(locationId),
     queryFn: () => getPendingTransfers(locationId),
-    refetchInterval: 60000, // Refresh every minute
+    refetchInterval: 60000,
+    refetchIntervalInBackground: false, // Stop polling when tab is hidden
   });
 }
 
@@ -50,6 +51,7 @@ export function useTransferStats(since?: string) {
     queryKey: [...transfersKeys.stats(), since],
     queryFn: () => getTransferStats(since),
     refetchInterval: 60000,
+    refetchIntervalInBackground: false, // Stop polling when tab is hidden
   });
 }
 

@@ -6,6 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 
 from app.api.v1.auth import get_client_ip
+from app.core import cache
 from app.core.database import get_supabase_admin_client
 from app.core.exceptions import NotFoundError, ValidationError
 from app.core.security import (
@@ -18,6 +19,8 @@ from app.services.audit_service import audit_service
 
 router = APIRouter()
 logger = get_logger(__name__)
+
+LOCATIONS_CACHE_KEY = "locations:list"
 
 
 @router.get("")
@@ -32,6 +35,11 @@ async def list_locations(
     Returns:
         List of locations with summary stats.
     """
+    # Serve from cache if available (locations rarely change)
+    cached = cache.get(LOCATIONS_CACHE_KEY)
+    if cached is not None:
+        return cached
+
     client = get_supabase_admin_client()
 
     result = (
@@ -41,13 +49,15 @@ async def list_locations(
         .execute()
     )
 
-    return {
+    response = {
         "success": True,
         "data": result.data,
         "meta": {
             "total": len(result.data) if result.data else 0,
         },
     }
+    cache.put(LOCATIONS_CACHE_KEY, response, ttl_seconds=300)  # 5 min
+    return response
 
 
 @router.get("/{location_id}")
@@ -166,6 +176,8 @@ async def create_location(
         description=f"Created site {name.upper()}" + (f" in {state_name}" if state_name else ""),
     )
 
+    cache.invalidate(LOCATIONS_CACHE_KEY)
+
     return {
         "success": True,
         "data": created,
@@ -254,6 +266,8 @@ async def update_location(
         ip_address=get_client_ip(request),
         description=f"Updated site {existing.data[0]['name']}",
     )
+
+    cache.invalidate(LOCATIONS_CACHE_KEY)
 
     return {
         "success": True,
@@ -398,6 +412,8 @@ async def delete_location(
         description=f"Deleted location {location_name}"
         + (f" (force: {plant_count} plants unassigned)" if force and plant_count > 0 else ""),
     )
+
+    cache.invalidate(LOCATIONS_CACHE_KEY)
 
     return {
         "success": True,

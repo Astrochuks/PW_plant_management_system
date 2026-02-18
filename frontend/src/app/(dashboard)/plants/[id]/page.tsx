@@ -102,12 +102,14 @@ function PlantDetailContent({ plantId }: { plantId: string }) {
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
 
-  // Data hooks
+  const [activeTab, setActiveTab] = useState('overview')
+
+  // Only fetch plant detail on mount; tab data loads lazily when tab is selected
   const { data: plant, isLoading } = usePlant(plantId)
-  const { data: maintenanceRecords = [], isLoading: maintenanceLoading } = usePlantMaintenanceHistory(plantId)
-  const { data: locationRecords = [], isLoading: locationLoading } = usePlantLocationHistory(plantId)
-  const { data: weeklyRecords = [], isLoading: weeklyLoading } = usePlantWeeklyRecords(plantId)
-  const { data: events = [], isLoading: eventsLoading } = usePlantEvents(plantId)
+  const { data: maintenanceRecords = [], isLoading: maintenanceLoading } = usePlantMaintenanceHistory(activeTab === 'maintenance' ? plantId : null)
+  const { data: locationRecords = [], isLoading: locationLoading } = usePlantLocationHistory(activeTab === 'locations' ? plantId : null)
+  const { data: weeklyRecords = [], isLoading: weeklyLoading } = usePlantWeeklyRecords(activeTab === 'usage' ? plantId : null)
+  const { data: events = [], isLoading: eventsLoading } = usePlantEvents(activeTab === 'events' ? plantId : null)
   const deleteMutation = useDeletePlant()
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
@@ -202,7 +204,7 @@ function PlantDetailContent({ plantId }: { plantId: string }) {
       {/* ── Two-column body ────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
         {/* Left: Tabs */}
-        <Tabs defaultValue="overview" className="w-full">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList variant="line" className="w-full justify-start border-b">
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="maintenance">Maintenance</TabsTrigger>

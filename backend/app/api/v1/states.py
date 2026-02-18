@@ -6,6 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 
 from app.api.v1.auth import get_client_ip
+from app.core import cache
 from app.core.database import get_supabase_admin_client
 from app.core.exceptions import NotFoundError, ValidationError
 from app.core.security import (
@@ -34,6 +35,11 @@ async def list_states(
     Returns:
         List of states with site counts.
     """
+    cache_key = f"states:list:{include_inactive}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     client = get_supabase_admin_client()
 
     query = client.table("states").select("*")
@@ -44,27 +50,33 @@ async def list_states(
     query = query.order("name")
     result = query.execute()
 
-    # Get site counts for each state
-    states_with_counts = []
-    for state in result.data or []:
-        sites = (
-            client.table("locations")
-            .select("id", count="exact")
-            .eq("state_id", state["id"])
-            .execute()
-        )
-        states_with_counts.append({
-            **state,
-            "sites_count": sites.count or 0,
-        })
+    # Batch fetch all location counts in one query instead of N+1
+    all_locations = (
+        client.table("locations")
+        .select("state_id")
+        .execute()
+    )
+    # Count locations per state_id
+    state_site_counts: dict[str, int] = {}
+    for loc in all_locations.data or []:
+        sid = loc.get("state_id")
+        if sid:
+            state_site_counts[sid] = state_site_counts.get(sid, 0) + 1
 
-    return {
+    states_with_counts = [
+        {**state, "sites_count": state_site_counts.get(state["id"], 0)}
+        for state in result.data or []
+    ]
+
+    response = {
         "success": True,
         "data": states_with_counts,
         "meta": {
             "total": len(states_with_counts),
         },
     }
+    cache.put(cache_key, response, ttl_seconds=300)  # 5 min
+    return response
 
 
 @router.get("/{state_id}")
@@ -294,6 +306,8 @@ async def create_state(
         description=f"Created state: {name}",
     )
 
+    cache.invalidate_prefix("states:")
+
     return {
         "success": True,
         "data": created,
@@ -393,6 +407,8 @@ async def update_state(
         description=f"Updated state: {existing.data[0]['name']}",
     )
 
+    cache.invalidate_prefix("states:")
+
     return {
         "success": True,
         "data": result.data[0],
@@ -474,6 +490,8 @@ async def delete_state(
         ip_address=get_client_ip(request),
         description=f"Deleted state: {state_name}",
     )
+
+    cache.invalidate_prefix("states:")
 
     return {
         "success": True,

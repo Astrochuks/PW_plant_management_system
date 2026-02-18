@@ -2,6 +2,7 @@
  * Plants data hooks using React Query
  */
 
+import { useCallback } from 'react';
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import {
   getPlants,
@@ -178,29 +179,25 @@ export function usePlantFilteredStats(
 // ============================================================================
 
 /**
- * Prefetch a single plant detail + sub-data into the cache.
+ * Prefetch a single plant detail into the cache.
  * Call this on hover/focus of a plant row for instant detail page loads.
+ * Only prefetches the plant detail itself (the only data loaded on mount
+ * since tab data is now lazy-loaded).
+ * Includes cache guard to skip if data is already cached.
  */
 export function usePrefetchPlantDetail() {
   const queryClient = useQueryClient();
 
-  return (plantId: string) => {
+  return useCallback((plantId: string) => {
+    // Skip if already cached
+    if (queryClient.getQueryData(plantsKeys.detail(plantId))) return;
+
     queryClient.prefetchQuery({
       queryKey: plantsKeys.detail(plantId),
       queryFn: () => getPlant(plantId),
       staleTime: 5 * 60 * 1000,
     });
-    queryClient.prefetchQuery({
-      queryKey: plantsKeys.maintenanceHistory(plantId),
-      queryFn: () => getPlantMaintenanceHistory(plantId),
-      staleTime: 5 * 60 * 1000,
-    });
-    queryClient.prefetchQuery({
-      queryKey: plantsKeys.locationHistory(plantId),
-      queryFn: () => getPlantLocationHistory(plantId),
-      staleTime: 5 * 60 * 1000,
-    });
-  };
+  }, [queryClient]);
 }
 
 // ============================================================================
