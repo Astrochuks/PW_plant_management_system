@@ -6,7 +6,7 @@ Uses pydantic-settings for type-safe configuration with environment variable sup
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -37,8 +37,8 @@ class Settings(BaseSettings):
     # Direct PostgreSQL (via Supavisor pooler on port 6543)
     database_url: str = Field(..., description="PostgreSQL connection string via Supavisor")
 
-    # CORS Settings
-    cors_origins: list[str] = ["http://localhost:3000", "http://localhost:8000"]
+    # CORS Settings  (stored as str so pydantic-settings doesn't json.loads it)
+    cors_origins: str = "http://localhost:3000,http://localhost:8000"
 
     # Security
     trust_proxy: bool = False  # Only enable behind a known reverse proxy (nginx, cloudflare)
@@ -77,19 +77,16 @@ class Settings(BaseSettings):
     # AI - OpenAI ChatGPT
     openai_api_key: str | None = Field(default=None, description="OpenAI API key for remarks parsing (primary)")
 
-    @field_validator("cors_origins", mode="before")
-    @classmethod
-    def parse_cors_origins(cls, v: str | list[str]) -> list[str]:
+    @property
+    def cors_origins_list(self) -> list[str]:
         """Parse CORS origins from JSON array or comma-separated string."""
-        if isinstance(v, str):
-            v = v.strip()
-            # JSON array format: ["https://a.com","https://b.com"]
-            if v.startswith("["):
-                import json
-                return json.loads(v)
-            # Comma-separated format: https://a.com,https://b.com
-            return [origin.strip() for origin in v.split(",")]
-        return v
+        v = self.cors_origins.strip()
+        if not v:
+            return []
+        if v.startswith("["):
+            import json
+            return json.loads(v)
+        return [origin.strip() for origin in v.split(",") if origin.strip()]
 
     @property
     def is_production(self) -> bool:
