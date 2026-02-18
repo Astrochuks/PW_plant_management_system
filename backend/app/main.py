@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse
 
 from app.config import get_settings
 from app.core.exceptions import AppException
+from app.core.pool import init_pool, close_pool
 from app.monitoring.logging import setup_logging, get_logger
 from app.monitoring.metrics import get_metrics_collector, start_metrics_flush_task
 from app.monitoring.middleware import RequestLoggingMiddleware, AlertingMiddleware
@@ -38,6 +39,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         debug=settings.debug,
     )
 
+    # Initialize asyncpg connection pool (direct PostgreSQL)
+    await init_pool()
+
     # Start background tasks
     metrics_task = asyncio.create_task(start_metrics_flush_task())
 
@@ -55,6 +59,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Flush remaining metrics
     await get_metrics_collector().flush()
+
+    # Close database pool
+    await close_pool()
 
     logger.info("Application shutdown complete")
 

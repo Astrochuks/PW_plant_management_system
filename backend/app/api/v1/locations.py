@@ -7,7 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 
 from app.api.v1.auth import get_client_ip
 from app.core import cache
-from app.core.database import get_supabase_admin_client
+from app.core.pool import fetch, fetchrow, fetchval, execute
 from app.core.exceptions import NotFoundError, ValidationError
 from app.core.security import (
     CurrentUser,
@@ -40,20 +40,15 @@ async def list_locations(
     if cached is not None:
         return cached
 
-    client = get_supabase_admin_client()
-
-    result = (
-        client.table("v_location_stats")
-        .select("*")
-        .order("location_name")
-        .execute()
+    data = await fetch(
+        "SELECT * FROM v_location_stats ORDER BY location_name"
     )
 
     response = {
         "success": True,
-        "data": result.data,
+        "data": data,
         "meta": {
-            "total": len(result.data) if result.data else 0,
+            "total": len(data),
         },
     }
     cache.put(LOCATIONS_CACHE_KEY, response, ttl_seconds=300)  # 5 min
@@ -74,22 +69,17 @@ async def get_location(
     Returns:
         Location details with stats.
     """
-    client = get_supabase_admin_client()
-
-    result = (
-        client.table("v_location_stats")
-        .select("*")
-        .eq("id", str(location_id))
-        .single()
-        .execute()
+    row = await fetchrow(
+        "SELECT * FROM v_location_stats WHERE id = $1::uuid",
+        str(location_id),
     )
 
-    if not result.data:
+    if not row:
         raise NotFoundError("Location", str(location_id))
 
     return {
         "success": True,
-        "data": result.data,
+        "data": row,
     }
 
 
@@ -113,17 +103,13 @@ async def create_location(
     Returns:
         Created site with ID.
     """
-    client = get_supabase_admin_client()
-
     # Check for duplicate name (case-insensitive since we store uppercase)
-    existing = (
-        client.table("locations")
-        .select("id")
-        .eq("name", name.upper())
-        .execute()
+    existing = await fetch(
+        "SELECT id FROM locations WHERE name = $1",
+        name.upper(),
     )
 
-    if existing.data:
+    if existing:
         raise ValidationError(
             "Site with this name already exists",
             details=[{"field": "name", "message": "Already exists", "code": "DUPLICATE"}],
@@ -132,29 +118,22 @@ async def create_location(
     # Verify state exists if provided
     state_name = None
     if state_id:
-        state = (
-            client.table("states")
-            .select("id, name")
-            .eq("id", str(state_id))
-            .execute()
+        state = await fetchrow(
+            "SELECT id, name FROM states WHERE id = $1::uuid",
+            str(state_id),
         )
-        if not state.data:
+        if not state:
             raise NotFoundError("State", str(state_id))
-        state_name = state.data[0]["name"]
+        state_name = state["name"]
 
-    location_data = {
-        "name": name.upper(),
-        "state_id": str(state_id) if state_id else None,
-        "state": state_name,  # Keep text field in sync for backwards compatibility
-    }
-
-    result = (
-        client.table("locations")
-        .insert(location_data)
-        .execute()
+    created = await fetchrow(
+        """INSERT INTO locations (name, state_id, state)
+           VALUES ($1, $2::uuid, $3)
+           RETURNING *""",
+        name.upper(),
+        str(state_id) if state_id else None,
+        state_name,
     )
-
-    created = result.data[0]
 
     logger.info(
         "Site created",
@@ -164,6 +143,7 @@ async def create_location(
         user_id=current_user.id,
     )
 
+    location_data = {"name": name.upper(), "state_id": str(state_id) if state_id else None, "state": state_name}
     background_tasks.add_task(
         audit_service.log,
         user_id=current_user.id,
@@ -206,45 +186,50 @@ async def update_location(
     Returns:
         Updated site.
     """
-    client = get_supabase_admin_client()
-
-    update_data = {}
+    update_data: dict[str, Any] = {}
     if name is not None:
         update_data["name"] = name.upper()
     if state_id is not None:
         # Verify state exists
-        state = (
-            client.table("states")
-            .select("id, name")
-            .eq("id", str(state_id))
-            .execute()
+        state = await fetchrow(
+            "SELECT id, name FROM states WHERE id = $1::uuid",
+            str(state_id),
         )
-        if not state.data:
+        if not state:
             raise NotFoundError("State", str(state_id))
         update_data["state_id"] = str(state_id)
-        update_data["state"] = state.data[0]["name"]  # Keep text field in sync
+        update_data["state"] = state["name"]
 
     if not update_data:
         raise ValidationError("No fields to update")
 
     # Fetch current values for audit diff
-    existing = (
-        client.table("locations")
-        .select("id, name, state_id, state")
-        .eq("id", str(location_id))
-        .execute()
+    existing = await fetchrow(
+        "SELECT id, name, state_id, state FROM locations WHERE id = $1::uuid",
+        str(location_id),
     )
 
-    if not existing.data:
+    if not existing:
         raise NotFoundError("Site", str(location_id))
 
-    old_values = {k: existing.data[0].get(k) for k in update_data}
+    old_values = {k: existing.get(k) for k in update_data}
 
-    result = (
-        client.table("locations")
-        .update(update_data)
-        .eq("id", str(location_id))
-        .execute()
+    # Build SET clause
+    set_parts: list[str] = []
+    params: list[Any] = []
+    for key, val in update_data.items():
+        params.append(val)
+        if key == "state_id":
+            set_parts.append(f"{key} = ${len(params)}::uuid")
+        else:
+            set_parts.append(f"{key} = ${len(params)}")
+
+    params.append(str(location_id))
+    set_clause = ", ".join(set_parts)
+
+    updated = await fetchrow(
+        f"UPDATE locations SET {set_clause} WHERE id = ${len(params)}::uuid RETURNING *",
+        *params,
     )
 
     logger.info(
@@ -264,14 +249,14 @@ async def update_location(
         old_values=old_values,
         new_values=update_data,
         ip_address=get_client_ip(request),
-        description=f"Updated site {existing.data[0]['name']}",
+        description=f"Updated site {existing['name']}",
     )
 
     cache.invalidate(LOCATIONS_CACHE_KEY)
 
     return {
         "success": True,
-        "data": result.data[0],
+        "data": updated,
     }
 
 
@@ -301,30 +286,22 @@ async def delete_location(
     Returns:
         Success message.
     """
-    client = get_supabase_admin_client()
-
     # Verify location exists
-    existing = (
-        client.table("locations")
-        .select("id, name")
-        .eq("id", str(location_id))
-        .single()
-        .execute()
+    existing = await fetchrow(
+        "SELECT id, name FROM locations WHERE id = $1::uuid",
+        str(location_id),
     )
 
-    if not existing.data:
+    if not existing:
         raise NotFoundError("Location", str(location_id))
 
-    location_name = existing.data["name"]
+    location_name = existing["name"]
 
     # Check for plants currently at this location
-    plants_at_location = (
-        client.table("plants_master")
-        .select("id", count="exact")
-        .eq("current_location_id", str(location_id))
-        .execute()
-    )
-    plant_count = plants_at_location.count or 0
+    plant_count = await fetchval(
+        "SELECT count(*) FROM plants_master WHERE current_location_id = $1::uuid",
+        str(location_id),
+    ) or 0
 
     if plant_count > 0 and not force:
         raise ValidationError(
@@ -338,32 +315,20 @@ async def delete_location(
         )
 
     # Check for non-nullable historical records that would block deletion
-    weekly_records = (
-        client.table("plant_weekly_records")
-        .select("id", count="exact")
-        .eq("location_id", str(location_id))
-        .limit(1)
-        .execute()
-    )
-    weekly_count = weekly_records.count or 0
+    weekly_count = await fetchval(
+        "SELECT count(*) FROM plant_weekly_records WHERE location_id = $1::uuid",
+        str(location_id),
+    ) or 0
 
-    submissions = (
-        client.table("weekly_report_submissions")
-        .select("id", count="exact")
-        .eq("location_id", str(location_id))
-        .limit(1)
-        .execute()
-    )
-    submission_count = submissions.count or 0
+    submission_count = await fetchval(
+        "SELECT count(*) FROM weekly_report_submissions WHERE location_id = $1::uuid",
+        str(location_id),
+    ) or 0
 
-    location_history = (
-        client.table("plant_location_history")
-        .select("id", count="exact")
-        .eq("location_id", str(location_id))
-        .limit(1)
-        .execute()
-    )
-    history_count = location_history.count or 0
+    history_count = await fetchval(
+        "SELECT count(*) FROM plant_location_history WHERE location_id = $1::uuid",
+        str(location_id),
+    ) or 0
 
     if weekly_count > 0 or submission_count > 0 or history_count > 0:
         deps = []
@@ -385,12 +350,16 @@ async def delete_location(
 
     # If force, unassign plants from this location
     if plant_count > 0 and force:
-        client.table("plants_master").update(
-            {"current_location_id": None}
-        ).eq("current_location_id", str(location_id)).execute()
+        await execute(
+            "UPDATE plants_master SET current_location_id = NULL WHERE current_location_id = $1::uuid",
+            str(location_id),
+        )
 
-    # Delete the location (nullable FKs on upload_tokens, spare_parts, etc. auto-set to NULL)
-    client.table("locations").delete().eq("id", str(location_id)).execute()
+    # Delete the location
+    await execute(
+        "DELETE FROM locations WHERE id = $1::uuid",
+        str(location_id),
+    )
 
     logger.info(
         "Location deleted",
@@ -444,41 +413,44 @@ async def get_location_plants(
     Returns:
         Paginated list of plants at this location.
     """
-    client = get_supabase_admin_client()
-
     # Verify location exists
-    location = (
-        client.table("locations")
-        .select("id, name")
-        .eq("id", str(location_id))
-        .single()
-        .execute()
+    location = await fetchrow(
+        "SELECT id, name FROM locations WHERE id = $1::uuid",
+        str(location_id),
     )
 
-    if not location.data:
+    if not location:
         raise NotFoundError("Location", str(location_id))
 
-    # Get plants
-    query = (
-        client.table("v_plants_summary")
-        .select("*", count="exact")
-        .eq("current_location_id", str(location_id))
-    )
+    # Build query
+    conditions = ["current_location_id = $1::uuid"]
+    params: list[Any] = [str(location_id)]
 
     if status:
-        query = query.eq("status", status)
+        params.append(status)
+        conditions.append(f"status = ${len(params)}")
 
+    where = " AND ".join(conditions)
     offset = (page - 1) * limit
-    query = query.range(offset, offset + limit - 1)
-    query = query.order("fleet_number")
 
-    result = query.execute()
-    total = result.count or 0
+    params.append(limit)
+    params.append(offset)
+    data = await fetch(
+        f"""SELECT *, count(*) OVER() AS _total_count FROM v_plants_summary
+            WHERE {where}
+            ORDER BY fleet_number
+            LIMIT ${len(params) - 1} OFFSET ${len(params)}""",
+        *params,
+    )
+
+    total = data[0].pop("_total_count", 0) if data else 0
+    for row in data[1:]:
+        row.pop("_total_count", None)
 
     return {
         "success": True,
-        "data": result.data,
-        "location": location.data,
+        "data": data,
+        "location": location,
         "meta": {
             "page": page,
             "limit": limit,
@@ -506,24 +478,27 @@ async def get_location_submissions(
     Returns:
         List of submissions for this location.
     """
-    client = get_supabase_admin_client()
-
-    query = (
-        client.table("weekly_report_submissions")
-        .select("*")
-        .eq("location_id", str(location_id))
-        .order("submitted_at", desc=True)
-        .limit(limit)
-    )
+    conditions = ["location_id = $1::uuid"]
+    params: list[Any] = [str(location_id)]
 
     if year:
-        query = query.eq("year", year)
+        params.append(year)
+        conditions.append(f"year = ${len(params)}")
 
-    result = query.execute()
+    where = " AND ".join(conditions)
+    params.append(limit)
+
+    data = await fetch(
+        f"""SELECT * FROM weekly_report_submissions
+            WHERE {where}
+            ORDER BY submitted_at DESC
+            LIMIT ${len(params)}""",
+        *params,
+    )
 
     return {
         "success": True,
-        "data": result.data,
+        "data": data,
     }
 
 
@@ -550,34 +525,33 @@ async def get_location_usage(
     Returns:
         Usage statistics for the location.
     """
-    client = get_supabase_admin_client()
-
     # Verify location exists
-    location = (
-        client.table("locations")
-        .select("id, name")
-        .eq("id", str(location_id))
-        .single()
-        .execute()
+    location = await fetchrow(
+        "SELECT id, name FROM locations WHERE id = $1::uuid",
+        str(location_id),
     )
 
-    if not location.data:
+    if not location:
         raise NotFoundError("Location", str(location_id))
 
     # Build query for weekly records at this location
-    query = (
-        client.table("plant_weekly_records")
-        .select("hours_worked, standby_hours, breakdown_hours, off_hire, year, week_number, plant_id")
-        .eq("location_id", str(location_id))
-    )
+    conditions = ["location_id = $1::uuid"]
+    params: list[Any] = [str(location_id)]
 
     if year:
-        query = query.eq("year", year)
+        params.append(year)
+        conditions.append(f"year = ${len(params)}")
     if week:
-        query = query.eq("week_number", week)
+        params.append(week)
+        conditions.append(f"week_number = ${len(params)}")
 
-    result = query.execute()
-    records = result.data or []
+    where = " AND ".join(conditions)
+    records = await fetch(
+        f"""SELECT hours_worked, standby_hours, breakdown_hours, off_hire, year, week_number, plant_id
+            FROM plant_weekly_records
+            WHERE {where}""",
+        *params,
+    )
 
     # Aggregate statistics
     total_hours_worked = sum(float(r.get("hours_worked") or 0) for r in records)
@@ -585,15 +559,12 @@ async def get_location_usage(
     total_breakdown_hours = sum(float(r.get("breakdown_hours") or 0) for r in records)
     total_off_hire = sum(1 for r in records if r.get("off_hire"))
 
-    # Count unique plants and weeks
     unique_plants = len(set(r.get("plant_id") for r in records if r.get("plant_id")))
     unique_weeks = len(set((r.get("year"), r.get("week_number")) for r in records))
 
-    # Calculate utilization rate (hours worked / total available hours)
     total_hours = total_hours_worked + total_standby_hours + total_breakdown_hours
     utilization_rate = round((total_hours_worked / total_hours * 100) if total_hours > 0 else 0, 2)
 
-    # Get period label
     if week and year:
         period_label = f"Week {week}, {year}"
     elif year:
@@ -605,7 +576,7 @@ async def get_location_usage(
         "success": True,
         "data": {
             "location_id": str(location_id),
-            "location_name": location.data["name"],
+            "location_name": location["name"],
             "period_label": period_label,
             "hours_worked": round(total_hours_worked, 2),
             "standby_hours": round(total_standby_hours, 2),
@@ -643,34 +614,35 @@ async def get_location_weekly_records(
     Returns:
         Paginated weekly records with plant details.
     """
-    client = get_supabase_admin_client()
-
-    query = (
-        client.table("plant_weekly_records")
-        .select("*, plants_master(fleet_number, description)", count="exact")
-        .eq("location_id", str(location_id))
-    )
+    conditions = ["pwr.location_id = $1::uuid"]
+    params: list[Any] = [str(location_id)]
 
     if year:
-        query = query.eq("year", year)
+        params.append(year)
+        conditions.append(f"pwr.year = ${len(params)}")
     if week:
-        query = query.eq("week_number", week)
+        params.append(week)
+        conditions.append(f"pwr.week_number = ${len(params)}")
 
-    # Apply ordering and pagination
+    where = " AND ".join(conditions)
     offset = (page - 1) * limit
-    query = query.order("year", desc=True).order("week_number", desc=True).order("plants_master(fleet_number)")
-    query = query.range(offset, offset + limit - 1)
 
-    result = query.execute()
-    total = result.count or 0
+    params.append(limit)
+    params.append(offset)
+    records = await fetch(
+        f"""SELECT pwr.*, pm.fleet_number, pm.description,
+                   count(*) OVER() AS _total_count
+            FROM plant_weekly_records pwr
+            LEFT JOIN plants_master pm ON pm.id = pwr.plant_id
+            WHERE {where}
+            ORDER BY pwr.year DESC, pwr.week_number DESC, pm.fleet_number
+            LIMIT ${len(params) - 1} OFFSET ${len(params)}""",
+        *params,
+    )
 
-    # Transform to flatten plant info
-    records = []
-    for item in result.data or []:
-        plant = item.pop("plants_master", None) or {}
-        item["fleet_number"] = plant.get("fleet_number")
-        item["description"] = plant.get("description")
-        records.append(item)
+    total = records[0].pop("_total_count", 0) if records else 0
+    for row in records[1:]:
+        row.pop("_total_count", None)
 
     return {
         "success": True,

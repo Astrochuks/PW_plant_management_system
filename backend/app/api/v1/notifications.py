@@ -5,7 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 
-from app.core.database import get_supabase_admin_client
+from app.core.pool import fetch, fetchrow, fetchval, execute
 from app.core.exceptions import NotFoundError
 from app.core.security import (
     CurrentUser,
@@ -35,27 +35,32 @@ async def list_notifications(
     Returns:
         Paginated list of notifications.
     """
-    client = get_supabase_admin_client()
-
-    query = (
-        client.table("notifications")
-        .select("*", count="exact")
-        .or_(f"target_role.eq.{current_user.role},target_user_id.eq.{current_user.id}")
-    )
+    conditions = ["(target_role = $1 OR target_user_id = $2)"]
+    params: list[Any] = [current_user.role, current_user.id]
 
     if unread_only:
-        query = query.eq("read", False)
+        conditions.append("read = false")
 
+    where = " AND ".join(conditions)
     offset = (page - 1) * limit
-    query = query.range(offset, offset + limit - 1)
-    query = query.order("created_at", desc=True)
 
-    result = query.execute()
-    total = result.count or 0
+    params.append(limit)
+    params.append(offset)
+    data = await fetch(
+        f"""SELECT *, count(*) OVER() AS _total_count FROM notifications
+            WHERE {where}
+            ORDER BY created_at DESC
+            LIMIT ${len(params) - 1} OFFSET ${len(params)}""",
+        *params,
+    )
+
+    total = data[0].pop("_total_count", 0) if data else 0
+    for row in data[1:]:
+        row.pop("_total_count", None)
 
     return {
         "success": True,
-        "data": result.data,
+        "data": data,
         "meta": {
             "page": page,
             "limit": limit,
@@ -78,19 +83,17 @@ async def get_unread_count(
     Returns:
         Count of unread notifications.
     """
-    client = get_supabase_admin_client()
-
-    result = (
-        client.table("notifications")
-        .select("id", count="exact")
-        .eq("read", False)
-        .or_(f"target_role.eq.{current_user.role},target_user_id.eq.{current_user.id}")
-        .execute()
-    )
+    count = await fetchval(
+        """SELECT count(*) FROM notifications
+           WHERE read = false
+             AND (target_role = $1 OR target_user_id = $2)""",
+        current_user.role,
+        current_user.id,
+    ) or 0
 
     return {
         "success": True,
-        "data": {"unread_count": result.count or 0},
+        "data": {"unread_count": count},
     }
 
 
@@ -108,37 +111,31 @@ async def mark_as_read(
     Returns:
         Updated notification.
     """
-    client = get_supabase_admin_client()
-
     # Check notification exists and belongs to user
-    existing = (
-        client.table("notifications")
-        .select("id, target_role, target_user_id")
-        .eq("id", str(notification_id))
-        .single()
-        .execute()
+    existing = await fetchrow(
+        "SELECT id, target_role, target_user_id FROM notifications WHERE id = $1::uuid",
+        str(notification_id),
     )
 
-    if not existing.data:
+    if not existing:
         raise NotFoundError("Notification", str(notification_id))
 
     # Verify user can access this notification
-    notif = existing.data
-    if notif.get("target_user_id") and notif["target_user_id"] != current_user.id:
+    if existing.get("target_user_id") and existing["target_user_id"] != current_user.id:
         raise NotFoundError("Notification", str(notification_id))
-    if notif.get("target_role") and notif["target_role"] != current_user.role:
+    if existing.get("target_role") and existing["target_role"] != current_user.role:
         raise NotFoundError("Notification", str(notification_id))
 
-    result = (
-        client.table("notifications")
-        .update({"read": True, "read_at": "now()"})
-        .eq("id", str(notification_id))
-        .execute()
+    updated = await fetchrow(
+        """UPDATE notifications SET read = true, read_at = now()
+           WHERE id = $1::uuid
+           RETURNING *""",
+        str(notification_id),
     )
 
     return {
         "success": True,
-        "data": result.data[0],
+        "data": updated,
     }
 
 
@@ -154,18 +151,20 @@ async def mark_all_as_read(
     Returns:
         Count of notifications marked as read.
     """
-    client = get_supabase_admin_client()
-
-    # Update all unread notifications for this user
-    result = (
-        client.table("notifications")
-        .update({"read": True, "read_at": "now()"})
-        .eq("read", False)
-        .or_(f"target_role.eq.{current_user.role},target_user_id.eq.{current_user.id}")
-        .execute()
+    status = await execute(
+        """UPDATE notifications SET read = true, read_at = now()
+           WHERE read = false
+             AND (target_role = $1 OR target_user_id = $2)""",
+        current_user.role,
+        current_user.id,
     )
 
-    count = len(result.data) if result.data else 0
+    # asyncpg execute returns status like "UPDATE 5"
+    count = 0
+    if status:
+        parts = status.split()
+        if len(parts) >= 2 and parts[-1].isdigit():
+            count = int(parts[-1])
 
     logger.info(
         "Marked all notifications as read",
@@ -193,27 +192,24 @@ async def delete_notification(
     Returns:
         Success message.
     """
-    client = get_supabase_admin_client()
-
     # Check notification exists and user can delete it
-    existing = (
-        client.table("notifications")
-        .select("id, target_role, target_user_id")
-        .eq("id", str(notification_id))
-        .single()
-        .execute()
+    existing = await fetchrow(
+        "SELECT id, target_role, target_user_id FROM notifications WHERE id = $1::uuid",
+        str(notification_id),
     )
 
-    if not existing.data:
+    if not existing:
         raise NotFoundError("Notification", str(notification_id))
 
-    notif = existing.data
-    if notif.get("target_user_id") and notif["target_user_id"] != current_user.id:
+    if existing.get("target_user_id") and existing["target_user_id"] != current_user.id:
         raise NotFoundError("Notification", str(notification_id))
-    if notif.get("target_role") and notif["target_role"] != current_user.role:
+    if existing.get("target_role") and existing["target_role"] != current_user.role:
         raise NotFoundError("Notification", str(notification_id))
 
-    client.table("notifications").delete().eq("id", str(notification_id)).execute()
+    await execute(
+        "DELETE FROM notifications WHERE id = $1::uuid",
+        str(notification_id),
+    )
 
     return {
         "success": True,

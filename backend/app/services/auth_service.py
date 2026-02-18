@@ -5,11 +5,12 @@ login response time (~560ms vs ~1200ms before optimization).
 """
 
 import ipaddress
+import json
 from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from app.core.database import get_supabase_admin_client
+from app.core.pool import fetch, fetchrow, fetchval, execute
 from app.core.exceptions import RateLimitError
 from app.monitoring.logging import get_logger
 
@@ -37,21 +38,11 @@ RATE_LIMIT_WINDOW_MINUTES = 15
 class AuthService:
     """Service for authentication-related operations including rate limiting and audit logging."""
 
-    def __init__(self):
-        self._client = None
-
-    @property
-    def client(self):
-        """Lazy load Supabase admin client."""
-        if self._client is None:
-            self._client = get_supabase_admin_client()
-        return self._client
-
     # =========================================================================
     # Rate Limiting (single RPC call - optimized)
     # =========================================================================
 
-    def check_rate_limit(self, email: str, ip_address: str | None = None) -> None:
+    async def check_rate_limit(self, email: str, ip_address: str | None = None) -> None:
         """
         Check if login should be allowed. Single DB call.
 
@@ -61,27 +52,29 @@ class AuthService:
         ip_address = validate_ip(ip_address)
 
         try:
-            result = self.client.rpc(
-                "check_rate_limit",
-                {
-                    "p_email": email,
-                    "p_ip": ip_address,
-                    "p_max_email_attempts": MAX_FAILED_ATTEMPTS_PER_EMAIL,
-                    "p_max_ip_attempts": MAX_FAILED_ATTEMPTS_PER_IP,
-                    "p_window_minutes": RATE_LIMIT_WINDOW_MINUTES
-                }
-            ).execute()
+            rows = await fetch(
+                "SELECT * FROM check_rate_limit($1, $2, $3, $4, $5)",
+                email,
+                ip_address,
+                MAX_FAILED_ATTEMPTS_PER_EMAIL,
+                MAX_FAILED_ATTEMPTS_PER_IP,
+                RATE_LIMIT_WINDOW_MINUTES,
+            )
 
-            if not result.data or len(result.data) == 0:
+            if not rows:
                 return  # No data = allow login
 
-            data = result.data[0]
+            data = rows[0]
 
             # Account is actively locked
             if data.get("is_locked"):
                 unlock_time = data.get("unlock_at")
                 if unlock_time:
-                    unlock_dt = datetime.fromisoformat(unlock_time.replace("Z", "+00:00"))
+                    # asyncpg may return datetime object or string
+                    if isinstance(unlock_time, str):
+                        unlock_dt = datetime.fromisoformat(unlock_time.replace("Z", "+00:00"))
+                    else:
+                        unlock_dt = unlock_time
                     minutes_remaining = int((unlock_dt - datetime.now(unlock_dt.tzinfo)).total_seconds() / 60)
                     raise RateLimitError(
                         f"Account locked due to too many failed attempts. "
@@ -91,7 +84,7 @@ class AuthService:
             # Too many email failures - create lockout
             email_failures = int(data.get("email_failures", 0))
             if email_failures >= MAX_FAILED_ATTEMPTS_PER_EMAIL:
-                self._create_lockout(email, ip_address, "too_many_attempts")
+                await self._create_lockout(email, ip_address, "too_many_attempts")
                 raise RateLimitError(
                     f"Too many failed login attempts. "
                     f"Account locked for {LOCKOUT_DURATION_MINUTES} minutes."
@@ -100,7 +93,7 @@ class AuthService:
             # Too many IP failures
             ip_failures = int(data.get("ip_failures", 0))
             if ip_address and ip_failures >= MAX_FAILED_ATTEMPTS_PER_IP:
-                self._create_lockout(email, ip_address, "suspicious_ip")
+                await self._create_lockout(email, ip_address, "suspicious_ip")
                 raise RateLimitError(
                     f"Too many failed attempts from this IP. "
                     f"Try again in {LOCKOUT_DURATION_MINUTES} minutes."
@@ -112,18 +105,16 @@ class AuthService:
             # Rate limit check failure should NOT block login
             logger.error("Rate limit check failed (allowing login)", error=str(e))
 
-    def _create_lockout(self, email: str, ip_address: str | None, reason: str) -> None:
+    async def _create_lockout(self, email: str, ip_address: str | None, reason: str) -> None:
         """Create an account lockout."""
         try:
-            self.client.rpc(
-                "create_account_lockout",
-                {
-                    "p_email": email,
-                    "p_ip": ip_address,
-                    "p_duration_minutes": LOCKOUT_DURATION_MINUTES,
-                    "p_reason": reason
-                }
-            ).execute()
+            await fetchval(
+                "SELECT create_account_lockout($1, $2, $3, $4)",
+                email,
+                ip_address,
+                LOCKOUT_DURATION_MINUTES,
+                reason,
+            )
 
             logger.warning(
                 "Account locked",
@@ -139,7 +130,7 @@ class AuthService:
     # Login Logging (combined RPC - runs in background)
     # =========================================================================
 
-    def record_login(
+    async def record_login(
         self,
         email: str,
         ip_address: str | None,
@@ -156,18 +147,16 @@ class AuthService:
         try:
             ip_address = validate_ip(ip_address)
 
-            self.client.rpc(
-                "record_login_and_event",
-                {
-                    "p_email": email,
-                    "p_ip": ip_address,
-                    "p_success": success,
-                    "p_failure_reason": failure_reason,
-                    "p_user_id": str(user_id) if user_id else None,
-                    "p_user_agent": user_agent,
-                    "p_details": details or {}
-                }
-            ).execute()
+            await fetchval(
+                "SELECT record_login_and_event($1, $2, $3, $4, $5, $6, $7::jsonb)",
+                email,
+                ip_address,
+                success,
+                failure_reason,
+                str(user_id) if user_id else None,
+                user_agent,
+                json.dumps(details or {}),
+            )
         except Exception as e:
             logger.error("Failed to record login", error=str(e), email=email)
 
@@ -175,7 +164,7 @@ class AuthService:
     # Audit Logging (for non-login events)
     # =========================================================================
 
-    def log_auth_event(
+    async def log_auth_event(
         self,
         event_type: str,
         email: str,
@@ -188,17 +177,15 @@ class AuthService:
         try:
             ip_address = validate_ip(ip_address)
 
-            self.client.rpc(
-                "record_auth_event",
-                {
-                    "p_user_id": str(user_id) if user_id else None,
-                    "p_email": email,
-                    "p_event_type": event_type,
-                    "p_ip_address": ip_address,
-                    "p_user_agent": user_agent,
-                    "p_details": details or {}
-                }
-            ).execute()
+            await fetchval(
+                "SELECT record_auth_event($1, $2, $3, $4, $5, $6::jsonb)",
+                str(user_id) if user_id else None,
+                email,
+                event_type,
+                ip_address,
+                user_agent,
+                json.dumps(details or {}),
+            )
 
             logger.info(
                 f"Auth event: {event_type}",
@@ -218,7 +205,7 @@ class AuthService:
     # Admin Operations
     # =========================================================================
 
-    def get_auth_events(
+    async def get_auth_events(
         self,
         user_id: str | None = None,
         email: str | None = None,
@@ -229,38 +216,52 @@ class AuthService:
         limit: int = 50
     ) -> dict[str, Any]:
         """Get auth events with filtering and pagination."""
-        query = (
-            self.client.table("auth_events")
-            .select("*", count="exact")
-            .order("created_at", desc=True)
-        )
+        conditions: list[str] = []
+        params: list[Any] = []
 
         if user_id:
-            query = query.eq("user_id", user_id)
+            params.append(user_id)
+            conditions.append(f"user_id = ${len(params)}")
         if email:
-            query = query.ilike("email", f"%{email}%")
+            params.append(f"%{email}%")
+            conditions.append(f"email ILIKE ${len(params)}")
         if event_type:
-            query = query.eq("event_type", event_type)
+            params.append(event_type)
+            conditions.append(f"event_type = ${len(params)}")
         if start_date:
-            query = query.gte("created_at", start_date)
+            params.append(start_date)
+            conditions.append(f"created_at >= ${len(params)}::timestamptz")
         if end_date:
-            query = query.lte("created_at", end_date)
+            params.append(end_date)
+            conditions.append(f"created_at <= ${len(params)}::timestamptz")
 
+        where = " AND ".join(conditions) if conditions else "TRUE"
         offset = (page - 1) * limit
-        query = query.range(offset, offset + limit - 1)
 
-        result = query.execute()
-        total = result.count or 0
+        total = await fetchval(
+            f"SELECT count(*) FROM auth_events WHERE {where}",
+            *params,
+        ) or 0
+
+        params.append(limit)
+        params.append(offset)
+        rows = await fetch(
+            f"""SELECT * FROM auth_events
+                WHERE {where}
+                ORDER BY created_at DESC
+                LIMIT ${len(params) - 1} OFFSET ${len(params)}""",
+            *params,
+        )
 
         return {
-            "events": result.data,
+            "events": rows,
             "total": total,
             "page": page,
             "limit": limit,
             "total_pages": (total + limit - 1) // limit if total > 0 else 0
         }
 
-    def get_login_attempts(
+    async def get_login_attempts(
         self,
         email: str | None = None,
         ip_address: str | None = None,
@@ -269,56 +270,68 @@ class AuthService:
         limit: int = 50
     ) -> dict[str, Any]:
         """Get login attempts with filtering and pagination."""
-        query = (
-            self.client.table("login_attempts")
-            .select("*", count="exact")
-            .order("created_at", desc=True)
-        )
+        conditions: list[str] = []
+        params: list[Any] = []
 
         if email:
-            query = query.ilike("email", f"%{email}%")
+            params.append(f"%{email}%")
+            conditions.append(f"email ILIKE ${len(params)}")
         if ip_address:
-            query = query.eq("ip_address", ip_address)
+            params.append(ip_address)
+            conditions.append(f"ip_address = ${len(params)}")
         if success is not None:
-            query = query.eq("success", success)
+            params.append(success)
+            conditions.append(f"success = ${len(params)}")
 
+        where = " AND ".join(conditions) if conditions else "TRUE"
         offset = (page - 1) * limit
-        query = query.range(offset, offset + limit - 1)
 
-        result = query.execute()
-        total = result.count or 0
+        total = await fetchval(
+            f"SELECT count(*) FROM login_attempts WHERE {where}",
+            *params,
+        ) or 0
+
+        params.append(limit)
+        params.append(offset)
+        rows = await fetch(
+            f"""SELECT * FROM login_attempts
+                WHERE {where}
+                ORDER BY created_at DESC
+                LIMIT ${len(params) - 1} OFFSET ${len(params)}""",
+            *params,
+        )
 
         return {
-            "attempts": result.data,
+            "attempts": rows,
             "total": total,
             "page": page,
             "limit": limit,
             "total_pages": (total + limit - 1) // limit if total > 0 else 0
         }
 
-    def get_active_lockouts(self) -> list[dict]:
+    async def get_active_lockouts(self) -> list[dict]:
         """Get all currently active lockouts."""
-        result = (
-            self.client.table("account_lockouts")
-            .select("*")
-            .gt("unlock_at", "now()")
-            .is_("unlocked_at", "null")
-            .order("locked_at", desc=True)
-            .execute()
+        rows = await fetch(
+            """SELECT * FROM account_lockouts
+               WHERE unlock_at > now() AND unlocked_at IS NULL
+               ORDER BY locked_at DESC"""
         )
-        return result.data
+        return rows
 
-    def unlock_account(
+    async def unlock_account(
         self,
         lockout_id: str,
         admin_user_id: str
     ) -> bool:
         """Manually unlock an account."""
         try:
-            self.client.table("account_lockouts").update({
-                "unlocked_at": "now()",
-                "unlocked_by": admin_user_id
-            }).eq("id", lockout_id).execute()
+            await execute(
+                """UPDATE account_lockouts
+                   SET unlocked_at = now(), unlocked_by = $2
+                   WHERE id = $1::uuid""",
+                lockout_id,
+                admin_user_id,
+            )
 
             logger.info(
                 "Account unlocked manually",

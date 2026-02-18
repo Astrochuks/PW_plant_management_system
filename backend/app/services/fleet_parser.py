@@ -7,7 +7,7 @@ Handles abbreviated inputs, fleet types, workshop entries, and category entries.
 import re
 from typing import Any
 
-from app.core.database import get_supabase_admin_client
+from app.core.pool import fetch, fetchrow
 from app.monitoring.logging import get_logger
 
 logger = get_logger(__name__)
@@ -69,7 +69,7 @@ def _normalize_category(text: str) -> str | None:
     return None
 
 
-def parse_fleet_input(raw_input: str) -> list[dict[str, Any]]:
+async def parse_fleet_input(raw_input: str) -> list[dict[str, Any]]:
     """
     Parse user input into fleet records.
 
@@ -93,7 +93,6 @@ def parse_fleet_input(raw_input: str) -> list[dict[str, Any]]:
         - category_name: Normalized category name if is_category
         - is_resolved: True if plant_id was matched
     """
-    client = get_supabase_admin_client()
     results = []
     last_prefix = None
 
@@ -124,7 +123,7 @@ def parse_fleet_input(raw_input: str) -> list[dict[str, Any]]:
                 "is_workshop": False,
                 "is_category": True,
                 "category_name": category,
-                "is_resolved": True,  # Resolved as a category
+                "is_resolved": True,
             })
             continue
 
@@ -140,18 +139,16 @@ def parse_fleet_input(raw_input: str) -> list[dict[str, Any]]:
                 last_prefix = prefix
 
                 # Try to find plant by fleet number
-                plant = (
-                    client.table("plants_master")
-                    .select("id, fleet_type")
-                    .eq("fleet_number", fleet_number)
-                    .execute()
+                plant = await fetchrow(
+                    "SELECT id, fleet_type FROM plants_master WHERE fleet_number = $1",
+                    fleet_number,
                 )
 
-                if plant.data:
+                if plant:
                     results.append({
                         "fleet_number_raw": part,
-                        "plant_id": plant.data[0]["id"],
-                        "fleet_type": plant.data[0].get("fleet_type"),
+                        "plant_id": plant["id"],
+                        "fleet_type": plant.get("fleet_type"),
                         "is_workshop": False,
                         "is_category": False,
                         "category_name": None,
@@ -159,17 +156,15 @@ def parse_fleet_input(raw_input: str) -> list[dict[str, Any]]:
                     })
                 else:
                     # Check if prefix maps to a fleet type
-                    fleet_type_match = (
-                        client.table("fleet_number_prefixes")
-                        .select("fleet_type")
-                        .eq("prefix", prefix)
-                        .execute()
+                    fleet_type_match = await fetchrow(
+                        "SELECT fleet_type FROM fleet_number_prefixes WHERE prefix = $1",
+                        prefix,
                     )
                     results.append({
                         "fleet_number_raw": part,
                         "plant_id": None,
-                        "fleet_type": fleet_type_match.data[0]["fleet_type"]
-                        if fleet_type_match.data
+                        "fleet_type": fleet_type_match["fleet_type"]
+                        if fleet_type_match
                         else prefix,
                         "is_workshop": False,
                         "is_category": False,
@@ -190,22 +185,20 @@ def parse_fleet_input(raw_input: str) -> list[dict[str, Any]]:
         else:
             # Not a standard fleet number pattern
             # Check if it's a fleet type name like "TRUCKS" or "GENERATORS"
-            fleet_type_match = (
-                client.table("fleet_number_prefixes")
-                .select("fleet_type")
-                .ilike("fleet_type", f"%{part}%")
-                .execute()
+            fleet_type_match = await fetchrow(
+                "SELECT fleet_type FROM fleet_number_prefixes WHERE fleet_type ILIKE $1 LIMIT 1",
+                f"%{part}%",
             )
 
-            if fleet_type_match.data:
+            if fleet_type_match:
                 # Matched a fleet type
                 results.append({
                     "fleet_number_raw": part,
                     "plant_id": None,
-                    "fleet_type": fleet_type_match.data[0]["fleet_type"],
+                    "fleet_type": fleet_type_match["fleet_type"],
                     "is_workshop": False,
                     "is_category": True,  # Fleet type without number = category
-                    "category_name": fleet_type_match.data[0]["fleet_type"],
+                    "category_name": fleet_type_match["fleet_type"],
                     "is_resolved": True,
                 })
             else:
@@ -233,7 +226,7 @@ def parse_fleet_input(raw_input: str) -> list[dict[str, Any]]:
     return results
 
 
-def resolve_location_from_req_no(req_no: str | None) -> str | None:
+async def resolve_location_from_req_no(req_no: str | None) -> str | None:
     """
     Extract location from REQ NO like 'ABJ 340888' → ABUJA location_id.
 
@@ -246,8 +239,6 @@ def resolve_location_from_req_no(req_no: str | None) -> str | None:
     if not req_no:
         return None
 
-    client = get_supabase_admin_client()
-
     # Extract prefix (letters before space or numbers)
     match = re.match(r"^([A-Z]+)", req_no.upper().strip())
     if not match:
@@ -255,22 +246,19 @@ def resolve_location_from_req_no(req_no: str | None) -> str | None:
 
     prefix = match.group(1)
 
-    # Look up mapping
-    result = (
-        client.table("req_no_location_mapping")
-        .select("location_id")
-        .eq("prefix", prefix)
-        .execute()
+    row = await fetchrow(
+        "SELECT location_id FROM req_no_location_mapping WHERE prefix = $1",
+        prefix,
     )
 
-    if result.data:
+    if row:
         logger.debug(
             "Resolved REQ NO to location",
             req_no=req_no,
             prefix=prefix,
-            location_id=result.data[0]["location_id"],
+            location_id=row["location_id"],
         )
-        return result.data[0]["location_id"]
+        return row["location_id"]
 
     return None
 
@@ -298,7 +286,7 @@ def get_cost_classification(fleet_associations: list[dict]) -> str:
     return "shared"
 
 
-def parse_multiple_req_nos(req_no_input: str) -> list[dict[str, Any]]:
+async def parse_multiple_req_nos(req_no_input: str) -> list[dict[str, Any]]:
     """
     Parse multiple REQ NOs from input like "KWOI 2345, ABJ 2340".
 
@@ -315,7 +303,6 @@ def parse_multiple_req_nos(req_no_input: str) -> list[dict[str, Any]]:
     if not req_no_input:
         return []
 
-    client = get_supabase_admin_client()
     results = []
 
     # Split by comma
@@ -335,21 +322,21 @@ def parse_multiple_req_nos(req_no_input: str) -> list[dict[str, Any]]:
 
         prefix = match.group(1)
 
-        # Look up location mapping
-        mapping = (
-            client.table("req_no_location_mapping")
-            .select("location_id, locations(name)")
-            .eq("prefix", prefix)
-            .execute()
+        # Look up location mapping with JOIN
+        mapping = await fetchrow(
+            """SELECT m.location_id, l.name AS location_name
+               FROM req_no_location_mapping m
+               LEFT JOIN locations l ON l.id = m.location_id
+               WHERE m.prefix = $1""",
+            prefix,
         )
 
-        if mapping.data:
-            loc = mapping.data[0]
+        if mapping:
             results.append({
                 "req_no": part.upper(),
                 "prefix": prefix,
-                "location_id": loc["location_id"],
-                "location_name": loc.get("locations", {}).get("name") if loc.get("locations") else None,
+                "location_id": mapping["location_id"],
+                "location_name": mapping.get("location_name"),
             })
         else:
             results.append({

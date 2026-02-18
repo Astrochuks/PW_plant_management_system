@@ -33,7 +33,10 @@ export interface AuthState {
 // API Functions
 export async function login(credentials: LoginCredentials): Promise<LoginResponse> {
   // Backend returns LoginResponse directly (not wrapped in ApiResponse)
-  const response = await apiClient.post<LoginResponse>('/auth/login', credentials);
+  // Login calls Supabase Auth API (external) so needs a longer timeout
+  const response = await apiClient.post<LoginResponse>('/auth/login', credentials, {
+    timeout: 30000,
+  });
   return response.data;
 }
 

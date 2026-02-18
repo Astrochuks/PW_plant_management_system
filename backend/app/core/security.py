@@ -19,8 +19,9 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
 from app.config import get_settings
-from app.core.database import get_supabase_client, get_supabase_admin_client
+from app.core.database import get_supabase_client
 from app.core.exceptions import AuthenticationError, AuthorizationError
+from app.core.pool import fetchrow
 from app.monitoring.logging import get_logger
 
 logger = get_logger(__name__)
@@ -165,7 +166,7 @@ def _verify_token(token: str) -> str:
 # User Lookup — cached to avoid repeated DB calls
 # =============================================================================
 
-def _get_user_data(user_id: str) -> dict:
+async def _get_user_data(user_id: str) -> dict:
     """Get user data from cache or database.
 
     Cache hit: 0 DB calls.
@@ -178,22 +179,18 @@ def _get_user_data(user_id: str) -> dict:
     if cached is not None:
         return cached
 
-    # Cache miss — fetch from database
-    admin_client = get_supabase_admin_client()
-    result = (
-        admin_client.table("users")
-        .select("id, email, role, full_name, is_active")
-        .eq("id", user_id)
-        .single()
-        .execute()
+    # Cache miss — fetch from database via asyncpg
+    row = await fetchrow(
+        "SELECT id, email, role, full_name, is_active FROM users WHERE id = $1::uuid",
+        user_id,
     )
 
-    if not result.data:
+    if not row:
         raise AuthenticationError("User not found in system")
 
     # Cache the result
-    cache.set(user_id, result.data)
-    return result.data
+    cache.set(user_id, row)
+    return row
 
 
 # =============================================================================
@@ -242,7 +239,7 @@ async def get_current_user(
         user_id = _verify_token(token)
 
         # Step 2: Get user data (cached or from DB)
-        user = _get_user_data(user_id)
+        user = await _get_user_data(user_id)
 
         if not user.get("is_active", False):
             raise AuthenticationError("User account is deactivated")
@@ -299,27 +296,21 @@ async def validate_upload_token(
     upload_type: str,
 ) -> dict[str, Any]:
     """Validate an upload token for public file uploads."""
-    from app.core.database import get_supabase_admin_client
-
     try:
-        client = get_supabase_admin_client()
-        result = client.rpc(
-            "validate_upload_token",
-            {"p_token": token, "p_upload_type": upload_type},
-        ).execute()
+        row = await fetchrow(
+            "SELECT * FROM validate_upload_token($1, $2)",
+            token,
+            upload_type,
+        )
 
-        if not result.data or not result.data[0].get("valid"):
-            error_message = (
-                result.data[0].get("error_message", "Invalid token")
-                if result.data
-                else "Invalid token"
-            )
+        if not row or not row.get("valid"):
+            error_message = row.get("error_message", "Invalid token") if row else "Invalid token"
             raise AuthenticationError(error_message)
 
         return {
-            "token_id": result.data[0].get("token_id"),
-            "location_id": result.data[0].get("location_id"),
-            "location_name": result.data[0].get("location_name"),
+            "token_id": row.get("token_id"),
+            "location_id": row.get("location_id"),
+            "location_name": row.get("location_name"),
         }
 
     except AuthenticationError:

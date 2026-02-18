@@ -1,13 +1,14 @@
 """Plant management endpoints."""
 
+import json
 from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 
 from app.api.v1.auth import get_client_ip
-from app.core.database import get_supabase_admin_client
 from app.core.exceptions import NotFoundError, ValidationError
+from app.core.pool import fetch, fetchrow, fetchval, execute, fetch_insert
 from app.core.security import (
     CurrentUser,
     require_admin,
@@ -25,6 +26,16 @@ from app.services.audit_service import audit_service
 
 router = APIRouter()
 logger = get_logger(__name__)
+
+# Whitelist of columns allowed for ORDER BY to prevent SQL injection
+_ALLOWED_SORT_COLUMNS = {
+    "fleet_number", "description", "fleet_type", "make", "model",
+    "condition", "current_location", "state", "chassis_number",
+    "year_of_manufacture", "purchase_year", "purchase_cost",
+    "total_maintenance_cost", "parts_replaced_count", "last_maintenance_date",
+    "created_at", "updated_at", "physical_verification", "remarks",
+    "shared_po_count", "last_verified_date",
+}
 
 
 # ============================================================================
@@ -56,37 +67,42 @@ async def list_plant_events(
     Returns:
         Paginated list of plant events.
     """
-    client = get_supabase_admin_client()
-
-    query = (
-        client.table("plant_events")
-        .select("*, plants_master(fleet_number, description)", count="estimated")
-    )
+    conditions: list[str] = []
+    params: list[Any] = []
 
     if event_type:
-        query = query.eq("event_type", event_type)
+        params.append(event_type)
+        conditions.append(f"pe.event_type = ${len(params)}")
     if plant_id:
-        query = query.eq("plant_id", str(plant_id))
+        params.append(str(plant_id))
+        conditions.append(f"pe.plant_id = ${len(params)}::uuid")
     if location_id:
-        query = query.or_(f"from_location_id.eq.{location_id},to_location_id.eq.{location_id}")
+        params.append(str(location_id))
+        n = len(params)
+        conditions.append(f"(pe.from_location_id = ${n}::uuid OR pe.to_location_id = ${n}::uuid)")
     if acknowledged is not None:
-        query = query.eq("acknowledged", acknowledged)
+        params.append(acknowledged)
+        conditions.append(f"pe.acknowledged = ${len(params)}")
 
+    where = " AND ".join(conditions) if conditions else "TRUE"
     offset = (page - 1) * limit
-    query = query.range(offset, offset + limit - 1)
-    query = query.order("created_at", desc=True)
 
-    result = query.execute()
-    total = result.count or 0
+    params.append(limit)
+    params.append(offset)
+    events = await fetch(
+        f"""SELECT pe.*, pm.fleet_number, pm.description AS plant_description,
+                   count(*) OVER() AS _total_count
+            FROM plant_events pe
+            LEFT JOIN plants_master pm ON pm.id = pe.plant_id
+            WHERE {where}
+            ORDER BY pe.created_at DESC
+            LIMIT ${len(params) - 1} OFFSET ${len(params)}""",
+        *params,
+    )
 
-    # Transform to include plant info
-    events = []
-    for item in result.data:
-        item["fleet_number"] = item.get("plants_master", {}).get("fleet_number") if item.get("plants_master") else None
-        item["plant_description"] = item.get("plants_master", {}).get("description") if item.get("plants_master") else None
-        if "plants_master" in item:
-            del item["plants_master"]
-        events.append(item)
+    total = events[0].pop("_total_count", 0) if events else 0
+    for row in events[1:]:
+        row.pop("_total_count", None)
 
     return {
         "success": True,
@@ -120,34 +136,34 @@ async def acknowledge_event(
     Returns:
         Updated event.
     """
-    client = get_supabase_admin_client()
-
-    # Check event exists and capture old state
-    existing = (
-        client.table("plant_events")
-        .select("*")
-        .eq("id", str(event_id))
-        .execute()
+    existing = await fetchrow(
+        "SELECT * FROM plant_events WHERE id = $1::uuid",
+        str(event_id),
     )
 
-    if not existing.data:
+    if not existing:
         raise NotFoundError("Plant event", str(event_id))
 
-    old_values = {"acknowledged": existing.data[0].get("acknowledged", False)}
+    old_values = {"acknowledged": existing.get("acknowledged", False)}
 
-    update_data = {
-        "acknowledged": True,
-        "acknowledged_by": current_user.id,
-        "acknowledged_at": "now()",
-    }
+    # Build dynamic SET clause
+    set_parts = [
+        "acknowledged = true",
+        f"acknowledged_by = ${1}",
+        "acknowledged_at = now()",
+    ]
+    params: list[Any] = [current_user.id]
+
     if remarks:
-        update_data["remarks"] = remarks
+        params.append(remarks)
+        set_parts.append(f"remarks = ${len(params)}")
 
-    result = (
-        client.table("plant_events")
-        .update(update_data)
-        .eq("id", str(event_id))
-        .execute()
+    params.append(str(event_id))
+    set_clause = ", ".join(set_parts)
+
+    updated = await fetchrow(
+        f"UPDATE plant_events SET {set_clause} WHERE id = ${len(params)}::uuid RETURNING *",
+        *params,
     )
 
     logger.info(
@@ -171,7 +187,7 @@ async def acknowledge_event(
 
     return {
         "success": True,
-        "data": result.data[0],
+        "data": updated,
     }
 
 
@@ -197,24 +213,20 @@ async def search_plants(
     Returns:
         Search results ranked by relevance.
     """
-    client = get_supabase_admin_client()
-
-    result = client.rpc(
-        "search_plants",
-        {
-            "p_search_term": query,
-            "p_condition": condition,
-            "p_location_id": str(location_id) if location_id else None,
-            "p_fleet_type": fleet_type,
-            "p_limit": limit,
-            "p_offset": 0,
-        },
-    ).execute()
+    data = await fetch(
+        "SELECT * FROM search_plants($1, $2, $3, $4, $5, $6)",
+        query,
+        condition,
+        str(location_id) if location_id else None,
+        fleet_type,
+        limit,
+        0,
+    )
 
     return {
         "success": True,
-        "data": result.data,
-        "meta": {"query": query, "count": len(result.data)},
+        "data": data,
+        "meta": {"query": query, "count": len(data)},
     }
 
 
@@ -242,30 +254,27 @@ async def get_usage_summary(
     Returns:
         Paginated usage summary for plants.
     """
-    client = get_supabase_admin_client()
     offset = (page - 1) * limit
 
-    result = client.rpc(
-        "get_plant_usage_summary",
-        {
-            "p_plant_id": None,
-            "p_year": year,
-            "p_month": month,
-            "p_week_number": week_number,
-            "p_location_id": str(location_id) if location_id else None,
-            "p_limit": limit,
-            "p_offset": offset,
-        },
-    ).execute()
+    data = await fetch(
+        "SELECT * FROM get_plant_usage_summary($1, $2, $3, $4, $5, $6, $7)",
+        None,  # p_plant_id
+        year,
+        month,
+        week_number,
+        str(location_id) if location_id else None,
+        limit,
+        offset,
+    )
 
     # total_count is returned in each row via window function
-    total = result.data[0]["total_count"] if result.data else 0
+    total = data[0]["total_count"] if data else 0
     # Strip the total_count field from response data
-    data = [{k: v for k, v in row.items() if k != "total_count"} for row in result.data]
+    clean_data = [{k: v for k, v in row.items() if k != "total_count"} for row in data]
 
     return {
         "success": True,
-        "data": data,
+        "data": clean_data,
         "meta": {
             "page": page,
             "limit": limit,
@@ -296,20 +305,16 @@ async def get_breakdown_report(
     Returns:
         List of plants with breakdowns.
     """
-    client = get_supabase_admin_client()
-
-    result = client.rpc(
-        "get_breakdown_report",
-        {
-            "p_year": year,
-            "p_week_number": week_number,
-            "p_location_id": str(location_id) if location_id else None,
-        },
-    ).execute()
+    data = await fetch(
+        "SELECT * FROM get_breakdown_report($1, $2, $3)",
+        year,
+        week_number,
+        str(location_id) if location_id else None,
+    )
 
     return {
         "success": True,
-        "data": result.data,
+        "data": data,
     }
 
 
@@ -337,32 +342,43 @@ async def get_fleet_utilization(
     Returns:
         Paginated plant utilization data with hours, rates, and costs.
     """
-    client = get_supabase_admin_client()
-
-    query = (
-        client.table("v_plant_utilization")
-        .select("*", count="estimated")
-    )
+    conditions: list[str] = []
+    params: list[Any] = []
 
     if location_id:
-        query = query.eq("current_location_id", str(location_id))
+        params.append(str(location_id))
+        conditions.append(f"current_location_id = ${len(params)}::uuid")
     if fleet_type:
-        query = query.ilike("fleet_type", f"%{fleet_type}%")
+        params.append(f"%{fleet_type}%")
+        conditions.append(f"fleet_type ILIKE ${len(params)}")
     if condition:
-        query = query.eq("condition", condition)
+        params.append(condition)
+        conditions.append(f"condition = ${len(params)}")
     if search:
-        query = query.or_(f"fleet_number.ilike.%{search}%,description.ilike.%{search}%")
+        params.append(f"%{search}%")
+        n = len(params)
+        conditions.append(f"(fleet_number ILIKE ${n} OR description ILIKE ${n})")
 
+    where = " AND ".join(conditions) if conditions else "TRUE"
     offset = (page - 1) * limit
-    query = query.order("total_hours_worked", desc=True)
-    query = query.range(offset, offset + limit - 1)
 
-    result = query.execute()
-    total = result.count or 0
+    params.append(limit)
+    params.append(offset)
+    data = await fetch(
+        f"""SELECT *, count(*) OVER() AS _total_count FROM v_plant_utilization
+            WHERE {where}
+            ORDER BY total_hours_worked DESC
+            LIMIT ${len(params) - 1} OFFSET ${len(params)}""",
+        *params,
+    )
+
+    total = data[0].pop("_total_count", 0) if data else 0
+    for row in data[1:]:
+        row.pop("_total_count", None)
 
     return {
         "success": True,
-        "data": result.data,
+        "data": data,
         "meta": {
             "page": page,
             "limit": limit,
@@ -406,9 +422,6 @@ async def export_plants_excel(
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
 
-    client = get_supabase_admin_client()
-
-    # Use v_plants_summary which has all computed fields (maintenance cost, etc.)
     select_fields = (
         "fleet_number, description, fleet_type, make, model, "
         "current_location, state, condition, physical_verification, "
@@ -416,63 +429,57 @@ async def export_plants_excel(
         "total_maintenance_cost, parts_replaced_count, last_maintenance_date, remarks"
     )
 
-    # Fetch all records using pagination (Supabase default limit is 1000)
-    plants = []
-    batch_size = 1000
-    offset = 0
+    # Build dynamic WHERE for the query
+    conds: list[str] = []
+    params: list[Any] = []
 
-    while True:
-        query = (
-            client.table("v_plants_summary")
-            .select(select_fields)
-            .order("fleet_type")
-            .order("fleet_number")
-            .range(offset, offset + batch_size - 1)
-        )
+    if exclude_not_seen:
+        conds.append("(remarks NOT ILIKE '%not seen%' OR remarks IS NULL)")
 
-        # Apply filters
-        if exclude_not_seen:
-            query = query.or_("remarks.not.ilike.%not seen%,remarks.is.null")
+    if location_id:
+        params.append(str(location_id))
+        conds.append(f"current_location_id = ${len(params)}::uuid")
 
-        if location_id:
-            query = query.eq("current_location_id", str(location_id))
+    if state:
+        params.append(f"%{state}%")
+        conds.append(f"state ILIKE ${len(params)}")
 
-        if state:
-            query = query.ilike("state", state)
+    if fleet_type:
+        fleet_type_list = [f.strip() for f in fleet_type.split(",")]
+        ft_conds = []
+        for ft in fleet_type_list:
+            params.append(f"%{ft}%")
+            ft_conds.append(f"fleet_type ILIKE ${len(params)}")
+        conds.append(f"({' OR '.join(ft_conds)})")
 
-        if fleet_type:
-            fleet_type_list = [f.strip() for f in fleet_type.split(",")]
-            if len(fleet_type_list) == 1:
-                query = query.ilike("fleet_type", f"%{fleet_type_list[0]}%")
-            else:
-                or_conditions = ",".join([f"fleet_type.ilike.%{ft}%" for ft in fleet_type_list])
-                query = query.or_(or_conditions)
+    if condition:
+        condition_list = [c.strip() for c in condition.split(",")]
+        if len(condition_list) == 1:
+            params.append(condition_list[0])
+            conds.append(f"condition = ${len(params)}")
+        else:
+            placeholders = ", ".join(f"${len(params) + i + 1}" for i in range(len(condition_list)))
+            params.extend(condition_list)
+            conds.append(f"condition IN ({placeholders})")
 
-        if condition:
-            condition_list = [c.strip() for c in condition.split(",")]
-            if len(condition_list) == 1:
-                query = query.eq("condition", condition_list[0])
-            else:
-                query = query.in_("condition", condition_list)
+    if search:
+        params.append(f"%{search}%")
+        n = len(params)
+        conds.append(f"(fleet_number ILIKE ${n} OR description ILIKE ${n})")
 
-        if search:
-            query = query.or_(f"fleet_number.ilike.%{search}%,description.ilike.%{search}%")
+    if verified_only:
+        conds.append("physical_verification = true")
 
-        if verified_only:
-            query = query.eq("physical_verification", True)
+    where = " AND ".join(conds) if conds else "TRUE"
 
-        result = query.execute()
-        batch = result.data or []
-        plants.extend(batch)
-
-        # If we got less than batch_size, we've reached the end
-        if len(batch) < batch_size:
-            break
-
-        offset += batch_size
+    plants = await fetch(
+        f"""SELECT {select_fields} FROM v_plants_summary
+            WHERE {where}
+            ORDER BY fleet_type, fleet_number""",
+        *params,
+    )
 
     # All available export columns with their config
-    # Data comes from v_plants_summary — all fields are direct (no nested joins)
     all_export_columns = [
         {"key": "fleet_number", "header": "Fleet Number", "width": 15, "getter": lambda p: p.get("fleet_number")},
         {"key": "description", "header": "Description", "width": 30, "getter": lambda p: p.get("description")},
@@ -498,7 +505,6 @@ async def export_plants_excel(
         requested = {c.strip() for c in columns.split(",")}
         export_cols = [c for c in all_export_columns if c["key"] in requested]
     else:
-        # Default columns (original set)
         default_keys = {"fleet_number", "description", "fleet_type", "make", "model", "current_location", "state", "physical_verification", "remarks"}
         export_cols = [c for c in all_export_columns if c["key"] in default_keys]
 
@@ -507,7 +513,7 @@ async def export_plants_excel(
     ws = wb.active
     ws.title = "Plants"
 
-    # Style definitions — PW brand gold matching the frontend table
+    # Style definitions
     title_font = Font(bold=True, size=14, color="101415")
     header_font = Font(bold=True, size=10, color="101415")
     header_fill = PatternFill(start_color="FFBF36", end_color="FFBF36", fill_type="solid")
@@ -527,23 +533,20 @@ async def export_plants_excel(
 
     # Row 1: P.W. NIGERIA LTD. branding with logo
     ws.row_dimensions[1].height = 55
-    # Add logo if available
     logo_added = False
     try:
         from pathlib import Path
         from openpyxl.drawing.image import Image as XlImage
         logo_path = Path(__file__).resolve().parents[4] / "frontend" / "public" / "images" / "logo.png"
-        logger.info("Excel export logo path", logo_path=str(logo_path), exists=logo_path.exists())
         if logo_path.exists():
             logo = XlImage(str(logo_path))
             logo.width = 50
             logo.height = 50
             ws.add_image(logo, "A1")
             logo_added = True
-            logger.info("Excel logo added successfully")
     except Exception as exc:
         logger.warning("Failed to add logo to Excel export", error=str(exc))
-    # Brand text — column B if logo present, else column A
+
     text_col = 2 if logo_added else 1
     ws.merge_cells(start_row=1, start_column=text_col, end_row=1, end_column=len(export_cols))
     brand_cell = ws.cell(row=1, column=text_col, value="P.W. NIGERIA LTD. — Plant Register")
@@ -570,15 +573,12 @@ async def export_plants_excel(
     for col_idx, col_def in enumerate(export_cols, 1):
         ws.column_dimensions[get_column_letter(col_idx)].width = col_def["width"]
 
-    # Freeze header rows (title + column headers)
     ws.freeze_panes = "A3"
 
-    # Save to buffer
     buffer = io.BytesIO()
     wb.save(buffer)
     buffer.seek(0)
 
-    # Generate filename
     from datetime import datetime
     filename = f"plants_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
 
@@ -612,14 +612,12 @@ async def get_plant_stats(
     Returns:
         Counts by condition (working, standby, breakdown, off_hire, etc.).
     """
-    client = get_supabase_admin_client()
+    raw = await fetchval(
+        "SELECT get_plant_filter_stats($1)",
+        str(location_id) if location_id else None,
+    )
 
-    result = client.rpc(
-        "get_plant_filter_stats",
-        {"p_location_id": str(location_id) if location_id else None},
-    ).execute()
-
-    stats = result.data if result.data else {}
+    stats = (json.loads(raw) if isinstance(raw, str) else raw) if raw else {}
 
     return {
         "success": True,
@@ -649,31 +647,24 @@ async def get_filtered_plant_stats(
     Returns condition breakdown, location breakdown, and fleet type breakdown
     for the filtered plant set. Uses a database RPC for fast GROUP BY aggregation.
     """
-    client = get_supabase_admin_client()
-
     # Parse multi-value filters
     condition_list = [c.strip() for c in condition.split(",")] if condition else None
     fleet_type_list = [f.strip() for f in fleet_type.split(",")] if fleet_type else None
 
-    # Call the database RPC — all aggregation done in PostgreSQL
-    rpc_params: dict[str, Any] = {
-        "p_verified_only": verified_only,
-        "p_unknown_location": unknown_location,
-        "p_pending_transfer": pending_transfer,
-    }
-    if condition_list:
-        rpc_params["p_condition"] = condition_list
-    if location_id:
-        rpc_params["p_location_id"] = str(location_id)
-    if fleet_type_list:
-        rpc_params["p_fleet_type"] = fleet_type_list
-    if state:
-        rpc_params["p_state"] = state
-    if search:
-        rpc_params["p_search"] = search
+    raw = await fetchval(
+        "SELECT get_filtered_plant_stats($1, $2, $3, $4, $5, $6, $7, $8)",
+        condition_list,
+        str(location_id) if location_id else None,
+        fleet_type_list,
+        state,
+        search,
+        verified_only,
+        unknown_location,
+        pending_transfer,
+    )
 
-    result = client.rpc("get_filtered_plant_stats", rpc_params).execute()
-    stats = result.data if result.data else {"total": 0, "by_condition": {}, "by_location": {}, "by_fleet_type": {}, "by_state_fleet_type": {}}
+    stats = (json.loads(raw) if isinstance(raw, str) else raw) if raw else {}
+    stats = stats or {"total": 0, "by_condition": {}, "by_location": {}, "by_fleet_type": {}, "by_state_fleet_type": {}}
 
     return {
         "success": True,
@@ -714,119 +705,111 @@ async def list_plants(
 
     **Column selection:** Use `columns` to select which fields to return.
     - `columns=fleet_number,condition,current_location` - Only these 3 fields
-    - Useful for exports and customized views
-
-    **Available columns:**
-    id, fleet_number, description, fleet_type, make, model, chassis_number,
-    year_of_manufacture, purchase_year, purchase_cost, serial_m, serial_e,
-    condition, physical_verification, current_location_id, current_location,
-    state_id, state, state_code, last_verified_date, remarks, created_at, updated_at,
-    total_maintenance_cost, parts_replaced_count, last_maintenance_date, shared_po_count,
-    pending_transfer_to_id, pending_transfer_to_location
 
     **Condition values:**
     working, standby, under_repair, breakdown, scrap, missing, off_hire, gpm_assessment, unverified
-
-    Args:
-        page: Page number.
-        limit: Items per page (max 500 for exports).
-        condition: Filter by condition(s) - comma-separated.
-        location_id: Filter by location UUID.
-        state: Filter by state name.
-        fleet_type: Filter by fleet type(s) - comma-separated.
-        search: Search in fleet_number, description.
-        verified_only: Only show verified plants.
-        unknown_location: Only plants with NULL location.
-        pending_transfer: Only plants with pending transfers.
-        columns: Comma-separated columns to return.
-        sort_by: Column to sort by.
-        sort_order: asc or desc.
-
-    Returns:
-        Paginated list of plants (with selected columns if specified).
     """
-    client = get_supabase_admin_client()
-
     # Parse multi-value filters
     condition_list = [c.strip() for c in condition.split(",")] if condition else None
     fleet_type_list = [f.strip() for f in fleet_type.split(",")] if fleet_type else None
 
-    # If filtering by state, get location IDs for that state first
-    state_location_ids = None
-    if state:
-        state_locs = (
-            client.table("locations")
-            .select("id, state_id, states(name)")
-            .ilike("states.name", f"%{state}%")
-            .execute()
-        )
-        state_location_ids = [loc["id"] for loc in (state_locs.data or []) if loc.get("states")]
-
     # Build select clause based on columns parameter
     if columns:
         column_list = [c.strip() for c in columns.split(",")]
-        # Always include id for consistency
         if "id" not in column_list:
             column_list.insert(0, "id")
-        select_clause = ",".join(column_list)
+        select_clause = ", ".join(column_list)
     else:
         select_clause = "*"
 
-    # Use the view for summary data
-    query = client.table("v_plants_summary").select(select_clause, count="estimated")
+    # Build WHERE clause
+    conds: list[str] = []
+    params: list[Any] = []
 
-    # Apply condition filter (multi-value) - unified field
-    if pending_transfer:
-        query = query.not_.is_("pending_transfer_to_id", "null")
-    elif condition_list:
-        if len(condition_list) == 1:
-            query = query.eq("condition", condition_list[0])
-        else:
-            query = query.in_("condition", condition_list)
-
-    # Apply fleet_type filter (multi-value with ILIKE for partial matching)
-    if fleet_type_list:
-        if len(fleet_type_list) == 1:
-            query = query.ilike("fleet_type", f"%{fleet_type_list[0]}%")
-        else:
-            # Build OR condition for multiple fleet types
-            or_conditions = ",".join([f"fleet_type.ilike.%{ft}%" for ft in fleet_type_list])
-            query = query.or_(or_conditions)
-
-    # Location filters
-    if unknown_location:
-        query = query.is_("current_location_id", "null")
-    elif location_id:
-        query = query.eq("current_location_id", str(location_id))
-    elif state_location_ids is not None:
-        if state_location_ids:
-            query = query.in_("current_location_id", state_location_ids)
-        else:
+    # If filtering by state, get location IDs for that state
+    if state:
+        params.append(f"%{state}%")
+        state_locs = await fetch(
+            f"""SELECT l.id FROM locations l
+                JOIN states s ON s.id = l.state_id
+                WHERE s.name ILIKE ${len(params)}""",
+            *params,
+        )
+        state_location_ids = [loc["id"] for loc in state_locs]
+        if not state_location_ids:
             return {
                 "success": True,
                 "data": [],
                 "meta": {"page": page, "limit": limit, "total": 0, "total_pages": 0, "has_more": False},
             }
+        # Reset params — the state lookup was a separate query
+        params = []
+        placeholders = ", ".join(f"${i+1}::uuid" for i in range(len(state_location_ids)))
+        params.extend(state_location_ids)
+        conds.append(f"current_location_id IN ({placeholders})")
+
+    # Condition filter
+    if pending_transfer:
+        conds.append("pending_transfer_to_id IS NOT NULL")
+    elif condition_list:
+        if len(condition_list) == 1:
+            params.append(condition_list[0])
+            conds.append(f"condition = ${len(params)}")
+        else:
+            placeholders = ", ".join(f"${len(params) + i + 1}" for i in range(len(condition_list)))
+            params.extend(condition_list)
+            conds.append(f"condition IN ({placeholders})")
+
+    # Fleet type filter (ILIKE for partial matching)
+    if fleet_type_list:
+        ft_conds = []
+        for ft in fleet_type_list:
+            params.append(f"%{ft}%")
+            ft_conds.append(f"fleet_type ILIKE ${len(params)}")
+        conds.append(f"({' OR '.join(ft_conds)})")
+
+    # Location filters
+    if unknown_location:
+        conds.append("current_location_id IS NULL")
+    elif location_id and not state:
+        params.append(str(location_id))
+        conds.append(f"current_location_id = ${len(params)}::uuid")
 
     if search:
-        query = query.or_(f"fleet_number.ilike.%{search}%,description.ilike.%{search}%")
+        params.append(f"%{search}%")
+        n = len(params)
+        conds.append(f"(fleet_number ILIKE ${n} OR description ILIKE ${n})")
 
     if verified_only:
-        query = query.eq("physical_verification", True)
+        conds.append("physical_verification = true")
 
-    # Pagination
+    where = " AND ".join(conds) if conds else "TRUE"
+
+    # Validate sort column
+    safe_sort = sort_by if sort_by in _ALLOWED_SORT_COLUMNS else "fleet_number"
+    safe_order = "DESC" if sort_order == "desc" else "ASC"
+
+    # Single query: data + total count in one round-trip (saves ~500ms network latency)
     offset = (page - 1) * limit
-    query = query.range(offset, offset + limit - 1)
+    params.append(limit)
+    params.append(offset)
+    data = await fetch(
+        f"""SELECT {select_clause}, count(*) OVER() AS _total_count
+            FROM v_plants_summary
+            WHERE {where}
+            ORDER BY {safe_sort} {safe_order}
+            LIMIT ${len(params) - 1} OFFSET ${len(params)}""",
+        *params,
+    )
 
-    # Sorting
-    query = query.order(sort_by, desc=(sort_order == "desc"))
-
-    result = query.execute()
-    total = result.count or 0
+    # Extract total from first row, strip the helper column
+    total = data[0].pop("_total_count", 0) if data else 0
+    for row in data[1:]:
+        row.pop("_total_count", None)
 
     return {
         "success": True,
-        "data": result.data or [],
+        "data": data,
         "meta": {
             "page": page,
             "limit": limit,
@@ -861,24 +844,19 @@ async def get_plant_by_fleet(
     Returns:
         Plant details with related data.
     """
-    client = get_supabase_admin_client()
-
-    # Normalize fleet number (uppercase, no extra spaces)
     normalized = " ".join(fleet_number.upper().split())
 
-    result = (
-        client.table("v_plants_summary")
-        .select("*")
-        .eq("fleet_number", normalized)
-        .execute()
+    result = await fetchrow(
+        "SELECT * FROM v_plants_summary WHERE fleet_number = $1",
+        normalized,
     )
 
-    if not result.data:
+    if not result:
         raise NotFoundError("Plant with fleet number", fleet_number)
 
     return {
         "success": True,
-        "data": result.data[0],
+        "data": result,
     }
 
 
@@ -896,22 +874,17 @@ async def get_plant(
     Returns:
         Plant details with related data.
     """
-    client = get_supabase_admin_client()
-
-    result = (
-        client.table("v_plants_summary")
-        .select("*")
-        .eq("id", str(plant_id))
-        .single()
-        .execute()
+    result = await fetchrow(
+        "SELECT * FROM v_plants_summary WHERE id = $1::uuid",
+        str(plant_id),
     )
 
-    if not result.data:
+    if not result:
         raise NotFoundError("Plant", str(plant_id))
 
     return {
         "success": True,
-        "data": result.data,
+        "data": result,
     }
 
 
@@ -933,19 +906,18 @@ async def create_plant(
     Returns:
         Created plant with ID.
     """
-    client = get_supabase_admin_client()
-
-    # Prepare plant data — mode="json" converts UUIDs to strings for Supabase
-    # fleet_type is auto-resolved by database trigger if not provided
     plant_data = plant.model_dump(exclude_none=True, mode="json")
 
-    # Insert with duplicate check in one operation
-    # Use upsert with ignoreDuplicates=False to get error on conflict
+    # Build INSERT dynamically from provided fields
+    cols = list(plant_data.keys())
+    vals = list(plant_data.values())
+    placeholders = ", ".join(f"${i+1}" for i in range(len(cols)))
+    col_names = ", ".join(cols)
+
     try:
-        result = (
-            client.table("plants_master")
-            .insert(plant_data)
-            .execute()
+        created = await fetchrow(
+            f"INSERT INTO plants_master ({col_names}) VALUES ({placeholders}) RETURNING *",
+            *vals,
         )
     except Exception as e:
         error_msg = str(e).lower()
@@ -955,25 +927,22 @@ async def create_plant(
                 details=[{"field": "fleet_number", "message": "Already exists", "code": "DUPLICATE"}],
             )
         if "violates check constraint" in error_msg:
-            logger.error("Check constraint violation on plant create", error=str(e))
             raise ValidationError(
                 "Invalid data: a field value is not allowed. Please check all fields and try again.",
                 details=[{"message": str(e), "code": "CONSTRAINT_VIOLATION"}],
             )
-        logger.error("Unexpected error creating plant", error=str(e))
         raise
-
-    created = result.data[0]
 
     # Record initial location history if a location was provided
     if plant_data.get("current_location_id"):
-        client.table("plant_location_history").insert({
-            "plant_id": created["id"],
-            "location_id": plant_data["current_location_id"],
-            "start_date": created.get("created_at", "now()"),
-            "transfer_reason": "Initial assignment",
-            "created_by": current_user.id,
-        }).execute()
+        await execute(
+            """INSERT INTO plant_location_history (plant_id, location_id, start_date, transfer_reason, created_by)
+               VALUES ($1::uuid, $2::uuid, now(), $3, $4)""",
+            created["id"],
+            plant_data["current_location_id"],
+            "Initial assignment",
+            current_user.id,
+        )
 
     logger.info(
         "Plant created",
@@ -1027,18 +996,9 @@ async def update_plant(
     ```
     PATCH /plants/{id}?purchase_cost=5000000&purchase_year=2023
     ```
-
-    Args:
-        plant_id: The plant UUID.
-        All other parameters are optional - only provide what you want to change.
-
-    Returns:
-        Updated plant with all fields.
     """
-    client = get_supabase_admin_client()
-
     # Build update data from provided parameters only
-    update_data = {}
+    update_data: dict[str, Any] = {}
     if description is not None:
         update_data["description"] = description
     if fleet_type is not None:
@@ -1071,29 +1031,37 @@ async def update_plant(
     if not update_data:
         raise ValidationError("No fields to update. Provide at least one field.")
 
-    # Fetch current values for the fields being changed (for audit diff)
-    fields_to_fetch = ",".join(["id", "fleet_number"] + list(update_data.keys()))
-    existing = (
-        client.table("plants_master")
-        .select(fields_to_fetch)
-        .eq("id", str(plant_id))
-        .execute()
+    # Fetch current values for audit diff
+    existing = await fetchrow(
+        "SELECT * FROM plants_master WHERE id = $1::uuid",
+        str(plant_id),
     )
 
-    if not existing.data:
+    if not existing:
         raise NotFoundError("Plant", str(plant_id))
 
-    # Capture old values only for fields that are actually changing
-    old_record = existing.data[0]
-    old_values = {k: old_record.get(k) for k in update_data if k in old_record}
+    old_values = {k: existing.get(k) for k in update_data if k in existing}
 
+    # Build SET clause
     update_data["updated_at"] = "now()"
+    set_parts: list[str] = []
+    params: list[Any] = []
+    for key, val in update_data.items():
+        if key == "updated_at":
+            set_parts.append("updated_at = now()")
+        elif key == "current_location_id":
+            params.append(val)
+            set_parts.append(f"{key} = ${len(params)}::uuid")
+        else:
+            params.append(val)
+            set_parts.append(f"{key} = ${len(params)}")
 
-    result = (
-        client.table("plants_master")
-        .update(update_data)
-        .eq("id", str(plant_id))
-        .execute()
+    params.append(str(plant_id))
+    set_clause = ", ".join(set_parts)
+
+    await execute(
+        f"UPDATE plants_master SET {set_clause} WHERE id = ${len(params)}::uuid",
+        *params,
     )
 
     logger.info(
@@ -1103,7 +1071,7 @@ async def update_plant(
         user_id=current_user.id,
     )
 
-    fleet_number = old_record.get("fleet_number", str(plant_id))
+    fleet_number = existing.get("fleet_number", str(plant_id))
     background_tasks.add_task(
         audit_service.log,
         user_id=current_user.id,
@@ -1118,17 +1086,14 @@ async def update_plant(
     )
 
     # Return full plant data from view
-    updated = (
-        client.table("v_plants_summary")
-        .select("*")
-        .eq("id", str(plant_id))
-        .single()
-        .execute()
+    updated = await fetchrow(
+        "SELECT * FROM v_plants_summary WHERE id = $1::uuid",
+        str(plant_id),
     )
 
     return {
         "success": True,
-        "data": updated.data,
+        "data": updated,
         "meta": {
             "updated_fields": [k for k in update_data.keys() if k != "updated_at"],
         },
@@ -1155,24 +1120,20 @@ async def transfer_plant(
     Returns:
         Transfer result.
     """
-    client = get_supabase_admin_client()
+    raw = await fetchval(
+        "SELECT transfer_plant($1, $2, $3, $4)",
+        str(plant_id),
+        str(transfer.new_location_id),
+        transfer.transfer_reason,
+        current_user.id,
+    )
 
-    # Call the RPC function
-    result = client.rpc(
-        "transfer_plant",
-        {
-            "p_plant_id": str(plant_id),
-            "p_new_location_id": str(transfer.new_location_id),
-            "p_transfer_reason": transfer.transfer_reason,
-            "p_user_id": current_user.id,
-        },
-    ).execute()
+    result = (json.loads(raw) if isinstance(raw, str) else raw) if raw else None
+    if not result or not result.get("success"):
+        raise ValidationError(result.get("error", "Transfer failed") if result else "Transfer failed")
 
-    if not result.data.get("success"):
-        raise ValidationError(result.data.get("error", "Transfer failed"))
-
-    from_loc = result.data.get("from_location", "Unknown")
-    to_loc = result.data.get("to_location", "Unknown")
+    from_loc = result.get("from_location", "Unknown")
+    to_loc = result.get("to_location", "Unknown")
 
     logger.info(
         "Plant transferred",
@@ -1197,7 +1158,7 @@ async def transfer_plant(
 
     return {
         "success": True,
-        "data": result.data,
+        "data": result,
     }
 
 
@@ -1210,8 +1171,6 @@ async def delete_plant(
 ) -> dict[str, Any]:
     """Delete a plant record.
 
-    Captures the full record before deletion for audit trail.
-
     Args:
         plant_id: The plant UUID.
         request: The HTTP request.
@@ -1221,25 +1180,20 @@ async def delete_plant(
     Returns:
         Success message.
     """
-    client = get_supabase_admin_client()
-
-    # Capture full record before deletion for audit trail
-    existing = (
-        client.table("plants_master")
-        .select("*")
-        .eq("id", str(plant_id))
-        .single()
-        .execute()
+    existing = await fetchrow(
+        "SELECT * FROM plants_master WHERE id = $1::uuid",
+        str(plant_id),
     )
 
-    if not existing.data:
+    if not existing:
         raise NotFoundError("Plant", str(plant_id))
 
-    deleted_record = existing.data
-    fleet_number = deleted_record.get("fleet_number", str(plant_id))
+    fleet_number = existing.get("fleet_number", str(plant_id))
 
-    # Delete plant
-    client.table("plants_master").delete().eq("id", str(plant_id)).execute()
+    await execute(
+        "DELETE FROM plants_master WHERE id = $1::uuid",
+        str(plant_id),
+    )
 
     logger.info(
         "Plant deleted",
@@ -1255,7 +1209,7 @@ async def delete_plant(
         action="delete",
         table_name="plants_master",
         record_id=str(plant_id),
-        old_values=deleted_record,
+        old_values=existing,
         ip_address=get_client_ip(request),
         description=f"Deleted plant {fleet_number}",
     )
@@ -1282,16 +1236,15 @@ async def get_plant_maintenance_history(
     Returns:
         List of maintenance/spare parts records.
     """
-    client = get_supabase_admin_client()
-
-    result = client.rpc(
-        "get_plant_maintenance_history",
-        {"p_plant_id": str(plant_id), "p_limit": limit},
-    ).execute()
+    data = await fetch(
+        "SELECT * FROM get_plant_maintenance_history($1, $2)",
+        str(plant_id),
+        limit,
+    )
 
     return {
         "success": True,
-        "data": result.data,
+        "data": data,
     }
 
 
@@ -1309,16 +1262,14 @@ async def get_plant_location_history(
     Returns:
         List of location records showing where the plant has been.
     """
-    client = get_supabase_admin_client()
-
-    result = client.rpc(
-        "get_plant_location_history",
-        {"p_plant_id": str(plant_id)},
-    ).execute()
+    data = await fetch(
+        "SELECT * FROM get_plant_location_history($1)",
+        str(plant_id),
+    )
 
     return {
         "success": True,
-        "data": result.data,
+        "data": data,
     }
 
 
@@ -1344,56 +1295,44 @@ async def get_plant_weekly_records(
     Returns:
         Paginated list of weekly records with location info.
     """
-    client = get_supabase_admin_client()
-
-    query = (
-        client.table("plant_weekly_records")
-        .select("*, locations!plant_weekly_records_location_id_fkey(name)", count="estimated")
-        .eq("plant_id", str(plant_id))
-    )
+    conditions = ["pwr.plant_id = $1::uuid"]
+    params: list[Any] = [str(plant_id)]
 
     if year:
-        query = query.eq("year", year)
+        params.append(year)
+        conditions.append(f"pwr.year = ${len(params)}")
 
-    # Apply ordering and pagination
+    where = " AND ".join(conditions)
     offset = (page - 1) * limit
-    query = query.order("year", desc=True).order("week_number", desc=True)
-    query = query.range(offset, offset + limit - 1)
 
-    try:
-        result = query.execute()
-        total = result.count or 0
+    params.append(limit)
+    params.append(offset)
+    records = await fetch(
+        f"""SELECT pwr.*, l.name AS location_name, count(*) OVER() AS _total_count
+            FROM plant_weekly_records pwr
+            LEFT JOIN locations l ON l.id = pwr.location_id
+            WHERE {where}
+            ORDER BY pwr.year DESC, pwr.week_number DESC
+            LIMIT ${len(params) - 1} OFFSET ${len(params)}""",
+        *params,
+    )
 
-        # Transform to include location name
-        records = []
-        for item in result.data or []:
-            # Handle locations which may be a dict or None
-            locations = item.get("locations")
-            if isinstance(locations, dict):
-                item["location_name"] = locations.get("name")
-            else:
-                item["location_name"] = None
+    total = records[0].pop("_total_count", 0) if records else 0
+    for row in records[1:]:
+        row.pop("_total_count", None)
 
-            # Remove embedded relation from response
-            if "locations" in item:
-                del item["locations"]
-
-            records.append(item)
-
-        return {
-            "success": True,
-            "data": records,
-            "meta": {
-                "page": page,
-                "limit": limit,
-                "total": total,
-                "total_pages": (total + limit - 1) // limit if total > 0 else 0,
-                "has_more": page * limit < total,
-                "year": year,
-            },
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch weekly records: {str(e)}")
+    return {
+        "success": True,
+        "data": records,
+        "meta": {
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "total_pages": (total + limit - 1) // limit if total > 0 else 0,
+            "has_more": page * limit < total,
+            "year": year,
+        },
+    }
 
 
 @router.get("/{plant_id}/events")
@@ -1412,27 +1351,19 @@ async def get_plant_events(
     Returns:
         List of events for this plant.
     """
-    client = get_supabase_admin_client()
-
-    result = (
-        client.table("plant_events")
-        .select("*, from_loc:locations!from_location_id(name), to_loc:locations!to_location_id(name)")
-        .eq("plant_id", str(plant_id))
-        .order("created_at", desc=True)
-        .limit(limit)
-        .execute()
+    events = await fetch(
+        """SELECT pe.*,
+                  fl.name AS from_location_name,
+                  tl.name AS to_location_name
+           FROM plant_events pe
+           LEFT JOIN locations fl ON fl.id = pe.from_location_id
+           LEFT JOIN locations tl ON tl.id = pe.to_location_id
+           WHERE pe.plant_id = $1::uuid
+           ORDER BY pe.created_at DESC
+           LIMIT $2""",
+        str(plant_id),
+        limit,
     )
-
-    # Transform
-    events = []
-    for item in result.data:
-        item["from_location_name"] = item.get("from_loc", {}).get("name") if item.get("from_loc") else None
-        item["to_location_name"] = item.get("to_loc", {}).get("name") if item.get("to_loc") else None
-        if "from_loc" in item:
-            del item["from_loc"]
-        if "to_loc" in item:
-            del item["to_loc"]
-        events.append(item)
 
     return {
         "success": True,
@@ -1458,22 +1389,19 @@ async def get_plant_usage(
     Returns:
         Usage summary for the plant.
     """
-    client = get_supabase_admin_client()
+    data = await fetch(
+        "SELECT * FROM get_plant_usage_summary($1, $2, $3, $4, $5)",
+        str(plant_id),
+        year,
+        month,
+        None,  # p_week_number
+        None,  # p_location_id
+    )
 
-    result = client.rpc(
-        "get_plant_usage_summary",
-        {
-            "p_plant_id": str(plant_id),
-            "p_year": year,
-            "p_month": month,
-            "p_location_id": None,
-        },
-    ).execute()
-
-    if not result.data:
+    if not data:
         raise NotFoundError("Plant usage data", str(plant_id))
 
     return {
         "success": True,
-        "data": result.data[0] if result.data else None,
+        "data": data[0] if data else None,
     }

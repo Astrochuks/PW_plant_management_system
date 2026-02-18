@@ -26,7 +26,7 @@ async def get_audit_logs(
 
     Admin only. Shows all data modification events across the system.
     """
-    result = audit_service.get_logs(
+    result = await audit_service.get_logs(
         table_name=table_name,
         record_id=record_id,
         action=action,
@@ -59,7 +59,7 @@ async def get_record_history(
 
     Admin only. Shows all changes made to a particular record over time.
     """
-    history = audit_service.get_record_history(table_name, record_id)
+    history = await audit_service.get_record_history(table_name, record_id)
 
     return {
         "success": True,

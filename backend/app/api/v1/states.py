@@ -7,7 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 
 from app.api.v1.auth import get_client_ip
 from app.core import cache
-from app.core.database import get_supabase_admin_client
+from app.core.pool import fetch, fetchrow, fetchval, execute
 from app.core.exceptions import NotFoundError, ValidationError
 from app.core.security import (
     CurrentUser,
@@ -40,33 +40,16 @@ async def list_states(
     if cached is not None:
         return cached
 
-    client = get_supabase_admin_client()
-
-    query = client.table("states").select("*")
-
-    if not include_inactive:
-        query = query.eq("is_active", True)
-
-    query = query.order("name")
-    result = query.execute()
-
-    # Batch fetch all location counts in one query instead of N+1
-    all_locations = (
-        client.table("locations")
-        .select("state_id")
-        .execute()
+    # Single query with LEFT JOIN for site counts instead of N+1
+    active_filter = "" if include_inactive else "WHERE s.is_active = true"
+    states_with_counts = await fetch(
+        f"""SELECT s.*, count(l.id)::int AS sites_count
+            FROM states s
+            LEFT JOIN locations l ON l.state_id = s.id
+            {active_filter}
+            GROUP BY s.id
+            ORDER BY s.name"""
     )
-    # Count locations per state_id
-    state_site_counts: dict[str, int] = {}
-    for loc in all_locations.data or []:
-        sid = loc.get("state_id")
-        if sid:
-            state_site_counts[sid] = state_site_counts.get(sid, 0) + 1
-
-    states_with_counts = [
-        {**state, "sites_count": state_site_counts.get(state["id"], 0)}
-        for state in result.data or []
-    ]
 
     response = {
         "success": True,
@@ -93,34 +76,26 @@ async def get_state(
     Returns:
         State details with list of sites.
     """
-    client = get_supabase_admin_client()
-
-    result = (
-        client.table("states")
-        .select("*")
-        .eq("id", str(state_id))
-        .single()
-        .execute()
+    state = await fetchrow(
+        "SELECT * FROM states WHERE id = $1::uuid",
+        str(state_id),
     )
 
-    if not result.data:
+    if not state:
         raise NotFoundError("State", str(state_id))
 
     # Get sites in this state
-    sites = (
-        client.table("v_location_stats")
-        .select("*")
-        .eq("state_id", str(state_id))
-        .order("location_name")
-        .execute()
+    sites = await fetch(
+        "SELECT * FROM v_location_stats WHERE state_id = $1::uuid ORDER BY location_name",
+        str(state_id),
     )
 
     return {
         "success": True,
         "data": {
-            **result.data,
-            "sites": sites.data or [],
-            "sites_count": len(sites.data) if sites.data else 0,
+            **state,
+            "sites": sites,
+            "sites_count": len(sites),
         },
     }
 
@@ -139,35 +114,27 @@ async def get_state_sites(
     Returns:
         List of sites with stats.
     """
-    client = get_supabase_admin_client()
-
     # Verify state exists
-    state = (
-        client.table("states")
-        .select("id, name")
-        .eq("id", str(state_id))
-        .single()
-        .execute()
+    state = await fetchrow(
+        "SELECT id, name FROM states WHERE id = $1::uuid",
+        str(state_id),
     )
 
-    if not state.data:
+    if not state:
         raise NotFoundError("State", str(state_id))
 
     # Get sites with stats
-    sites = (
-        client.table("v_location_stats")
-        .select("*")
-        .eq("state_id", str(state_id))
-        .order("location_name")
-        .execute()
+    sites = await fetch(
+        "SELECT * FROM v_location_stats WHERE state_id = $1::uuid ORDER BY location_name",
+        str(state_id),
     )
 
     return {
         "success": True,
-        "data": sites.data or [],
+        "data": sites,
         "meta": {
-            "state": state.data,
-            "total": len(sites.data) if sites.data else 0,
+            "state": state,
+            "total": len(sites),
         },
     }
 
@@ -194,44 +161,48 @@ async def get_state_plants(
     Returns:
         Paginated list of plants in this state.
     """
-    client = get_supabase_admin_client()
-
     # Verify state exists
-    state = (
-        client.table("states")
-        .select("id, name")
-        .eq("id", str(state_id))
-        .single()
-        .execute()
+    state = await fetchrow(
+        "SELECT id, name FROM states WHERE id = $1::uuid",
+        str(state_id),
     )
 
-    if not state.data:
+    if not state:
         raise NotFoundError("State", str(state_id))
 
-    # Get plants using the view which has state_id
-    query = (
-        client.table("v_plants_summary")
-        .select("*", count="exact")
-        .eq("state_id", str(state_id))
-    )
+    # Build WHERE clause
+    conditions = ["state_id = $1::uuid"]
+    params: list[Any] = [str(state_id)]
 
     if status:
-        query = query.eq("status", status)
+        params.append(status)
+        conditions.append(f"status = ${len(params)}")
     if fleet_type:
-        query = query.ilike("fleet_type", f"%{fleet_type}%")
+        params.append(f"%{fleet_type}%")
+        conditions.append(f"fleet_type ILIKE ${len(params)}")
 
+    where = " AND ".join(conditions)
     offset = (page - 1) * limit
-    query = query.range(offset, offset + limit - 1)
-    query = query.order("fleet_number")
 
-    result = query.execute()
-    total = result.count or 0
+    params.append(limit)
+    params.append(offset)
+    data = await fetch(
+        f"""SELECT *, count(*) OVER() AS _total_count FROM v_plants_summary
+            WHERE {where}
+            ORDER BY fleet_number
+            LIMIT ${len(params) - 1} OFFSET ${len(params)}""",
+        *params,
+    )
+
+    total = data[0].pop("_total_count", 0) if data else 0
+    for row in data[1:]:
+        row.pop("_total_count", None)
 
     return {
         "success": True,
-        "data": result.data or [],
+        "data": data,
         "meta": {
-            "state": state.data,
+            "state": state,
             "page": page,
             "limit": limit,
             "total": total,
@@ -262,30 +233,26 @@ async def create_state(
     Returns:
         Created state.
     """
-    client = get_supabase_admin_client()
-
     # Check for duplicate name (case-insensitive)
-    existing = (
-        client.table("states")
-        .select("id, name")
-        .ilike("name_normalized", name.upper().strip())
-        .execute()
+    existing = await fetch(
+        "SELECT id, name FROM states WHERE name_normalized ILIKE $1",
+        name.upper().strip(),
     )
 
-    if existing.data:
+    if existing:
         raise ValidationError(
-            f"State '{existing.data[0]['name']}' already exists",
+            f"State '{existing[0]['name']}' already exists",
             details=[{"field": "name", "message": "Already exists", "code": "DUPLICATE"}],
         )
 
-    state_data = {
-        "name": name.strip(),
-        "code": code.upper() if code else None,
-        "region": region,
-    }
-
-    result = client.table("states").insert(state_data).execute()
-    created = result.data[0]
+    created = await fetchrow(
+        """INSERT INTO states (name, code, region)
+           VALUES ($1, $2, $3)
+           RETURNING *""",
+        name.strip(),
+        code.upper() if code else None,
+        region,
+    )
 
     logger.info(
         "State created",
@@ -301,7 +268,7 @@ async def create_state(
         action="create",
         table_name="states",
         record_id=created["id"],
-        new_values=state_data,
+        new_values={"name": name.strip(), "code": code, "region": region},
         ip_address=get_client_ip(request),
         description=f"Created state: {name}",
     )
@@ -334,10 +301,8 @@ async def update_state(
     Returns:
         Updated state.
     """
-    client = get_supabase_admin_client()
-
     # Build update data
-    update_data = {}
+    update_data: dict[str, Any] = {}
     if name is not None:
         update_data["name"] = name.strip()
     if code is not None:
@@ -351,40 +316,43 @@ async def update_state(
         raise ValidationError("No fields to update")
 
     # Get existing for audit
-    existing = (
-        client.table("states")
-        .select("*")
-        .eq("id", str(state_id))
-        .execute()
+    existing = await fetchrow(
+        "SELECT * FROM states WHERE id = $1::uuid",
+        str(state_id),
     )
 
-    if not existing.data:
+    if not existing:
         raise NotFoundError("State", str(state_id))
 
-    old_values = {k: existing.data[0].get(k) for k in update_data}
+    old_values = {k: existing.get(k) for k in update_data}
 
     # Check for duplicate name if changing name
     if name:
-        dup_check = (
-            client.table("states")
-            .select("id, name")
-            .ilike("name_normalized", name.upper().strip())
-            .neq("id", str(state_id))
-            .execute()
+        dup_check = await fetch(
+            "SELECT id, name FROM states WHERE name_normalized ILIKE $1 AND id != $2::uuid",
+            name.upper().strip(),
+            str(state_id),
         )
-        if dup_check.data:
+        if dup_check:
             raise ValidationError(
-                f"State '{dup_check.data[0]['name']}' already exists",
+                f"State '{dup_check[0]['name']}' already exists",
                 details=[{"field": "name", "message": "Already exists", "code": "DUPLICATE"}],
             )
 
-    update_data["updated_at"] = "now()"
+    # Build SET clause
+    set_parts: list[str] = []
+    params: list[Any] = []
+    for key, val in update_data.items():
+        params.append(val)
+        set_parts.append(f"{key} = ${len(params)}")
+    set_parts.append("updated_at = now()")
 
-    result = (
-        client.table("states")
-        .update(update_data)
-        .eq("id", str(state_id))
-        .execute()
+    params.append(str(state_id))
+    set_clause = ", ".join(set_parts)
+
+    updated = await fetchrow(
+        f"UPDATE states SET {set_clause} WHERE id = ${len(params)}::uuid RETURNING *",
+        *params,
     )
 
     logger.info(
@@ -402,16 +370,16 @@ async def update_state(
         table_name="states",
         record_id=str(state_id),
         old_values=old_values,
-        new_values={k: v for k, v in update_data.items() if k != "updated_at"},
+        new_values=update_data,
         ip_address=get_client_ip(request),
-        description=f"Updated state: {existing.data[0]['name']}",
+        description=f"Updated state: {existing['name']}",
     )
 
     cache.invalidate_prefix("states:")
 
     return {
         "success": True,
-        "data": result.data[0],
+        "data": updated,
     }
 
 
@@ -432,33 +400,29 @@ async def delete_state(
     Returns:
         Success message.
     """
-    client = get_supabase_admin_client()
-
     # Verify state exists
-    existing = (
-        client.table("states")
-        .select("id, name")
-        .eq("id", str(state_id))
-        .single()
-        .execute()
+    existing = await fetchrow(
+        "SELECT id, name FROM states WHERE id = $1::uuid",
+        str(state_id),
     )
 
-    if not existing.data:
+    if not existing:
         raise NotFoundError("State", str(state_id))
 
-    state_name = existing.data["name"]
+    state_name = existing["name"]
 
     # Check for linked sites
-    sites = (
-        client.table("locations")
-        .select("id, name", count="exact")
-        .eq("state_id", str(state_id))
-        .execute()
-    )
-    site_count = sites.count or 0
+    site_count = await fetchval(
+        "SELECT count(*) FROM locations WHERE state_id = $1::uuid",
+        str(state_id),
+    ) or 0
 
     if site_count > 0:
-        site_names = [s["name"] for s in (sites.data or [])[:5]]
+        site_names_rows = await fetch(
+            "SELECT name FROM locations WHERE state_id = $1::uuid LIMIT 5",
+            str(state_id),
+        )
+        site_names = [s["name"] for s in site_names_rows]
         raise ValidationError(
             f"Cannot delete state '{state_name}': {site_count} site(s) linked. "
             f"Reassign sites first: {', '.join(site_names)}{'...' if site_count > 5 else ''}",
@@ -470,7 +434,10 @@ async def delete_state(
         )
 
     # Delete the state
-    client.table("states").delete().eq("id", str(state_id)).execute()
+    await execute(
+        "DELETE FROM states WHERE id = $1::uuid",
+        str(state_id),
+    )
 
     logger.info(
         "State deleted",

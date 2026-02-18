@@ -6,7 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 
 from app.core import cache
-from app.core.database import get_supabase_admin_client
+from app.core.pool import fetch, fetchrow, fetchval
 from app.core.exceptions import NotFoundError
 from app.core.security import (
     CurrentUser,
@@ -37,13 +37,8 @@ async def list_fleet_types(
     if cached is not None:
         return cached
 
-    client = get_supabase_admin_client()
-
-    result = (
-        client.table("fleet_number_prefixes")
-        .select("id, fleet_type, prefix, created_at")
-        .order("fleet_type")
-        .execute()
+    rows = await fetch(
+        "SELECT id, fleet_type, prefix, created_at FROM fleet_number_prefixes ORDER BY fleet_type"
     )
 
     # Transform fleet_type to name for API response
@@ -54,7 +49,7 @@ async def list_fleet_types(
             "prefix": item["prefix"],
             "created_at": item["created_at"],
         }
-        for item in result.data
+        for item in rows
     ]
 
     response = {
@@ -79,25 +74,20 @@ async def get_fleet_type(
     Returns:
         Fleet type details.
     """
-    client = get_supabase_admin_client()
-
-    result = (
-        client.table("fleet_number_prefixes")
-        .select("id, fleet_type, prefix, created_at")
-        .eq("id", str(fleet_type_id))
-        .single()
-        .execute()
+    row = await fetchrow(
+        "SELECT id, fleet_type, prefix, created_at FROM fleet_number_prefixes WHERE id = $1::uuid",
+        str(fleet_type_id),
     )
 
-    if not result.data:
+    if not row:
         raise NotFoundError("Fleet type", str(fleet_type_id))
 
     # Transform fleet_type to name for API response
     data = {
-        "id": result.data["id"],
-        "name": result.data["fleet_type"],
-        "prefix": result.data["prefix"],
-        "created_at": result.data["created_at"],
+        "id": row["id"],
+        "name": row["fleet_type"],
+        "prefix": row["prefix"],
+        "created_at": row["created_at"],
     }
 
     return {
@@ -120,34 +110,26 @@ async def get_fleet_type_plants(
     Returns:
         Plant count for this fleet type.
     """
-    client = get_supabase_admin_client()
-
     # Get fleet type
-    fleet_type_result = (
-        client.table("fleet_number_prefixes")
-        .select("id, fleet_type")
-        .eq("id", str(fleet_type_id))
-        .single()
-        .execute()
+    fleet_type_row = await fetchrow(
+        "SELECT id, fleet_type FROM fleet_number_prefixes WHERE id = $1::uuid",
+        str(fleet_type_id),
     )
 
-    if not fleet_type_result.data:
+    if not fleet_type_row:
         raise NotFoundError("Fleet type", str(fleet_type_id))
 
-    fleet_type_name = fleet_type_result.data["fleet_type"]
+    fleet_type_name = fleet_type_row["fleet_type"]
 
     # Get plant count
-    plants = (
-        client.table("plants_master")
-        .select("id", count="exact")
-        .eq("fleet_type", fleet_type_name)
-        .not_.is_("status", "null")
-        .execute()
-    )
+    plant_count = await fetchval(
+        "SELECT count(*) FROM plants_master WHERE fleet_type = $1 AND status IS NOT NULL",
+        fleet_type_name,
+    ) or 0
 
     # Transform for API response
     fleet_type_data = {
-        "id": fleet_type_result.data["id"],
+        "id": fleet_type_row["id"],
         "name": fleet_type_name,
     }
 
@@ -155,6 +137,6 @@ async def get_fleet_type_plants(
         "success": True,
         "data": {
             "fleet_type": fleet_type_data,
-            "plant_count": plants.count or 0,
+            "plant_count": plant_count,
         },
     }

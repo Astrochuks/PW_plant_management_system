@@ -11,7 +11,7 @@ from typing import Any
 
 import pandas as pd
 
-from app.core.database import get_supabase_admin_client
+from app.core.pool import fetch
 from app.monitoring.logging import get_logger
 
 logger = get_logger(__name__)
@@ -213,7 +213,7 @@ def _parse_week_ending_date(value: Any) -> date | None:
     return None
 
 
-def lookup_location_by_name(location_name: str) -> dict[str, Any] | None:
+async def lookup_location_by_name(location_name: str) -> dict[str, Any] | None:
     """Look up a location by name with fuzzy matching.
 
     Args:
@@ -230,54 +230,47 @@ def lookup_location_by_name(location_name: str) -> dict[str, Any] | None:
         logger.warning("Skipping separator line as location name", value=location_name[:50])
         return None
 
-    client = get_supabase_admin_client()
     name_upper = location_name.upper().strip()
 
     # Try exact match first
-    result = (
-        client.table("locations")
-        .select("id, name")
-        .ilike("name", name_upper)
-        .execute()
+    rows = await fetch(
+        "SELECT id, name FROM locations WHERE name ILIKE $1",
+        name_upper,
     )
 
-    if result.data:
-        return result.data[0]
+    if rows:
+        return rows[0]
 
     # Try contains match (e.g., "KWOI KADUNA" matches "KWOI KADUNA")
-    result = (
-        client.table("locations")
-        .select("id, name")
-        .ilike("name", f"%{name_upper}%")
-        .execute()
+    rows = await fetch(
+        "SELECT id, name FROM locations WHERE name ILIKE $1",
+        f"%{name_upper}%",
     )
 
-    if result.data:
+    if rows:
         # If multiple matches, prefer exact word match
-        for loc in result.data:
+        for loc in rows:
             if name_upper in loc["name"].upper():
                 return loc
-        return result.data[0]
+        return rows[0]
 
     # Try partial match (location name contains our search term)
     # Split search term and try first word
     first_word = name_upper.split()[0] if name_upper else ""
     if first_word and len(first_word) >= 3:
-        result = (
-            client.table("locations")
-            .select("id, name")
-            .ilike("name", f"{first_word}%")
-            .execute()
+        rows = await fetch(
+            "SELECT id, name FROM locations WHERE name ILIKE $1",
+            f"{first_word}%",
         )
 
-        if result.data:
-            return result.data[0]
+        if rows:
+            return rows[0]
 
     logger.warning("Could not find location", search_name=location_name)
     return None
 
 
-def extract_and_resolve_metadata(file_content: bytes) -> dict[str, Any]:
+async def extract_and_resolve_metadata(file_content: bytes) -> dict[str, Any]:
     """Extract metadata from file and resolve location to ID.
 
     This is the main entry point for auto-detection.
@@ -304,7 +297,7 @@ def extract_and_resolve_metadata(file_content: bytes) -> dict[str, Any]:
 
     # Resolve location
     if metadata["location_name"]:
-        location = lookup_location_by_name(metadata["location_name"])
+        location = await lookup_location_by_name(metadata["location_name"])
         if location:
             result["location_id"] = location["id"]
             result["location_name"] = location["name"]
@@ -329,7 +322,7 @@ def extract_and_resolve_metadata(file_content: bytes) -> dict[str, Any]:
     return result
 
 
-def extract_weekly_report_preview(file_content: bytes, max_rows: int = 10) -> dict[str, Any]:
+async def extract_weekly_report_preview(file_content: bytes, max_rows: int = 10) -> dict[str, Any]:
     """Extract a preview of the weekly report data for validation.
 
     Args:
@@ -345,7 +338,7 @@ def extract_weekly_report_preview(file_content: bytes, max_rows: int = 10) -> di
         - validation_warnings: Any data quality issues detected
     """
     result = {
-        "metadata": extract_and_resolve_metadata(file_content),
+        "metadata": await extract_and_resolve_metadata(file_content),
         "plants_preview": [],
         "total_plants": 0,
         "columns_found": [],

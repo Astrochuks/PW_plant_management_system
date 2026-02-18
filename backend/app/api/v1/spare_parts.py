@@ -7,7 +7,8 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, UploadFile, File
 
 from app.api.v1.auth import get_client_ip
-from app.core.database import get_supabase_admin_client
+from app.core.database import get_supabase_admin_client  # Storage only
+from app.core.pool import fetch, fetchrow, fetchval, execute
 from app.core.exceptions import NotFoundError, ValidationError
 from app.core.security import (
     CurrentUser,
@@ -94,83 +95,77 @@ async def list_spare_parts(
     quarter: int | None = None,
     search: str | None = None,
 ) -> dict[str, Any]:
-    """List spare parts (PO line items) with filtering and pagination.
+    """List spare parts (PO line items) with filtering and pagination."""
+    conds: list[str] = []
+    params: list[Any] = []
 
-    Filter by:
-    - plant_id or fleet_number (specific plant)
-    - location_id (specific site)
-    - supplier_id or supplier (by supplier)
-    - po_number (specific PO)
-    - date_from/date_to (date range)
-    - year, month, week, quarter (time periods)
-    - search (text search in part description/number)
-    """
-    client = get_supabase_admin_client()
+    if plant_id:
+        params.append(str(plant_id))
+        conds.append(f"sp.plant_id = ${len(params)}::uuid")
+    if fleet_number:
+        params.append(fleet_number.upper())
+        conds.append(f"pm.fleet_number = ${len(params)}")
+    if location_id:
+        params.append(str(location_id))
+        conds.append(f"sp.location_id = ${len(params)}::uuid")
+    if supplier_id:
+        params.append(str(supplier_id))
+        conds.append(f"sp.supplier_id = ${len(params)}::uuid")
+    elif supplier:
+        params.append(f"%{supplier}%")
+        conds.append(f"sp.supplier ILIKE ${len(params)}")
+    if po_number:
+        params.append(f"%{po_number}%")
+        conds.append(f"sp.purchase_order_number ILIKE ${len(params)}")
+    if date_from:
+        params.append(str(date_from))
+        conds.append(f"sp.replaced_date >= ${len(params)}::date")
+    if date_to:
+        params.append(str(date_to))
+        conds.append(f"sp.replaced_date <= ${len(params)}::date")
+    if year:
+        params.append(year)
+        conds.append(f"sp.year = ${len(params)}")
+    if month:
+        params.append(month)
+        conds.append(f"sp.month = ${len(params)}")
+    if week:
+        params.append(week)
+        conds.append(f"sp.week_number = ${len(params)}")
+    if quarter:
+        params.append(quarter)
+        conds.append(f"sp.quarter = ${len(params)}")
+    if search:
+        params.append(f"%{search}%")
+        n = len(params)
+        conds.append(f"(sp.part_description ILIKE ${n} OR sp.part_number ILIKE ${n})")
 
-    # Use explicit FK hint since there are 2 FKs to plants_master (plant_id, assigned_plant_id)
-    query = (
-        client.table("spare_parts")
-        .select("*, plants_master!spare_parts_plant_id_fkey(fleet_number, description), suppliers(id, name)", count="exact")
+    where = " AND ".join(conds) if conds else "TRUE"
+
+    offset = (page - 1) * limit
+    params.append(limit)
+    params.append(offset)
+    rows = await fetch(
+        f"""SELECT sp.*,
+                   pm.fleet_number, pm.description AS plant_description,
+                   COALESCE(s.name, sp.supplier) AS supplier_name,
+                   count(*) OVER() AS _total_count
+            FROM spare_parts sp
+            LEFT JOIN plants_master pm ON pm.id = sp.plant_id
+            LEFT JOIN suppliers s ON s.id = sp.supplier_id
+            WHERE {where}
+            ORDER BY sp.replaced_date DESC NULLS LAST
+            LIMIT ${len(params) - 1} OFFSET ${len(params)}""",
+        *params,
     )
 
-    # Apply filters
-    if plant_id:
-        query = query.eq("plant_id", str(plant_id))
-    if fleet_number:
-        query = query.eq("plants_master.fleet_number", fleet_number.upper())
-    if location_id:
-        query = query.eq("location_id", str(location_id))
-    if supplier_id:
-        query = query.eq("supplier_id", str(supplier_id))
-    elif supplier:
-        query = query.ilike("supplier", f"%{supplier}%")
-    if po_number:
-        query = query.ilike("purchase_order_number", f"%{po_number}%")
-    if date_from:
-        query = query.gte("replaced_date", str(date_from))
-    if date_to:
-        query = query.lte("replaced_date", str(date_to))
-    if year:
-        query = query.eq("year", year)
-    if month:
-        query = query.eq("month", month)
-    if week:
-        query = query.eq("week_number", week)
-    if quarter:
-        query = query.eq("quarter", quarter)
-    if search:
-        query = query.or_(f"part_description.ilike.%{search}%,part_number.ilike.%{search}%")
-
-    # Pagination
-    offset = (page - 1) * limit
-    query = query.range(offset, offset + limit - 1)
-    query = query.order("replaced_date", desc=True)
-
-    result = query.execute()
-    total = result.count or 0
-
-    # Transform data to include fleet_number and normalized supplier
-    parts = []
-    for item in result.data:
-        item["fleet_number"] = item.get("plants_master", {}).get("fleet_number") if item.get("plants_master") else None
-        item["plant_description"] = item.get("plants_master", {}).get("description") if item.get("plants_master") else None
-
-        # Use normalized supplier name from suppliers table, fall back to text field
-        suppliers_data = item.get("suppliers") or {}
-        if suppliers_data:
-            item["supplier_name"] = suppliers_data.get("name")
-        else:
-            item["supplier_name"] = item.get("supplier")
-
-        if "plants_master" in item:
-            del item["plants_master"]
-        if "suppliers" in item:
-            del item["suppliers"]
-        parts.append(item)
+    total = rows[0].pop("_total_count", 0) if rows else 0
+    for row in rows[1:]:
+        row.pop("_total_count", None)
 
     return {
         "success": True,
-        "data": parts,
+        "data": rows,
         "meta": {
             "page": page,
             "limit": limit,
@@ -186,54 +181,26 @@ async def autocomplete_descriptions(
     q: str = Query(..., min_length=2, description="Search query"),
     limit: int = Query(10, ge=1, le=50),
 ) -> dict[str, Any]:
-    """Get part description suggestions for autocomplete.
-
-    Returns distinct part descriptions matching the search query.
-
-    Args:
-        q: Search query (minimum 2 characters).
-        limit: Maximum suggestions to return.
-
-    Returns:
-        List of matching part descriptions.
-    """
-    client = get_supabase_admin_client()
-
+    """Get part description suggestions for autocomplete."""
     try:
-        result = client.rpc(
-            "search_distinct_values",
-            {
-                "p_table": "spare_parts",
-                "p_column": "part_description",
-                "p_search": q,
-                "p_limit": limit,
-            },
-        ).execute()
-
-        # Extract just the values from the RPC result
-        suggestions = [row.get("value") for row in (result.data or []) if row.get("value")]
-        return {"success": True, "data": suggestions}
-
-    except Exception:
-        # Fallback if RPC fails - use direct query
-        result = (
-            client.table("spare_parts")
-            .select("part_description")
-            .ilike("part_description", f"%{q}%")
-            .not_.is_("part_description", "null")
-            .limit(limit * 3)
-            .execute()
+        result = await fetch(
+            "SELECT * FROM search_distinct_values($1, $2, $3, $4)",
+            "spare_parts", "part_description", q, limit,
         )
-        seen = set()
-        suggestions = []
-        for row in result.data or []:
-            val = row.get("part_description")
-            if val and val not in seen:
-                seen.add(val)
-                suggestions.append(val)
-                if len(suggestions) >= limit:
-                    break
+        suggestions = [row.get("search_distinct_values") for row in result if row.get("search_distinct_values")]
         return {"success": True, "data": suggestions}
+    except Exception:
+        # Fallback — direct query
+        rows = await fetch(
+            """SELECT DISTINCT part_description
+               FROM spare_parts
+               WHERE part_description ILIKE $1
+                 AND part_description IS NOT NULL
+               LIMIT $2""",
+            f"%{q}%",
+            limit,
+        )
+        return {"success": True, "data": [r["part_description"] for r in rows]}
 
 
 @router.get("/autocomplete/po-numbers")
@@ -242,40 +209,22 @@ async def autocomplete_po_numbers(
     q: str = Query(..., min_length=1, description="Search query"),
     limit: int = Query(10, ge=1, le=50),
 ) -> dict[str, Any]:
-    """Get PO number suggestions for autocomplete.
-
-    Returns distinct PO numbers matching the search query.
-    Useful to check if a PO has already been entered.
-
-    Args:
-        q: Search query (minimum 1 character).
-        limit: Maximum suggestions to return.
-
-    Returns:
-        List of matching PO numbers with item count.
-    """
-    client = get_supabase_admin_client()
-
-    result = (
-        client.table("spare_parts")
-        .select("purchase_order_number")
-        .ilike("purchase_order_number", f"%{q.upper()}%")
-        .not_.is_("purchase_order_number", "null")
-        .limit(limit * 3)
-        .execute()
+    """Get PO number suggestions for autocomplete."""
+    rows = await fetch(
+        """SELECT purchase_order_number, count(*)::int AS items_count
+           FROM spare_parts
+           WHERE purchase_order_number ILIKE $1
+             AND purchase_order_number IS NOT NULL
+           GROUP BY purchase_order_number
+           ORDER BY count(*) DESC
+           LIMIT $2""",
+        f"%{q.upper()}%",
+        limit,
     )
 
-    # Get distinct with counts
-    po_counts: dict[str, int] = {}
-    for row in result.data or []:
-        po = row.get("purchase_order_number")
-        if po:
-            po_counts[po] = po_counts.get(po, 0) + 1
-
-    # Sort by frequency and limit
     suggestions = [
-        {"po_number": po, "items_count": count}
-        for po, count in sorted(po_counts.items(), key=lambda x: -x[1])[:limit]
+        {"po_number": row["purchase_order_number"], "items_count": row["items_count"]}
+        for row in rows
     ]
 
     return {"success": True, "data": suggestions}
@@ -291,49 +240,20 @@ async def get_spare_parts_stats(
     location_id: UUID | None = Query(None, description="Filter by location"),
     supplier_id: UUID | None = Query(None, description="Filter by supplier"),
 ) -> dict[str, Any]:
-    """Get spare parts statistics.
-
-    Returns overall stats (total_parts, total_spend, etc.) plus stats
-    for the filtered period (parts_in_period, spend_in_period).
-
-    Args:
-        current_user: The authenticated user.
-        year: Filter by year.
-        month: Filter by month (1-12).
-        week: Filter by week number (1-53).
-        quarter: Filter by quarter (1-4).
-        location_id: Filter by location.
-        supplier_id: Filter by supplier.
-
-    Returns:
-        Aggregate statistics for spare parts.
-    """
-    client = get_supabase_admin_client()
-
-    # Get overall stats
-    result = client.rpc(
-        "get_spare_parts_stats",
-        {
-            "p_year": year,
-            "p_month": month,
-            "p_week": week,
-            "p_quarter": quarter,
-            "p_location_id": str(location_id) if location_id else None,
-            "p_supplier_id": str(supplier_id) if supplier_id else None,
-        },
-    ).execute()
-
-    data = result.data[0] if result.data else {}
+    """Get spare parts statistics."""
+    row = await fetchrow(
+        "SELECT * FROM get_spare_parts_stats($1, $2, $3, $4, $5, $6)",
+        year, month, week, quarter,
+        str(location_id) if location_id else None,
+        str(supplier_id) if supplier_id else None,
+    )
 
     return {
         "success": True,
-        "data": data,
+        "data": row or {},
         "meta": {
             "filters": {
-                "year": year,
-                "month": month,
-                "week": week,
-                "quarter": quarter,
+                "year": year, "month": month, "week": week, "quarter": quarter,
                 "location_id": str(location_id) if location_id else None,
                 "supplier_id": str(supplier_id) if supplier_id else None,
             },
@@ -350,36 +270,14 @@ async def get_top_suppliers(
     quarter: int | None = Query(None, ge=1, le=4, description="Filter by quarter"),
     location_id: UUID | None = Query(None, description="Filter by location"),
 ) -> dict[str, Any]:
-    """Get top suppliers by total spend.
+    """Get top suppliers by total spend."""
+    data = await fetch(
+        "SELECT * FROM get_top_suppliers($1, $2, $3, $4, $5)",
+        limit, year, month, quarter,
+        str(location_id) if location_id else None,
+    )
 
-    Args:
-        current_user: The authenticated user.
-        limit: Number of suppliers to return.
-        year: Filter by year.
-        month: Filter by month.
-        quarter: Filter by quarter.
-        location_id: Filter by location.
-
-    Returns:
-        List of top suppliers with spend amounts and PO count.
-    """
-    client = get_supabase_admin_client()
-
-    result = client.rpc(
-        "get_top_suppliers",
-        {
-            "p_limit": limit,
-            "p_year": year,
-            "p_month": month,
-            "p_quarter": quarter,
-            "p_location_id": str(location_id) if location_id else None,
-        },
-    ).execute()
-
-    return {
-        "success": True,
-        "data": result.data,
-    }
+    return {"success": True, "data": data}
 
 
 @router.get("/high-cost-plants")
@@ -388,27 +286,13 @@ async def get_high_cost_plants(
     limit: int = Query(10, ge=1, le=50),
     year: int | None = None,
 ) -> dict[str, Any]:
-    """Get plants with highest maintenance costs.
+    """Get plants with highest maintenance costs."""
+    data = await fetch(
+        "SELECT * FROM get_high_cost_plants($1, $2)",
+        limit, year,
+    )
 
-    Args:
-        current_user: The authenticated user.
-        limit: Number of plants to return.
-        year: Filter by year.
-
-    Returns:
-        List of plants ranked by maintenance cost.
-    """
-    client = get_supabase_admin_client()
-
-    result = client.rpc(
-        "get_high_cost_plants",
-        {"p_limit": limit, "p_year": year},
-    ).execute()
-
-    return {
-        "success": True,
-        "data": result.data,
-    }
+    return {"success": True, "data": data}
 
 
 @router.post("", status_code=201)
@@ -424,147 +308,87 @@ async def create_spare_part(
     reason_for_change: str | None = None,
     unit_cost: float | None = None,
     quantity: int = 1,
-    vat_percentage: float | None = Query(default=None, ge=0, le=100, description="VAT percentage (0-100). Use this OR vat_amount."),
-    vat_amount: float | None = Query(default=None, ge=0, description="Absolute VAT amount. Use this OR vat_percentage."),
-    discount_percentage: float | None = Query(default=None, ge=0, le=100, description="Discount percentage (0-100). Use this OR discount_amount."),
-    discount_amount: float | None = Query(default=None, ge=0, description="Absolute discount amount. Use this OR discount_percentage."),
-    other_costs: float = Query(default=0, ge=0, description="Additional costs (shipping, handling, etc.)"),
-    purchase_order_number: str | None = Query(None, description="PO number from document"),
+    vat_percentage: float | None = Query(default=None, ge=0, le=100),
+    vat_amount: float | None = Query(default=None, ge=0),
+    discount_percentage: float | None = Query(default=None, ge=0, le=100),
+    discount_amount: float | None = Query(default=None, ge=0),
+    other_costs: float = Query(default=0, ge=0),
+    purchase_order_number: str | None = Query(None),
     po_date: str | None = Query(None, description="PO date (formats: 2026-01-13, 13-01-26, 13-January-26)"),
-    requisition_number: str | None = Query(None, description="REQ NO from PO (e.g., ABJ 340888)"),
-    location_id: UUID | None = Query(None, description="Location/site UUID"),
+    requisition_number: str | None = Query(None),
+    location_id: UUID | None = Query(None),
     remarks: str | None = None,
 ) -> dict[str, Any]:
-    """Create a new spare part / PO line item record.
-
-    This is the main endpoint for entering PO data. Each call creates one line item.
-    For a PO with multiple items, call this endpoint multiple times with the same PO number.
-
-    Total cost is auto-calculated as: subtotal + VAT - discount + other_costs
-    Where:
-    - subtotal = unit_cost × quantity
-    - VAT = vat_amount (if provided) OR subtotal × vat_percentage / 100
-    - discount = discount_amount (if provided) OR subtotal × discount_percentage / 100
-
-    You can provide either:
-    - plant_id OR fleet_number (for identifying the plant)
-    - vat_percentage OR vat_amount (for VAT calculation)
-    - discount_percentage OR discount_amount (for discount calculation)
-
-    Date formats accepted: 2026-01-13, 13-01-2026, 13/01/26, 13-January-26, 13-Jan-26
-
-    Args:
-        plant_id: The plant UUID (use this OR fleet_number).
-        fleet_number: Fleet number string (alternative to plant_id).
-        part_description: Description of the part/item.
-        part_number: Part number if known.
-        supplier: Vendor/supplier name.
-        reason_for_change: Why the part was replaced.
-        unit_cost: Cost per unit.
-        quantity: Number of parts.
-        vat_percentage: VAT percentage (0-100). Use this OR vat_amount.
-        vat_amount: Absolute VAT amount already calculated. Use this OR vat_percentage.
-        discount_percentage: Discount percentage (0-100). Use this OR discount_amount.
-        discount_amount: Absolute discount amount already calculated. Use this OR discount_percentage.
-        other_costs: Additional costs (shipping, handling, etc.).
-        purchase_order_number: PO number from the document.
-        po_date: Date on the PO (used for both po_date and replaced_date).
-        requisition_number: REQ NO (e.g., ABJ 340888, KWO 12345).
-        location_id: Location/site UUID.
-        remarks: Additional notes.
-
-    Returns:
-        Created spare part with ID and calculated total_cost.
-    """
-    client = get_supabase_admin_client()
-
-    # Parse the date (flexible format)
+    """Create a new spare part / PO line item record."""
     parsed_date = parse_flexible_date(po_date)
 
-    # Resolve plant_id from fleet_number if needed
     resolved_plant_id = None
     resolved_fleet_number = None
 
     if plant_id:
-        # Verify plant exists
-        plant = (
-            client.table("plants_master")
-            .select("id, fleet_number")
-            .eq("id", str(plant_id))
-            .single()
-            .execute()
+        plant = await fetchrow(
+            "SELECT id, fleet_number FROM plants_master WHERE id = $1::uuid",
+            str(plant_id),
         )
-        if not plant.data:
+        if not plant:
             raise NotFoundError("Plant", str(plant_id))
         resolved_plant_id = str(plant_id)
-        resolved_fleet_number = plant.data["fleet_number"]
-
+        resolved_fleet_number = plant["fleet_number"]
     elif fleet_number:
-        # Look up plant by fleet number
-        plant = (
-            client.table("plants_master")
-            .select("id, fleet_number")
-            .eq("fleet_number", fleet_number.upper())
-            .execute()
+        plant = await fetchrow(
+            "SELECT id, fleet_number FROM plants_master WHERE fleet_number = $1",
+            fleet_number.upper(),
         )
-        if plant.data:
-            resolved_plant_id = plant.data[0]["id"]
-            resolved_fleet_number = plant.data[0]["fleet_number"]
-        else:
+        if not plant:
             raise NotFoundError("Plant with fleet number", fleet_number.upper())
-
+        resolved_plant_id = plant["id"]
+        resolved_fleet_number = plant["fleet_number"]
     else:
         raise ValidationError(
             "Either plant_id or fleet_number is required",
             details=[{"field": "plant_id", "message": "Required", "code": "REQUIRED"}],
         )
 
-    # Calculate time dimensions from date if provided
-    year = None
-    month = None
-    week_number = None
-    quarter = None
-    if parsed_date:
-        year = parsed_date.year
-        month = parsed_date.month
-        week_number = parsed_date.isocalendar()[1]
-        quarter = (month - 1) // 3 + 1
+    # Calculate time dimensions
+    calc_year = parsed_date.year if parsed_date else None
+    calc_month = parsed_date.month if parsed_date else None
+    calc_week = parsed_date.isocalendar()[1] if parsed_date else None
+    calc_quarter = (calc_month - 1) // 3 + 1 if calc_month else None
 
-    # Create spare part (po_date = replaced_date, same thing)
-    # Use either percentage or absolute amount for VAT and discount
-    part_data = {
-        "plant_id": resolved_plant_id,
-        "part_description": part_description,
-        "replaced_date": str(parsed_date) if parsed_date else None,
-        "part_number": part_number,
-        "supplier": supplier,
-        "reason_for_change": reason_for_change,
-        "unit_cost": unit_cost,
-        "quantity": quantity,
-        "vat_percentage": vat_percentage if vat_amount is None else 0,
-        "vat_amount": vat_amount,
-        "discount_percentage": discount_percentage if discount_amount is None else 0,
-        "discount_amount": discount_amount,
-        "other_costs": other_costs,
-        "purchase_order_number": purchase_order_number.upper() if purchase_order_number else None,
-        "po_date": str(parsed_date) if parsed_date else None,
-        "requisition_number": requisition_number.upper() if requisition_number else None,
-        "location_id": str(location_id) if location_id else None,
-        "year": year,
-        "month": month,
-        "week_number": week_number,
-        "quarter": quarter,
-        "remarks": remarks,
-        "created_by": current_user.id,
-    }
-
-    result = (
-        client.table("spare_parts")
-        .insert(part_data)
-        .execute()
+    created = await fetchrow(
+        """INSERT INTO spare_parts
+               (plant_id, part_description, replaced_date, part_number,
+                supplier, reason_for_change, unit_cost, quantity,
+                vat_percentage, vat_amount, discount_percentage, discount_amount,
+                other_costs, purchase_order_number, po_date, requisition_number,
+                location_id, year, month, week_number, quarter, remarks, created_by)
+           VALUES ($1::uuid, $2, $3::date, $4,
+                   $5, $6, $7, $8,
+                   $9, $10, $11, $12,
+                   $13, $14, $15::date, $16,
+                   $17::uuid, $18, $19, $20, $21, $22, $23)
+           RETURNING *""",
+        resolved_plant_id,
+        part_description,
+        str(parsed_date) if parsed_date else None,
+        part_number,
+        supplier,
+        reason_for_change,
+        unit_cost,
+        quantity,
+        vat_percentage if vat_amount is None else 0,
+        vat_amount,
+        discount_percentage if discount_amount is None else 0,
+        discount_amount,
+        other_costs,
+        purchase_order_number.upper() if purchase_order_number else None,
+        str(parsed_date) if parsed_date else None,
+        requisition_number.upper() if requisition_number else None,
+        str(location_id) if location_id else None,
+        calc_year, calc_month, calc_week, calc_quarter,
+        remarks,
+        current_user.id,
     )
-
-    created = result.data[0]
 
     logger.info(
         "Spare part created",
@@ -582,17 +406,14 @@ async def create_spare_part(
         action="create",
         table_name="spare_parts",
         record_id=created["id"],
-        new_values=part_data,
+        new_values={"part_description": part_description, "plant_id": resolved_plant_id},
         ip_address=get_client_ip(request),
         description=f"Created spare part for {resolved_fleet_number}: {part_description}",
     )
 
     return {
         "success": True,
-        "data": {
-            **created,
-            "fleet_number": resolved_fleet_number,
-        },
+        "data": {**created, "fleet_number": resolved_fleet_number},
     }
 
 
@@ -615,115 +436,75 @@ async def create_spare_parts_bulk(
     discount_amount: float | None = Query(None, ge=0, description="Total discount amount"),
     other_costs: float = Query(default=0, ge=0, description="Other costs"),
 ) -> dict[str, Any]:
-    """
-    **UNIFIED PO ENTRY - Handles ALL scenarios**
-
-    - Single fleet: `T468`
-    - Multiple fleets: `T468, 463, 466`
-    - Workshop: `WORKSHOP` or `W/SHOP`
-    - Categories: `LOW LOADER`, `VOLVO`, `CONSUMABLES`
-    - Mixed: `T468, WORKSHOP, LOW LOADER`
-
-    **Items Format:**
-    ```
-    NOZZLE SET|6|415000|170-5181;TIPS|8|35000|1U3352
-    ```
-    Format: `description|quantity|unit_cost|part_number|fleet` (semicolon-separated)
-
-    **Per-Item Fleet Assignment (5th field):**
-    - If fleet specified: Item is DIRECT cost to that specific plant
-    - If fleet omitted: Item is SHARED across all fleets listed in fleet_numbers
-
-    **Examples:**
-    - `Battery|1|50000||T468;Filter|1|30000||T469` - Direct to specific plants
-    - `Hydraulic Oil|10|5000||` - Shared across all listed fleets
-    - Mixed: `Battery|1|50000||T468;Oil|10|5000||` - Battery direct, Oil shared
-
-    **Date Formats:** 2026-01-13, 13-01-26, 13-January-26, 13/01/26
-
-    **Cost Classification:**
-    - `direct`: Single resolved plant OR item has specific fleet assigned
-    - `shared`: Multiple plants without specific assignment
-    """
+    """UNIFIED PO ENTRY - Handles ALL scenarios."""
     import json
     from app.services.fleet_parser import parse_fleet_input, get_cost_classification
 
-    client = get_supabase_admin_client()
-
-    # Check for duplicate PO - block if exists
+    # Check for duplicate PO
     po_upper = purchase_order_number.upper().strip()
-    existing_po = (
-        client.table("spare_parts")
-        .select("id, purchase_order_number")
-        .eq("purchase_order_number", po_upper)
-        .limit(1)
-        .execute()
+    existing_po = await fetchrow(
+        "SELECT id FROM spare_parts WHERE purchase_order_number = $1 LIMIT 1",
+        po_upper,
     )
-
-    if existing_po.data:
+    if existing_po:
         raise ValidationError(
             f"PO '{po_upper}' already exists. Use PATCH /spare-parts/{{id}} to edit existing line items.",
             details=[{"field": "purchase_order_number", "message": "Already exists", "code": "DUPLICATE_PO"}],
         )
 
-    # Resolve supplier_id from supplier name if not provided directly
+    # Resolve supplier
     resolved_supplier_id = None
     resolved_supplier_name = None
-    supplier_matched_by = None  # "exact", "fuzzy", or "new"
+    supplier_matched_by = None
 
     if supplier_id:
-        # Verify supplier exists
-        sup = client.table("suppliers").select("id, name").eq("id", str(supplier_id)).execute()
-        if sup.data:
-            resolved_supplier_id = str(supplier_id)
-            resolved_supplier_name = sup.data[0]["name"]
-            supplier_matched_by = "exact"
-        else:
+        sup = await fetchrow(
+            "SELECT id, name FROM suppliers WHERE id = $1::uuid", str(supplier_id),
+        )
+        if not sup:
             raise ValidationError(f"Supplier with ID '{supplier_id}' not found")
+        resolved_supplier_id = str(supplier_id)
+        resolved_supplier_name = sup["name"]
+        supplier_matched_by = "exact"
     elif supplier:
         supplier_input = supplier.strip()
-
-        # Step 1: Try exact match (case-insensitive)
-        sup = client.table("suppliers").select("id, name").ilike("name", supplier_input).execute()
-        if sup.data:
-            resolved_supplier_id = sup.data[0]["id"]
-            resolved_supplier_name = sup.data[0]["name"]
+        # Exact match (case-insensitive)
+        sup = await fetchrow(
+            "SELECT id, name FROM suppliers WHERE name ILIKE $1", supplier_input,
+        )
+        if sup:
+            resolved_supplier_id = sup["id"]
+            resolved_supplier_name = sup["name"]
             supplier_matched_by = "exact"
         else:
-            # Step 2: Try fuzzy matching using pg_trgm similarity
-            fuzzy_result = client.rpc(
-                "find_similar_supplier",
-                {"p_name": supplier_input, "p_threshold": 0.3}
-            ).execute()
-
-            if fuzzy_result.data and len(fuzzy_result.data) > 0:
-                # Use the best fuzzy match
-                best_match = fuzzy_result.data[0]
-                resolved_supplier_id = best_match["id"]
-                resolved_supplier_name = best_match["name"]
+            # Fuzzy match
+            fuzzy = await fetch(
+                "SELECT * FROM find_similar_supplier($1, $2)",
+                supplier_input, 0.3,
+            )
+            if fuzzy:
+                best = fuzzy[0]
+                resolved_supplier_id = best["id"]
+                resolved_supplier_name = best["name"]
                 supplier_matched_by = "fuzzy"
-                logger.info(
-                    "Fuzzy matched supplier",
-                    input=supplier_input,
-                    matched_to=best_match["name"],
-                    similarity=best_match["similarity"],
-                )
+                logger.info("Fuzzy matched supplier", input=supplier_input, matched_to=best["name"])
             else:
-                # Step 3: No match found - create new supplier
-                new_sup = client.table("suppliers").insert({"name": supplier_input}).execute()
-                if new_sup.data:
-                    resolved_supplier_id = new_sup.data[0]["id"]
-                    resolved_supplier_name = new_sup.data[0]["name"]
+                # Create new supplier
+                new_sup = await fetchrow(
+                    "INSERT INTO suppliers (name) VALUES ($1) RETURNING *",
+                    supplier_input,
+                )
+                if new_sup:
+                    resolved_supplier_id = new_sup["id"]
+                    resolved_supplier_name = new_sup["name"]
                     supplier_matched_by = "new"
                     logger.info("Created new supplier", supplier_name=supplier_input)
 
-    # Parse the date
     parsed_date = parse_flexible_date(po_date)
 
     # Parse items
     items_list = []
     items_stripped = items.strip()
-
     if items_stripped.startswith("["):
         try:
             items_list = json.loads(items_stripped)
@@ -737,7 +518,7 @@ async def create_spare_parts_bulk(
             parts = [p.strip() for p in item_str.split("|")]
             if not parts or not parts[0]:
                 continue
-            item_dict = {"description": parts[0]}
+            item_dict: dict[str, Any] = {"description": parts[0]}
             if len(parts) > 1 and parts[1]:
                 try:
                     item_dict["quantity"] = int(parts[1])
@@ -750,183 +531,171 @@ async def create_spare_parts_bulk(
                     pass
             if len(parts) > 3 and parts[3]:
                 item_dict["part_number"] = parts[3]
-            # 5th field: specific fleet for this item (makes it a direct cost)
             if len(parts) > 4 and parts[4]:
                 item_dict["item_fleet"] = parts[4].upper()
             items_list.append(item_dict)
-
         if not items_list:
             raise ValidationError("No valid items. Format: description|qty|cost|part_no|fleet;next...")
 
-    # Parse fleet numbers (handles T468, 463, WORKSHOP, LOW LOADER, etc.)
-    parsed_fleets = parse_fleet_input(fleet_numbers)
+    # Parse fleet numbers (now async)
+    parsed_fleets = await parse_fleet_input(fleet_numbers)
     if not parsed_fleets:
         raise ValidationError("At least one fleet entry is required")
 
-    # Determine cost type
     cost_type = get_cost_classification(parsed_fleets)
 
-    # Calculate time dimensions
-    year = parsed_date.year if parsed_date else None
-    month = parsed_date.month if parsed_date else None
-    week_number = parsed_date.isocalendar()[1] if parsed_date else None
-    quarter = (month - 1) // 3 + 1 if month else None
+    # Time dimensions
+    calc_year = parsed_date.year if parsed_date else None
+    calc_month = parsed_date.month if parsed_date else None
+    calc_week = parsed_date.isocalendar()[1] if parsed_date else None
+    calc_quarter = (calc_month - 1) // 3 + 1 if calc_month else None
 
     # Calculate subtotal for VAT/discount distribution
     subtotal = sum((item.get("unit_cost") or 0) * (item.get("quantity") or 1) for item in items_list)
+    total_vat = vat_amount if vat_amount is not None else subtotal * (vat_percentage or 0) / 100
+    total_discount = discount_amount if discount_amount is not None else subtotal * (discount_percentage or 0) / 100
 
-    # Calculate VAT and discount totals
-    if vat_amount is not None:
-        total_vat = vat_amount
-    else:
-        total_vat = subtotal * (vat_percentage or 0) / 100
-
-    if discount_amount is not None:
-        total_discount = discount_amount
-    else:
-        total_discount = subtotal * (discount_percentage or 0) / 100
-
-    # Separate items into direct (has item_fleet) and shared (no item_fleet)
+    # Separate direct vs shared items
     direct_items = [item for item in items_list if item.get("item_fleet")]
     shared_items = [item for item in items_list if not item.get("item_fleet")]
 
-    # Build a fleet lookup from parsed_fleets
-    fleet_lookup = {}
+    # Build fleet lookup
+    fleet_lookup: dict[str, dict] = {}
     for fleet in parsed_fleets:
         fleet_lookup[fleet["fleet_number_raw"]] = fleet
-        # Also try to match by the resolved fleet number pattern
         if fleet.get("plant_id"):
-            # Try to find the plant's fleet_number
-            plant_result = client.table("plants_master").select("fleet_number").eq("id", fleet["plant_id"]).execute()
-            if plant_result.data:
-                fleet_lookup[plant_result.data[0]["fleet_number"]] = fleet
+            plant_row = await fetchrow(
+                "SELECT fleet_number FROM plants_master WHERE id = $1::uuid",
+                str(fleet["plant_id"]),
+            )
+            if plant_row:
+                fleet_lookup[plant_row["fleet_number"]] = fleet
 
     created_parts = []
     total_cost_sum = 0
     direct_count = 0
     shared_count = 0
 
-    # Process DIRECT items (specific fleet per item)
+    date_str = str(parsed_date) if parsed_date else None
+
+    # Process DIRECT items
     for item in direct_items:
         item_fleet = item["item_fleet"]
         item_subtotal = (item.get("unit_cost") or 0) * (item.get("quantity") or 1)
 
-        # Find the fleet info for this item
         fleet = fleet_lookup.get(item_fleet)
-
-        # If item_fleet not in parsed_fleets, try to resolve it
         if not fleet:
-            from app.services.fleet_parser import parse_fleet_input
-            resolved = parse_fleet_input(item_fleet)
+            resolved = await parse_fleet_input(item_fleet)
             if resolved and resolved[0].get("plant_id"):
                 fleet = resolved[0]
-
         if not fleet:
             logger.warning(f"Could not resolve fleet '{item_fleet}' for item '{item['description']}'")
             continue
 
-        # Distribute VAT/discount proportionally based on item's share of subtotal
-        if subtotal > 0:
-            item_vat = total_vat * (item_subtotal / subtotal)
-            item_discount = total_discount * (item_subtotal / subtotal)
-            item_other = other_costs * (item_subtotal / subtotal)
-        else:
-            item_vat = item_discount = item_other = 0
+        frac = item_subtotal / subtotal if subtotal > 0 else 0
+        item_vat = total_vat * frac
+        item_disc = total_discount * frac
+        item_other = other_costs * frac
 
-        part_data = {
-            "plant_id": fleet.get("plant_id"),
-            "assigned_plant_id": fleet.get("plant_id"),  # Direct assignment
-            "fleet_number_raw": item_fleet,
-            "is_workshop": fleet.get("is_workshop", False),
-            "is_category": fleet.get("is_category", False),
-            "category_name": fleet.get("category_name"),
-            "cost_type": "direct",  # Direct cost since fleet is specified
-            "part_description": item["description"],
-            "part_number": item.get("part_number"),
-            "quantity": item.get("quantity", 1),
-            "unit_cost": item.get("unit_cost"),
-            "purchase_order_number": purchase_order_number.upper(),
-            "po_date": str(parsed_date) if parsed_date else None,
-            "replaced_date": str(parsed_date) if parsed_date else None,
-            "requisition_number": requisition_number.upper() if requisition_number else None,
-            "location_id": str(location_id) if location_id else None,
-            "supplier_id": resolved_supplier_id,
-            "supplier": resolved_supplier_name,
-            "vat_amount": round(item_vat, 2) if item_vat > 0 else None,
-            "discount_amount": round(item_discount, 2) if item_discount > 0 else None,
-            "other_costs": round(item_other, 2) if item_other > 0 else None,
-            "vat_percentage": 0,
-            "discount_percentage": 0,
-            "year": year,
-            "month": month,
-            "week_number": week_number,
-            "quarter": quarter,
-            "created_by": current_user.id,
-        }
+        created = await fetchrow(
+            """INSERT INTO spare_parts
+                   (plant_id, assigned_plant_id, fleet_number_raw, is_workshop, is_category,
+                    category_name, cost_type, part_description, part_number, quantity, unit_cost,
+                    purchase_order_number, po_date, replaced_date, requisition_number,
+                    location_id, supplier_id, supplier,
+                    vat_amount, discount_amount, other_costs, vat_percentage, discount_percentage,
+                    year, month, week_number, quarter, created_by)
+               VALUES ($1::uuid, $2::uuid, $3, $4, $5,
+                       $6, 'direct', $7, $8, $9, $10,
+                       $11, $12::date, $12::date, $13,
+                       $14::uuid, $15::uuid, $16,
+                       $17, $18, $19, 0, 0,
+                       $20, $21, $22, $23, $24)
+               RETURNING *""",
+            fleet.get("plant_id"),
+            fleet.get("plant_id"),
+            item_fleet,
+            fleet.get("is_workshop", False),
+            fleet.get("is_category", False),
+            fleet.get("category_name"),
+            item["description"],
+            item.get("part_number"),
+            item.get("quantity", 1),
+            item.get("unit_cost"),
+            po_upper,
+            date_str,
+            requisition_number.upper() if requisition_number else None,
+            str(location_id) if location_id else None,
+            str(resolved_supplier_id) if resolved_supplier_id else None,
+            resolved_supplier_name,
+            round(item_vat, 2) if item_vat > 0 else None,
+            round(item_disc, 2) if item_disc > 0 else None,
+            round(item_other, 2) if item_other > 0 else None,
+            calc_year, calc_month, calc_week, calc_quarter,
+            current_user.id,
+        )
+        if created:
+            created_parts.append(created)
+            total_cost_sum += float(created.get("total_cost") or 0)
+            direct_count += 1
 
-        result = client.table("spare_parts").insert(part_data).execute()
-        created = result.data[0]
-        created_parts.append(created)
-        total_cost_sum += float(created.get("total_cost") or 0)
-        direct_count += 1
-
-    # Process SHARED items (no specific fleet - shared across all parsed_fleets)
+    # Process SHARED items
     for fleet in parsed_fleets:
         for item in shared_items:
             item_subtotal = (item.get("unit_cost") or 0) * (item.get("quantity") or 1)
+            frac = (item_subtotal / subtotal / len(parsed_fleets)) if subtotal > 0 else 0
+            item_vat = total_vat * frac
+            item_disc = total_discount * frac
+            item_other = other_costs * frac
 
-            # Distribute VAT/discount proportionally, then divide by number of fleets
-            if subtotal > 0:
-                item_vat = total_vat * (item_subtotal / subtotal) / len(parsed_fleets)
-                item_discount = total_discount * (item_subtotal / subtotal) / len(parsed_fleets)
-                item_other = other_costs * (item_subtotal / subtotal) / len(parsed_fleets)
-            else:
-                item_vat = item_discount = item_other = 0
+            created = await fetchrow(
+                """INSERT INTO spare_parts
+                       (plant_id, assigned_plant_id, fleet_number_raw, is_workshop, is_category,
+                        category_name, cost_type, part_description, part_number, quantity, unit_cost,
+                        purchase_order_number, po_date, replaced_date, requisition_number,
+                        location_id, supplier_id, supplier,
+                        vat_amount, discount_amount, other_costs, vat_percentage, discount_percentage,
+                        year, month, week_number, quarter, created_by)
+                   VALUES ($1::uuid, NULL, $2, $3, $4,
+                           $5, $6, $7, $8, $9, $10,
+                           $11, $12::date, $12::date, $13,
+                           $14::uuid, $15::uuid, $16,
+                           $17, $18, $19, 0, 0,
+                           $20, $21, $22, $23, $24)
+                   RETURNING *""",
+                fleet["plant_id"],
+                fleet["fleet_number_raw"],
+                fleet["is_workshop"],
+                fleet.get("is_category", False),
+                fleet.get("category_name"),
+                cost_type,
+                item["description"],
+                item.get("part_number"),
+                item.get("quantity", 1),
+                item.get("unit_cost"),
+                po_upper,
+                date_str,
+                requisition_number.upper() if requisition_number else None,
+                str(location_id) if location_id else None,
+                str(resolved_supplier_id) if resolved_supplier_id else None,
+                resolved_supplier_name,
+                round(item_vat, 2) if item_vat > 0 else None,
+                round(item_disc, 2) if item_disc > 0 else None,
+                round(item_other, 2) if item_other > 0 else None,
+                calc_year, calc_month, calc_week, calc_quarter,
+                current_user.id,
+            )
+            if created:
+                created_parts.append(created)
+                total_cost_sum += float(created.get("total_cost") or 0)
+                shared_count += 1
 
-            part_data = {
-                "plant_id": fleet["plant_id"],  # The fleet this record is associated with
-                "assigned_plant_id": None,  # NULL = shared cost
-                "fleet_number_raw": fleet["fleet_number_raw"],
-                "is_workshop": fleet["is_workshop"],
-                "is_category": fleet.get("is_category", False),
-                "category_name": fleet.get("category_name"),
-                "cost_type": cost_type,  # 'shared' if multiple fleets
-                "part_description": item["description"],
-                "part_number": item.get("part_number"),
-                "quantity": item.get("quantity", 1),
-                "unit_cost": item.get("unit_cost"),
-                "purchase_order_number": purchase_order_number.upper(),
-                "po_date": str(parsed_date) if parsed_date else None,
-                "replaced_date": str(parsed_date) if parsed_date else None,
-                "requisition_number": requisition_number.upper() if requisition_number else None,
-                "location_id": str(location_id) if location_id else None,
-                "supplier_id": resolved_supplier_id,
-                "supplier": resolved_supplier_name,
-                "vat_amount": round(item_vat, 2) if item_vat > 0 else None,
-                "discount_amount": round(item_discount, 2) if item_discount > 0 else None,
-                "other_costs": round(item_other, 2) if item_other > 0 else None,
-                "vat_percentage": 0,
-                "discount_percentage": 0,
-                "year": year,
-                "month": month,
-                "week_number": week_number,
-                "quarter": quarter,
-                "created_by": current_user.id,
-            }
-
-            result = client.table("spare_parts").insert(part_data).execute()
-            created = result.data[0]
-            created_parts.append(created)
-            total_cost_sum += float(created.get("total_cost") or 0)
-            shared_count += 1
-
-    # Get resolved fleet numbers for response
     resolved_fleets = [f["fleet_number_raw"] for f in parsed_fleets]
     plants_resolved = [f for f in parsed_fleets if f["plant_id"]]
 
     logger.info(
         "PO bulk entry created",
-        po_number=purchase_order_number.upper(),
+        po_number=po_upper,
         fleets=resolved_fleets,
         items_count=len(items_list),
         records_created=len(created_parts),
@@ -941,17 +710,17 @@ async def create_spare_parts_bulk(
         user_email=current_user.email,
         action="create",
         table_name="spare_parts",
-        record_id=purchase_order_number.upper(),
+        record_id=po_upper,
         new_values={"po_number": purchase_order_number, "fleets": resolved_fleets, "items": len(items_list)},
         ip_address=get_client_ip(request),
-        description=f"PO {purchase_order_number.upper()}: {len(items_list)} items for {', '.join(resolved_fleets)}",
+        description=f"PO {po_upper}: {len(items_list)} items for {', '.join(resolved_fleets)}",
     )
 
     return {
         "success": True,
         "data": created_parts,
         "meta": {
-            "po_number": purchase_order_number.upper(),
+            "po_number": po_upper,
             "cost_type": cost_type,
             "fleets": resolved_fleets,
             "fleets_resolved": len(plants_resolved),
@@ -971,7 +740,7 @@ async def create_spare_parts_bulk(
             "supplier": {
                 "id": resolved_supplier_id,
                 "name": resolved_supplier_name,
-                "matched_by": supplier_matched_by,  # "exact", "fuzzy", or "new"
+                "matched_by": supplier_matched_by,
             } if resolved_supplier_id else None,
         },
     }
@@ -983,9 +752,9 @@ async def create_spare_parts_entry(
     request: Request,
     background_tasks: BackgroundTasks,
     current_user: Annotated[CurrentUser, Depends(require_admin)],
-    fleet_numbers: str = Query(..., description="Fleet(s): T468, 463, WORKSHOP, LOW LOADER"),
-    purchase_order_number: str = Query(..., description="PO number"),
-    items: str = Query(..., description="Items: desc|qty|cost|part_no;next..."),
+    fleet_numbers: str = Query(...),
+    purchase_order_number: str = Query(...),
+    items: str = Query(...),
     po_date: str | None = Query(None),
     requisition_number: str | None = Query(None),
     location_id: UUID | None = Query(None),
@@ -1038,57 +807,35 @@ async def get_spare_parts_by_po(
     po_number: str,
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
 ) -> dict[str, Any]:
-    """Get all spare parts for a specific PO number.
-
-    Use this to view all line items entered for a PO.
-
-    Args:
-        po_number: The purchase order number.
-
-    Returns:
-        List of spare parts with plant info, supplier info, and totals.
-    """
-    client = get_supabase_admin_client()
-
-    # Use explicit FK hint since there are 2 FKs to plants_master (plant_id, assigned_plant_id)
-    result = (
-        client.table("spare_parts")
-        .select("*, plants_master!spare_parts_plant_id_fkey(fleet_number, description), suppliers(id, name)")
-        .ilike("purchase_order_number", po_number)
-        .order("created_at")
-        .execute()
+    """Get all spare parts for a specific PO number."""
+    rows = await fetch(
+        """SELECT sp.*,
+                  pm.fleet_number, pm.description AS plant_description,
+                  COALESCE(s.name, sp.supplier) AS supplier_name,
+                  s.id AS supplier_table_id, s.name AS supplier_table_name
+           FROM spare_parts sp
+           LEFT JOIN plants_master pm ON pm.id = sp.plant_id
+           LEFT JOIN suppliers s ON s.id = sp.supplier_id
+           WHERE sp.purchase_order_number ILIKE $1
+           ORDER BY sp.created_at""",
+        po_number,
     )
 
-    parts = []
     total_cost = 0
     supplier_info = None
-
-    for item in result.data or []:
-        plant_info = item.pop("plants_master", {}) or {}
-        suppliers_data = item.pop("suppliers", {}) or {}
-
-        item["fleet_number"] = plant_info.get("fleet_number")
-        item["plant_description"] = plant_info.get("description")
-
-        # Use normalized supplier name from suppliers table, fall back to text field
-        if suppliers_data:
-            item["supplier_name"] = suppliers_data.get("name")
-            if not supplier_info:
-                supplier_info = {"id": suppliers_data.get("id"), "name": suppliers_data.get("name")}
-        else:
-            item["supplier_name"] = item.get("supplier")
-
-        parts.append(item)
-        total_cost += float(item.get("total_cost") or 0)
+    for row in rows:
+        total_cost += float(row.get("total_cost") or 0)
+        if not supplier_info and row.get("supplier_table_id"):
+            supplier_info = {"id": row["supplier_table_id"], "name": row["supplier_table_name"]}
 
     return {
         "success": True,
-        "data": parts,
+        "data": rows,
         "meta": {
             "po_number": po_number.upper(),
-            "items_count": len(parts),
+            "items_count": len(rows),
             "total_cost": round(total_cost, 2),
-            "distinct_plants": len(set(p.get("plant_id") for p in parts if p.get("plant_id"))),
+            "distinct_plants": len(set(r.get("plant_id") for r in rows if r.get("plant_id"))),
             "supplier": supplier_info,
         },
     }
@@ -1100,113 +847,110 @@ async def update_po(
     request: Request,
     background_tasks: BackgroundTasks,
     current_user: Annotated[CurrentUser, Depends(require_admin)],
-    po_date: str | None = Query(None, description="New PO date"),
-    supplier_id: UUID | None = Query(None, description="New supplier UUID"),
-    vat_amount: float | None = Query(None, ge=0, description="New VAT amount (replaces existing)"),
-    discount_amount: float | None = Query(None, ge=0, description="New discount amount"),
-    location_id: UUID | None = Query(None, description="New location UUID"),
-    requisition_number: str | None = Query(None, description="New REQ number"),
+    po_date: str | None = Query(None),
+    supplier_id: UUID | None = Query(None),
+    vat_amount: float | None = Query(None, ge=0),
+    discount_amount: float | None = Query(None, ge=0),
+    location_id: UUID | None = Query(None),
+    requisition_number: str | None = Query(None),
 ) -> dict[str, Any]:
-    """Update PO-level details for all line items in a PO.
-
-    This updates shared fields across all items in the PO.
-    For individual item updates, use PATCH /spare-parts/{part_id}.
-
-    Args:
-        po_number: The PO number to update.
-        po_date: New PO date.
-        supplier_id: New supplier.
-        vat_amount: New total VAT (will be distributed proportionally).
-        discount_amount: New total discount (will be distributed proportionally).
-        location_id: New location.
-        requisition_number: New REQ number.
-
-    Returns:
-        Updated PO summary.
-    """
-    client = get_supabase_admin_client()
-
-    # Get existing PO items
-    existing = (
-        client.table("spare_parts")
-        .select("id, total_cost, unit_cost, quantity")
-        .ilike("purchase_order_number", po_number)
-        .execute()
+    """Update PO-level details for all line items in a PO."""
+    existing = await fetch(
+        "SELECT id, total_cost, unit_cost, quantity FROM spare_parts WHERE purchase_order_number ILIKE $1",
+        po_number,
     )
-
-    if not existing.data:
+    if not existing:
         raise NotFoundError("PO", po_number)
 
-    update_data = {}
+    update_data: dict[str, Any] = {}
+    set_parts: list[str] = []
+    params: list[Any] = []
+
     if po_date:
         parsed_date = parse_flexible_date(po_date)
-        update_data["po_date"] = str(parsed_date) if parsed_date else None
-        update_data["replaced_date"] = str(parsed_date) if parsed_date else None
         if parsed_date:
-            update_data["year"] = parsed_date.year
-            update_data["month"] = parsed_date.month
-            update_data["week_number"] = parsed_date.isocalendar()[1]
-            update_data["quarter"] = (parsed_date.month - 1) // 3 + 1
+            params.append(str(parsed_date))
+            n = len(params)
+            set_parts.extend([f"po_date = ${n}::date", f"replaced_date = ${n}::date"])
+            update_data["po_date"] = str(parsed_date)
+            params.append(parsed_date.year)
+            set_parts.append(f"year = ${len(params)}")
+            params.append(parsed_date.month)
+            set_parts.append(f"month = ${len(params)}")
+            params.append(parsed_date.isocalendar()[1])
+            set_parts.append(f"week_number = ${len(params)}")
+            params.append((parsed_date.month - 1) // 3 + 1)
+            set_parts.append(f"quarter = ${len(params)}")
 
     if supplier_id:
-        sup = client.table("suppliers").select("id, name").eq("id", str(supplier_id)).execute()
-        if not sup.data:
+        sup = await fetchrow("SELECT id, name FROM suppliers WHERE id = $1::uuid", str(supplier_id))
+        if not sup:
             raise NotFoundError("Supplier", str(supplier_id))
+        params.append(str(supplier_id))
+        set_parts.append(f"supplier_id = ${len(params)}::uuid")
+        params.append(sup["name"])
+        set_parts.append(f"supplier = ${len(params)}")
         update_data["supplier_id"] = str(supplier_id)
-        update_data["supplier"] = sup.data[0]["name"]
+        update_data["supplier"] = sup["name"]
 
     if location_id:
-        loc = client.table("locations").select("id").eq("id", str(location_id)).execute()
-        if not loc.data:
+        loc = await fetchrow("SELECT id FROM locations WHERE id = $1::uuid", str(location_id))
+        if not loc:
             raise NotFoundError("Location", str(location_id))
+        params.append(str(location_id))
+        set_parts.append(f"location_id = ${len(params)}::uuid")
         update_data["location_id"] = str(location_id)
 
     if requisition_number is not None:
-        update_data["requisition_number"] = requisition_number.upper() if requisition_number else None
+        params.append(requisition_number.upper() if requisition_number else None)
+        set_parts.append(f"requisition_number = ${len(params)}")
+        update_data["requisition_number"] = requisition_number
 
-    # Handle VAT/discount redistribution
+    # Handle VAT/discount redistribution per item
     if vat_amount is not None or discount_amount is not None:
-        subtotal = sum((item.get("unit_cost") or 0) * (item.get("quantity") or 1) for item in existing.data)
-
-        for item in existing.data:
+        subtotal = sum((item.get("unit_cost") or 0) * (item.get("quantity") or 1) for item in existing)
+        for item in existing:
             item_subtotal = (item.get("unit_cost") or 0) * (item.get("quantity") or 1)
-            item_update = {}
-
+            item_sets: list[str] = []
+            item_params: list[Any] = []
             if vat_amount is not None and subtotal > 0:
-                item_update["vat_amount"] = round(vat_amount * (item_subtotal / subtotal), 2)
+                item_params.append(round(vat_amount * (item_subtotal / subtotal), 2))
+                item_sets.append(f"vat_amount = ${len(item_params)}")
             if discount_amount is not None and subtotal > 0:
-                item_update["discount_amount"] = round(discount_amount * (item_subtotal / subtotal), 2)
-
-            if item_update:
-                client.table("spare_parts").update(item_update).eq("id", item["id"]).execute()
+                item_params.append(round(discount_amount * (item_subtotal / subtotal), 2))
+                item_sets.append(f"discount_amount = ${len(item_params)}")
+            if item_sets:
+                item_params.append(str(item["id"]))
+                await execute(
+                    f"UPDATE spare_parts SET {', '.join(item_sets)} WHERE id = ${len(item_params)}::uuid",
+                    *item_params,
+                )
 
     # Apply common updates to all items
-    if update_data:
-        client.table("spare_parts").update(update_data).ilike("purchase_order_number", po_number).execute()
+    if set_parts:
+        params.append(po_number)
+        await execute(
+            f"UPDATE spare_parts SET {', '.join(set_parts)} WHERE purchase_order_number ILIKE ${len(params)}",
+            *params,
+        )
 
     logger.info(
-        "PO updated",
-        po_number=po_number.upper(),
-        updated_fields=list(update_data.keys()),
-        items_count=len(existing.data),
+        "PO updated", po_number=po_number.upper(),
+        updated_fields=list(update_data.keys()), items_count=len(existing),
         user_id=current_user.id,
     )
 
     background_tasks.add_task(
         audit_service.log,
-        user_id=current_user.id,
-        user_email=current_user.email,
-        action="update",
-        table_name="spare_parts",
-        record_id=po_number.upper(),
-        new_values=update_data,
-        ip_address=get_client_ip(request),
+        user_id=current_user.id, user_email=current_user.email,
+        action="update", table_name="spare_parts", record_id=po_number.upper(),
+        new_values=update_data, ip_address=get_client_ip(request),
         description=f"Updated PO {po_number.upper()}: {', '.join(update_data.keys())}",
     )
 
     return {
         "success": True,
-        "message": f"Updated {len(existing.data)} items in PO {po_number.upper()}",
+        "message": f"Updated {len(existing)} items in PO {po_number.upper()}",
         "updated_fields": list(update_data.keys()),
     }
 
@@ -1218,48 +962,28 @@ async def delete_po(
     background_tasks: BackgroundTasks,
     current_user: Annotated[CurrentUser, Depends(require_admin)],
 ) -> dict[str, Any]:
-    """Delete an entire PO and all its line items.
-
-    Args:
-        po_number: The PO number to delete.
-
-    Returns:
-        Success message with count of deleted items.
-    """
-    client = get_supabase_admin_client()
-
-    # Get existing PO items for audit
-    existing = (
-        client.table("spare_parts")
-        .select("id, part_description, total_cost")
-        .ilike("purchase_order_number", po_number)
-        .execute()
+    """Delete an entire PO and all its line items."""
+    existing = await fetch(
+        "SELECT id, part_description, total_cost FROM spare_parts WHERE purchase_order_number ILIKE $1",
+        po_number,
     )
-
-    if not existing.data:
+    if not existing:
         raise NotFoundError("PO", po_number)
 
-    items_count = len(existing.data)
-    total_cost = sum(float(item.get("total_cost") or 0) for item in existing.data)
+    items_count = len(existing)
+    total_cost = sum(float(item.get("total_cost") or 0) for item in existing)
 
-    # Delete all items
-    client.table("spare_parts").delete().ilike("purchase_order_number", po_number).execute()
-
-    logger.info(
-        "PO deleted",
-        po_number=po_number.upper(),
-        items_deleted=items_count,
-        total_cost=total_cost,
-        user_id=current_user.id,
+    await execute(
+        "DELETE FROM spare_parts WHERE purchase_order_number ILIKE $1",
+        po_number,
     )
+
+    logger.info("PO deleted", po_number=po_number.upper(), items_deleted=items_count, user_id=current_user.id)
 
     background_tasks.add_task(
         audit_service.log,
-        user_id=current_user.id,
-        user_email=current_user.email,
-        action="delete",
-        table_name="spare_parts",
-        record_id=po_number.upper(),
+        user_id=current_user.id, user_email=current_user.email,
+        action="delete", table_name="spare_parts", record_id=po_number.upper(),
         old_values={"items_count": items_count, "total_cost": total_cost},
         ip_address=get_client_ip(request),
         description=f"Deleted PO {po_number.upper()} ({items_count} items, ₦{total_cost:,.2f})",
@@ -1268,10 +992,7 @@ async def delete_po(
     return {
         "success": True,
         "message": f"Deleted PO {po_number.upper()}",
-        "details": {
-            "items_deleted": items_count,
-            "total_cost_deleted": round(total_cost, 2),
-        },
+        "details": {"items_deleted": items_count, "total_cost_deleted": round(total_cost, 2)},
     }
 
 
@@ -1283,32 +1004,15 @@ async def upload_po_document(
     current_user: Annotated[CurrentUser, Depends(require_admin)],
     file: UploadFile = File(..., description="PO document (PDF or image)"),
 ) -> dict[str, Any]:
-    """Upload a document for a PO.
-
-    Accepts PDF, JPEG, PNG files. Overwrites existing document if any.
-
-    Args:
-        po_number: The PO number.
-        file: The document file.
-
-    Returns:
-        Document URL and metadata.
-    """
-    client = get_supabase_admin_client()
-
+    """Upload a document for a PO. Storage stays on Supabase SDK."""
     # Verify PO exists
-    existing = (
-        client.table("spare_parts")
-        .select("id")
-        .ilike("purchase_order_number", po_number)
-        .limit(1)
-        .execute()
+    existing = await fetchrow(
+        "SELECT id FROM spare_parts WHERE purchase_order_number ILIKE $1 LIMIT 1",
+        po_number,
     )
-
-    if not existing.data:
+    if not existing:
         raise NotFoundError("PO", po_number)
 
-    # Validate file type
     allowed_types = ["application/pdf", "image/jpeg", "image/png", "image/jpg"]
     if file.content_type not in allowed_types:
         raise ValidationError(
@@ -1316,48 +1020,36 @@ async def upload_po_document(
             details=[{"field": "file", "message": "Invalid file type", "code": "INVALID_TYPE"}],
         )
 
-    # Generate unique filename
     ext = file.filename.split(".")[-1] if file.filename and "." in file.filename else "pdf"
     unique_filename = f"po-documents/{po_number.upper()}/{uuid4()}.{ext}"
-
-    # Read file content
     file_content = await file.read()
 
-    # Upload to Supabase Storage
+    # Upload to Supabase Storage (SDK stays)
     try:
+        client = get_supabase_admin_client()
         storage = client.storage.from_("documents")
-        storage.upload(
-            unique_filename,
-            file_content,
-            {"content-type": file.content_type},
-        )
-        # Get public URL
+        storage.upload(unique_filename, file_content, {"content-type": file.content_type})
         document_url = storage.get_public_url(unique_filename)
     except Exception as e:
         logger.error("Failed to upload document", error=str(e), po_number=po_number)
         raise ValidationError(f"Failed to upload document: {str(e)}")
 
-    # Update all items in this PO with the document URL
-    client.table("spare_parts").update({
-        "document_url": document_url,
-        "document_name": file.filename,
-        "document_uploaded_at": "now()",
-    }).ilike("purchase_order_number", po_number).execute()
-
-    logger.info(
-        "PO document uploaded",
-        po_number=po_number.upper(),
-        filename=file.filename,
-        user_id=current_user.id,
+    # Update DB via asyncpg
+    await execute(
+        """UPDATE spare_parts
+           SET document_url = $1, document_name = $2, document_uploaded_at = now()
+           WHERE purchase_order_number ILIKE $3""",
+        document_url,
+        file.filename,
+        po_number,
     )
+
+    logger.info("PO document uploaded", po_number=po_number.upper(), filename=file.filename, user_id=current_user.id)
 
     background_tasks.add_task(
         audit_service.log,
-        user_id=current_user.id,
-        user_email=current_user.email,
-        action="upload",
-        table_name="spare_parts",
-        record_id=po_number.upper(),
+        user_id=current_user.id, user_email=current_user.email,
+        action="upload", table_name="spare_parts", record_id=po_number.upper(),
         new_values={"document_name": file.filename, "document_url": document_url},
         ip_address=get_client_ip(request),
         description=f"Uploaded document for PO {po_number.upper()}: {file.filename}",
@@ -1365,11 +1057,7 @@ async def upload_po_document(
 
     return {
         "success": True,
-        "data": {
-            "po_number": po_number.upper(),
-            "document_url": document_url,
-            "document_name": file.filename,
-        },
+        "data": {"po_number": po_number.upper(), "document_url": document_url, "document_name": file.filename},
     }
 
 
@@ -1378,29 +1066,17 @@ async def get_po_document(
     po_number: str,
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
 ) -> dict[str, Any]:
-    """Get the document URL for a PO.
-
-    Args:
-        po_number: The PO number.
-
-    Returns:
-        Document URL and metadata if exists.
-    """
-    client = get_supabase_admin_client()
-
-    result = (
-        client.table("spare_parts")
-        .select("document_url, document_name, document_uploaded_at")
-        .ilike("purchase_order_number", po_number)
-        .not_.is_("document_url", "null")
-        .limit(1)
-        .execute()
+    """Get the document URL for a PO."""
+    doc = await fetchrow(
+        """SELECT document_url, document_name, document_uploaded_at
+           FROM spare_parts
+           WHERE purchase_order_number ILIKE $1 AND document_url IS NOT NULL
+           LIMIT 1""",
+        po_number,
     )
-
-    if not result.data or not result.data[0].get("document_url"):
+    if not doc or not doc.get("document_url"):
         raise NotFoundError("Document for PO", po_number)
 
-    doc = result.data[0]
     return {
         "success": True,
         "data": {
@@ -1419,60 +1095,36 @@ async def delete_po_document(
     background_tasks: BackgroundTasks,
     current_user: Annotated[CurrentUser, Depends(require_admin)],
 ) -> dict[str, Any]:
-    """Delete the document for a PO.
-
-    Args:
-        po_number: The PO number.
-
-    Returns:
-        Success message.
-    """
-    client = get_supabase_admin_client()
-
-    # Get current document info
-    result = (
-        client.table("spare_parts")
-        .select("document_url, document_name")
-        .ilike("purchase_order_number", po_number)
-        .not_.is_("document_url", "null")
-        .limit(1)
-        .execute()
+    """Delete the document for a PO."""
+    old_doc = await fetchrow(
+        """SELECT document_url, document_name
+           FROM spare_parts
+           WHERE purchase_order_number ILIKE $1 AND document_url IS NOT NULL
+           LIMIT 1""",
+        po_number,
     )
-
-    if not result.data or not result.data[0].get("document_url"):
+    if not old_doc or not old_doc.get("document_url"):
         raise NotFoundError("Document for PO", po_number)
 
-    old_doc = result.data[0]
-
-    # Clear document fields
-    client.table("spare_parts").update({
-        "document_url": None,
-        "document_name": None,
-        "document_uploaded_at": None,
-    }).ilike("purchase_order_number", po_number).execute()
-
-    logger.info(
-        "PO document deleted",
-        po_number=po_number.upper(),
-        user_id=current_user.id,
+    await execute(
+        """UPDATE spare_parts
+           SET document_url = NULL, document_name = NULL, document_uploaded_at = NULL
+           WHERE purchase_order_number ILIKE $1""",
+        po_number,
     )
+
+    logger.info("PO document deleted", po_number=po_number.upper(), user_id=current_user.id)
 
     background_tasks.add_task(
         audit_service.log,
-        user_id=current_user.id,
-        user_email=current_user.email,
-        action="delete",
-        table_name="spare_parts",
-        record_id=po_number.upper(),
+        user_id=current_user.id, user_email=current_user.email,
+        action="delete", table_name="spare_parts", record_id=po_number.upper(),
         old_values={"document_name": old_doc["document_name"]},
         ip_address=get_client_ip(request),
         description=f"Deleted document for PO {po_number.upper()}",
     )
 
-    return {
-        "success": True,
-        "message": f"Document deleted for PO {po_number.upper()}",
-    }
+    return {"success": True, "message": f"Document deleted for PO {po_number.upper()}"}
 
 
 @router.patch("/{part_id}")
@@ -1488,106 +1140,79 @@ async def update_spare_part(
     reason_for_change: str | None = None,
     unit_cost: float | None = None,
     quantity: int | None = None,
-    vat_percentage: float | None = Query(default=None, ge=0, le=100, description="VAT percentage (0-100)"),
-    discount_percentage: float | None = Query(default=None, ge=0, le=100, description="Discount percentage (0-100)"),
-    other_costs: float | None = Query(default=None, ge=0, description="Additional costs"),
+    vat_percentage: float | None = Query(default=None, ge=0, le=100),
+    discount_percentage: float | None = Query(default=None, ge=0, le=100),
+    other_costs: float | None = Query(default=None, ge=0),
     purchase_order_number: str | None = None,
     remarks: str | None = None,
 ) -> dict[str, Any]:
-    """Update an existing spare part.
-
-    Total cost is auto-calculated as: (unit_cost × quantity × (1 + VAT%) × (1 - discount%)) + other_costs
-
-    Args:
-        part_id: The spare part UUID.
-        request: The HTTP request.
-        background_tasks: Background task runner.
-        current_user: The authenticated admin user.
-        All other args are optional fields to update.
-
-    Returns:
-        Updated spare part with recalculated total_cost.
-    """
-    client = get_supabase_admin_client()
-
-    # Build update data first to know which fields to fetch
-    update_data = {}
+    """Update an existing spare part."""
+    update_fields: dict[str, Any] = {}
     if part_description is not None:
-        update_data["part_description"] = part_description
+        update_fields["part_description"] = part_description
     if replaced_date is not None:
-        update_data["replaced_date"] = str(replaced_date)
+        update_fields["replaced_date"] = str(replaced_date)
     if part_number is not None:
-        update_data["part_number"] = part_number
+        update_fields["part_number"] = part_number
     if supplier is not None:
-        update_data["supplier"] = supplier
+        update_fields["supplier"] = supplier
     if reason_for_change is not None:
-        update_data["reason_for_change"] = reason_for_change
+        update_fields["reason_for_change"] = reason_for_change
     if unit_cost is not None:
-        update_data["unit_cost"] = unit_cost
+        update_fields["unit_cost"] = unit_cost
     if quantity is not None:
-        update_data["quantity"] = quantity
+        update_fields["quantity"] = quantity
     if vat_percentage is not None:
-        update_data["vat_percentage"] = vat_percentage
+        update_fields["vat_percentage"] = vat_percentage
     if discount_percentage is not None:
-        update_data["discount_percentage"] = discount_percentage
+        update_fields["discount_percentage"] = discount_percentage
     if other_costs is not None:
-        update_data["other_costs"] = other_costs
+        update_fields["other_costs"] = other_costs
     if purchase_order_number is not None:
-        update_data["purchase_order_number"] = purchase_order_number
+        update_fields["purchase_order_number"] = purchase_order_number
     if remarks is not None:
-        update_data["remarks"] = remarks
+        update_fields["remarks"] = remarks
 
-    if not update_data:
+    if not update_fields:
         raise ValidationError("No fields to update")
 
-    # Fetch current values for fields being changed (for audit diff)
-    fields_to_fetch = ",".join(["id", "part_description"] + list(update_data.keys()))
-    existing = (
-        client.table("spare_parts")
-        .select(fields_to_fetch)
-        .eq("id", str(part_id))
-        .execute()
+    existing = await fetchrow(
+        "SELECT * FROM spare_parts WHERE id = $1::uuid",
+        str(part_id),
     )
-
-    if not existing.data:
+    if not existing:
         raise NotFoundError("Spare part", str(part_id))
 
-    old_record = existing.data[0]
-    old_values = {k: old_record.get(k) for k in update_data if k in old_record}
+    old_values = {k: existing.get(k) for k in update_fields if k in existing}
 
-    # updated_at is auto-set by trigger
+    # Build dynamic SET clause
+    set_parts: list[str] = []
+    params: list[Any] = []
+    for key, val in update_fields.items():
+        params.append(val)
+        if key == "replaced_date":
+            set_parts.append(f"{key} = ${len(params)}::date")
+        else:
+            set_parts.append(f"{key} = ${len(params)}")
 
-    result = (
-        client.table("spare_parts")
-        .update(update_data)
-        .eq("id", str(part_id))
-        .execute()
+    params.append(str(part_id))
+    updated = await fetchrow(
+        f"UPDATE spare_parts SET {', '.join(set_parts)} WHERE id = ${len(params)}::uuid RETURNING *",
+        *params,
     )
 
-    logger.info(
-        "Spare part updated",
-        part_id=str(part_id),
-        updated_fields=list(update_data.keys()),
-        user_id=current_user.id,
-    )
+    logger.info("Spare part updated", part_id=str(part_id), updated_fields=list(update_fields.keys()), user_id=current_user.id)
 
     background_tasks.add_task(
         audit_service.log,
-        user_id=current_user.id,
-        user_email=current_user.email,
-        action="update",
-        table_name="spare_parts",
-        record_id=str(part_id),
-        old_values=old_values,
-        new_values=update_data,
+        user_id=current_user.id, user_email=current_user.email,
+        action="update", table_name="spare_parts", record_id=str(part_id),
+        old_values=old_values, new_values=update_fields,
         ip_address=get_client_ip(request),
-        description=f"Updated spare part {old_record.get('part_description', str(part_id))}: {', '.join(update_data.keys())}",
+        description=f"Updated spare part {existing.get('part_description', str(part_id))}: {', '.join(update_fields.keys())}",
     )
 
-    return {
-        "success": True,
-        "data": result.data[0],
-    }
+    return {"success": True, "data": updated}
 
 
 @router.delete("/{part_id}")
@@ -1597,59 +1222,27 @@ async def delete_spare_part(
     background_tasks: BackgroundTasks,
     current_user: Annotated[CurrentUser, Depends(require_admin)],
 ) -> dict[str, Any]:
-    """Delete a spare part record.
-
-    Args:
-        part_id: The spare part UUID.
-        request: The HTTP request.
-        background_tasks: Background task runner.
-        current_user: The authenticated admin user.
-
-    Returns:
-        Success message.
-    """
-    client = get_supabase_admin_client()
-
-    # Capture full record before deletion for audit trail
-    existing = (
-        client.table("spare_parts")
-        .select("*")
-        .eq("id", str(part_id))
-        .single()
-        .execute()
+    """Delete a spare part record."""
+    existing = await fetchrow(
+        "SELECT * FROM spare_parts WHERE id = $1::uuid",
+        str(part_id),
     )
-
-    if not existing.data:
+    if not existing:
         raise NotFoundError("Spare part", str(part_id))
 
-    deleted_record = existing.data
+    await execute("DELETE FROM spare_parts WHERE id = $1::uuid", str(part_id))
 
-    # Delete part
-    client.table("spare_parts").delete().eq("id", str(part_id)).execute()
-
-    logger.info(
-        "Spare part deleted",
-        part_id=str(part_id),
-        plant_id=deleted_record["plant_id"],
-        user_id=current_user.id,
-    )
+    logger.info("Spare part deleted", part_id=str(part_id), user_id=current_user.id)
 
     background_tasks.add_task(
         audit_service.log,
-        user_id=current_user.id,
-        user_email=current_user.email,
-        action="delete",
-        table_name="spare_parts",
-        record_id=str(part_id),
-        old_values=deleted_record,
-        ip_address=get_client_ip(request),
-        description=f"Deleted spare part {deleted_record.get('part_description', str(part_id))}",
+        user_id=current_user.id, user_email=current_user.email,
+        action="delete", table_name="spare_parts", record_id=str(part_id),
+        old_values=existing, ip_address=get_client_ip(request),
+        description=f"Deleted spare part {existing.get('part_description', str(part_id))}",
     )
 
-    return {
-        "success": True,
-        "message": "Spare part deleted successfully",
-    }
+    return {"success": True, "message": "Spare part deleted successfully"}
 
 
 # ============== PO-LEVEL ENDPOINTS ==============
@@ -1660,121 +1253,128 @@ async def list_purchase_orders(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     location_id: UUID | None = None,
-    supplier_id: UUID | None = Query(None, description="Filter by supplier"),
-    plant_id: UUID | None = Query(None, description="Filter by plant (shows POs containing this plant)"),
-    fleet_number: str | None = Query(None, description="Filter by fleet number"),
+    supplier_id: UUID | None = Query(None),
+    plant_id: UUID | None = Query(None),
+    fleet_number: str | None = Query(None),
     date_from: date | None = None,
     date_to: date | None = None,
     vendor: str | None = None,
-    search: str | None = Query(None, description="Search in PO number, vendor, or part descriptions"),
+    search: str | None = Query(None),
     cost_type: str | None = Query(None, pattern="^(direct|shared)$"),
     year: int | None = None,
     month: int | None = None,
     week: int | None = None,
     quarter: int | None = None,
-    sort_by: str = Query("po_date", pattern="^(po_date|created_at)$", description="Sort by: po_date (default) or created_at (recently added)"),
-    sort_order: str = Query("desc", pattern="^(asc|desc)$", description="Sort order: asc or desc"),
+    sort_by: str = Query("po_date", pattern="^(po_date|created_at)$"),
+    sort_order: str = Query("desc", pattern="^(asc|desc)$"),
 ) -> dict[str, Any]:
-    """List purchase orders (aggregated from spare_parts).
-
-    Filter by date range, year, month, week, quarter, location, vendor, supplier, cost_type.
-    Filter by plant_id or fleet_number to find POs that include a specific plant.
-    Search in PO numbers, vendor names, or part descriptions.
-    Sort by po_date (PO date) or created_at (recently added).
-    """
-    client = get_supabase_admin_client()
-
-    # If filtering by plant, first get PO numbers that include this plant
-    plant_po_numbers = None
+    """List purchase orders (aggregated from spare_parts)."""
+    # If filtering by plant, first get PO numbers for this plant
+    plant_po_numbers: list[str] | None = None
     if plant_id or fleet_number:
-        plant_query = client.table("spare_parts").select("purchase_order_number")
+        target_plant_id = None
         if plant_id:
-            plant_query = plant_query.eq("plant_id", str(plant_id))
+            target_plant_id = str(plant_id)
         elif fleet_number:
-            # Look up plant_id from fleet_number
-            plant = client.table("plants_master").select("id").eq("fleet_number", fleet_number.upper()).execute()
-            if plant.data:
-                plant_query = plant_query.eq("plant_id", plant.data[0]["id"])
-            else:
-                # No plant found, return empty
-                return {
-                    "success": True,
-                    "data": [],
-                    "meta": {"page": page, "limit": limit, "total": 0, "total_amount": 0, "total_pages": 0},
-                }
-        plant_query = plant_query.not_.is_("purchase_order_number", "null")
-        plant_result = plant_query.execute()
-        plant_po_numbers = list(set(p["purchase_order_number"] for p in (plant_result.data or [])))
+            p = await fetchrow(
+                "SELECT id FROM plants_master WHERE fleet_number = $1", fleet_number.upper(),
+            )
+            if not p:
+                return {"success": True, "data": [], "meta": {"page": page, "limit": limit, "total": 0, "total_amount": 0, "total_pages": 0}}
+            target_plant_id = p["id"]
+
+        po_rows = await fetch(
+            """SELECT DISTINCT purchase_order_number
+               FROM spare_parts WHERE plant_id = $1::uuid AND purchase_order_number IS NOT NULL""",
+            target_plant_id,
+        )
+        plant_po_numbers = [r["purchase_order_number"] for r in po_rows]
         if not plant_po_numbers:
-            return {
-                "success": True,
-                "data": [],
-                "meta": {"page": page, "limit": limit, "total": 0, "total_amount": 0, "total_pages": 0},
-            }
+            return {"success": True, "data": [], "meta": {"page": page, "limit": limit, "total": 0, "total_amount": 0, "total_pages": 0}}
 
     # If searching in descriptions, get matching PO numbers
+    desc_po_numbers: list[str] | None = None
     if search:
-        desc_query = (
-            client.table("spare_parts")
-            .select("purchase_order_number")
-            .ilike("part_description", f"%{search}%")
-            .not_.is_("purchase_order_number", "null")
-            .execute()
+        desc_rows = await fetch(
+            """SELECT DISTINCT purchase_order_number
+               FROM spare_parts WHERE part_description ILIKE $1 AND purchase_order_number IS NOT NULL""",
+            f"%{search}%",
         )
-        desc_po_numbers = list(set(p["purchase_order_number"] for p in (desc_query.data or [])))
-    else:
-        desc_po_numbers = None
+        desc_po_numbers = [r["purchase_order_number"] for r in desc_rows]
 
-    query = client.table("v_purchase_orders_summary").select("*", count="exact")
+    conds: list[str] = []
+    params: list[Any] = []
 
-    # Apply plant filter
     if plant_po_numbers is not None:
-        query = query.in_("po_number", plant_po_numbers)
+        placeholders = ", ".join(f"${len(params) + i + 1}" for i in range(len(plant_po_numbers)))
+        params.extend(plant_po_numbers)
+        conds.append(f"po_number IN ({placeholders})")
 
     if location_id:
-        query = query.eq("location_id", str(location_id))
+        params.append(str(location_id))
+        conds.append(f"location_id = ${len(params)}::uuid")
     if supplier_id:
-        query = query.eq("supplier_id", str(supplier_id))
+        params.append(str(supplier_id))
+        conds.append(f"supplier_id = ${len(params)}::uuid")
     if date_from:
-        query = query.gte("po_date", str(date_from))
+        params.append(str(date_from))
+        conds.append(f"po_date >= ${len(params)}::date")
     if date_to:
-        query = query.lte("po_date", str(date_to))
+        params.append(str(date_to))
+        conds.append(f"po_date <= ${len(params)}::date")
     if vendor:
-        query = query.ilike("vendor", f"%{vendor}%")
+        params.append(f"%{vendor}%")
+        conds.append(f"vendor ILIKE ${len(params)}")
     if search:
-        # Search in PO number, vendor, OR part descriptions (via desc_po_numbers)
+        search_cond_parts = [f"po_number ILIKE ${len(params) + 1}", f"vendor ILIKE ${len(params) + 1}"]
+        params.append(f"%{search}%")
         if desc_po_numbers:
-            query = query.or_(f"po_number.ilike.%{search}%,vendor.ilike.%{search}%,po_number.in.({','.join(desc_po_numbers)})")
-        else:
-            query = query.or_(f"po_number.ilike.%{search}%,vendor.ilike.%{search}%")
+            desc_placeholders = ", ".join(f"${len(params) + i + 1}" for i in range(len(desc_po_numbers)))
+            params.extend(desc_po_numbers)
+            search_cond_parts.append(f"po_number IN ({desc_placeholders})")
+        conds.append(f"({' OR '.join(search_cond_parts)})")
     if cost_type:
-        query = query.eq("cost_type", cost_type)
+        params.append(cost_type)
+        conds.append(f"cost_type = ${len(params)}")
     if year:
-        query = query.eq("year", year)
+        params.append(year)
+        conds.append(f"year = ${len(params)}")
     if month:
-        query = query.eq("month", month)
+        params.append(month)
+        conds.append(f"month = ${len(params)}")
     if week:
-        query = query.eq("week_number", week)
+        params.append(week)
+        conds.append(f"week_number = ${len(params)}")
     if quarter:
-        query = query.eq("quarter", quarter)
+        params.append(quarter)
+        conds.append(f"quarter = ${len(params)}")
+
+    where = " AND ".join(conds) if conds else "TRUE"
+    safe_sort = sort_by if sort_by in ("po_date", "created_at") else "po_date"
+    direction = "DESC" if sort_order == "desc" else "ASC"
 
     offset = (page - 1) * limit
-    query = query.range(offset, offset + limit - 1)
-    query = query.order(sort_by, desc=(sort_order == "desc"))
+    params.append(limit)
+    params.append(offset)
+    data = await fetch(
+        f"""SELECT *, count(*) OVER() AS _total_count FROM v_purchase_orders_summary
+            WHERE {where}
+            ORDER BY {safe_sort} {direction} NULLS LAST
+            LIMIT ${len(params) - 1} OFFSET ${len(params)}""",
+        *params,
+    )
 
-    result = query.execute()
-    total = result.count or 0
+    total = data[0].pop("_total_count", 0) if data else 0
+    for row in data[1:]:
+        row.pop("_total_count", None)
 
-    # Calculate totals for filtered data
-    total_amount = sum(float(po.get("total_amount") or 0) for po in result.data or [])
+    total_amount = sum(float(po.get("total_amount") or 0) for po in data)
 
     return {
         "success": True,
-        "data": result.data,
+        "data": data,
         "meta": {
-            "page": page,
-            "limit": limit,
-            "total": total,
+            "page": page, "limit": limit, "total": total,
             "total_amount": round(total_amount, 2),
             "total_pages": (total + limit - 1) // limit if total > 0 else 0,
         },
@@ -1790,64 +1390,50 @@ async def get_plant_costs(
     quarter: int | None = None,
     week: int | None = None,
 ) -> dict[str, Any]:
-    """Get maintenance costs for a specific plant.
-
-    Filter by year, month, quarter, or week for time-based analysis.
-    """
-    client = get_supabase_admin_client()
-
-    # Get plant info
-    plant_result = (
-        client.table("plants_master")
-        .select("id, fleet_number, description, fleet_type, current_location_id, locations(name)")
-        .eq("id", str(plant_id))
-        .single()
-        .execute()
+    """Get maintenance costs for a specific plant."""
+    plant = await fetchrow(
+        """SELECT pm.id, pm.fleet_number, pm.description, pm.fleet_type,
+                  pm.current_location_id, l.name AS current_location
+           FROM plants_master pm
+           LEFT JOIN locations l ON l.id = pm.current_location_id
+           WHERE pm.id = $1::uuid""",
+        str(plant_id),
     )
-
-    if not plant_result.data:
+    if not plant:
         raise NotFoundError("Plant", str(plant_id))
 
-    plant = plant_result.data
-    location_info = plant.pop("locations", {}) or {}
-    plant["current_location"] = location_info.get("name")
-
-    # Get costs using RPC
-    costs_result = client.rpc(
-        "get_plant_costs_by_period",
-        {
-            "p_plant_id": str(plant_id),
-            "p_year": year,
-            "p_month": month,
-            "p_quarter": quarter,
-            "p_week": week,
-        },
-    ).execute()
-
-    costs = costs_result.data[0] if costs_result.data else {
-        "total_cost": 0,
-        "parts_count": 0,
-        "po_count": 0,
-    }
-
-    # Get recent spare parts for this plant
-    parts_query = (
-        client.table("spare_parts")
-        .select("id, part_description, quantity, total_cost, purchase_order_number, replaced_date, supplier")
-        .eq("plant_id", str(plant_id))
+    costs = await fetchrow(
+        "SELECT * FROM get_plant_costs_by_period($1, $2, $3, $4, $5)",
+        str(plant_id), year, month, quarter, week,
     )
+    costs = costs or {"total_cost": 0, "parts_count": 0, "po_count": 0}
 
+    # Recent parts
+    conds = ["sp.plant_id = $1::uuid"]
+    params: list[Any] = [str(plant_id)]
     if year:
-        parts_query = parts_query.eq("year", year)
+        params.append(year)
+        conds.append(f"sp.year = ${len(params)}")
     if month:
-        parts_query = parts_query.eq("month", month)
+        params.append(month)
+        conds.append(f"sp.month = ${len(params)}")
     if quarter:
-        parts_query = parts_query.eq("quarter", quarter)
+        params.append(quarter)
+        conds.append(f"sp.quarter = ${len(params)}")
     if week:
-        parts_query = parts_query.eq("week_number", week)
+        params.append(week)
+        conds.append(f"sp.week_number = ${len(params)}")
 
-    parts_query = parts_query.order("replaced_date", desc=True).limit(20)
-    parts_result = parts_query.execute()
+    where = " AND ".join(conds)
+    recent_parts = await fetch(
+        f"""SELECT sp.id, sp.part_description, sp.quantity, sp.total_cost,
+                   sp.purchase_order_number, sp.replaced_date, sp.supplier
+            FROM spare_parts sp
+            WHERE {where}
+            ORDER BY sp.replaced_date DESC NULLS LAST
+            LIMIT 20""",
+        *params,
+    )
 
     return {
         "success": True,
@@ -1858,14 +1444,9 @@ async def get_plant_costs(
                 "parts_count": int(costs.get("parts_count") or 0),
                 "po_count": int(costs.get("po_count") or 0),
             },
-            "recent_parts": parts_result.data or [],
+            "recent_parts": recent_parts,
         },
-        "meta": {
-            "year": year,
-            "month": month,
-            "quarter": quarter,
-            "week": week,
-        },
+        "meta": {"year": year, "month": month, "quarter": quarter, "week": week},
     }
 
 
@@ -1874,39 +1455,21 @@ async def get_plant_shared_costs(
     plant_id: UUID,
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
 ) -> dict[str, Any]:
-    """Get shared costs for a specific plant.
-
-    Returns POs where this plant shares costs with other plants.
-    Note: Shared costs are NOT included in the plant's total_maintenance_cost.
-
-    Args:
-        plant_id: The plant UUID.
-
-    Returns:
-        List of shared POs with details.
-    """
-    client = get_supabase_admin_client()
-
-    # Verify plant exists
-    plant = (
-        client.table("plants_master")
-        .select("id, fleet_number, description")
-        .eq("id", str(plant_id))
-        .single()
-        .execute()
+    """Get shared costs for a specific plant."""
+    plant = await fetchrow(
+        "SELECT id, fleet_number, description FROM plants_master WHERE id = $1::uuid",
+        str(plant_id),
     )
-
-    if not plant.data:
+    if not plant:
         raise NotFoundError("Plant", str(plant_id))
 
-    # Get shared costs using the function
-    result = client.rpc(
-        "get_plant_shared_costs",
-        {"p_plant_id": str(plant_id)}
-    ).execute()
+    result = await fetch(
+        "SELECT * FROM get_plant_shared_costs($1)",
+        str(plant_id),
+    )
 
     shared_costs = []
-    for idx, po in enumerate(result.data or [], 1):
+    for idx, po in enumerate(result, 1):
         shared_costs.append({
             "label": f"Shared Cost {idx}",
             "po_number": po.get("po_number"),
@@ -1919,11 +1482,7 @@ async def get_plant_shared_costs(
 
     return {
         "success": True,
-        "data": {
-            "plant": plant.data,
-            "shared_costs": shared_costs,
-            "shared_costs_count": len(shared_costs),
-        },
+        "data": {"plant": plant, "shared_costs": shared_costs, "shared_costs_count": len(shared_costs)},
     }
 
 
@@ -1935,59 +1494,50 @@ async def get_location_costs(
     month: int | None = None,
 ) -> dict[str, Any]:
     """Get maintenance costs for a specific location/site."""
-    client = get_supabase_admin_client()
-
-    # Get location info
-    location_result = (
-        client.table("locations")
-        .select("id, name")
-        .eq("id", str(location_id))
-        .single()
-        .execute()
+    location = await fetchrow(
+        "SELECT id, name FROM locations WHERE id = $1::uuid", str(location_id),
     )
-
-    if not location_result.data:
+    if not location:
         raise NotFoundError("Location", str(location_id))
 
-    location = location_result.data
-
-    # Get costs for this location
-    query = (
-        client.table("spare_parts")
-        .select("total_cost, plant_id, is_workshop, is_category")
-        .eq("location_id", str(location_id))
-    )
-
+    conds = ["location_id = $1::uuid"]
+    params: list[Any] = [str(location_id)]
     if year:
-        query = query.eq("year", year)
+        params.append(year)
+        conds.append(f"year = ${len(params)}")
     if month:
-        query = query.eq("month", month)
+        params.append(month)
+        conds.append(f"month = ${len(params)}")
 
-    result = query.execute()
-    data = result.data or []
+    where = " AND ".join(conds)
 
-    total_cost = sum(float(r.get("total_cost") or 0) for r in data)
-    direct_cost = sum(float(r.get("total_cost") or 0) for r in data if r.get("plant_id") and not r.get("is_workshop") and not r.get("is_category"))
-    workshop_cost = sum(float(r.get("total_cost") or 0) for r in data if r.get("is_workshop"))
-    category_cost = sum(float(r.get("total_cost") or 0) for r in data if r.get("is_category"))
+    # Use SQL aggregation instead of fetching all rows
+    agg = await fetchrow(
+        f"""SELECT
+                COALESCE(SUM(total_cost), 0)::float AS total_cost,
+                COALESCE(SUM(CASE WHEN plant_id IS NOT NULL AND NOT is_workshop AND NOT COALESCE(is_category, false) THEN total_cost ELSE 0 END), 0)::float AS direct_cost,
+                COALESCE(SUM(CASE WHEN is_workshop THEN total_cost ELSE 0 END), 0)::float AS workshop_cost,
+                COALESCE(SUM(CASE WHEN COALESCE(is_category, false) THEN total_cost ELSE 0 END), 0)::float AS category_cost,
+                count(*)::int AS items_count,
+                count(DISTINCT plant_id)::int AS plants_count
+            FROM spare_parts WHERE {where}""",
+        *params,
+    )
 
     return {
         "success": True,
         "data": {
             "location": location,
             "costs": {
-                "total_cost": round(total_cost, 2),
-                "direct_cost": round(direct_cost, 2),
-                "workshop_cost": round(workshop_cost, 2),
-                "category_cost": round(category_cost, 2),
+                "total_cost": round(agg["total_cost"], 2),
+                "direct_cost": round(agg["direct_cost"], 2),
+                "workshop_cost": round(agg["workshop_cost"], 2),
+                "category_cost": round(agg["category_cost"], 2),
             },
-            "items_count": len(data),
-            "plants_count": len(set(r.get("plant_id") for r in data if r.get("plant_id"))),
+            "items_count": agg["items_count"],
+            "plants_count": agg["plants_count"],
         },
-        "meta": {
-            "year": year,
-            "month": month,
-        },
+        "meta": {"year": year, "month": month},
     }
 
 
@@ -1999,122 +1549,99 @@ async def get_overall_summary(
     location_id: UUID | None = None,
 ) -> dict[str, Any]:
     """Get overall maintenance cost summary."""
-    client = get_supabase_admin_client()
-
-    query = client.table("spare_parts").select("total_cost, plant_id, is_workshop, is_category, location_id")
-
+    conds: list[str] = []
+    params: list[Any] = []
     if year:
-        query = query.eq("year", year)
+        params.append(year)
+        conds.append(f"year = ${len(params)}")
     if month:
-        query = query.eq("month", month)
+        params.append(month)
+        conds.append(f"month = ${len(params)}")
     if location_id:
-        query = query.eq("location_id", str(location_id))
+        params.append(str(location_id))
+        conds.append(f"location_id = ${len(params)}::uuid")
 
-    result = query.execute()
-    data = result.data or []
+    where = " AND ".join(conds) if conds else "TRUE"
 
-    total_cost = sum(float(r.get("total_cost") or 0) for r in data)
-    direct_cost = sum(float(r.get("total_cost") or 0) for r in data if r.get("plant_id") and not r.get("is_workshop") and not r.get("is_category"))
-    workshop_cost = sum(float(r.get("total_cost") or 0) for r in data if r.get("is_workshop"))
-    category_cost = sum(float(r.get("total_cost") or 0) for r in data if r.get("is_category"))
-
-    # Get distinct counts
-    po_numbers = set(r.get("purchase_order_number") for r in data if r.get("purchase_order_number"))
-    plant_ids = set(r.get("plant_id") for r in data if r.get("plant_id"))
-    location_ids = set(r.get("location_id") for r in data if r.get("location_id"))
+    agg = await fetchrow(
+        f"""SELECT
+                COALESCE(SUM(total_cost), 0)::float AS total_cost,
+                COALESCE(SUM(CASE WHEN plant_id IS NOT NULL AND NOT is_workshop AND NOT COALESCE(is_category, false) THEN total_cost ELSE 0 END), 0)::float AS direct_cost,
+                COALESCE(SUM(CASE WHEN is_workshop THEN total_cost ELSE 0 END), 0)::float AS workshop_cost,
+                COALESCE(SUM(CASE WHEN COALESCE(is_category, false) THEN total_cost ELSE 0 END), 0)::float AS category_cost,
+                count(*)::int AS items_count,
+                count(DISTINCT purchase_order_number)::int AS po_count,
+                count(DISTINCT plant_id)::int AS plants_count,
+                count(DISTINCT location_id)::int AS locations_count
+            FROM spare_parts WHERE {where}""",
+        *params,
+    )
 
     return {
         "success": True,
         "data": {
-            "total_cost": round(total_cost, 2),
-            "direct_cost": round(direct_cost, 2),
-            "workshop_cost": round(workshop_cost, 2),
-            "category_cost": round(category_cost, 2),
-            "items_count": len(data),
-            "po_count": len(po_numbers),
-            "plants_count": len(plant_ids),
-            "locations_count": len(location_ids),
+            "total_cost": round(agg["total_cost"], 2),
+            "direct_cost": round(agg["direct_cost"], 2),
+            "workshop_cost": round(agg["workshop_cost"], 2),
+            "category_cost": round(agg["category_cost"], 2),
+            "items_count": agg["items_count"],
+            "po_count": agg["po_count"],
+            "plants_count": agg["plants_count"],
+            "locations_count": agg["locations_count"],
         },
-        "meta": {
-            "year": year,
-            "month": month,
-            "location_id": str(location_id) if location_id else None,
-        },
+        "meta": {"year": year, "month": month, "location_id": str(location_id) if location_id else None},
     }
 
 
 @router.get("/analytics/by-period")
 async def get_costs_by_period(
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
-    period: str = Query(..., pattern="^(week|month|quarter|year)$", description="Period type"),
-    year: int = Query(..., description="Year to analyze"),
+    period: str = Query(..., pattern="^(week|month|quarter|year)$"),
+    year: int = Query(...),
     plant_id: UUID | None = None,
     location_id: UUID | None = None,
 ) -> dict[str, Any]:
-    """Get costs grouped by period (week, month, quarter, year).
+    """Get costs grouped by period (week, month, quarter, year)."""
+    period_column = {"week": "week_number", "month": "month", "quarter": "quarter", "year": "year"}[period]
 
-    Returns totals for each week/month/quarter in the specified year,
-    useful for trend analysis and charts.
-    """
-    client = get_supabase_admin_client()
+    conds = ["year = $1"]
+    params: list[Any] = [year]
+    if plant_id:
+        params.append(str(plant_id))
+        conds.append(f"plant_id = ${len(params)}::uuid")
+    if location_id:
+        params.append(str(location_id))
+        conds.append(f"location_id = ${len(params)}::uuid")
 
-    # Determine the grouping column
-    period_column = {
-        "week": "week_number",
-        "month": "month",
-        "quarter": "quarter",
-        "year": "year",
-    }[period]
+    where = " AND ".join(conds)
 
-    query = (
-        client.table("spare_parts")
-        .select(f"{period_column}, total_cost, plant_id, purchase_order_number")
-        .eq("year", year)
+    rows = await fetch(
+        f"""SELECT {period_column} AS period_val,
+                   COALESCE(SUM(total_cost), 0)::float AS total_cost,
+                   count(*)::int AS items_count,
+                   count(DISTINCT purchase_order_number)::int AS po_count
+            FROM spare_parts
+            WHERE {where} AND {period_column} IS NOT NULL
+            GROUP BY {period_column}
+            ORDER BY {period_column}""",
+        *params,
     )
 
-    if plant_id:
-        query = query.eq("plant_id", str(plant_id))
-    if location_id:
-        query = query.eq("location_id", str(location_id))
-
-    result = query.execute()
-    data = result.data or []
-
-    # Group by period
-    period_totals: dict[int, dict] = {}
-    for item in data:
-        p = item.get(period_column)
-        if p is None:
-            continue
-        if p not in period_totals:
-            period_totals[p] = {"total_cost": 0, "items_count": 0, "po_numbers": set()}
-        period_totals[p]["total_cost"] += float(item.get("total_cost") or 0)
-        period_totals[p]["items_count"] += 1
-        if item.get("purchase_order_number"):
-            period_totals[p]["po_numbers"].add(item["purchase_order_number"])
-
-    # Convert to list
-    periods = []
-    for p in sorted(period_totals.keys()):
-        periods.append({
-            period: p,
-            "total_cost": round(period_totals[p]["total_cost"], 2),
-            "items_count": period_totals[p]["items_count"],
-            "po_count": len(period_totals[p]["po_numbers"]),
-        })
-
+    periods = [
+        {period: row["period_val"], "total_cost": round(row["total_cost"], 2),
+         "items_count": row["items_count"], "po_count": row["po_count"]}
+        for row in rows
+    ]
     grand_total = sum(p["total_cost"] for p in periods)
 
     return {
         "success": True,
         "data": periods,
         "meta": {
-            "period_type": period,
-            "year": year,
+            "period_type": period, "year": year,
             "plant_id": str(plant_id) if plant_id else None,
             "location_id": str(location_id) if location_id else None,
-            "grand_total": round(grand_total, 2),
-            "periods_count": len(periods),
+            "grand_total": round(grand_total, 2), "periods_count": len(periods),
         },
     }
 
@@ -2127,69 +1654,64 @@ async def get_year_over_year(
     location_id: UUID | None = None,
     group_by: str = Query("month", pattern="^(month|quarter)$"),
 ) -> dict[str, Any]:
-    """Compare costs year-over-year.
-
-    Returns monthly or quarterly totals for each year for comparison.
-    """
-    client = get_supabase_admin_client()
-
+    """Compare costs year-over-year."""
     year_list = [int(y.strip()) for y in years.split(",") if y.strip().isdigit()]
     if not year_list:
         raise ValidationError("At least one valid year is required")
 
     period_column = "month" if group_by == "month" else "quarter"
 
-    query = (
-        client.table("spare_parts")
-        .select(f"year, {period_column}, total_cost, purchase_order_number")
-        .in_("year", year_list)
-    )
+    conds: list[str] = []
+    params: list[Any] = []
+
+    # Build IN clause for years
+    year_placeholders = ", ".join(f"${i + 1}" for i in range(len(year_list)))
+    params.extend(year_list)
+    conds.append(f"year IN ({year_placeholders})")
 
     if plant_id:
-        query = query.eq("plant_id", str(plant_id))
+        params.append(str(plant_id))
+        conds.append(f"plant_id = ${len(params)}::uuid")
     if location_id:
-        query = query.eq("location_id", str(location_id))
+        params.append(str(location_id))
+        conds.append(f"location_id = ${len(params)}::uuid")
 
-    result = query.execute()
-    data = result.data or []
+    where = " AND ".join(conds)
 
-    # Group by year and period
-    year_data: dict[int, dict[int, dict]] = {y: {} for y in year_list}
-    for item in data:
-        y = item.get("year")
-        p = item.get(period_column)
-        if y is None or p is None or y not in year_data:
-            continue
-        if p not in year_data[y]:
-            year_data[y][p] = {"total_cost": 0, "items_count": 0, "po_numbers": set()}
-        year_data[y][p]["total_cost"] += float(item.get("total_cost") or 0)
-        year_data[y][p]["items_count"] += 1
-        if item.get("purchase_order_number"):
-            year_data[y][p]["po_numbers"].add(item["purchase_order_number"])
+    rows = await fetch(
+        f"""SELECT year, {period_column} AS period_val,
+                   COALESCE(SUM(total_cost), 0)::float AS total_cost
+            FROM spare_parts
+            WHERE {where} AND {period_column} IS NOT NULL
+            GROUP BY year, {period_column}
+            ORDER BY year, {period_column}""",
+        *params,
+    )
+
+    # Build year → period → total_cost map
+    year_data: dict[int, dict[int, float]] = {y: {} for y in year_list}
+    for row in rows:
+        y = row["year"]
+        p = row["period_val"]
+        if y in year_data:
+            year_data[y][p] = row["total_cost"]
 
     # Format response
-    comparison = []
     max_period = 12 if group_by == "month" else 4
+    comparison = []
     for p in range(1, max_period + 1):
-        row = {group_by: p}
+        entry: dict[str, Any] = {group_by: p}
         for y in year_list:
-            if p in year_data[y]:
-                row[str(y)] = round(year_data[y][p]["total_cost"], 2)
-            else:
-                row[str(y)] = 0
-        comparison.append(row)
+            entry[str(y)] = round(year_data[y].get(p, 0), 2)
+        comparison.append(entry)
 
-    # Yearly totals
-    yearly_totals = {}
-    for y in year_list:
-        yearly_totals[str(y)] = round(sum(d["total_cost"] for d in year_data[y].values()), 2)
+    yearly_totals = {str(y): round(sum(year_data[y].values()), 2) for y in year_list}
 
     return {
         "success": True,
         "data": comparison,
         "meta": {
-            "years": year_list,
-            "group_by": group_by,
+            "years": year_list, "group_by": group_by,
             "plant_id": str(plant_id) if plant_id else None,
             "location_id": str(location_id) if location_id else None,
             "yearly_totals": yearly_totals,
@@ -2204,47 +1726,18 @@ async def get_spare_part(
     part_id: UUID,
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
 ) -> dict[str, Any]:
-    """Get a single spare part by ID.
-
-    Args:
-        part_id: The spare part UUID.
-        current_user: The authenticated user.
-
-    Returns:
-        Spare part details with plant and supplier info.
-    """
-    client = get_supabase_admin_client()
-
-    # Use explicit FK hint since there are 2 FKs to plants_master (plant_id, assigned_plant_id)
-    result = (
-        client.table("spare_parts")
-        .select("*, plants_master!spare_parts_plant_id_fkey(fleet_number, description), suppliers(id, name)")
-        .eq("id", str(part_id))
-        .single()
-        .execute()
+    """Get a single spare part by ID."""
+    row = await fetchrow(
+        """SELECT sp.*,
+                  pm.fleet_number, pm.description AS plant_description,
+                  COALESCE(s.name, sp.supplier) AS supplier_name
+           FROM spare_parts sp
+           LEFT JOIN plants_master pm ON pm.id = sp.plant_id
+           LEFT JOIN suppliers s ON s.id = sp.supplier_id
+           WHERE sp.id = $1::uuid""",
+        str(part_id),
     )
-
-    if not result.data:
+    if not row:
         raise NotFoundError("Spare part", str(part_id))
 
-    # Transform data
-    data = result.data
-    data["fleet_number"] = data.get("plants_master", {}).get("fleet_number") if data.get("plants_master") else None
-    data["plant_description"] = data.get("plants_master", {}).get("description") if data.get("plants_master") else None
-
-    # Get supplier name from suppliers table (normalized) or fall back to text field
-    suppliers_info = data.get("suppliers")
-    if suppliers_info:
-        data["supplier_name"] = suppliers_info.get("name")
-    else:
-        data["supplier_name"] = data.get("supplier")  # fallback to text field
-
-    if "plants_master" in data:
-        del data["plants_master"]
-    if "suppliers" in data:
-        del data["suppliers"]
-
-    return {
-        "success": True,
-        "data": data,
-    }
+    return {"success": True, "data": row}

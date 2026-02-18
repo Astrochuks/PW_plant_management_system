@@ -6,7 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 
 from app.api.v1.auth import get_client_ip
-from app.core.database import get_supabase_admin_client
+from app.core.pool import fetch, fetchrow, fetchval, execute
 from app.core.exceptions import NotFoundError, ValidationError
 from app.core.security import (
     CurrentUser,
@@ -40,27 +40,36 @@ async def list_suppliers(
     Returns:
         Paginated list of suppliers with PO stats.
     """
-    client = get_supabase_admin_client()
-
-    # Use view with pre-aggregated stats for performance
-    query = client.table("v_supplier_stats").select("*", count="exact")
+    conditions: list[str] = []
+    params: list[Any] = []
 
     if active_only:
-        query = query.eq("is_active", True)
+        conditions.append("is_active = true")
 
     if search:
-        query = query.ilike("name", f"%{search}%")
+        params.append(f"%{search}%")
+        conditions.append(f"name ILIKE ${len(params)}")
 
+    where = " AND ".join(conditions) if conditions else "TRUE"
     offset = (page - 1) * limit
-    query = query.order("name")
-    query = query.range(offset, offset + limit - 1)
 
-    result = query.execute()
-    total = result.count or 0
+    params.append(limit)
+    params.append(offset)
+    data = await fetch(
+        f"""SELECT *, count(*) OVER() AS _total_count FROM v_supplier_stats
+            WHERE {where}
+            ORDER BY name
+            LIMIT ${len(params) - 1} OFFSET ${len(params)}""",
+        *params,
+    )
+
+    total = data[0].pop("_total_count", 0) if data else 0
+    for row in data[1:]:
+        row.pop("_total_count", None)
 
     return {
         "success": True,
-        "data": result.data or [],
+        "data": data,
         "meta": {
             "page": page,
             "limit": limit,
@@ -89,47 +98,47 @@ async def autocomplete_suppliers(
     Returns:
         List of matching suppliers with id, name, and match_type.
     """
-    client = get_supabase_admin_client()
-
-    suggestions = []
-    seen_ids = set()
+    suggestions: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
 
     # Step 1: Exact matches (contains)
-    exact_result = (
-        client.table("suppliers")
-        .select("id, name")
-        .ilike("name", f"%{q}%")
-        .eq("is_active", True)
-        .order("name")
-        .limit(limit)
-        .execute()
+    exact_rows = await fetch(
+        """SELECT id, name FROM suppliers
+           WHERE name ILIKE $1 AND is_active = true
+           ORDER BY name
+           LIMIT $2""",
+        f"%{q}%",
+        limit,
     )
 
-    for sup in exact_result.data or []:
-        if sup["id"] not in seen_ids:
+    for sup in exact_rows:
+        sid = str(sup["id"])
+        if sid not in seen_ids:
             suggestions.append({
-                "id": sup["id"],
+                "id": sid,
                 "name": sup["name"],
                 "match_type": "exact",
             })
-            seen_ids.add(sup["id"])
+            seen_ids.add(sid)
 
     # Step 2: Fuzzy matches (if enabled and need more results)
     if fuzzy and len(suggestions) < limit:
-        fuzzy_result = client.rpc(
-            "find_similar_supplier",
-            {"p_name": q, "p_threshold": 0.25}
-        ).execute()
+        fuzzy_rows = await fetch(
+            "SELECT * FROM find_similar_supplier($1, $2)",
+            q,
+            0.25,
+        )
 
-        for sup in fuzzy_result.data or []:
-            if sup["id"] not in seen_ids:
+        for sup in fuzzy_rows:
+            sid = str(sup["id"])
+            if sid not in seen_ids:
                 suggestions.append({
-                    "id": sup["id"],
+                    "id": sid,
                     "name": sup["name"],
                     "match_type": "fuzzy",
-                    "similarity": round(sup["similarity"], 2),
+                    "similarity": round(float(sup.get("similarity", 0)), 2),
                 })
-                seen_ids.add(sup["id"])
+                seen_ids.add(sid)
                 if len(suggestions) >= limit:
                     break
 
@@ -153,23 +162,17 @@ async def get_supplier(
     Returns:
         Supplier details with stats.
     """
-    client = get_supabase_admin_client()
-
-    # Use view with pre-aggregated stats
-    result = (
-        client.table("v_supplier_stats")
-        .select("*")
-        .eq("id", str(supplier_id))
-        .single()
-        .execute()
+    row = await fetchrow(
+        "SELECT * FROM v_supplier_stats WHERE id = $1::uuid",
+        str(supplier_id),
     )
 
-    if not result.data:
+    if not row:
         raise NotFoundError("Supplier", str(supplier_id))
 
     return {
         "success": True,
-        "data": result.data,
+        "data": row,
     }
 
 
@@ -196,32 +199,28 @@ async def create_supplier(
     Returns:
         Created supplier.
     """
-    client = get_supabase_admin_client()
-
     # Check for duplicate (case-insensitive)
-    existing = (
-        client.table("suppliers")
-        .select("id, name")
-        .ilike("name_normalized", name.upper().strip())
-        .execute()
+    existing = await fetch(
+        "SELECT id, name FROM suppliers WHERE name_normalized ILIKE $1",
+        name.upper().strip(),
     )
 
-    if existing.data:
+    if existing:
         raise ValidationError(
-            f"Supplier '{existing.data[0]['name']}' already exists",
+            f"Supplier '{existing[0]['name']}' already exists",
             details=[{"field": "name", "message": "Already exists", "code": "DUPLICATE"}],
         )
 
-    supplier_data = {
-        "name": name.strip(),
-        "contact_person": contact_person,
-        "phone": phone,
-        "email": email,
-        "address": address,
-    }
-
-    result = client.table("suppliers").insert(supplier_data).execute()
-    created = result.data[0]
+    created = await fetchrow(
+        """INSERT INTO suppliers (name, contact_person, phone, email, address)
+           VALUES ($1, $2, $3, $4, $5)
+           RETURNING *""",
+        name.strip(),
+        contact_person,
+        phone,
+        email,
+        address,
+    )
 
     logger.info(
         "Supplier created",
@@ -237,7 +236,7 @@ async def create_supplier(
         action="create",
         table_name="suppliers",
         record_id=created["id"],
-        new_values=supplier_data,
+        new_values={"name": name.strip(), "contact_person": contact_person, "phone": phone, "email": email, "address": address},
         ip_address=get_client_ip(request),
         description=f"Created supplier: {name}",
     )
@@ -270,10 +269,8 @@ async def update_supplier(
     Returns:
         Updated supplier.
     """
-    client = get_supabase_admin_client()
-
     # Build update data
-    update_data = {}
+    update_data: dict[str, Any] = {}
     if name is not None:
         update_data["name"] = name.strip()
     if contact_person is not None:
@@ -291,40 +288,43 @@ async def update_supplier(
         raise ValidationError("No fields to update")
 
     # Get existing for audit
-    existing = (
-        client.table("suppliers")
-        .select("*")
-        .eq("id", str(supplier_id))
-        .execute()
+    existing = await fetchrow(
+        "SELECT * FROM suppliers WHERE id = $1::uuid",
+        str(supplier_id),
     )
 
-    if not existing.data:
+    if not existing:
         raise NotFoundError("Supplier", str(supplier_id))
 
-    old_values = {k: existing.data[0].get(k) for k in update_data}
+    old_values = {k: existing.get(k) for k in update_data}
 
     # Check for duplicate name if changing name
     if name:
-        dup_check = (
-            client.table("suppliers")
-            .select("id, name")
-            .ilike("name_normalized", name.upper().strip())
-            .neq("id", str(supplier_id))
-            .execute()
+        dup_check = await fetch(
+            "SELECT id, name FROM suppliers WHERE name_normalized ILIKE $1 AND id != $2::uuid",
+            name.upper().strip(),
+            str(supplier_id),
         )
-        if dup_check.data:
+        if dup_check:
             raise ValidationError(
-                f"Supplier '{dup_check.data[0]['name']}' already exists",
+                f"Supplier '{dup_check[0]['name']}' already exists",
                 details=[{"field": "name", "message": "Already exists", "code": "DUPLICATE"}],
             )
 
-    update_data["updated_at"] = "now()"
+    # Build SET clause
+    set_parts: list[str] = []
+    params: list[Any] = []
+    for key, val in update_data.items():
+        params.append(val)
+        set_parts.append(f"{key} = ${len(params)}")
+    set_parts.append("updated_at = now()")
 
-    result = (
-        client.table("suppliers")
-        .update(update_data)
-        .eq("id", str(supplier_id))
-        .execute()
+    params.append(str(supplier_id))
+    set_clause = ", ".join(set_parts)
+
+    updated = await fetchrow(
+        f"UPDATE suppliers SET {set_clause} WHERE id = ${len(params)}::uuid RETURNING *",
+        *params,
     )
 
     logger.info(
@@ -342,14 +342,14 @@ async def update_supplier(
         table_name="suppliers",
         record_id=str(supplier_id),
         old_values=old_values,
-        new_values={k: v for k, v in update_data.items() if k != "updated_at"},
+        new_values=update_data,
         ip_address=get_client_ip(request),
-        description=f"Updated supplier: {existing.data[0]['name']}",
+        description=f"Updated supplier: {existing['name']}",
     )
 
     return {
         "success": True,
-        "data": result.data[0],
+        "data": updated,
     }
 
 
@@ -362,6 +362,8 @@ async def get_supplier_pos(
 ) -> dict[str, Any]:
     """Get all POs for a supplier.
 
+    Optimized: SQL GROUP BY instead of fetching all rows and aggregating in Python.
+
     Args:
         supplier_id: The supplier UUID.
         page: Page number.
@@ -370,56 +372,46 @@ async def get_supplier_pos(
     Returns:
         Paginated list of POs for this supplier.
     """
-    client = get_supabase_admin_client()
-
     # Verify supplier exists
-    supplier = (
-        client.table("suppliers")
-        .select("id, name")
-        .eq("id", str(supplier_id))
-        .execute()
+    supplier = await fetchrow(
+        "SELECT id, name FROM suppliers WHERE id = $1::uuid",
+        str(supplier_id),
     )
 
-    if not supplier.data:
+    if not supplier:
         raise NotFoundError("Supplier", str(supplier_id))
 
-    # Get POs via spare_parts
-    result = (
-        client.table("spare_parts")
-        .select("purchase_order_number, po_date, total_cost, location_id, locations(name)")
-        .eq("supplier_id", str(supplier_id))
-        .not_.is_("purchase_order_number", "null")
-        .order("po_date", desc=True)
-        .execute()
-    )
+    # Aggregate POs in SQL instead of Python
+    total = await fetchval(
+        """SELECT count(DISTINCT purchase_order_number)
+           FROM spare_parts
+           WHERE supplier_id = $1::uuid AND purchase_order_number IS NOT NULL""",
+        str(supplier_id),
+    ) or 0
 
-    # Aggregate by PO number
-    po_map: dict = {}
-    for item in result.data or []:
-        po_num = item["purchase_order_number"]
-        if po_num not in po_map:
-            loc = item.get("locations") or {}
-            po_map[po_num] = {
-                "po_number": po_num,
-                "po_date": item.get("po_date"),
-                "location": loc.get("name") if isinstance(loc, dict) else None,
-                "items_count": 0,
-                "total_amount": 0,
-            }
-        po_map[po_num]["items_count"] += 1
-        po_map[po_num]["total_amount"] += float(item.get("total_cost") or 0)
-
-    # Sort by date and paginate
-    pos = sorted(po_map.values(), key=lambda x: x.get("po_date") or "", reverse=True)
-    total = len(pos)
     offset = (page - 1) * limit
-    paginated = pos[offset : offset + limit]
+    pos = await fetch(
+        """SELECT sp.purchase_order_number AS po_number,
+                  MAX(sp.po_date) AS po_date,
+                  MAX(l.name) AS location,
+                  count(*)::int AS items_count,
+                  COALESCE(SUM(sp.total_cost), 0)::float AS total_amount
+           FROM spare_parts sp
+           LEFT JOIN locations l ON l.id = sp.location_id
+           WHERE sp.supplier_id = $1::uuid AND sp.purchase_order_number IS NOT NULL
+           GROUP BY sp.purchase_order_number
+           ORDER BY MAX(sp.po_date) DESC NULLS LAST
+           LIMIT $2 OFFSET $3""",
+        str(supplier_id),
+        limit,
+        offset,
+    )
 
     return {
         "success": True,
-        "data": paginated,
+        "data": pos,
         "meta": {
-            "supplier": supplier.data[0],
+            "supplier": supplier,
             "page": page,
             "limit": limit,
             "total": total,

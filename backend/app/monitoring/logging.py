@@ -174,11 +174,27 @@ class DatabaseLogHandler:
         if not self._buffer:
             return
 
-        from app.core.database import get_supabase_admin_client
+        from app.core.pool import executemany
+        import json
 
         try:
-            client = get_supabase_admin_client()
-            client.table("monitoring.app_logs").insert(self._buffer).execute()
+            await executemany(
+                """INSERT INTO monitoring.app_logs
+                       (timestamp, level, message, logger_name, request_id, user_id, context)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)""",
+                [
+                    (
+                        entry.get("timestamp"),
+                        entry.get("level", "INFO"),
+                        entry.get("message", ""),
+                        entry.get("logger_name"),
+                        entry.get("request_id"),
+                        entry.get("user_id"),
+                        json.dumps(entry.get("context", {})),
+                    )
+                    for entry in self._buffer
+                ],
+            )
             self._buffer = []
             self._last_flush = datetime.now(timezone.utc)
         except Exception as e:

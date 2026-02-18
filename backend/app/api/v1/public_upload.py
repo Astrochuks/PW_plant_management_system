@@ -6,7 +6,7 @@ Provides a shareable HTML page for uploading weekly reports and purchase orders.
 from fastapi import APIRouter, Query
 from fastapi.responses import HTMLResponse
 
-from app.core.database import get_supabase_admin_client
+from app.core.pool import fetch, fetchrow, execute
 from app.monitoring.logging import get_logger
 
 router = APIRouter()
@@ -492,30 +492,30 @@ async def upload_page(
     Returns:
         HTML page with upload form.
     """
-    client = get_supabase_admin_client()
-
-    # Validate token
-    result = (
-        client.table("upload_tokens")
-        .select("*, locations(name)")
-        .eq("token", token)
-        .eq("is_active", True)
-        .execute()
+    # Validate token with LEFT JOIN for location name
+    rows = await fetch(
+        """SELECT ut.*, l.name AS location_name
+           FROM upload_tokens ut
+           LEFT JOIN locations l ON l.id = ut.location_id
+           WHERE ut.token = $1 AND ut.is_active = true""",
+        token,
     )
 
-    if not result.data:
+    if not rows:
         logger.warning("Invalid upload token attempt", token=token[:8] + "..." if len(token) > 8 else token)
         return HTMLResponse(
             content=_get_error_page("Invalid or expired upload token. Please contact your administrator for a valid link."),
             status_code=401,
         )
 
-    token_data = result.data[0]
+    token_data = rows[0]
 
     # Check expiration
     if token_data.get("expires_at"):
         from datetime import datetime, timezone
-        expires_at = datetime.fromisoformat(token_data["expires_at"].replace("Z", "+00:00"))
+        expires_at = token_data["expires_at"]
+        if isinstance(expires_at, str):
+            expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
         if expires_at < datetime.now(timezone.utc):
             logger.warning("Expired upload token attempt", token_id=token_data["id"])
             return HTMLResponse(
@@ -526,7 +526,7 @@ async def upload_page(
     # Build token info for page
     token_info = {
         "token": token,
-        "location_name": token_data.get("locations", {}).get("name") if token_data.get("locations") else "Any Location",
+        "location_name": token_data.get("location_name") or "Any Location",
         "allowed_upload_types": token_data.get("allowed_upload_types", ["weekly_report", "purchase_order"]),
     }
 
@@ -537,9 +537,10 @@ async def upload_page(
     )
 
     # Update last used
-    client.table("upload_tokens").update({
-        "last_used_at": "now()",
-        "use_count": token_data.get("use_count", 0) + 1,
-    }).eq("id", token_data["id"]).execute()
+    await execute(
+        "UPDATE upload_tokens SET last_used_at = now(), use_count = $2 WHERE id = $1::uuid",
+        token_data["id"],
+        (token_data.get("use_count") or 0) + 1,
+    )
 
     return HTMLResponse(content=_get_upload_page(token_info))

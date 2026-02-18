@@ -1,7 +1,7 @@
 """Audit logging service for CRUD operations.
 
 Provides a simple interface to log all data modifications across the system.
-Logs are written to the audit_logs table via the admin client (bypasses RLS).
+Logs are written to the audit_logs table via asyncpg (bypasses RLS).
 
 Usage:
     from app.services.audit_service import audit_service
@@ -21,9 +21,10 @@ Usage:
     )
 """
 
+import json
 from typing import Any
 
-from app.core.database import get_supabase_admin_client
+from app.core.pool import fetch, fetchval, execute
 from app.monitoring.logging import get_logger
 from app.services.auth_service import validate_ip
 
@@ -33,17 +34,7 @@ logger = get_logger(__name__)
 class AuditService:
     """Service for logging CRUD audit events."""
 
-    def __init__(self):
-        self._client = None
-
-    @property
-    def client(self):
-        """Lazy load Supabase admin client."""
-        if self._client is None:
-            self._client = get_supabase_admin_client()
-        return self._client
-
-    def log(
+    async def log(
         self,
         user_id: str,
         user_email: str,
@@ -64,18 +55,22 @@ class AuditService:
         try:
             ip_address = validate_ip(ip_address)
 
-            self.client.table("audit_logs").insert({
-                "user_id": user_id,
-                "user_email": user_email,
-                "action": action,
-                "table_name": table_name,
-                "record_id": record_id,
-                "old_values": old_values,
-                "new_values": new_values,
-                "ip_address": ip_address,
-                "user_agent": user_agent,
-                "description": description,
-            }).execute()
+            await execute(
+                """INSERT INTO audit_logs
+                       (user_id, user_email, action, table_name, record_id,
+                        old_values, new_values, ip_address, user_agent, description)
+                   VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9, $10)""",
+                user_id,
+                user_email,
+                action,
+                table_name,
+                record_id,
+                json.dumps(old_values) if old_values else None,
+                json.dumps(new_values) if new_values else None,
+                ip_address,
+                user_agent,
+                description,
+            )
 
         except Exception as e:
             logger.error(
@@ -86,7 +81,7 @@ class AuditService:
                 record_id=record_id,
             )
 
-    def get_logs(
+    async def get_logs(
         self,
         table_name: str | None = None,
         record_id: str | None = None,
@@ -98,54 +93,68 @@ class AuditService:
         limit: int = 50,
     ) -> dict[str, Any]:
         """Query audit logs with filtering and pagination."""
-        query = (
-            self.client.table("audit_logs")
-            .select("*", count="exact")
-            .order("created_at", desc=True)
-        )
+        conditions: list[str] = []
+        params: list[Any] = []
 
         if table_name:
-            query = query.eq("table_name", table_name)
+            params.append(table_name)
+            conditions.append(f"table_name = ${len(params)}")
         if record_id:
-            query = query.eq("record_id", record_id)
+            params.append(record_id)
+            conditions.append(f"record_id = ${len(params)}")
         if action:
-            query = query.eq("action", action)
+            params.append(action)
+            conditions.append(f"action = ${len(params)}")
         if user_id:
-            query = query.eq("user_id", user_id)
+            params.append(user_id)
+            conditions.append(f"user_id = ${len(params)}")
         if start_date:
-            query = query.gte("created_at", start_date)
+            params.append(start_date)
+            conditions.append(f"created_at >= ${len(params)}::timestamptz")
         if end_date:
-            query = query.lte("created_at", end_date)
+            params.append(end_date)
+            conditions.append(f"created_at <= ${len(params)}::timestamptz")
 
+        where = " AND ".join(conditions) if conditions else "TRUE"
         offset = (page - 1) * limit
-        query = query.range(offset, offset + limit - 1)
 
-        result = query.execute()
-        total = result.count or 0
+        total = await fetchval(
+            f"SELECT count(*) FROM audit_logs WHERE {where}",
+            *params,
+        ) or 0
+
+        params.append(limit)
+        params.append(offset)
+        rows = await fetch(
+            f"""SELECT * FROM audit_logs
+                WHERE {where}
+                ORDER BY created_at DESC
+                LIMIT ${len(params) - 1} OFFSET ${len(params)}""",
+            *params,
+        )
 
         return {
-            "logs": result.data,
+            "logs": rows,
             "total": total,
             "page": page,
             "limit": limit,
             "total_pages": (total + limit - 1) // limit if total > 0 else 0,
         }
 
-    def get_record_history(
+    async def get_record_history(
         self,
         table_name: str,
         record_id: str,
     ) -> list[dict]:
         """Get full audit history for a specific record."""
-        result = (
-            self.client.table("audit_logs")
-            .select("*")
-            .eq("table_name", table_name)
-            .eq("record_id", record_id)
-            .order("created_at", desc=True)
-            .execute()
+        rows = await fetch(
+            """SELECT * FROM audit_logs
+               WHERE table_name = $1 AND record_id = $2
+               ORDER BY created_at DESC""",
+            table_name,
+            record_id,
         )
-        return result.data
+        return rows
 
 
 # Singleton instance

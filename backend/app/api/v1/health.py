@@ -1,12 +1,13 @@
 """Health check endpoints for monitoring and load balancers."""
 
+import time
 from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends
 
 from app.config import get_settings, Settings
-from app.core.database import get_supabase_admin_client
+from app.core.pool import fetchval, get_pool
 from app.monitoring.metrics import get_metrics_collector
 
 router = APIRouter()
@@ -89,21 +90,23 @@ async def liveness_check() -> dict[str, Any]:
 
 
 async def _check_database() -> dict[str, Any]:
-    """Check database connectivity."""
+    """Check database connectivity via asyncpg pool."""
     try:
-        client = get_supabase_admin_client()
-        result = client.rpc("get_dashboard_stats").execute()
+        start = time.monotonic()
+        result = await fetchval("SELECT 1")
+        latency_ms = round((time.monotonic() - start) * 1000, 1)
 
-        if result.data:
-            return {
-                "status": "healthy",
-                "latency_ms": 0,  # Could measure this
-                "stats": {
-                    "plants": result.data.get("plants", {}).get("total", 0),
-                    "locations": result.data.get("locations", {}).get("total", 0),
-                },
-            }
-        return {"status": "healthy"}
+        pool = get_pool()
+        return {
+            "status": "healthy",
+            "latency_ms": latency_ms,
+            "pool": {
+                "size": pool.get_size(),
+                "free": pool.get_idle_size(),
+                "min": pool.get_min_size(),
+                "max": pool.get_max_size(),
+            },
+        }
 
     except Exception as e:
         return {

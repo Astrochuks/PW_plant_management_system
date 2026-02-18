@@ -186,46 +186,36 @@ class AlertingMiddleware(BaseHTTPMiddleware):
 
     async def _create_alert(self) -> None:
         """Create an alert in the dashboard."""
-        from app.core.database import get_supabase_admin_client
+        from app.core.pool import fetch, fetchval
 
         try:
-            client = get_supabase_admin_client()
-
             # Check if similar alert already exists (within last hour)
-            existing = (
-                client.table("notifications")
-                .select("id")
-                .eq("type", "error")
-                .eq("title", "Error Rate Spike Detected")
-                .gte("created_at", f"now() - interval '1 hour'")
-                .execute()
+            existing = await fetch(
+                """SELECT id FROM notifications
+                   WHERE type = 'error' AND title = 'Error Rate Spike Detected'
+                   AND created_at >= now() - interval '1 hour'""",
             )
 
-            if existing.data:
+            if existing:
                 return  # Alert already exists
 
             # Get admin users to notify
-            admins = (
-                client.table("users")
-                .select("id")
-                .eq("role", "admin")
-                .eq("is_active", True)
-                .execute()
+            admins = await fetch(
+                "SELECT id FROM users WHERE role = 'admin' AND is_active = true",
             )
 
             # Create notification for each admin
-            for admin in admins.data or []:
-                client.rpc(
-                    "create_notification",
-                    {
-                        "p_user_id": admin["id"],
-                        "p_type": "error",
-                        "p_title": "Error Rate Spike Detected",
-                        "p_message": f"More than {self.error_threshold} errors in the last {self.window_seconds} seconds",
-                        "p_action_url": "/dashboard/monitoring",
-                        "p_action_label": "View Details",
-                    },
-                ).execute()
+            message = f"More than {self.error_threshold} errors in the last {self.window_seconds} seconds"
+            for admin in admins:
+                await fetchval(
+                    "SELECT create_notification($1, $2, $3, $4, $5, $6)",
+                    admin["id"],
+                    "error",
+                    "Error Rate Spike Detected",
+                    message,
+                    "/dashboard/monitoring",
+                    "View Details",
+                )
 
             logger.warning(
                 "Alert created: Error rate spike",

@@ -11,7 +11,7 @@ from datetime import date, datetime
 from typing import Any
 from uuid import UUID
 
-from app.core.database import get_supabase_admin_client
+from app.core.pool import fetch, fetchrow, fetchval, execute
 from app.monitoring.logging import get_logger
 from app.services.remarks_parser import ParsedRemarks
 
@@ -21,10 +21,7 @@ logger = get_logger(__name__)
 class TransferService:
     """Service for managing plant transfers."""
 
-    def __init__(self):
-        self.client = get_supabase_admin_client()
-
-    def resolve_location(self, location_name: str) -> dict[str, Any] | None:
+    async def resolve_location(self, location_name: str) -> dict[str, Any] | None:
         """Resolve a location name or alias to a location record.
 
         Args:
@@ -39,44 +36,40 @@ class TransferService:
         name_upper = location_name.upper().strip()
 
         # Try alias lookup first (includes exact names)
-        result = (
-            self.client.table("location_aliases")
-            .select("location_id, locations(id, name)")
-            .eq("alias_normalized", name_upper)
-            .execute()
+        row = await fetchrow(
+            """SELECT l.id, l.name
+               FROM location_aliases la
+               JOIN locations l ON l.id = la.location_id
+               WHERE la.alias_normalized = $1""",
+            name_upper,
         )
-
-        if result.data and result.data[0].get("locations"):
-            loc = result.data[0]["locations"]
-            return {"id": loc["id"], "name": loc["name"]}
+        if row:
+            return row
 
         # Try partial match on aliases
-        result = (
-            self.client.table("location_aliases")
-            .select("location_id, locations(id, name)")
-            .ilike("alias_normalized", f"%{name_upper}%")
-            .execute()
+        row = await fetchrow(
+            """SELECT l.id, l.name
+               FROM location_aliases la
+               JOIN locations l ON l.id = la.location_id
+               WHERE la.alias_normalized ILIKE $1
+               LIMIT 1""",
+            f"%{name_upper}%",
         )
-
-        if result.data and result.data[0].get("locations"):
-            loc = result.data[0]["locations"]
-            return {"id": loc["id"], "name": loc["name"]}
+        if row:
+            return row
 
         # Try direct location name match
-        result = (
-            self.client.table("locations")
-            .select("id, name")
-            .ilike("name", f"%{name_upper}%")
-            .execute()
+        row = await fetchrow(
+            "SELECT id, name FROM locations WHERE name ILIKE $1 LIMIT 1",
+            f"%{name_upper}%",
         )
-
-        if result.data:
-            return result.data[0]
+        if row:
+            return row
 
         logger.warning("Could not resolve location", location_name=location_name)
         return None
 
-    def create_outbound_transfer(
+    async def create_outbound_transfer(
         self,
         plant_id: str | UUID,
         from_location_id: str | UUID,
@@ -101,53 +94,57 @@ class TransferService:
             The created transfer record or None on failure (or if duplicate exists).
         """
         # Resolve destination location
-        to_location = self.resolve_location(to_location_raw)
+        to_location = await self.resolve_location(to_location_raw)
         to_location_id = to_location["id"] if to_location else None
 
         try:
             # Check if a similar transfer already exists (pending or confirmed)
-            # to avoid duplicates on re-upload
-            existing_query = (
-                self.client.table("plant_transfers")
-                .select("id, status")
-                .eq("plant_id", str(plant_id))
-                .eq("from_location_id", str(from_location_id))
-                .eq("direction", "outbound")
-                .in_("status", ["pending", "confirmed"])
-            )
+            existing_params: list[Any] = [str(plant_id), str(from_location_id)]
+            existing_cond = ""
             if to_location_id:
-                existing_query = existing_query.eq("to_location_id", to_location_id)
+                existing_params.append(str(to_location_id))
+                existing_cond = f" AND to_location_id = ${len(existing_params)}::uuid"
 
-            existing = existing_query.execute()
+            existing = await fetch(
+                f"""SELECT id, status FROM plant_transfers
+                    WHERE plant_id = $1::uuid
+                      AND from_location_id = $2::uuid
+                      AND direction = 'outbound'
+                      AND status IN ('pending', 'confirmed')
+                      {existing_cond}""",
+                *existing_params,
+            )
 
-            if existing.data:
+            if existing:
                 logger.debug(
                     "Outbound transfer already exists, skipping",
                     plant_id=str(plant_id),
-                    existing_transfer_id=existing.data[0]["id"],
+                    existing_transfer_id=existing[0]["id"],
                 )
-                return existing.data[0]  # Return existing instead of creating duplicate
+                return existing[0]
 
-            result = (
-                self.client.table("plant_transfers")
-                .insert({
-                    "plant_id": str(plant_id),
-                    "from_location_id": str(from_location_id),
-                    "to_location_id": to_location_id,
-                    "from_location_raw": None,
-                    "to_location_raw": to_location_raw,
-                    "transfer_date": transfer_date.isoformat() if transfer_date else None,
-                    "direction": "outbound",
-                    "status": "pending",
-                    "source_submission_id": str(source_submission_id),
-                    "source_remarks": source_remarks,
-                    "parsed_confidence": confidence,
-                })
-                .execute()
+            transfer = await fetchrow(
+                """INSERT INTO plant_transfers
+                       (plant_id, from_location_id, to_location_id,
+                        from_location_raw, to_location_raw,
+                        transfer_date, direction, status,
+                        source_submission_id, source_remarks, parsed_confidence)
+                   VALUES ($1::uuid, $2::uuid, $3::uuid,
+                           NULL, $4,
+                           $5, 'outbound', 'pending',
+                           $6::uuid, $7, $8)
+                   RETURNING *""",
+                str(plant_id),
+                str(from_location_id),
+                str(to_location_id) if to_location_id else None,
+                to_location_raw,
+                transfer_date if transfer_date else None,
+                str(source_submission_id),
+                source_remarks,
+                confidence,
             )
 
-            if result.data:
-                transfer = result.data[0]
+            if transfer:
                 logger.info(
                     "Created outbound transfer",
                     transfer_id=transfer["id"],
@@ -156,11 +153,11 @@ class TransferService:
                 )
 
                 # Update plant with pending transfer ONLY - don't change location or condition
-                # Per the plan: location stays at source until confirmed at destination
-                # The pending_transfer_id tracks where the plant is going
-                self.client.table("plants_master").update({
-                    "pending_transfer_id": transfer["id"],
-                }).eq("id", str(plant_id)).execute()
+                await execute(
+                    "UPDATE plants_master SET pending_transfer_id = $1::uuid WHERE id = $2::uuid",
+                    str(transfer["id"]),
+                    str(plant_id),
+                )
 
                 return transfer
 
@@ -173,7 +170,7 @@ class TransferService:
 
         return None
 
-    def create_inbound_transfer(
+    async def create_inbound_transfer(
         self,
         plant_id: str | UUID,
         to_location_id: str | UUID,
@@ -201,55 +198,59 @@ class TransferService:
             The created transfer record or None on failure (or if duplicate exists).
         """
         # Resolve source location
-        from_location = self.resolve_location(from_location_raw)
+        from_location = await self.resolve_location(from_location_raw)
         from_location_id = from_location["id"] if from_location else None
 
         try:
-            # Check if a similar inbound transfer already exists (confirmed)
-            # to avoid duplicates on re-upload
-            existing_query = (
-                self.client.table("plant_transfers")
-                .select("id, status")
-                .eq("plant_id", str(plant_id))
-                .eq("to_location_id", str(to_location_id))
-                .eq("direction", "inbound")
-                .eq("status", "confirmed")
-            )
+            # Check if a similar inbound transfer already exists
+            existing_params: list[Any] = [str(plant_id), str(to_location_id)]
+            existing_cond = ""
             if from_location_id:
-                existing_query = existing_query.eq("from_location_id", from_location_id)
+                existing_params.append(str(from_location_id))
+                existing_cond = f" AND from_location_id = ${len(existing_params)}::uuid"
 
-            existing = existing_query.execute()
+            existing = await fetch(
+                f"""SELECT id, status FROM plant_transfers
+                    WHERE plant_id = $1::uuid
+                      AND to_location_id = $2::uuid
+                      AND direction = 'inbound'
+                      AND status = 'confirmed'
+                      {existing_cond}""",
+                *existing_params,
+            )
 
-            if existing.data:
+            if existing:
                 logger.debug(
                     "Inbound transfer already exists, skipping",
                     plant_id=str(plant_id),
-                    existing_transfer_id=existing.data[0]["id"],
+                    existing_transfer_id=existing[0]["id"],
                 )
-                return existing.data[0]  # Return existing instead of creating duplicate
+                return existing[0]
 
-            result = (
-                self.client.table("plant_transfers")
-                .insert({
-                    "plant_id": str(plant_id),
-                    "from_location_id": from_location_id,
-                    "to_location_id": str(to_location_id),
-                    "from_location_raw": from_location_raw,
-                    "to_location_raw": None,
-                    "transfer_date": transfer_date.isoformat() if transfer_date else None,
-                    "direction": "inbound",
-                    "status": "confirmed",
-                    "confirmed_at": datetime.utcnow().isoformat(),
-                    "confirmed_by_submission_id": str(source_submission_id),
-                    "source_submission_id": str(source_submission_id),
-                    "source_remarks": source_remarks,
-                    "parsed_confidence": confidence,
-                })
-                .execute()
+            transfer = await fetchrow(
+                """INSERT INTO plant_transfers
+                       (plant_id, from_location_id, to_location_id,
+                        from_location_raw, to_location_raw,
+                        transfer_date, direction, status,
+                        confirmed_at, confirmed_by_submission_id,
+                        source_submission_id, source_remarks, parsed_confidence)
+                   VALUES ($1::uuid, $2::uuid, $3::uuid,
+                           $4, NULL,
+                           $5, 'inbound', 'confirmed',
+                           now(), $6::uuid,
+                           $6::uuid, $7, $8)
+                   RETURNING *""",
+                str(plant_id),
+                str(from_location_id) if from_location_id else None,
+                str(to_location_id),
+                from_location_raw,
+                transfer_date if transfer_date else None,
+                str(source_submission_id),
+                source_remarks,
+                confidence,
             )
 
-            if result.data:
-                transfer = result.data[0]
+            if transfer:
                 logger.info(
                     "Created inbound transfer",
                     transfer_id=transfer["id"],
@@ -267,7 +268,7 @@ class TransferService:
 
         return None
 
-    def check_and_confirm_pending_transfers(
+    async def check_and_confirm_pending_transfers(
         self,
         plant_ids: list[str],
         location_id: str | UUID,
@@ -292,43 +293,43 @@ class TransferService:
         confirmed = []
 
         try:
-            # Find pending transfers for these plants going to this location
-            # Batch the query to avoid URL length limits with many plant IDs
-            all_transfers = []
-            batch_size = 50
-            for i in range(0, len(plant_ids), batch_size):
-                batch_ids = plant_ids[i:i + batch_size]
-                result = (
-                    self.client.table("plant_transfers")
-                    .select("*")
-                    .in_("plant_id", batch_ids)
-                    .eq("to_location_id", str(location_id))
-                    .eq("status", "pending")
-                    .execute()
-                )
-                all_transfers.extend(result.data or [])
+            # Build IN clause for plant_ids
+            placeholders = ", ".join(f"${i + 3}::uuid" for i in range(len(plant_ids)))
+            params: list[Any] = [str(location_id), str(submission_id)] + plant_ids
+
+            all_transfers = await fetch(
+                f"""SELECT * FROM plant_transfers
+                    WHERE plant_id IN ({placeholders})
+                      AND to_location_id = $1::uuid
+                      AND status = 'pending'""",
+                *params,
+            )
 
             for transfer in all_transfers:
                 # Confirm the transfer
-                update_result = (
-                    self.client.table("plant_transfers")
-                    .update({
-                        "status": "confirmed",
-                        "confirmed_at": datetime.utcnow().isoformat(),
-                        "confirmed_by_submission_id": str(submission_id),
-                    })
-                    .eq("id", transfer["id"])
-                    .execute()
+                updated = await fetchrow(
+                    """UPDATE plant_transfers
+                       SET status = 'confirmed',
+                           confirmed_at = now(),
+                           confirmed_by_submission_id = $2::uuid
+                       WHERE id = $1::uuid
+                       RETURNING *""",
+                    str(transfer["id"]),
+                    str(submission_id),
                 )
 
-                if update_result.data:
-                    confirmed.append(update_result.data[0])
+                if updated:
+                    confirmed.append(updated)
 
-                    # Clear pending transfer from plant
-                    self.client.table("plants_master").update({
-                        "pending_transfer_id": None,
-                        "current_location_id": str(location_id),
-                    }).eq("id", transfer["plant_id"]).execute()
+                    # Clear pending transfer from plant and update location
+                    await execute(
+                        """UPDATE plants_master
+                           SET pending_transfer_id = NULL,
+                               current_location_id = $1::uuid
+                           WHERE id = $2::uuid""",
+                        str(location_id),
+                        str(transfer["plant_id"]),
+                    )
 
                     logger.info(
                         "Confirmed pending transfer",
@@ -345,72 +346,60 @@ class TransferService:
 
         return confirmed
 
-    def get_pending_transfers(
+    async def get_pending_transfers(
         self,
         location_id: str | UUID | None = None,
         plant_id: str | UUID | None = None,
     ) -> list[dict[str, Any]]:
-        """Get pending transfers, optionally filtered by location or plant.
+        """Get pending transfers with enriched data via JOINs (no N+1).
 
         Args:
             location_id: Filter by source or destination location.
             plant_id: Filter by specific plant.
 
         Returns:
-            List of pending transfer records with enriched data.
+            List of pending transfer records with plant and location data.
         """
         try:
-            query = (
-                self.client.table("plant_transfers")
-                .select("*")
-                .eq("status", "pending")
-                .order("created_at", desc=True)
-            )
+            conds = ["t.status = 'pending'"]
+            params: list[Any] = []
 
             if plant_id:
-                query = query.eq("plant_id", str(plant_id))
+                params.append(str(plant_id))
+                conds.append(f"t.plant_id = ${len(params)}::uuid")
 
-            result = query.execute()
-            transfers = result.data or []
+            where = " AND ".join(conds)
 
-            # Enrich with plant and location data
-            enriched = []
-            for transfer in transfers:
-                # Get plant info
-                plant = None
-                if transfer.get("plant_id"):
-                    plant_result = self.client.table("plants_master").select("id, fleet_number, description").eq("id", transfer["plant_id"]).execute()
-                    plant = plant_result.data[0] if plant_result.data else None
+            rows = await fetch(
+                f"""SELECT t.*,
+                           json_build_object('id', pm.id, 'fleet_number', pm.fleet_number, 'description', pm.description) AS plant,
+                           CASE WHEN fl.id IS NOT NULL
+                                THEN json_build_object('id', fl.id, 'name', fl.name)
+                                ELSE NULL END AS from_location,
+                           CASE WHEN tl.id IS NOT NULL
+                                THEN json_build_object('id', tl.id, 'name', tl.name)
+                                ELSE NULL END AS to_location
+                    FROM plant_transfers t
+                    LEFT JOIN plants_master pm ON pm.id = t.plant_id
+                    LEFT JOIN locations fl ON fl.id = t.from_location_id
+                    LEFT JOIN locations tl ON tl.id = t.to_location_id
+                    WHERE {where}
+                    ORDER BY t.created_at DESC""",
+                *params,
+            )
 
-                # Get location names
-                from_loc = None
-                to_loc = None
-                if transfer.get("from_location_id"):
-                    loc_result = self.client.table("locations").select("id, name").eq("id", transfer["from_location_id"]).execute()
-                    from_loc = loc_result.data[0] if loc_result.data else None
-                if transfer.get("to_location_id"):
-                    loc_result = self.client.table("locations").select("id, name").eq("id", transfer["to_location_id"]).execute()
-                    to_loc = loc_result.data[0] if loc_result.data else None
-
-                enriched.append({
-                    **transfer,
-                    "plant": plant,
-                    "from_location": from_loc,
-                    "to_location": to_loc,
-                })
-
-            return enriched
+            return rows
 
         except Exception as e:
             logger.error("Failed to get pending transfers", error=str(e))
             return []
 
-    def get_plant_transfers(
+    async def get_plant_transfers(
         self,
         plant_id: str | UUID,
         limit: int = 10,
     ) -> list[dict[str, Any]]:
-        """Get transfer history for a specific plant.
+        """Get transfer history for a specific plant via JOINs (no N+1).
 
         Args:
             plant_id: The plant ID.
@@ -420,42 +409,31 @@ class TransferService:
             List of transfer records, newest first.
         """
         try:
-            result = (
-                self.client.table("plant_transfers")
-                .select("*")
-                .eq("plant_id", str(plant_id))
-                .order("created_at", desc=True)
-                .limit(limit)
-                .execute()
+            rows = await fetch(
+                """SELECT t.*,
+                          CASE WHEN fl.id IS NOT NULL
+                               THEN json_build_object('id', fl.id, 'name', fl.name)
+                               ELSE NULL END AS from_location,
+                          CASE WHEN tl.id IS NOT NULL
+                               THEN json_build_object('id', tl.id, 'name', tl.name)
+                               ELSE NULL END AS to_location
+                   FROM plant_transfers t
+                   LEFT JOIN locations fl ON fl.id = t.from_location_id
+                   LEFT JOIN locations tl ON tl.id = t.to_location_id
+                   WHERE t.plant_id = $1::uuid
+                   ORDER BY t.created_at DESC
+                   LIMIT $2""",
+                str(plant_id),
+                limit,
             )
 
-            transfers = result.data or []
-
-            # Enrich with location data
-            enriched = []
-            for transfer in transfers:
-                from_loc = None
-                to_loc = None
-                if transfer.get("from_location_id"):
-                    loc_result = self.client.table("locations").select("id, name").eq("id", transfer["from_location_id"]).execute()
-                    from_loc = loc_result.data[0] if loc_result.data else None
-                if transfer.get("to_location_id"):
-                    loc_result = self.client.table("locations").select("id, name").eq("id", transfer["to_location_id"]).execute()
-                    to_loc = loc_result.data[0] if loc_result.data else None
-
-                enriched.append({
-                    **transfer,
-                    "from_location": from_loc,
-                    "to_location": to_loc,
-                })
-
-            return enriched
+            return rows
 
         except Exception as e:
             logger.error("Failed to get plant transfers", error=str(e))
             return []
 
-    def cancel_transfer(
+    async def cancel_transfer(
         self,
         transfer_id: str | UUID,
         reason: str | None = None,
@@ -470,24 +448,21 @@ class TransferService:
             Updated transfer record or None on failure.
         """
         try:
-            result = (
-                self.client.table("plant_transfers")
-                .update({
-                    "status": "cancelled",
-                    "source_remarks": reason,
-                })
-                .eq("id", str(transfer_id))
-                .eq("status", "pending")  # Only cancel pending transfers
-                .execute()
+            transfer = await fetchrow(
+                """UPDATE plant_transfers
+                   SET status = 'cancelled', source_remarks = COALESCE($2, source_remarks)
+                   WHERE id = $1::uuid AND status = 'pending'
+                   RETURNING *""",
+                str(transfer_id),
+                reason,
             )
 
-            if result.data:
-                transfer = result.data[0]
-
+            if transfer:
                 # Clear pending transfer from plant
-                self.client.table("plants_master").update({
-                    "pending_transfer_id": None,
-                }).eq("pending_transfer_id", str(transfer_id)).execute()
+                await execute(
+                    "UPDATE plants_master SET pending_transfer_id = NULL WHERE pending_transfer_id = $1::uuid",
+                    str(transfer_id),
+                )
 
                 logger.info("Cancelled transfer", transfer_id=str(transfer_id))
                 return transfer
@@ -501,7 +476,7 @@ class TransferService:
 
         return None
 
-    def process_transfer_from_parsed(
+    async def process_transfer_from_parsed(
         self,
         plant_id: str | UUID,
         current_location_id: str | UUID,
@@ -525,7 +500,7 @@ class TransferService:
             return None
 
         if parsed.transfer_direction == "outbound" and parsed.transfer_location:
-            return self.create_outbound_transfer(
+            return await self.create_outbound_transfer(
                 plant_id=plant_id,
                 from_location_id=current_location_id,
                 to_location_raw=parsed.transfer_location,
@@ -535,7 +510,7 @@ class TransferService:
             )
 
         elif parsed.transfer_direction == "inbound" and parsed.transfer_location:
-            return self.create_inbound_transfer(
+            return await self.create_inbound_transfer(
                 plant_id=plant_id,
                 to_location_id=current_location_id,
                 from_location_raw=parsed.transfer_location,

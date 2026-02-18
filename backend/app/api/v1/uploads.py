@@ -1,5 +1,6 @@
 """File upload endpoints for weekly reports and purchase orders."""
 
+import json
 from datetime import date, datetime
 from typing import Annotated, Any
 from uuid import UUID
@@ -8,8 +9,9 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Query, Requ
 
 from app.api.v1.auth import get_client_ip
 from app.config import get_settings
-from app.core.database import get_supabase_admin_client
+from app.core.database import get_supabase_admin_client  # Storage only
 from app.core.exceptions import ValidationError, AuthenticationError, NotFoundError
+from app.core.pool import fetch, fetchrow, fetchval, execute
 from app.core.security import (
     CurrentUser,
     get_current_user,
@@ -101,30 +103,29 @@ async def upload_weekly_report(
     year = week_info.year
     week_number = week_info.week
 
-    # Create submission record
-    submission_data = {
-        "year": year,
-        "week_number": week_number,
-        "week_ending_date": str(week_ending_date),
-        "location_id": str(final_location_id),
-        "submitted_by_name": submitter_name,
-        "submitted_by_email": submitter_email,
-        "upload_token_id": token_info.get("token_id"),
-        "source_type": "upload",
-        "source_file_path": storage_path,
-        "source_file_name": file.filename,
-        "source_file_size": file_size,
-        "status": "pending",
-    }
-
-    # Use upsert in case a report for this week/location already exists
-    result = (
-        client.table("weekly_report_submissions")
-        .upsert(submission_data, on_conflict="year,week_number,location_id")
-        .execute()
+    # Create submission record (upsert in case a report for this week/location already exists)
+    row = await fetchrow(
+        """INSERT INTO weekly_report_submissions
+               (year, week_number, week_ending_date, location_id,
+                submitted_by_name, submitted_by_email, upload_token_id,
+                source_type, source_file_path, source_file_name, source_file_size, status)
+           VALUES ($1, $2, $3, $4::uuid, $5, $6, $7, 'upload', $8, $9, $10, 'pending')
+           ON CONFLICT (year, week_number, location_id) DO UPDATE SET
+               week_ending_date = EXCLUDED.week_ending_date,
+               submitted_by_name = EXCLUDED.submitted_by_name,
+               submitted_by_email = EXCLUDED.submitted_by_email,
+               upload_token_id = EXCLUDED.upload_token_id,
+               source_file_path = EXCLUDED.source_file_path,
+               source_file_name = EXCLUDED.source_file_name,
+               source_file_size = EXCLUDED.source_file_size,
+               status = 'pending'
+           RETURNING id""",
+        year, week_number, str(week_ending_date), str(final_location_id),
+        submitter_name, submitter_email, token_info.get("token_id"),
+        storage_path, file.filename, file_size,
     )
 
-    job_id = result.data[0]["id"]
+    job_id = str(row["id"])
 
     logger.info(
         "Weekly report uploaded",
@@ -227,27 +228,21 @@ async def upload_purchase_order(
             raise
 
     # Create submission record
-    submission_data = {
-        "po_number": po_number,
-        "po_date": str(po_date) if po_date else None,
-        "location_id": str(final_location_id) if final_location_id else None,
-        "submitted_by_name": submitter_name,
-        "submitted_by_email": submitter_email,
-        "upload_token_id": token_info.get("token_id"),
-        "source_type": "upload",
-        "source_file_path": storage_path,
-        "source_file_name": file.filename,
-        "source_file_size": file_size,
-        "status": "pending",
-    }
-
-    result = (
-        client.table("purchase_order_submissions")
-        .insert(submission_data)
-        .execute()
+    row = await fetchrow(
+        """INSERT INTO purchase_order_submissions
+               (po_number, po_date, location_id,
+                submitted_by_name, submitted_by_email, upload_token_id,
+                source_type, source_file_path, source_file_name, source_file_size, status)
+           VALUES ($1, $2, $3::uuid, $4, $5, $6, 'upload', $7, $8, $9, 'pending')
+           RETURNING id""",
+        po_number,
+        str(po_date) if po_date else None,
+        str(final_location_id) if final_location_id else None,
+        submitter_name, submitter_email, token_info.get("token_id"),
+        storage_path, file.filename, file_size,
     )
 
-    job_id = result.data[0]["id"]
+    job_id = str(row["id"])
 
     logger.info(
         "Purchase order uploaded",
@@ -306,22 +301,15 @@ async def get_upload_status(
     Returns:
         Current processing status and results.
     """
-    client = get_supabase_admin_client()
-
     table = "weekly_report_submissions" if upload_type == "weekly_report" else "purchase_order_submissions"
 
-    result = (
-        client.table(table)
-        .select("*")
-        .eq("id", str(job_id))
-        .single()
-        .execute()
+    data = await fetchrow(
+        f"SELECT * FROM {table} WHERE id = $1::uuid",
+        str(job_id),
     )
 
-    if not result.data:
+    if not data:
         raise NotFoundError("Upload job", str(job_id))
-
-    data = result.data
 
     return UploadStatusResponse(
         success=True,
@@ -362,34 +350,46 @@ async def list_weekly_submissions(
     Returns:
         Paginated list of submissions.
     """
-    client = get_supabase_admin_client()
-
-    query = (
-        client.table("weekly_report_submissions")
-        .select("*, locations(name)", count="exact")
-    )
+    # Build dynamic WHERE clause
+    conditions: list[str] = []
+    params: list[Any] = []
 
     if year:
-        query = query.eq("year", year)
+        params.append(year)
+        conditions.append(f"wrs.year = ${len(params)}")
     if week_number:
-        query = query.eq("week_number", week_number)
+        params.append(week_number)
+        conditions.append(f"wrs.week_number = ${len(params)}")
     if location_id:
-        query = query.eq("location_id", str(location_id))
+        params.append(str(location_id))
+        conditions.append(f"wrs.location_id = ${len(params)}::uuid")
     if status:
-        query = query.eq("status", status)
+        params.append(status)
+        conditions.append(f"wrs.status = ${len(params)}")
 
+    where = " AND ".join(conditions) if conditions else "TRUE"
     offset = (page - 1) * limit
-    query = query.range(offset, offset + limit - 1)
-    query = query.order("submitted_at", desc=True)
 
-    result = query.execute()
-    total = result.count or 0
+    # Single query: data + count in one round-trip
+    params.append(limit)
+    params.append(offset)
+    rows = await fetch(
+        f"""SELECT wrs.*, l.name AS location_name, count(*) OVER() AS _total_count
+            FROM weekly_report_submissions wrs
+            LEFT JOIN locations l ON l.id = wrs.location_id
+            WHERE {where}
+            ORDER BY wrs.submitted_at DESC
+            LIMIT ${len(params) - 1} OFFSET ${len(params)}""",
+        *params,
+    )
 
-    # Transform data to include location name and metadata
+    total = rows[0].pop("_total_count", 0) if rows else 0
+    for row in rows[1:]:
+        row.pop("_total_count", None)
+
+    # Transform data to include metadata
     submissions = []
-    for item in result.data:
-        item["location_name"] = item.get("locations", {}).get("name") if item.get("locations") else None
-        item.pop("locations", None)
+    for item in rows:
 
         # Add computed metadata
         file_size = item.get("source_file_size")
@@ -461,50 +461,36 @@ async def get_weekly_submission(
     Returns:
         Full submission details including plant records.
     """
-    client = get_supabase_admin_client()
-
-    # Get submission with location
-    submission_result = (
-        client.table("weekly_report_submissions")
-        .select("*, locations(name)")
-        .eq("id", str(submission_id))
-        .single()
-        .execute()
+    # Get submission with location name
+    submission = await fetchrow(
+        """SELECT wrs.*, l.name AS location_name
+           FROM weekly_report_submissions wrs
+           LEFT JOIN locations l ON l.id = wrs.location_id
+           WHERE wrs.id = $1::uuid""",
+        str(submission_id),
     )
 
-    if not submission_result.data:
+    if not submission:
         raise NotFoundError("Weekly report submission", str(submission_id))
 
-    submission = submission_result.data
-    submission["location_name"] = submission.get("locations", {}).get("name") if submission.get("locations") else None
-    submission.pop("locations", None)
-
-    # Get plant weekly records for this submission
-    records_result = (
-        client.table("plant_weekly_records")
-        .select("*, plants_master(fleet_number, fleet_type, description)")
-        .eq("submission_id", str(submission_id))
-        .order("plants_master(fleet_number)")
-        .execute()
+    # Get plant weekly records for this submission with plant details
+    records = await fetch(
+        """SELECT pwr.*, pm.fleet_number, pm.fleet_type, pm.description
+           FROM plant_weekly_records pwr
+           LEFT JOIN plants_master pm ON pm.id = pwr.plant_id
+           WHERE pwr.submission_id = $1::uuid
+           ORDER BY pm.fleet_number""",
+        str(submission_id),
     )
 
-    # Transform plant records
-    plant_records = []
-    for record in records_result.data:
-        plant_info = record.pop("plants_master", {}) or {}
-        plant_records.append({
-            **record,
-            "fleet_number": plant_info.get("fleet_number"),
-            "fleet_type": plant_info.get("fleet_type"),
-            "description": plant_info.get("description"),
-        })
+    plant_records = list(records)
 
     # Generate file download URL if file exists
     file_url = None
     if submission.get("source_file_path"):
         try:
-            # Create a signed URL valid for 1 hour
-            signed_url = client.storage.from_("reports").create_signed_url(
+            storage_client = get_supabase_admin_client()
+            signed_url = storage_client.storage.from_("reports").create_signed_url(
                 submission["source_file_path"],
                 expires_in=3600,  # 1 hour
             )
@@ -581,27 +567,23 @@ async def download_weekly_submission_file(
     """
     from fastapi.responses import RedirectResponse
 
-    client = get_supabase_admin_client()
-
     # Get submission to find file path
-    submission_result = (
-        client.table("weekly_report_submissions")
-        .select("source_file_path, source_file_name")
-        .eq("id", str(submission_id))
-        .single()
-        .execute()
+    row = await fetchrow(
+        "SELECT source_file_path, source_file_name FROM weekly_report_submissions WHERE id = $1::uuid",
+        str(submission_id),
     )
 
-    if not submission_result.data:
+    if not row:
         raise NotFoundError("Weekly report submission", str(submission_id))
 
-    file_path = submission_result.data.get("source_file_path")
+    file_path = row.get("source_file_path")
     if not file_path:
         raise NotFoundError("File for submission", str(submission_id))
 
-    # Create signed URL for download
+    # Create signed URL for download (Storage SDK)
     try:
-        signed_url = client.storage.from_("reports").create_signed_url(
+        storage_client = get_supabase_admin_client()
+        signed_url = storage_client.storage.from_("reports").create_signed_url(
             file_path,
             expires_in=300,  # 5 minutes
         )
@@ -639,20 +621,14 @@ async def generate_upload_token(
     Returns:
         Generated token details.
     """
-    client = get_supabase_admin_client()
-
-    result = client.rpc(
-        "generate_upload_token",
-        {
-            "p_name": name,
-            "p_location_id": str(location_id) if location_id else None,
-            "p_upload_types": upload_types,
-            "p_expires_in_days": expires_in_days,
-            "p_created_by": current_user.id,
-        },
-    ).execute()
-
-    token_data = result.data[0]
+    token_data = await fetchrow(
+        "SELECT * FROM generate_upload_token($1, $2, $3, $4, $5)",
+        name,
+        str(location_id) if location_id else None,
+        upload_types,
+        expires_in_days,
+        current_user.id,
+    )
 
     logger.info(
         "Upload token generated",
@@ -698,24 +674,18 @@ async def list_upload_tokens(
     Returns:
         List of upload tokens.
     """
-    client = get_supabase_admin_client()
-
-    query = (
-        client.table("upload_tokens")
-        .select("*, locations(name)")
-        .order("created_at", desc=True)
+    active_filter = " AND ut.is_active = true" if active_only else ""
+    rows = await fetch(
+        f"""SELECT ut.*, l.name AS location_name
+            FROM upload_tokens ut
+            LEFT JOIN locations l ON l.id = ut.location_id
+            WHERE TRUE{active_filter}
+            ORDER BY ut.created_at DESC""",
     )
-
-    if active_only:
-        query = query.eq("is_active", True)
-
-    result = query.execute()
 
     # Transform data
     tokens = []
-    for item in result.data:
-        item["location_name"] = item.get("locations", {}).get("name") if item.get("locations") else None
-        item.pop("locations", None)
+    for item in rows:
         # Don't expose the actual token in list view
         raw_token = item.get("token", "")
         item["token"] = (raw_token[:4] + "****") if raw_token and len(raw_token) >= 4 else "****"
@@ -797,12 +767,11 @@ async def preview_weekly_report(
     # Read file content
     file_content = await file.read()
 
-    # Extract preview
-    preview = extract_weekly_report_preview(file_content)
+    # Extract preview (now async)
+    preview = await extract_weekly_report_preview(file_content)
 
     # Get list of all locations for frontend dropdown
-    client = get_supabase_admin_client()
-    locations_result = client.table("locations").select("id, name").order("name").execute()
+    locations_rows = await fetch("SELECT id, name FROM locations ORDER BY name")
 
     return {
         "success": True,
@@ -820,7 +789,7 @@ async def preview_weekly_report(
             "plants": preview["plants_preview"],
         },
         "validation_warnings": preview["validation_warnings"],
-        "available_locations": [{"id": loc["id"], "name": loc["name"]} for loc in locations_result.data],
+        "available_locations": [{"id": loc["id"], "name": loc["name"]} for loc in locations_rows],
     }
 
 
@@ -853,7 +822,6 @@ async def admin_upload_weekly_report(
         Upload confirmation with job ID for status tracking.
     """
     settings = get_settings()
-    client = get_supabase_admin_client()
 
     # Validate file
     _validate_upload_file(file, settings)
@@ -869,8 +837,8 @@ async def admin_upload_weekly_report(
     extraction_warnings = []
 
     if not location_id or not week_ending_date:
-        # Extract metadata from file
-        extracted = extract_and_resolve_metadata(file_content)
+        # Extract metadata from file (now async)
+        extracted = await extract_and_resolve_metadata(file_content)
         extraction_warnings = extracted.get("extraction_warnings", [])
 
         if not location_id:
@@ -900,27 +868,25 @@ async def admin_upload_weekly_report(
 
     # Get location name if not already set
     if not location_name:
-        location_result = (
-            client.table("locations")
-            .select("name")
-            .eq("id", str(final_location_id))
-            .single()
-            .execute()
+        loc_row = await fetchrow(
+            "SELECT name FROM locations WHERE id = $1::uuid",
+            str(final_location_id),
         )
-        location_name = location_result.data.get("name") if location_result.data else "Unknown"
+        location_name = loc_row["name"] if loc_row else "Unknown"
 
     # Store file in Supabase Storage
+    storage_client = get_supabase_admin_client()
     storage_path = f"weekly-reports/{final_location_id}/{final_week_ending_date}/{file.filename}"
 
     try:
-        client.storage.from_("reports").upload(
+        storage_client.storage.from_("reports").upload(
             storage_path,
             file_content,
             {"content-type": file.content_type or "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
         )
     except Exception as e:
         if "already exists" in str(e).lower():
-            client.storage.from_("reports").update(storage_path, file_content)
+            storage_client.storage.from_("reports").update(storage_path, file_content)
         else:
             raise
 
@@ -929,28 +895,28 @@ async def admin_upload_weekly_report(
     year = week_info.year
     week_number = week_info.week
 
-    # Create submission record
-    submission_data = {
-        "year": year,
-        "week_number": week_number,
-        "week_ending_date": str(final_week_ending_date),
-        "location_id": str(final_location_id),
-        "submitted_by_name": current_user.full_name,
-        "submitted_by_email": current_user.email,
-        "source_type": "upload",
-        "source_file_path": storage_path,
-        "source_file_name": file.filename,
-        "source_file_size": file_size,
-        "status": "pending",
-    }
-
-    result = (
-        client.table("weekly_report_submissions")
-        .upsert(submission_data, on_conflict="year,week_number,location_id")
-        .execute()
+    # Create submission record (upsert)
+    row = await fetchrow(
+        """INSERT INTO weekly_report_submissions
+               (year, week_number, week_ending_date, location_id,
+                submitted_by_name, submitted_by_email,
+                source_type, source_file_path, source_file_name, source_file_size, status)
+           VALUES ($1, $2, $3, $4::uuid, $5, $6, 'upload', $7, $8, $9, 'pending')
+           ON CONFLICT (year, week_number, location_id) DO UPDATE SET
+               week_ending_date = EXCLUDED.week_ending_date,
+               submitted_by_name = EXCLUDED.submitted_by_name,
+               submitted_by_email = EXCLUDED.submitted_by_email,
+               source_file_path = EXCLUDED.source_file_path,
+               source_file_name = EXCLUDED.source_file_name,
+               source_file_size = EXCLUDED.source_file_size,
+               status = 'pending'
+           RETURNING id""",
+        year, week_number, str(final_week_ending_date), str(final_location_id),
+        current_user.full_name, current_user.email,
+        storage_path, file.filename, file_size,
     )
 
-    job_id = result.data[0]["id"]
+    job_id = str(row["id"])
 
     # Build message with auto-detection info
     message = "File uploaded successfully. Processing started."
@@ -1034,7 +1000,6 @@ async def admin_upload_purchase_order(
         Upload confirmation with job ID.
     """
     settings = get_settings()
-    client = get_supabase_admin_client()
 
     # Validate file
     _validate_upload_file(file, settings)
@@ -1043,38 +1008,34 @@ async def admin_upload_purchase_order(
     file_content = await file.read()
     file_size = len(file_content)
 
-    # Store file
+    # Store file (Storage SDK)
+    storage_client = get_supabase_admin_client()
     storage_path = f"purchase-orders/{location_id or 'general'}/{po_date or 'undated'}/{file.filename}"
 
     try:
-        client.storage.from_("reports").upload(storage_path, file_content)
+        storage_client.storage.from_("reports").upload(storage_path, file_content)
     except Exception as e:
         if "already exists" in str(e).lower():
-            client.storage.from_("reports").update(storage_path, file_content)
+            storage_client.storage.from_("reports").update(storage_path, file_content)
         else:
             raise
 
     # Create submission record
-    submission_data = {
-        "po_number": po_number,
-        "po_date": str(po_date) if po_date else None,
-        "location_id": str(location_id) if location_id else None,
-        "submitted_by_name": current_user.full_name,
-        "submitted_by_email": current_user.email,
-        "source_type": "upload",
-        "source_file_path": storage_path,
-        "source_file_name": file.filename,
-        "source_file_size": file_size,
-        "status": "pending",
-    }
-
-    result = (
-        client.table("purchase_order_submissions")
-        .insert(submission_data)
-        .execute()
+    row = await fetchrow(
+        """INSERT INTO purchase_order_submissions
+               (po_number, po_date, location_id,
+                submitted_by_name, submitted_by_email,
+                source_type, source_file_path, source_file_name, source_file_size, status)
+           VALUES ($1, $2, $3::uuid, $4, $5, 'upload', $6, $7, $8, 'pending')
+           RETURNING id""",
+        po_number,
+        str(po_date) if po_date else None,
+        str(location_id) if location_id else None,
+        current_user.full_name, current_user.email,
+        storage_path, file.filename, file_size,
     )
 
-    job_id = result.data[0]["id"]
+    job_id = str(row["id"])
 
     logger.info(
         "Purchase order uploaded by admin",
@@ -1160,7 +1121,6 @@ async def preview_weekly_report(
     )
 
     settings = get_settings()
-    client = get_supabase_admin_client()
 
     # Validate file
     _validate_upload_file(file, settings)
@@ -1194,15 +1154,18 @@ async def preview_weekly_report(
         raise ValidationError("No fleet_number column found in file")
 
     # Get all locations for dropdown
-    locations_result = client.table("locations").select("id, name").execute()
-    available_locations = locations_result.data or []
+    available_locations = await fetch("SELECT id, name FROM locations")
 
     # Get location aliases for transfer matching
-    aliases_result = client.table("location_aliases").select("alias, location_id, locations(name)").execute()
+    alias_rows = await fetch(
+        """SELECT la.alias, la.location_id, l.name AS location_name
+           FROM location_aliases la
+           LEFT JOIN locations l ON l.id = la.location_id""",
+    )
     location_aliases = {}
-    for alias_row in aliases_result.data or []:
-        if alias_row.get("locations"):
-            location_aliases[alias_row["alias"]] = alias_row["locations"]["name"]
+    for alias_row in alias_rows:
+        if alias_row.get("location_name"):
+            location_aliases[alias_row["alias"]] = alias_row["location_name"]
 
     # Get current location name
     current_location = next((loc for loc in available_locations if loc["id"] == str(location_id)), None)
@@ -1210,14 +1173,14 @@ async def preview_weekly_report(
 
     # Get most recent week's data at this location to detect missing/new plants
     # (not just week N-1, to handle gaps in uploads)
-    prev_week_result = (
-        client.table("plant_weekly_records")
-        .select("plant_id, year, week_number, plants_master(fleet_number)")
-        .eq("location_id", str(location_id))
-        .order("year", desc=True)
-        .order("week_number", desc=True)
-        .limit(1000)
-        .execute()
+    prev_week_rows = await fetch(
+        """SELECT pwr.plant_id, pwr.year, pwr.week_number, pm.fleet_number
+           FROM plant_weekly_records pwr
+           LEFT JOIN plants_master pm ON pm.id = pwr.plant_id
+           WHERE pwr.location_id = $1::uuid
+           ORDER BY pwr.year DESC, pwr.week_number DESC
+           LIMIT 1000""",
+        str(location_id),
     )
 
     # Find the most recent week that is before the current upload
@@ -1225,7 +1188,7 @@ async def preview_weekly_report(
     last_known_year = None
     prev_week_fleet_numbers = set()
 
-    for record in prev_week_result.data or []:
+    for record in prev_week_rows:
         rec_year = record.get("year", 0)
         rec_week = record.get("week_number", 0)
 
@@ -1240,8 +1203,8 @@ async def preview_weekly_report(
 
         # Only include records from that same week
         if (rec_year, rec_week) == (last_known_year, last_known_week):
-            if record.get("plants_master"):
-                prev_week_fleet_numbers.add(record["plants_master"]["fleet_number"])
+            if record.get("fleet_number"):
+                prev_week_fleet_numbers.add(record["fleet_number"])
         else:
             break  # We've passed the most recent week, stop
 
@@ -1260,29 +1223,23 @@ async def preview_weekly_report(
         if fn:
             all_fleet_numbers_in_file.add(fn)
 
-    # Batch lookup existing plants with their current locations
+    # Batch lookup existing plants with their current locations (single query with ANY)
     existing_plants_map = {}  # fleet_number -> {current_location_id, current_location_name}
     if all_fleet_numbers_in_file:
-        fleet_list = list(all_fleet_numbers_in_file)
-        # Query in batches of 100 to avoid URL length limits
-        for batch_start in range(0, len(fleet_list), 100):
-            batch = fleet_list[batch_start:batch_start + 100]
-            existing_result = (
-                client.table("plants_master")
-                .select("fleet_number, current_location_id")
-                .in_("fleet_number", batch)
-                .execute()
-            )
-            for p in existing_result.data or []:
-                loc_id = p.get("current_location_id")
-                loc_name = None
-                if loc_id:
-                    loc = next((l for l in available_locations if l["id"] == loc_id), None)
-                    loc_name = loc["name"] if loc else None
-                existing_plants_map[p["fleet_number"]] = {
-                    "current_location_id": loc_id,
-                    "current_location_name": loc_name,
-                }
+        existing_rows = await fetch(
+            "SELECT fleet_number, current_location_id FROM plants_master WHERE fleet_number = ANY($1::text[])",
+            list(all_fleet_numbers_in_file),
+        )
+        for p in existing_rows:
+            loc_id = p.get("current_location_id")
+            loc_name = None
+            if loc_id:
+                loc = next((l for l in available_locations if str(l["id"]) == str(loc_id)), None)
+                loc_name = loc["name"] if loc else None
+            existing_plants_map[p["fleet_number"]] = {
+                "current_location_id": str(loc_id) if loc_id else None,
+                "current_location_name": loc_name,
+            }
 
     # Process each row in file
     preview_plants = []
@@ -1414,32 +1371,21 @@ async def preview_weekly_report(
     missing_plants = []
 
     if missing_fleet_numbers:
-        # Get details of missing plants
-        seen_missing = set()
-        for record in prev_week_result.data or []:
-            if record.get("plants_master"):
-                fleet_num = record["plants_master"]["fleet_number"]
-                if fleet_num in missing_fleet_numbers and fleet_num not in seen_missing:
-                    seen_missing.add(fleet_num)
-                    # Get plant details
-                    plant_result = (
-                        client.table("plants_master")
-                        .select("id, fleet_number, description, condition")
-                        .eq("fleet_number", fleet_num)
-                        .single()
-                        .execute()
-                    )
-
-                    if plant_result.data:
-                        missing_plants.append({
-                            "fleet_number": fleet_num,
-                            "description": plant_result.data.get("description"),
-                            "last_seen_week": last_known_week,
-                            "last_seen_year": last_known_year,
-                            "last_location_id": str(location_id),
-                            "last_location_name": current_location_name,
-                            "last_condition": plant_result.data.get("condition"),
-                        })
+        # Batch lookup missing plant details (no N+1)
+        missing_plant_rows = await fetch(
+            "SELECT id, fleet_number, description, condition FROM plants_master WHERE fleet_number = ANY($1::text[])",
+            list(missing_fleet_numbers),
+        )
+        for p in missing_plant_rows:
+            missing_plants.append({
+                "fleet_number": p["fleet_number"],
+                "description": p.get("description"),
+                "last_seen_week": last_known_week,
+                "last_seen_year": last_known_year,
+                "last_location_id": str(location_id),
+                "last_location_name": current_location_name,
+                "last_condition": p.get("condition"),
+            })
 
     # Calculate summary stats
     condition_counts = {}
@@ -1531,10 +1477,6 @@ async def confirm_weekly_report(
     Returns:
         Success response with created/updated counts.
     """
-    import json
-
-    client = get_supabase_admin_client()
-
     # Parse JSON data
     try:
         validated_plants = json.loads(plants_json)
@@ -1555,51 +1497,41 @@ async def confirm_weekly_report(
     )
 
     # Check for existing submission
-    existing = (
-        client.table("weekly_report_submissions")
-        .select("id, status")
-        .eq("year", year)
-        .eq("week_number", week_number)
-        .eq("location_id", str(location_id))
-        .execute()
+    existing_rows = await fetch(
+        """SELECT id, status FROM weekly_report_submissions
+           WHERE year = $1 AND week_number = $2 AND location_id = $3::uuid""",
+        year, week_number, str(location_id),
     )
 
-    if existing.data:
-        submission_id = existing.data[0]["id"]
-        # Clean up existing data for reprocessing
-        await cleanup_submission_data(client, submission_id)
+    if existing_rows:
+        submission_id = str(existing_rows[0]["id"])
+        # Clean up existing data for reprocessing (already migrated to asyncpg)
+        await cleanup_submission_data(submission_id)
         # Update submission metadata for the re-upload
-        client.table("weekly_report_submissions").update({
-            "submitted_by_name": current_user.full_name,
-            "submitted_by_email": current_user.email,
-            "submitted_at": datetime.utcnow().isoformat(),
-            "status": "pending",
-            "week_ending_date": str(week_ending_date),
-            "plants_processed": 0,
-            "plants_created": 0,
-            "plants_updated": 0,
-        }).eq("id", submission_id).execute()
+        await execute(
+            """UPDATE weekly_report_submissions SET
+                   submitted_by_name = $2, submitted_by_email = $3,
+                   submitted_at = now(), status = 'pending',
+                   week_ending_date = $4,
+                   plants_processed = 0, plants_created = 0, plants_updated = 0
+               WHERE id = $1::uuid""",
+            submission_id, current_user.full_name, current_user.email,
+            str(week_ending_date),
+        )
         logger.info("Reprocessing existing submission", submission_id=submission_id)
     else:
         # Create new submission
-        submission_data = {
-            "year": year,
-            "week_number": week_number,
-            "week_ending_date": str(week_ending_date),
-            "location_id": str(location_id),
-            "submitted_by_name": current_user.full_name,
-            "submitted_by_email": current_user.email,
-            "source_type": "admin_validated",
-            "status": "pending",
-        }
-
-        result = (
-            client.table("weekly_report_submissions")
-            .insert(submission_data)
-            .execute()
+        row = await fetchrow(
+            """INSERT INTO weekly_report_submissions
+                   (year, week_number, week_ending_date, location_id,
+                    submitted_by_name, submitted_by_email, source_type, status)
+               VALUES ($1, $2, $3, $4::uuid, $5, $6, 'admin_validated', 'pending')
+               RETURNING id""",
+            year, week_number, str(week_ending_date), str(location_id),
+            current_user.full_name, current_user.email,
         )
 
-        submission_id = result.data[0]["id"]
+        submission_id = str(row["id"])
         logger.info("Created new submission", submission_id=submission_id)
 
     # Save confirmed data (runs in background)

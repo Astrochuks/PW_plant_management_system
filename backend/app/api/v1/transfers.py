@@ -6,11 +6,14 @@ Provides endpoints for:
 - Transfer history for plants
 """
 
+import json
+from datetime import datetime
 from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.core.pool import fetch, fetchrow, fetchval, execute
 from app.core.security import CurrentUser, require_admin, require_management_or_admin
 from app.services.transfer_service import get_transfer_service
 
@@ -29,85 +32,64 @@ async def list_transfers(
     """List plant transfers with optional filters.
 
     Returns transfers ordered by creation date (newest first).
+    Single JOIN query replaces previous batch-fetch pattern.
     """
-    service = get_transfer_service()
+    conds: list[str] = []
+    params: list[Any] = []
 
-    try:
-        # Use count="exact" on main query to avoid a duplicate count query
-        query = (
-            service.client.table("plant_transfers")
-            .select("*", count="exact")
-            .order("created_at", desc=True)
-            .range(offset, offset + limit - 1)
-        )
+    if status:
+        params.append(status)
+        conds.append(f"t.status = ${len(params)}")
+    if plant_id:
+        params.append(str(plant_id))
+        conds.append(f"t.plant_id = ${len(params)}::uuid")
+    if location_id:
+        params.append(str(location_id))
+        n = len(params)
+        conds.append(f"(t.from_location_id = ${n}::uuid OR t.to_location_id = ${n}::uuid)")
 
-        if status:
-            query = query.eq("status", status)
+    where = " AND ".join(conds) if conds else "TRUE"
 
-        if plant_id:
-            query = query.eq("plant_id", str(plant_id))
+    # Single query: data + count in one round-trip
+    params.append(limit)
+    params.append(offset)
+    data = await fetch(
+        f"""SELECT t.*,
+                   json_build_object('id', pm.id, 'fleet_number', pm.fleet_number, 'description', pm.description) AS plant,
+                   CASE WHEN fl.id IS NOT NULL
+                        THEN json_build_object('id', fl.id, 'name', fl.name)
+                        ELSE NULL END AS from_location,
+                   CASE WHEN tl.id IS NOT NULL
+                        THEN json_build_object('id', tl.id, 'name', tl.name)
+                        ELSE NULL END AS to_location,
+                   ws.week_number AS source_week,
+                   ws.year AS source_year,
+                   ws.week_ending_date,
+                   count(*) OVER() AS _total_count
+            FROM plant_transfers t
+            LEFT JOIN plants_master pm ON pm.id = t.plant_id
+            LEFT JOIN locations fl ON fl.id = t.from_location_id
+            LEFT JOIN locations tl ON tl.id = t.to_location_id
+            LEFT JOIN weekly_report_submissions ws ON ws.id = t.source_submission_id
+            WHERE {where}
+            ORDER BY t.created_at DESC
+            LIMIT ${len(params) - 1} OFFSET ${len(params)}""",
+        *params,
+    )
 
-        if location_id:
-            query = query.or_(
-                f"from_location_id.eq.{str(location_id)},to_location_id.eq.{str(location_id)}"
-            )
+    total = data[0].pop("_total_count", 0) if data else 0
+    for row in data[1:]:
+        row.pop("_total_count", None)
 
-        result = query.execute()
-
-        # Batch collect IDs for enrichment (avoid N+1 queries)
-        transfers_list = result.data or []
-        plant_ids = list({t["plant_id"] for t in transfers_list if t.get("plant_id")})
-        location_ids = list({
-            lid for t in transfers_list
-            for lid in [t.get("from_location_id"), t.get("to_location_id")]
-            if lid
-        })
-        submission_ids = list({t["source_submission_id"] for t in transfers_list if t.get("source_submission_id")})
-
-        # Batch fetch plants
-        plants_map: dict[str, dict] = {}
-        if plant_ids:
-            plants_result = service.client.table("plants_master").select("id, fleet_number, description").in_("id", plant_ids).execute()
-            plants_map = {p["id"]: p for p in (plants_result.data or [])}
-
-        # Batch fetch locations
-        locations_map: dict[str, dict] = {}
-        if location_ids:
-            locs_result = service.client.table("locations").select("id, name").in_("id", location_ids).execute()
-            locations_map = {loc["id"]: loc for loc in (locs_result.data or [])}
-
-        # Batch fetch source submissions for week info
-        submissions_map: dict[str, dict] = {}
-        if submission_ids:
-            subs_result = service.client.table("weekly_report_submissions").select("id, year, week_number, week_ending_date").in_("id", submission_ids).execute()
-            submissions_map = {s["id"]: s for s in (subs_result.data or [])}
-
-        # Enrich transfers
-        enriched_data = []
-        for transfer in transfers_list:
-            sub = submissions_map.get(transfer.get("source_submission_id", ""), {})
-            enriched_data.append({
-                **transfer,
-                "plant": plants_map.get(transfer.get("plant_id")),
-                "from_location": locations_map.get(transfer.get("from_location_id")),
-                "to_location": locations_map.get(transfer.get("to_location_id")),
-                "source_week": sub.get("week_number"),
-                "source_year": sub.get("year"),
-                "week_ending_date": sub.get("week_ending_date"),
-            })
-
-        return {
-            "success": True,
-            "data": enriched_data,
-            "pagination": {
-                "total": result.count,
-                "limit": limit,
-                "offset": offset,
-            },
-        }
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch transfers: {str(e)}")
+    return {
+        "success": True,
+        "data": data,
+        "pagination": {
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        },
+    }
 
 
 @router.get("/pending")
@@ -121,8 +103,7 @@ async def list_pending_transfers(
     the destination location's report yet.
     """
     service = get_transfer_service()
-
-    transfers = service.get_pending_transfers(location_id=location_id)
+    transfers = await service.get_pending_transfers(location_id=location_id)
 
     return {
         "success": True,
@@ -139,8 +120,7 @@ async def get_plant_transfers(
 ) -> dict[str, Any]:
     """Get transfer history for a specific plant."""
     service = get_transfer_service()
-
-    transfers = service.get_plant_transfers(plant_id=plant_id, limit=limit)
+    transfers = await service.get_plant_transfers(plant_id=plant_id, limit=limit)
 
     return {
         "success": True,
@@ -155,29 +135,38 @@ async def get_transfer(
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
 ) -> dict[str, Any]:
     """Get details of a specific transfer."""
-    service = get_transfer_service()
-
-    result = (
-        service.client.table("plant_transfers")
-        .select(
-            "*, "
-            "plants_master(id, fleet_number, description, status), "
-            "from_location:locations!from_location_id(id, name), "
-            "to_location:locations!to_location_id(id, name), "
-            "source_submission:weekly_report_submissions!source_submission_id(id, week_ending_date, location_id), "
-            "confirmed_submission:weekly_report_submissions!confirmed_by_submission_id(id, week_ending_date, location_id)"
-        )
-        .eq("id", str(transfer_id))
-        .single()
-        .execute()
+    row = await fetchrow(
+        """SELECT t.*,
+                  json_build_object('id', pm.id, 'fleet_number', pm.fleet_number,
+                                    'description', pm.description, 'status', pm.status) AS plants_master,
+                  CASE WHEN fl.id IS NOT NULL
+                       THEN json_build_object('id', fl.id, 'name', fl.name)
+                       ELSE NULL END AS from_location,
+                  CASE WHEN tl.id IS NOT NULL
+                       THEN json_build_object('id', tl.id, 'name', tl.name)
+                       ELSE NULL END AS to_location,
+                  CASE WHEN ss.id IS NOT NULL
+                       THEN json_build_object('id', ss.id, 'week_ending_date', ss.week_ending_date, 'location_id', ss.location_id)
+                       ELSE NULL END AS source_submission,
+                  CASE WHEN cs.id IS NOT NULL
+                       THEN json_build_object('id', cs.id, 'week_ending_date', cs.week_ending_date, 'location_id', cs.location_id)
+                       ELSE NULL END AS confirmed_submission
+           FROM plant_transfers t
+           LEFT JOIN plants_master pm ON pm.id = t.plant_id
+           LEFT JOIN locations fl ON fl.id = t.from_location_id
+           LEFT JOIN locations tl ON tl.id = t.to_location_id
+           LEFT JOIN weekly_report_submissions ss ON ss.id = t.source_submission_id
+           LEFT JOIN weekly_report_submissions cs ON cs.id = t.confirmed_by_submission_id
+           WHERE t.id = $1::uuid""",
+        str(transfer_id),
     )
 
-    if not result.data:
+    if not row:
         raise HTTPException(status_code=404, detail="Transfer not found")
 
     return {
         "success": True,
-        "data": result.data,
+        "data": row,
     }
 
 
@@ -191,61 +180,61 @@ async def confirm_transfer(
     This updates the transfer status to confirmed and updates
     the plant's current location to the destination.
     """
-    service = get_transfer_service()
-
     # Get the transfer
-    transfer = (
-        service.client.table("plant_transfers")
-        .select("*")
-        .eq("id", str(transfer_id))
-        .single()
-        .execute()
+    transfer = await fetchrow(
+        "SELECT * FROM plant_transfers WHERE id = $1::uuid",
+        str(transfer_id),
     )
 
-    if not transfer.data:
+    if not transfer:
         raise HTTPException(status_code=404, detail="Transfer not found")
 
-    if transfer.data["status"] != "pending":
+    if transfer["status"] != "pending":
         raise HTTPException(
             status_code=400,
-            detail=f"Transfer is already {transfer.data['status']}"
+            detail=f"Transfer is already {transfer['status']}"
         )
 
     # Confirm the transfer
-    from datetime import datetime
-
-    result = (
-        service.client.table("plant_transfers")
-        .update({
-            "status": "confirmed",
-            "confirmed_at": datetime.utcnow().isoformat(),
-        })
-        .eq("id", str(transfer_id))
-        .execute()
+    updated = await fetchrow(
+        """UPDATE plant_transfers
+           SET status = 'confirmed', confirmed_at = now()
+           WHERE id = $1::uuid
+           RETURNING *""",
+        str(transfer_id),
     )
 
     # Update plant location and clear pending transfer
-    service.client.table("plants_master").update({
-        "current_location_id": transfer.data["to_location_id"],
-        "pending_transfer_id": None,
-        "status": "working",  # Reset from in_transit
-    }).eq("id", transfer.data["plant_id"]).execute()
+    await execute(
+        """UPDATE plants_master
+           SET current_location_id = $1::uuid,
+               pending_transfer_id = NULL,
+               status = 'working'
+           WHERE id = $2::uuid""",
+        str(transfer["to_location_id"]),
+        str(transfer["plant_id"]),
+    )
 
-    # Create location history record
-    service.client.table("plant_location_history").update({
-        "end_date": datetime.utcnow().date().isoformat(),
-    }).eq("plant_id", transfer.data["plant_id"]).is_("end_date", "null").execute()
-
-    service.client.table("plant_location_history").insert({
-        "plant_id": transfer.data["plant_id"],
-        "location_id": transfer.data["to_location_id"],
-        "start_date": datetime.utcnow().date().isoformat(),
-        "transfer_reason": "Manual transfer confirmation",
-    }).execute()
+    # Close current location history and create new one
+    today = datetime.utcnow().date()
+    await execute(
+        """UPDATE plant_location_history
+           SET end_date = $1::date
+           WHERE plant_id = $2::uuid AND end_date IS NULL""",
+        today,
+        str(transfer["plant_id"]),
+    )
+    await execute(
+        """INSERT INTO plant_location_history (plant_id, location_id, start_date, transfer_reason)
+           VALUES ($1::uuid, $2::uuid, $3::date, 'Manual transfer confirmation')""",
+        str(transfer["plant_id"]),
+        str(transfer["to_location_id"]),
+        today,
+    )
 
     return {
         "success": True,
-        "data": result.data[0] if result.data else None,
+        "data": updated,
         "message": "Transfer confirmed successfully",
     }
 
@@ -262,8 +251,7 @@ async def cancel_transfer(
     status from in_transit.
     """
     service = get_transfer_service()
-
-    result = service.cancel_transfer(transfer_id=transfer_id, reason=reason)
+    result = await service.cancel_transfer(transfer_id=transfer_id, reason=reason)
 
     if not result:
         raise HTTPException(
@@ -288,14 +276,12 @@ async def get_transfer_stats(
     Uses a single RPC that scans plant_transfers once with COUNT FILTER
     instead of 4-5 separate COUNT queries.
     """
-    service = get_transfer_service()
+    raw = await fetchval(
+        "SELECT get_transfer_stats_summary($1::timestamptz)",
+        since,
+    )
 
-    result = service.client.rpc(
-        "get_transfer_stats_summary",
-        {"p_since": since},
-    ).execute()
-
-    stats = result.data if result.data else {}
+    stats = (json.loads(raw) if isinstance(raw, str) else raw) if raw else {}
 
     return {
         "success": True,

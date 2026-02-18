@@ -1,0 +1,36 @@
+services:
+  - type: web
+    name: pw-plant-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    region: frankfurt  # EU — close to Supabase DB for low latency
+    plan: free
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DEBUG
+        value: "false"
+      - key: LOG_LEVEL
+        value: INFO
+      - key: TRUST_PROXY
+        value: "true"
+      # CORS — set this after you know your Vercel frontend URL
+      - key: CORS_ORIGINS
+        sync: false  # Set manually in Render dashboard
+      # Secrets — set these in Render dashboard (not in yaml)
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+    healthCheckPath: /api/v1/health

@@ -11,13 +11,16 @@ Uses AI-powered remarks parsing for:
 """
 
 import io
+import json
+import re
 from datetime import datetime
 from typing import Any
 
 import pandas as pd
 
 from app.config import get_settings
-from app.core.database import get_supabase_admin_client
+from app.core.database import get_supabase_admin_client  # Only for Storage downloads
+from app.core.pool import fetch, fetchrow, fetchval, execute, executemany
 from app.monitoring.logging import get_logger
 from app.services.remarks_parser import (
     parse_remarks_batch,
@@ -29,14 +32,22 @@ from app.services.transfer_service import get_transfer_service
 logger = get_logger(__name__)
 
 
-async def cleanup_submission_data(client, submission_id: str) -> dict[str, int]:
+def _parse_count(status: str) -> int:
+    """Parse row count from asyncpg status string like 'DELETE 5' or 'UPDATE 3'."""
+    if status:
+        parts = status.split()
+        if parts and parts[-1].isdigit():
+            return int(parts[-1])
+    return 0
+
+
+async def cleanup_submission_data(submission_id: str) -> dict[str, int]:
     """Delete all data related to a submission for reprocessing.
 
     This enables "smart reprocessing" - when a user re-uploads a file for the
     same week/location, we clean up old data and process fresh.
 
     Args:
-        client: Supabase client.
         submission_id: The submission ID to clean up.
 
     Returns:
@@ -49,59 +60,40 @@ async def cleanup_submission_data(client, submission_id: str) -> dict[str, int]:
     }
 
     try:
-        # 1. Get affected plant IDs from weekly records
-        records = (
-            client.table("plant_weekly_records")
-            .select("plant_id")
-            .eq("submission_id", submission_id)
-            .execute()
+        # 1. Delete weekly records for this submission
+        status = await execute(
+            "DELETE FROM plant_weekly_records WHERE submission_id = $1::uuid",
+            submission_id,
         )
-        plant_ids = [r["plant_id"] for r in records.data] if records.data else []
+        cleanup_stats["weekly_records_deleted"] = _parse_count(status)
 
-        # 2. Delete weekly records for this submission
-        if plant_ids:
-            delete_result = (
-                client.table("plant_weekly_records")
-                .delete()
-                .eq("submission_id", submission_id)
-                .execute()
-            )
-            cleanup_stats["weekly_records_deleted"] = len(delete_result.data) if delete_result.data else 0
-
-        # 3. Delete transfers sourced from this submission
-        transfer_delete = (
-            client.table("plant_transfers")
-            .delete()
-            .eq("source_submission_id", submission_id)
-            .execute()
+        # 2. Delete transfers sourced from this submission
+        status = await execute(
+            "DELETE FROM plant_transfers WHERE source_submission_id = $1::uuid",
+            submission_id,
         )
-        cleanup_stats["transfers_deleted"] = len(transfer_delete.data) if transfer_delete.data else 0
+        cleanup_stats["transfers_deleted"] = _parse_count(status)
 
-        # 4. Delete events sourced from this submission (if tracked)
-        # Note: plant_events may not have submission_id - skip if not applicable
+        # 3. Delete events sourced from this submission (if tracked)
         try:
-            events_delete = (
-                client.table("plant_events")
-                .delete()
-                .eq("submission_id", submission_id)
-                .execute()
+            status = await execute(
+                "DELETE FROM plant_events WHERE submission_id = $1::uuid",
+                submission_id,
             )
-            cleanup_stats["events_deleted"] = len(events_delete.data) if events_delete.data else 0
+            cleanup_stats["events_deleted"] = _parse_count(status)
         except Exception:
             pass  # Column may not exist
 
-        # 5. Reset submission stats
-        client.table("weekly_report_submissions").update({
-            "status": "pending",
-            "plants_processed": 0,
-            "plants_created": 0,
-            "plants_updated": 0,
-            "processing_stats": {},
-            "errors": None,
-            "warnings": None,
-            "processing_started_at": None,
-            "processing_completed_at": None,
-        }).eq("id", submission_id).execute()
+        # 4. Reset submission stats
+        await execute(
+            """UPDATE weekly_report_submissions SET
+                status = 'pending', plants_processed = 0, plants_created = 0,
+                plants_updated = 0, processing_stats = '{}'::jsonb,
+                errors = NULL, warnings = NULL,
+                processing_started_at = NULL, processing_completed_at = NULL
+            WHERE id = $1::uuid""",
+            submission_id,
+        )
 
         logger.info(
             "Cleaned up submission data for reprocessing",
@@ -469,7 +461,6 @@ async def process_weekly_report(
         Processing result with stats.
     """
     settings = get_settings()
-    client = get_supabase_admin_client()
 
     result = {
         "success": False,
@@ -504,31 +495,34 @@ async def process_weekly_report(
     try:
         # If reprocessing, cleanup existing data first
         if is_reprocess:
-            cleanup_stats = await cleanup_submission_data(client, job_id)
+            cleanup_stats = await cleanup_submission_data(job_id)
             logger.info("Cleaned up for reprocessing", job_id=job_id, **cleanup_stats)
 
         # Update status to processing
-        client.table("weekly_report_submissions").update({
-            "status": "processing",
-            "processing_started_at": datetime.utcnow().isoformat(),
-        }).eq("id", job_id).execute()
+        await execute(
+            """UPDATE weekly_report_submissions SET status = 'processing',
+                processing_started_at = $2 WHERE id = $1::uuid""",
+            job_id, datetime.utcnow(),
+        )
 
         logger.info("Starting weekly report processing", job_id=job_id, storage_path=storage_path)
 
         # Get submission data for week info
-        submission = client.table("weekly_report_submissions").select(
-            "year, week_number, week_ending_date"
-        ).eq("id", job_id).single().execute()
+        submission = await fetchrow(
+            "SELECT year, week_number, week_ending_date FROM weekly_report_submissions WHERE id = $1::uuid",
+            job_id,
+        )
 
-        if not submission.data:
+        if not submission:
             raise ValueError("Submission not found")
 
-        submission_year = submission.data["year"]
-        submission_week = submission.data["week_number"]
-        submission_week_ending = submission.data["week_ending_date"]
+        submission_year = submission["year"]
+        submission_week = submission["week_number"]
+        submission_week_ending = submission["week_ending_date"]
 
-        # Download file from storage
-        file_data = client.storage.from_("reports").download(storage_path)
+        # Download file from storage (stays on Supabase SDK)
+        storage_client = get_supabase_admin_client()
+        file_data = storage_client.storage.from_("reports").download(storage_path)
 
         # Parse Excel file
         df_raw = pd.read_excel(io.BytesIO(file_data), sheet_name=0, header=None)
@@ -544,21 +538,8 @@ async def process_weekly_report(
             result["errors"].append("No fleet_number column found in file")
             raise ValueError("Invalid file format: no fleet_number column")
 
-        # Get ALL existing plants using pagination (Supabase limits to 1000 per request)
-        all_plants = []
-        page_size = 1000
-        offset = 0
-        while True:
-            page = (
-                client.table("plants_master")
-                .select("id, fleet_number")
-                .range(offset, offset + page_size - 1)
-                .execute()
-            )
-            all_plants.extend(page.data)
-            if len(page.data) < page_size:
-                break
-            offset += page_size
+        # Get ALL existing plants (no pagination needed with asyncpg - no 1000 row limit)
+        all_plants = await fetch("SELECT id, fleet_number FROM plants_master")
 
         fleet_to_id = {p["fleet_number"]: p["id"] for p in all_plants}
         logger.info("Loaded existing plants for lookup", count=len(fleet_to_id))
@@ -625,7 +606,7 @@ async def process_weekly_report(
                 "last_verified_date": submission_week_ending,
                 "last_verified_year": submission_year,
                 "last_verified_week": submission_week,
-                "updated_at": datetime.utcnow().isoformat(),
+                "updated_at": datetime.utcnow(),
                 # Usage data for weekly tracking (not stored in plants table)
                 "_usage": {
                     "hours_worked": hours_worked,
@@ -675,21 +656,16 @@ async def process_weekly_report(
                 plant_ids_needing = [pid for pid in plant_ids_needing if pid]
 
                 if plant_ids_needing:
-                    # Fetch previous week's records in batches
+                    # Fetch previous week's records (single query with ANY)
                     prev_remarks_by_plant_id = {}
-                    batch_size = 50
-                    for i in range(0, len(plant_ids_needing), batch_size):
-                        batch_ids = plant_ids_needing[i:i + batch_size]
-                        prev_result = (
-                            client.table("plant_weekly_records")
-                            .select("plant_id, remarks, hours_worked, standby_hours, breakdown_hours")
-                            .eq("year", prev_year)
-                            .eq("week_number", prev_week)
-                            .in_("plant_id", batch_ids)
-                            .execute()
-                        )
-                        for r in prev_result.data or []:
-                            prev_remarks_by_plant_id[r["plant_id"]] = r
+                    prev_remarks_rows = await fetch(
+                        """SELECT plant_id, remarks, hours_worked, standby_hours, breakdown_hours
+                           FROM plant_weekly_records
+                           WHERE year = $1 AND week_number = $2 AND plant_id = ANY($3::uuid[])""",
+                        prev_year, prev_week, plant_ids_needing,
+                    )
+                    for r in prev_remarks_rows:
+                        prev_remarks_by_plant_id[r["plant_id"]] = r
 
                     # Create reverse lookup: plant_id -> fleet_number
                     id_to_fleet = {v: k for k, v in fleet_to_id.items()}
@@ -772,15 +748,10 @@ async def process_weekly_report(
         if plants_to_insert:
             try:
                 # Batch resolve fleet types for all new plants (single query)
-                fleet_prefixes = (
-                    client.table("fleet_number_prefixes")
-                    .select("prefix, fleet_type")
-                    .execute()
-                )
-                prefix_to_type = {p["prefix"]: p["fleet_type"] for p in fleet_prefixes.data}
+                fleet_prefixes = await fetch("SELECT prefix, fleet_type FROM fleet_number_prefixes")
+                prefix_to_type = {p["prefix"]: p["fleet_type"] for p in fleet_prefixes}
 
                 # Apply fleet types based on prefix
-                import re
                 for plant in plants_to_insert:
                     fn = plant.get("fleet_number", "")
                     match = re.match(r'^([A-Z]+)', fn.replace(" ", ""))
@@ -789,28 +760,40 @@ async def process_weekly_report(
                         if prefix in prefix_to_type:
                             plant["fleet_type"] = prefix_to_type[prefix]
 
-                insert_data = [
-                    {k: v for k, v in p.items() if not k.startswith("_")}
-                    for p in plants_to_insert
-                ]
-                insert_result = client.table("plants_master").insert(insert_data).execute()
-                result["plants_created"] = len(insert_result.data)
-                # Update plants_to_insert with generated IDs for tracking
-                for i, p in enumerate(plants_to_insert):
-                    p["id"] = insert_result.data[i]["id"]
+                # Insert one by one to get RETURNING IDs
+                created_count = 0
+                for plant in plants_to_insert:
+                    row = await fetchrow(
+                        """INSERT INTO plants_master (fleet_number, description, remarks,
+                            physical_verification, current_location_id, last_verified_date,
+                            last_verified_year, last_verified_week, updated_at, condition,
+                            condition_confidence, fleet_type)
+                        VALUES ($1, $2, $3, $4, $5::uuid, $6, $7, $8, $9, $10, $11, $12)
+                        RETURNING id, fleet_number""",
+                        plant["fleet_number"], plant.get("description"), plant.get("remarks"),
+                        plant.get("physical_verification"), plant.get("current_location_id"),
+                        plant.get("last_verified_date"), plant.get("last_verified_year"),
+                        plant.get("last_verified_week"), plant.get("updated_at"),
+                        plant.get("condition"), plant.get("condition_confidence"),
+                        plant.get("fleet_type"),
+                    )
+                    if row:
+                        plant["id"] = row["id"]
+                        created_count += 1
+
+                result["plants_created"] = created_count
 
                 # Record initial location history for new plants
-                location_history_records = [
-                    {
-                        "plant_id": p["id"],
-                        "location_id": location_id,
-                        "start_date": datetime.utcnow().isoformat(),
-                        "transfer_reason": "First seen in weekly report",
-                    }
+                location_history_params = [
+                    (p["id"], location_id, datetime.utcnow(), "First seen in weekly report")
                     for p in plants_to_insert if p.get("id")
                 ]
-                if location_history_records:
-                    client.table("plant_location_history").insert(location_history_records).execute()
+                if location_history_params:
+                    await executemany(
+                        """INSERT INTO plant_location_history (plant_id, location_id, start_date, transfer_reason)
+                           VALUES ($1::uuid, $2::uuid, $3, $4)""",
+                        location_history_params,
+                    )
 
                 logger.info("Inserted new plants", count=result["plants_created"], job_id=job_id)
             except Exception as e:
@@ -833,35 +816,25 @@ async def process_weekly_report(
                     prev_week = 52
                     prev_year = submission_year - 1
 
-                batch_size = 50
-                for i in range(0, len(plant_ids_to_check), batch_size):
-                    batch_ids = plant_ids_to_check[i:i + batch_size]
-                    # Get previous week locations
-                    prev_result = (
-                        client.table("plant_weekly_records")
-                        .select("plant_id, location_id")
-                        .eq("year", prev_year)
-                        .eq("week_number", prev_week)
-                        .in_("plant_id", batch_ids)
-                        .execute()
-                    )
-                    for r in prev_result.data or []:
-                        prev_week_locations[r["plant_id"]] = r["location_id"]
+                # Single query with ANY (no batching needed with asyncpg)
+                prev_loc_rows = await fetch(
+                    """SELECT plant_id, location_id FROM plant_weekly_records
+                       WHERE year = $1 AND week_number = $2 AND plant_id = ANY($3::uuid[])""",
+                    prev_year, prev_week, plant_ids_to_check,
+                )
+                for r in prev_loc_rows:
+                    prev_week_locations[r["plant_id"]] = r["location_id"]
 
-                # Batch into chunks of 50 to avoid URL length limits
-                for i in range(0, len(plant_ids_to_check), batch_size):
-                    batch_ids = plant_ids_to_check[i:i + batch_size]
-                    batch_result = (
-                        client.table("plant_weekly_records")
-                        .select("plant_id, location_id, hours_worked, remarks, physical_verification, transfer_from")
-                        .eq("year", submission_year)
-                        .eq("week_number", submission_week)
-                        .neq("location_id", location_id)
-                        .in_("plant_id", batch_ids)
-                        .execute()
-                    )
-                    for r in batch_result.data or []:
-                        existing_by_plant[r["plant_id"]] = r
+                # Check for existing records at OTHER locations this week
+                conflict_rows = await fetch(
+                    """SELECT plant_id, location_id, hours_worked, remarks, physical_verification, transfer_from
+                       FROM plant_weekly_records
+                       WHERE year = $1 AND week_number = $2 AND location_id != $3::uuid
+                         AND plant_id = ANY($4::uuid[])""",
+                    submission_year, submission_week, location_id, plant_ids_to_check,
+                )
+                for r in conflict_rows:
+                    existing_by_plant[r["plant_id"]] = r
 
                 # Resolve conflicts
                 plants_to_skip = set()
@@ -883,9 +856,12 @@ async def process_weekly_report(
 
                         if winner_location == location_id:
                             # Current wins - mark existing record as conflicting
-                            client.table("plant_weekly_records").update({
-                                "conflict_status": "conflicting",
-                            }).eq("plant_id", plant_id).eq("year", submission_year).eq("week_number", submission_week).eq("location_id", existing["location_id"]).execute()
+                            await execute(
+                                """UPDATE plant_weekly_records SET conflict_status = 'conflicting'
+                                   WHERE plant_id = $1::uuid AND year = $2 AND week_number = $3
+                                     AND location_id = $4::uuid""",
+                                plant_id, submission_year, submission_week, existing["location_id"],
+                            )
 
                             processing_stats["conflicts"]["resolved"] += 1
                             processing_stats["anomalies"].append({
@@ -914,17 +890,33 @@ async def process_weekly_report(
             except Exception as e:
                 logger.warning("Failed to check for location conflicts", error=str(e), job_id=job_id)
 
-        # Batch update existing plants using upsert (single DB request instead of 1 per plant)
+        # Batch update existing plants using executemany
         if plants_to_update:
             try:
-                update_data = [
-                    {k: v for k, v in p.items() if not k.startswith("_")}
-                    for p in plants_to_update
-                ]
-                client.table("plants_master").upsert(
-                    update_data,
-                    on_conflict="id",
-                ).execute()
+                await executemany(
+                    """UPDATE plants_master SET
+                        description = COALESCE($2, description),
+                        remarks = $3,
+                        physical_verification = $4,
+                        current_location_id = $5::uuid,
+                        last_verified_date = $6,
+                        last_verified_year = $7,
+                        last_verified_week = $8,
+                        updated_at = $9,
+                        condition = COALESCE($10, condition),
+                        condition_confidence = COALESCE($11, condition_confidence)
+                    WHERE id = $1::uuid""",
+                    [
+                        (
+                            p["id"], p.get("description"), p.get("remarks"),
+                            p.get("physical_verification"), p.get("current_location_id"),
+                            p.get("last_verified_date"), p.get("last_verified_year"),
+                            p.get("last_verified_week"), p.get("updated_at"),
+                            p.get("condition"), p.get("condition_confidence"),
+                        )
+                        for p in plants_to_update
+                    ],
+                )
                 result["plants_updated"] = len(plants_to_update)
                 logger.info("Batch updated plants", count=result["plants_updated"], job_id=job_id)
             except Exception as e:
@@ -934,7 +926,6 @@ async def process_weekly_report(
         # Record weekly location data for plants and detect movements
         all_plants = plants_to_insert + plants_to_update
         tracking_result = await _record_plant_locations(
-            client,
             job_id,
             location_id,
             [p["fleet_number"] for p in all_plants],
@@ -964,20 +955,22 @@ async def process_weekly_report(
             processing_stats["anomalies"] = processing_stats["anomalies"][:50]
             processing_stats["anomalies_truncated"] = True
 
-        client.table("weekly_report_submissions").update({
-            "status": final_status,
-            "processing_completed_at": datetime.utcnow().isoformat(),
-            "plants_processed": result["plants_processed"],
-            "plants_created": result["plants_created"],
-            "plants_updated": result["plants_updated"],
-            "processing_stats": processing_stats,
-            "errors": result["errors"] if result["errors"] else None,
-            "warnings": result["warnings"] if result["warnings"] else None,
-        }).eq("id", job_id).execute()
+        await execute(
+            """UPDATE weekly_report_submissions SET
+                status = $2, processing_completed_at = $3,
+                plants_processed = $4, plants_created = $5, plants_updated = $6,
+                processing_stats = $7::jsonb,
+                errors = $8::jsonb, warnings = $9::jsonb
+            WHERE id = $1::uuid""",
+            job_id, final_status, datetime.utcnow(),
+            result["plants_processed"], result["plants_created"], result["plants_updated"],
+            json.dumps(processing_stats),
+            json.dumps(result["errors"]) if result["errors"] else None,
+            json.dumps(result["warnings"]) if result["warnings"] else None,
+        )
 
         # Create notification for plant officer
         await _create_notification(
-            client,
             title=f"Weekly report processed",
             message=f"Processed {result['plants_processed']} plants: {result['plants_created']} new, {result['plants_updated']} updated",
             notification_type="report_processed" if result["success"] else "warning",
@@ -999,15 +992,18 @@ async def process_weekly_report(
         result["errors"].append(f"Processing failed: {str(e)}")
 
         # Update submission as failed
-        client.table("weekly_report_submissions").update({
-            "status": "failed",
-            "processing_completed_at": datetime.utcnow().isoformat(),
-            "errors": result["errors"],
-        }).eq("id", job_id).execute()
+        try:
+            await execute(
+                """UPDATE weekly_report_submissions SET
+                    status = 'failed', processing_completed_at = $2, errors = $3::jsonb
+                WHERE id = $1::uuid""",
+                job_id, datetime.utcnow(), json.dumps(result["errors"]),
+            )
+        except Exception:
+            pass
 
         # Create failure notification
         await _create_notification(
-            client,
             title="Weekly report processing failed",
             message=f"Error: {str(e)[:200]}",
             notification_type="report_failed",
@@ -1031,7 +1027,6 @@ async def process_purchase_order(
         Processing result with stats.
     """
     settings = get_settings()
-    client = get_supabase_admin_client()
 
     result = {
         "success": False,
@@ -1043,20 +1038,25 @@ async def process_purchase_order(
 
     try:
         # Update status to processing
-        client.table("purchase_order_submissions").update({
-            "status": "processing",
-            "processing_started_at": datetime.utcnow().isoformat(),
-        }).eq("id", job_id).execute()
+        await execute(
+            """UPDATE purchase_order_submissions SET status = 'processing',
+                processing_started_at = $2 WHERE id = $1::uuid""",
+            job_id, datetime.utcnow(),
+        )
 
         logger.info("Starting purchase order processing", job_id=job_id, storage_path=storage_path)
 
-        # Download file from storage
-        file_data = client.storage.from_("reports").download(storage_path)
+        # Download file from storage (stays on Supabase SDK)
+        storage_client = get_supabase_admin_client()
+        file_data = storage_client.storage.from_("reports").download(storage_path)
 
         # Get submission details
-        submission = client.table("purchase_order_submissions").select("*").eq("id", job_id).single().execute()
-        po_number = submission.data.get("po_number")
-        po_date = submission.data.get("po_date")
+        submission = await fetchrow(
+            "SELECT * FROM purchase_order_submissions WHERE id = $1::uuid",
+            job_id,
+        )
+        po_number = submission.get("po_number")
+        po_date = submission.get("po_date")
 
         # Parse Excel - PO files may have various formats
         xl = pd.ExcelFile(io.BytesIO(file_data))
@@ -1080,21 +1080,23 @@ async def process_purchase_order(
                 df = _map_po_columns(df)
 
                 # Get plant ID for this fleet
-                plant_result = client.table("plants_master").select("id").eq("fleet_number", fleet_num).execute()
+                plant_row = await fetchrow(
+                    "SELECT id FROM plants_master WHERE fleet_number = $1",
+                    fleet_num,
+                )
 
-                if not plant_result.data:
+                if not plant_row:
                     # Create plant if doesn't exist — resolve fleet_type from prefix
-                    resolved_type = client.rpc("resolve_fleet_type", {"p_fleet_number": fleet_num}).execute()
-                    new_plant = client.table("plants_master").insert({
-                        "fleet_number": fleet_num,
-                        "fleet_type": resolved_type.data if resolved_type.data else None,
-                        "condition": "unverified",
-                        "physical_verification": False,
-                    }).execute()
-                    plant_id = new_plant.data[0]["id"]
+                    resolved_type = await fetchval("SELECT resolve_fleet_type($1)", fleet_num)
+                    new_plant = await fetchrow(
+                        """INSERT INTO plants_master (fleet_number, fleet_type, condition, physical_verification)
+                           VALUES ($1, $2, 'unverified', false) RETURNING id""",
+                        fleet_num, resolved_type,
+                    )
+                    plant_id = new_plant["id"]
                     result["warnings"].append(f"Created new plant for fleet: {fleet_num}")
                 else:
-                    plant_id = plant_result.data[0]["id"]
+                    plant_id = plant_row["id"]
 
                 # Process rows
                 for _, row in df.iterrows():
@@ -1134,8 +1136,21 @@ async def process_purchase_order(
         # Batch insert spare parts
         if parts_to_insert:
             try:
-                insert_result = client.table("spare_parts").insert(parts_to_insert).execute()
-                result["parts_created"] = len(insert_result.data)
+                await executemany(
+                    """INSERT INTO spare_parts (plant_id, replaced_date, part_number, part_description,
+                        supplier, reason_for_change, unit_cost, quantity, purchase_order_number, remarks)
+                    VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10)""",
+                    [
+                        (
+                            p["plant_id"], p.get("replaced_date"), p.get("part_number"),
+                            p.get("part_description"), p.get("supplier"), p.get("reason_for_change"),
+                            p.get("unit_cost"), p.get("quantity"), p.get("purchase_order_number"),
+                            p.get("remarks"),
+                        )
+                        for p in parts_to_insert
+                    ],
+                )
+                result["parts_created"] = len(parts_to_insert)
                 logger.info("Inserted spare parts", count=result["parts_created"], job_id=job_id)
             except Exception as e:
                 result["errors"].append(f"Failed to insert spare parts: {str(e)}")
@@ -1146,18 +1161,20 @@ async def process_purchase_order(
         # Update submission with results
         final_status = "completed" if result["success"] else "partial" if result["parts_processed"] > 0 else "failed"
 
-        client.table("purchase_order_submissions").update({
-            "status": final_status,
-            "processing_completed_at": datetime.utcnow().isoformat(),
-            "parts_processed": result["parts_processed"],
-            "parts_created": result["parts_created"],
-            "errors": result["errors"] if result["errors"] else None,
-            "warnings": result["warnings"] if result["warnings"] else None,
-        }).eq("id", job_id).execute()
+        await execute(
+            """UPDATE purchase_order_submissions SET
+                status = $2, processing_completed_at = $3,
+                parts_processed = $4, parts_created = $5,
+                errors = $6::jsonb, warnings = $7::jsonb
+            WHERE id = $1::uuid""",
+            job_id, final_status, datetime.utcnow(),
+            result["parts_processed"], result["parts_created"],
+            json.dumps(result["errors"]) if result["errors"] else None,
+            json.dumps(result["warnings"]) if result["warnings"] else None,
+        )
 
         # Create notification
         await _create_notification(
-            client,
             title="Purchase order processed",
             message=f"Processed {result['parts_processed']} parts: {result['parts_created']} created",
             notification_type="report_processed" if result["success"] else "warning",
@@ -1178,15 +1195,18 @@ async def process_purchase_order(
         result["errors"].append(f"Processing failed: {str(e)}")
 
         # Update submission as failed
-        client.table("purchase_order_submissions").update({
-            "status": "failed",
-            "processing_completed_at": datetime.utcnow().isoformat(),
-            "errors": result["errors"],
-        }).eq("id", job_id).execute()
+        try:
+            await execute(
+                """UPDATE purchase_order_submissions SET
+                    status = 'failed', processing_completed_at = $2, errors = $3::jsonb
+                WHERE id = $1::uuid""",
+                job_id, datetime.utcnow(), json.dumps(result["errors"]),
+            )
+        except Exception:
+            pass
 
         # Create failure notification
         await _create_notification(
-            client,
             title="Purchase order processing failed",
             message=f"Error: {str(e)[:200]}",
             notification_type="report_failed",
@@ -1197,7 +1217,6 @@ async def process_purchase_order(
 
 
 async def _record_plant_locations(
-    client,
     submission_id: str,
     location_id: str,
     fleet_numbers: list[str],
@@ -1215,7 +1234,6 @@ async def _record_plant_locations(
     - Conflict status marking for duplicate records
 
     Args:
-        client: Supabase client.
         submission_id: The submission ID.
         location_id: Current location ID.
         fleet_numbers: List of fleet numbers in this report.
@@ -1243,21 +1261,25 @@ async def _record_plant_locations(
     transfer_service = get_transfer_service()
 
     try:
-        # Get plant IDs for fleet numbers
-        plants = client.table("plants_master").select("id, fleet_number, current_location_id").in_("fleet_number", fleet_numbers).execute()
-        fleet_to_plant = {p["fleet_number"]: p for p in plants.data}
+        # Get plant IDs for fleet numbers (single query with ANY)
+        plants_rows = await fetch(
+            "SELECT id, fleet_number, current_location_id FROM plants_master WHERE fleet_number = ANY($1::text[])",
+            fleet_numbers,
+        )
+        fleet_to_plant = {p["fleet_number"]: p for p in plants_rows}
 
         # Get submission details for week info
-        submission = client.table("weekly_report_submissions").select(
-            "year, week_number, week_ending_date"
-        ).eq("id", submission_id).single().execute()
+        submission = await fetchrow(
+            "SELECT year, week_number, week_ending_date FROM weekly_report_submissions WHERE id = $1::uuid",
+            submission_id,
+        )
 
-        if not submission.data:
+        if not submission:
             return tracking_result
 
-        year = submission.data["year"]
-        week_number = submission.data["week_number"]
-        week_ending_date = submission.data["week_ending_date"]
+        year = submission["year"]
+        week_number = submission["week_number"]
+        week_ending_date = submission["week_ending_date"]
 
         # Build details lookup if provided
         details_lookup = {}
@@ -1275,34 +1297,23 @@ async def _record_plant_locations(
 
         plant_ids = [fleet_to_plant[fn]["id"] for fn in fleet_numbers if fn in fleet_to_plant]
 
-        # Helper function to batch IN queries to avoid URL length limits
-        def batched_in_query(table_name: str, select_cols: str, plant_id_list: list, extra_filters: dict | None = None, batch_size: int = 50) -> list:
-            """Execute IN query in batches to avoid URL length limits."""
-            results = []
-            for i in range(0, len(plant_id_list), batch_size):
-                batch_ids = plant_id_list[i:i + batch_size]
-                query = client.table(table_name).select(select_cols).in_("plant_id", batch_ids)
-                if extra_filters:
-                    for key, value in extra_filters.items():
-                        query = query.eq(key, value)
-                batch_result = query.execute()
-                results.extend(batch_result.data or [])
-            return results
-
-        prev_records_data = batched_in_query(
-            "plant_weekly_records",
-            "plant_id, location_id",
-            plant_ids,
-            {"year": prev_year, "week_number": prev_week}
+        # No batching needed with asyncpg — use ANY() for all IN queries
+        prev_records_data = await fetch(
+            """SELECT plant_id, location_id FROM plant_weekly_records
+               WHERE year = $1 AND week_number = $2 AND plant_id = ANY($3::uuid[])""",
+            prev_year, prev_week, plant_ids,
         )
         prev_locations = {r["plant_id"]: r["location_id"] for r in prev_records_data}
 
-        # Batch check which plants have ANY existing records
-        existing_records_data = batched_in_query("plant_weekly_records", "plant_id", plant_ids)
+        # Check which plants have ANY existing records
+        existing_records_data = await fetch(
+            "SELECT DISTINCT plant_id FROM plant_weekly_records WHERE plant_id = ANY($1::uuid[])",
+            plant_ids,
+        )
         plants_with_history = {r["plant_id"] for r in existing_records_data}
 
-        # Check for pending transfers that should be confirmed (handles batching internally)
-        confirmed_transfers = transfer_service.check_and_confirm_pending_transfers(
+        # Check for pending transfers that should be confirmed
+        confirmed_transfers = await transfer_service.check_and_confirm_pending_transfers(
             plant_ids=plant_ids,
             location_id=location_id,
             submission_id=submission_id,
@@ -1310,8 +1321,10 @@ async def _record_plant_locations(
         tracking_result["transfers_confirmed"] = len(confirmed_transfers)
 
         # Check which plants this is the latest week for (to update current_location)
-        # Only update current_location if this is the most recent week data for the plant
-        latest_weeks_data = batched_in_query("plant_weekly_records", "plant_id, year, week_number", plant_ids)
+        latest_weeks_data = await fetch(
+            "SELECT plant_id, year, week_number FROM plant_weekly_records WHERE plant_id = ANY($1::uuid[])",
+            plant_ids,
+        )
         # Build map of plant_id -> (latest_year, latest_week)
         plant_latest_week = {}
         for r in sorted(latest_weeks_data, key=lambda x: (x["year"], x["week_number"]), reverse=True):
@@ -1382,7 +1395,7 @@ async def _record_plant_locations(
 
                 # Resolve transfer location to ID if detected
                 if parsed.transfer_location:
-                    resolved = transfer_service.resolve_location(parsed.transfer_location)
+                    resolved = await transfer_service.resolve_location(parsed.transfer_location)
                     if resolved:
                         record["parsed_transfer_location_id"] = resolved["id"]
 
@@ -1406,7 +1419,7 @@ async def _record_plant_locations(
 
                 if not is_ignored:
                     # Try to resolve to a valid location
-                    to_location_resolved = transfer_service.resolve_location(transfer_to_col)
+                    to_location_resolved = await transfer_service.resolve_location(transfer_to_col)
                     if to_location_resolved and to_location_resolved["id"] != location_id:
                         # Valid different location - create outbound transfer
                         outbound_transfers_to_create.append({
@@ -1437,7 +1450,7 @@ async def _record_plant_locations(
                 is_ignored = any(ignored in transfer_loc_upper for ignored in IGNORED_TRANSFER_LOCATIONS)
 
                 if not is_ignored:
-                    to_loc = transfer_service.resolve_location(parsed.transfer_location)
+                    to_loc = await transfer_service.resolve_location(parsed.transfer_location)
                     if to_loc and to_loc["id"] != location_id:
                         outbound_transfers_to_create.append({
                             "plant_id": str(plant_id),
@@ -1479,45 +1492,42 @@ async def _record_plant_locations(
 
                 # Create CONFIRMED transfer record (automatic detection)
                 # Check if there's already a pending transfer for this plant
-                existing_pending = (
-                    client.table("plant_transfers")
-                    .select("id")
-                    .eq("plant_id", str(plant_id))
-                    .eq("to_location_id", str(location_id))
-                    .eq("status", "pending")
-                    .execute()
+                existing_pending = await fetchrow(
+                    """SELECT id FROM plant_transfers
+                       WHERE plant_id = $1::uuid AND to_location_id = $2::uuid AND status = 'pending'""",
+                    str(plant_id), str(location_id),
                 )
 
-                if existing_pending.data:
+                if existing_pending:
                     # Confirm the existing pending transfer
-                    client.table("plant_transfers").update({
-                        "status": "confirmed",
-                        "confirmed_at": datetime.utcnow().isoformat(),
-                        "confirmed_by_submission_id": str(submission_id),
-                    }).eq("id", existing_pending.data[0]["id"]).execute()
+                    await execute(
+                        """UPDATE plant_transfers SET status = 'confirmed',
+                            confirmed_at = $2, confirmed_by_submission_id = $3::uuid
+                        WHERE id = $1::uuid""",
+                        existing_pending["id"], datetime.utcnow(), str(submission_id),
+                    )
 
                     # Clear pending transfer from plant
-                    client.table("plants_master").update({
-                        "pending_transfer_id": None,
-                    }).eq("id", str(plant_id)).execute()
+                    await execute(
+                        "UPDATE plants_master SET pending_transfer_id = NULL WHERE id = $1::uuid",
+                        str(plant_id),
+                    )
 
                     tracking_result["transfers_confirmed"] = tracking_result.get("transfers_confirmed", 0) + 1
                 else:
                     # Create new CONFIRMED transfer (automatic detection)
                     try:
-                        client.table("plant_transfers").insert({
-                            "plant_id": str(plant_id),
-                            "from_location_id": str(prev_location),
-                            "to_location_id": str(location_id),
-                            "transfer_date": week_ending_date,
-                            "direction": "inbound",  # Detected at arrival
-                            "status": "confirmed",
-                            "confirmed_at": datetime.utcnow().isoformat(),
-                            "confirmed_by_submission_id": str(submission_id),
-                            "source_submission_id": str(submission_id),
-                            "source_remarks": details.get("remarks"),
-                            "parsed_confidence": 1.0,  # Automatic detection is certain
-                        }).execute()
+                        await execute(
+                            """INSERT INTO plant_transfers (plant_id, from_location_id, to_location_id,
+                                transfer_date, direction, status, confirmed_at,
+                                confirmed_by_submission_id, source_submission_id,
+                                source_remarks, parsed_confidence)
+                            VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'inbound', 'confirmed',
+                                $5, $6::uuid, $6::uuid, $7, 1.0)""",
+                            str(plant_id), str(prev_location), str(location_id),
+                            week_ending_date, datetime.utcnow(),
+                            str(submission_id), details.get("remarks"),
+                        )
                         tracking_result["transfers_detected"] += 1
                         logger.info(
                             "Created automatic transfer (plant moved)",
@@ -1545,32 +1555,77 @@ async def _record_plant_locations(
 
         # Upsert weekly records
         if weekly_records:
-            client.table("plant_weekly_records").upsert(
-                weekly_records,
-                on_conflict="plant_id,year,week_number",
-            ).execute()
+            await executemany(
+                """INSERT INTO plant_weekly_records (
+                    plant_id, location_id, submission_id, year, week_number,
+                    week_ending_date, physical_verification, remarks, raw_description,
+                    raw_remarks, condition, hours_worked, standby_hours, breakdown_hours,
+                    off_hire, transfer_from, transfer_to, conflict_status,
+                    parsed_condition, parsed_transfer_direction, ai_confidence,
+                    parsed_condition_keywords, parsed_transfer_location_id)
+                VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $10,
+                    $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23::uuid)
+                ON CONFLICT (plant_id, year, week_number) DO UPDATE SET
+                    location_id = EXCLUDED.location_id, submission_id = EXCLUDED.submission_id,
+                    week_ending_date = EXCLUDED.week_ending_date,
+                    physical_verification = EXCLUDED.physical_verification,
+                    remarks = EXCLUDED.remarks, raw_description = EXCLUDED.raw_description,
+                    raw_remarks = EXCLUDED.raw_remarks, condition = EXCLUDED.condition,
+                    hours_worked = EXCLUDED.hours_worked, standby_hours = EXCLUDED.standby_hours,
+                    breakdown_hours = EXCLUDED.breakdown_hours, off_hire = EXCLUDED.off_hire,
+                    transfer_from = EXCLUDED.transfer_from, transfer_to = EXCLUDED.transfer_to,
+                    conflict_status = EXCLUDED.conflict_status,
+                    parsed_condition = EXCLUDED.parsed_condition,
+                    parsed_transfer_direction = EXCLUDED.parsed_transfer_direction,
+                    ai_confidence = EXCLUDED.ai_confidence,
+                    parsed_condition_keywords = EXCLUDED.parsed_condition_keywords,
+                    parsed_transfer_location_id = EXCLUDED.parsed_transfer_location_id""",
+                [
+                    (
+                        r["plant_id"], r["location_id"], r["submission_id"],
+                        r["year"], r["week_number"], r["week_ending_date"],
+                        r.get("physical_verification", True), r.get("remarks"),
+                        r.get("raw_description"), r.get("raw_remarks"),
+                        r.get("condition"), r.get("hours_worked", 0),
+                        r.get("standby_hours", 0), r.get("breakdown_hours", 0),
+                        r.get("off_hire", False), r.get("transfer_from"),
+                        r.get("transfer_to"), r.get("conflict_status"),
+                        r.get("parsed_condition"), r.get("parsed_transfer_direction"),
+                        r.get("ai_confidence"), r.get("parsed_condition_keywords"),
+                        r.get("parsed_transfer_location_id"),
+                    )
+                    for r in weekly_records
+                ],
+            )
             tracking_result["records_created"] = len(weekly_records)
 
         # Batch insert OUTBOUND transfers for speed
         if outbound_transfers_to_create:
             try:
-                # Remove internal fields and batch insert
-                outbound_data = [
-                    {k: v for k, v in t.items() if not k.startswith("_")}
-                    for t in outbound_transfers_to_create
-                ]
-                insert_result = client.table("plant_transfers").insert(outbound_data).execute()
+                # Insert one by one to get RETURNING IDs for pending_transfer_id
+                plant_to_transfer = {}
+                for t in outbound_transfers_to_create:
+                    row = await fetchrow(
+                        """INSERT INTO plant_transfers (plant_id, from_location_id, to_location_id,
+                            from_location_raw, to_location_raw, transfer_date, direction,
+                            status, source_submission_id, source_remarks, parsed_confidence)
+                        VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9::uuid, $10, $11)
+                        RETURNING id""",
+                        t["plant_id"], t["from_location_id"], t["to_location_id"],
+                        t.get("from_location_raw"), t.get("to_location_raw"),
+                        t["transfer_date"], t["direction"], t["status"],
+                        t["source_submission_id"], t.get("source_remarks"),
+                        t.get("parsed_confidence"),
+                    )
+                    if row:
+                        plant_to_transfer[t["plant_id"]] = row["id"]
 
-                # Update plants with pending_transfer_id (batch)
-                if insert_result.data:
-                    plant_to_transfer = {
-                        outbound_transfers_to_create[i]["plant_id"]: insert_result.data[i]["id"]
-                        for i in range(len(insert_result.data))
-                    }
-                    for plant_id, transfer_id in plant_to_transfer.items():
-                        client.table("plants_master").update({
-                            "pending_transfer_id": transfer_id,
-                        }).eq("id", plant_id).execute()
+                # Update plants with pending_transfer_id
+                for pid, tid in plant_to_transfer.items():
+                    await execute(
+                        "UPDATE plants_master SET pending_transfer_id = $1::uuid WHERE id = $2::uuid",
+                        tid, pid,
+                    )
 
                 tracking_result["transfers_detected"] += len(outbound_transfers_to_create)
                 tracking_result["outbound_pending"] += len(outbound_transfers_to_create)
@@ -1584,57 +1639,67 @@ async def _record_plant_locations(
 
         # Update current_location only for plants where this is the latest week
         if location_updates:
-            client.table("plants_master").update({
-                "current_location_id": location_id,
-            }).in_("id", location_updates).execute()
+            await execute(
+                "UPDATE plants_master SET current_location_id = $1::uuid WHERE id = ANY($2::uuid[])",
+                location_id, location_updates,
+            )
 
         # Create events
         if events_to_create:
-            client.table("plant_events").insert(events_to_create).execute()
+            await executemany(
+                """INSERT INTO plant_events (plant_id, event_type, event_date, year, week_number,
+                    from_location_id, to_location_id, details, remarks)
+                VALUES ($1::uuid, $2, $3, $4, $5, $6::uuid, $7::uuid, $8::jsonb, $9)""",
+                [
+                    (
+                        e["plant_id"], e["event_type"], e["event_date"],
+                        e.get("year"), e.get("week_number"),
+                        e.get("from_location_id"), e.get("to_location_id"),
+                        json.dumps(e.get("details", {})), e.get("remarks"),
+                    )
+                    for e in events_to_create
+                ],
+            )
 
-        # Batch update plant_location_history for movements (avoid individual DB calls)
+        # Batch update plant_location_history for movements
         movement_events = [e for e in events_to_create if e["event_type"] == "movement"]
         if movement_events:
             try:
-                # Collect all location history records to insert
-                location_history_to_insert = []
+                # Close previous location records
                 for event in movement_events:
-                    # Close previous location record for each plant
-                    client.table("plant_location_history").update({
-                        "end_date": week_ending_date,
-                    }).eq("plant_id", event["plant_id"]).is_("end_date", "null").execute()
+                    await execute(
+                        """UPDATE plant_location_history SET end_date = $1
+                           WHERE plant_id = $2::uuid AND end_date IS NULL""",
+                        week_ending_date, event["plant_id"],
+                    )
 
-                    # Prepare new location record
-                    location_history_to_insert.append({
-                        "plant_id": event["plant_id"],
-                        "location_id": event["to_location_id"],
-                        "start_date": week_ending_date,
-                        "transfer_reason": "Weekly report update",
-                    })
-
-                # Batch insert all new location records (single DB call)
-                if location_history_to_insert:
-                    client.table("plant_location_history").insert(location_history_to_insert).execute()
+                # Batch insert new location records
+                location_history_params = [
+                    (e["plant_id"], e["to_location_id"], week_ending_date, "Weekly report update")
+                    for e in movement_events
+                ]
+                if location_history_params:
+                    await executemany(
+                        """INSERT INTO plant_location_history (plant_id, location_id, start_date, transfer_reason)
+                           VALUES ($1::uuid, $2::uuid, $3, $4)""",
+                        location_history_params,
+                    )
                     logger.info(
                         "Updated location history for movements",
-                        count=len(location_history_to_insert),
+                        count=len(location_history_params),
                     )
             except Exception as e:
                 logger.warning("Failed to update location history for movements", error=str(e))
 
         # Detect missing plants - plants at this location last week but not in current report
-        # Only mark as missing if this is the latest week we have data for
         try:
             # Get all plants that were at THIS location in previous week
-            prev_at_location = (
-                client.table("plant_weekly_records")
-                .select("plant_id")
-                .eq("location_id", location_id)
-                .eq("year", prev_year)
-                .eq("week_number", prev_week)
-                .execute()
+            prev_at_location = await fetch(
+                """SELECT plant_id FROM plant_weekly_records
+                   WHERE location_id = $1::uuid AND year = $2 AND week_number = $3""",
+                location_id, prev_year, prev_week,
             )
-            prev_plant_ids = {r["plant_id"] for r in prev_at_location.data}
+            prev_plant_ids = {r["plant_id"] for r in prev_at_location}
 
             # Current report plant IDs
             current_plant_ids = set(plant_ids)
@@ -1643,68 +1708,67 @@ async def _record_plant_locations(
             missing_plant_ids = prev_plant_ids - current_plant_ids
 
             if missing_plant_ids:
-                # Check if any of these missing plants have pending outbound transfers
-                # Batch the query if there are many missing plants
                 missing_list = list(missing_plant_ids)
-                plants_with_pending_transfer = set()
-                batch_size = 50
-                for i in range(0, len(missing_list), batch_size):
-                    batch_ids = missing_list[i:i + batch_size]
-                    pending_batch = (
-                        client.table("plant_transfers")
-                        .select("plant_id")
-                        .in_("plant_id", batch_ids)
-                        .eq("status", "pending")
-                        .eq("direction", "outbound")
-                        .execute()
-                    )
-                    plants_with_pending_transfer.update(r["plant_id"] for r in pending_batch.data or [])
+
+                # Check pending outbound transfers (single query)
+                pending_rows = await fetch(
+                    """SELECT plant_id FROM plant_transfers
+                       WHERE plant_id = ANY($1::uuid[]) AND status = 'pending' AND direction = 'outbound'""",
+                    missing_list,
+                )
+                plants_with_pending_transfer = {r["plant_id"] for r in pending_rows}
 
                 # For plants truly missing (no pending transfer), mark as unknown location
                 truly_missing = missing_plant_ids - plants_with_pending_transfer
 
-                for missing_id in truly_missing:
-                    # Check if this week is the latest for this plant
-                    latest_check = (
-                        client.table("plant_weekly_records")
-                        .select("year, week_number")
-                        .eq("plant_id", missing_id)
-                        .order("year", desc=True)
-                        .order("week_number", desc=True)
-                        .limit(1)
-                        .execute()
-                    )
+                if truly_missing:
+                    truly_missing_list = list(truly_missing)
 
-                    if latest_check.data:
-                        latest = latest_check.data[0]
+                    # Batch get latest week for all truly missing plants
+                    latest_weeks = await fetch(
+                        """SELECT DISTINCT ON (plant_id) plant_id, year, week_number
+                           FROM plant_weekly_records
+                           WHERE plant_id = ANY($1::uuid[])
+                           ORDER BY plant_id, year DESC, week_number DESC""",
+                        truly_missing_list,
+                    )
+                    latest_week_by_plant = {r["plant_id"]: (r["year"], r["week_number"]) for r in latest_weeks}
+
+                    # Batch get fleet numbers
+                    fleet_info = await fetch(
+                        "SELECT id, fleet_number FROM plants_master WHERE id = ANY($1::uuid[])",
+                        truly_missing_list,
+                    )
+                    fleet_map = {r["id"]: r["fleet_number"] for r in fleet_info}
+
+                    for missing_id in truly_missing:
+                        latest = latest_week_by_plant.get(missing_id)
                         # Only mark as missing if prev week was the latest record
-                        if (latest["year"], latest["week_number"]) == (prev_year, prev_week):
-                            # Set current_location to NULL (unknown) and condition to missing
-                            client.table("plants_master").update({
-                                "current_location_id": None,
-                                "condition": "missing",
-                            }).eq("id", missing_id).execute()
+                        if latest and latest == (prev_year, prev_week):
+                            fn = fleet_map.get(missing_id, "unknown")
+
+                            # Set current_location to NULL and condition to missing
+                            await execute(
+                                "UPDATE plants_master SET current_location_id = NULL, condition = 'missing' WHERE id = $1::uuid",
+                                missing_id,
+                            )
 
                             # Close location history
-                            client.table("plant_location_history").update({
-                                "end_date": week_ending_date,
-                            }).eq("plant_id", missing_id).eq("location_id", location_id).is_("end_date", "null").execute()
-
-                            # Get fleet number for logging
-                            plant_info = client.table("plants_master").select("fleet_number").eq("id", missing_id).execute()
-                            fn = plant_info.data[0]["fleet_number"] if plant_info.data else "unknown"
+                            await execute(
+                                """UPDATE plant_location_history SET end_date = $1
+                                   WHERE plant_id = $2::uuid AND location_id = $3::uuid AND end_date IS NULL""",
+                                week_ending_date, missing_id, location_id,
+                            )
 
                             # Create missing event
-                            client.table("plant_events").insert({
-                                "plant_id": missing_id,
-                                "event_type": "missing",
-                                "event_date": week_ending_date,
-                                "year": year,
-                                "week_number": week_number,
-                                "from_location_id": location_id,
-                                "details": {"fleet_number": fn},
-                                "remarks": f"Plant {fn} not found in Week {week_number} report - location now unknown",
-                            }).execute()
+                            await execute(
+                                """INSERT INTO plant_events (plant_id, event_type, event_date, year, week_number,
+                                    from_location_id, details, remarks)
+                                VALUES ($1::uuid, 'missing', $2, $3, $4, $5::uuid, $6::jsonb, $7)""",
+                                missing_id, week_ending_date, year, week_number, location_id,
+                                json.dumps({"fleet_number": fn}),
+                                f"Plant {fn} not found in Week {week_number} report - location now unknown",
+                            )
 
                             tracking_result["plants_missing"] = tracking_result.get("plants_missing", 0) + 1
 
@@ -1736,7 +1800,6 @@ async def _record_plant_locations(
 
 
 async def _create_notification(
-    client,
     title: str,
     message: str,
     notification_type: str,
@@ -1744,14 +1807,12 @@ async def _create_notification(
 ) -> None:
     """Create an in-app notification for admins."""
     try:
-        client.table("notifications").insert({
-            "title": title,
-            "message": message,
-            "type": notification_type,
-            "data": data,
-            "target_role": "admin",
-            "read": False,
-        }).execute()
+        await execute(
+            """INSERT INTO notifications (title, message, type, data, target_role, read)
+               VALUES ($1, $2, $3, $4::jsonb, 'admin', false)""",
+            title, message, notification_type,
+            json.dumps(data) if data else None,
+        )
     except Exception as e:
         logger.warning("Failed to create notification", error=str(e))
 
@@ -1916,8 +1977,6 @@ async def save_confirmed_weekly_report(
     Returns:
         Result with counts of created/updated records.
     """
-    client = get_supabase_admin_client()
-
     result = {
         "success": False,
         "plants_processed": 0,
@@ -1929,10 +1988,11 @@ async def save_confirmed_weekly_report(
 
     try:
         # Update submission status
-        client.table("weekly_report_submissions").update({
-            "status": "processing",
-            "processing_started_at": datetime.utcnow().isoformat(),
-        }).eq("id", submission_id).execute()
+        await execute(
+            """UPDATE weekly_report_submissions SET status = 'processing',
+                processing_started_at = $2 WHERE id = $1::uuid""",
+            submission_id, datetime.utcnow(),
+        )
 
         logger.info(
             "Saving confirmed weekly report",
@@ -1941,21 +2001,10 @@ async def save_confirmed_weekly_report(
             total_plants=len(validated_plants),
         )
 
-        # Get all existing plants for lookup (include verification info + condition for event tracking)
-        all_plants = []
-        page_size = 1000
-        offset = 0
-        while True:
-            page = (
-                client.table("plants_master")
-                .select("id, fleet_number, last_verified_year, last_verified_week, condition, current_location_id")
-                .range(offset, offset + page_size - 1)
-                .execute()
-            )
-            all_plants.extend(page.data)
-            if len(page.data) < page_size:
-                break
-            offset += page_size
+        # Get all existing plants (no pagination needed with asyncpg)
+        all_plants = await fetch(
+            "SELECT id, fleet_number, last_verified_year, last_verified_week, condition, current_location_id FROM plants_master"
+        )
 
         fleet_to_id = {p["fleet_number"]: p["id"] for p in all_plants}
         fleet_to_verification = {
@@ -1981,7 +2030,7 @@ async def save_confirmed_weekly_report(
                 "remarks": plant_data.get("remarks"),
                 "condition": condition,
                 "physical_verification": plant_data.get("physical_verification", True),
-                "updated_at": datetime.utcnow().isoformat(),
+                "updated_at": datetime.utcnow(),
             }
 
             # Prevent backwards overwrites: only update location/verification
@@ -2004,32 +2053,51 @@ async def save_confirmed_weekly_report(
 
             # If new plant, set creation time and resolve fleet type
             if fleet_num not in fleet_to_id:
-                plant_upsert["created_at"] = datetime.utcnow().isoformat()
+                plant_upsert["created_at"] = datetime.utcnow()
                 plant_upsert["current_location_id"] = location_id
                 plant_upsert["last_verified_date"] = week_ending_date
                 plant_upsert["last_verified_year"] = year
                 plant_upsert["last_verified_week"] = week_number
                 # Resolve fleet type from prefix using database function
-                resolved_type = client.rpc("resolve_fleet_type", {"p_fleet_number": fleet_num}).execute()
-                plant_upsert["fleet_type"] = resolved_type.data if resolved_type.data else None
+                resolved_type = await fetchval("SELECT resolve_fleet_type($1)", fleet_num)
+                plant_upsert["fleet_type"] = resolved_type
 
             plants_to_upsert.append(plant_upsert)
 
-        # Upsert plants (create new or update existing)
+        # Upsert plants one by one (need RETURNING for new plant IDs)
         if plants_to_upsert:
-            upsert_result = (
-                client.table("plants_master")
-                .upsert(plants_to_upsert, on_conflict="fleet_number")
-                .execute()
-            )
-
-            # Update fleet_to_id with any new plants
-            for plant in upsert_result.data:
-                if plant["fleet_number"] not in fleet_to_id:
-                    fleet_to_id[plant["fleet_number"]] = plant["id"]
-                    result["plants_created"] += 1
-                else:
-                    result["plants_updated"] += 1
+            for plant_upsert in plants_to_upsert:
+                row = await fetchrow(
+                    """INSERT INTO plants_master (fleet_number, description, remarks, condition,
+                        physical_verification, updated_at, current_location_id,
+                        last_verified_date, last_verified_year, last_verified_week,
+                        fleet_type, created_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7::uuid, $8, $9, $10, $11, $12)
+                    ON CONFLICT (fleet_number) DO UPDATE SET
+                        description = COALESCE(EXCLUDED.description, plants_master.description),
+                        remarks = EXCLUDED.remarks, condition = EXCLUDED.condition,
+                        physical_verification = EXCLUDED.physical_verification,
+                        updated_at = EXCLUDED.updated_at,
+                        current_location_id = COALESCE(EXCLUDED.current_location_id, plants_master.current_location_id),
+                        last_verified_date = COALESCE(EXCLUDED.last_verified_date, plants_master.last_verified_date),
+                        last_verified_year = COALESCE(EXCLUDED.last_verified_year, plants_master.last_verified_year),
+                        last_verified_week = COALESCE(EXCLUDED.last_verified_week, plants_master.last_verified_week),
+                        fleet_type = COALESCE(EXCLUDED.fleet_type, plants_master.fleet_type)
+                    RETURNING id, fleet_number""",
+                    plant_upsert["fleet_number"], plant_upsert.get("description"),
+                    plant_upsert.get("remarks"), plant_upsert.get("condition"),
+                    plant_upsert.get("physical_verification"), plant_upsert.get("updated_at"),
+                    plant_upsert.get("current_location_id"), plant_upsert.get("last_verified_date"),
+                    plant_upsert.get("last_verified_year"), plant_upsert.get("last_verified_week"),
+                    plant_upsert.get("fleet_type"),
+                    plant_upsert.get("created_at", datetime.utcnow()),
+                )
+                if row:
+                    if plant_upsert["fleet_number"] not in fleet_to_id:
+                        fleet_to_id[row["fleet_number"]] = row["id"]
+                        result["plants_created"] += 1
+                    else:
+                        result["plants_updated"] += 1
 
         result["plants_processed"] = len(plants_to_upsert)
 
@@ -2075,29 +2143,27 @@ async def save_confirmed_weekly_report(
                     "status": "pending",  # Confirmed when it appears at destination
                     "direction": "outbound",
                     "source_submission_id": submission_id,
-                    "created_at": datetime.utcnow().isoformat(),
+                    "created_at": datetime.utcnow(),
                 })
 
             # INBOUND transfer (plant received FROM another location)
             if transfer_from_id:
                 # Check if there's a pending transfer to confirm
-                pending_transfer = (
-                    client.table("plant_transfers")
-                    .select("id")
-                    .eq("plant_id", plant_id)
-                    .eq("from_location_id", transfer_from_id)
-                    .eq("to_location_id", location_id)
-                    .eq("status", "pending")
-                    .execute()
+                pending_transfer = await fetchrow(
+                    """SELECT id FROM plant_transfers
+                       WHERE plant_id = $1::uuid AND from_location_id = $2::uuid
+                         AND to_location_id = $3::uuid AND status = 'pending'""",
+                    plant_id, transfer_from_id, location_id,
                 )
 
-                if pending_transfer.data:
+                if pending_transfer:
                     # Confirm existing transfer
-                    client.table("plant_transfers").update({
-                        "status": "confirmed",
-                        "actual_arrival_date": week_ending_date,
-                        "updated_at": datetime.utcnow().isoformat(),
-                    }).eq("id", pending_transfer.data[0]["id"]).execute()
+                    await execute(
+                        """UPDATE plant_transfers SET status = 'confirmed',
+                            actual_arrival_date = $2, updated_at = $3
+                        WHERE id = $1::uuid""",
+                        pending_transfer["id"], week_ending_date, datetime.utcnow(),
+                    )
                 else:
                     # Create confirmed transfer (no pending transfer exists)
                     transfers_to_create.append({
@@ -2109,19 +2175,54 @@ async def save_confirmed_weekly_report(
                         "status": "confirmed",
                         "direction": "inbound",
                         "source_submission_id": submission_id,
-                        "created_at": datetime.utcnow().isoformat(),
+                        "created_at": datetime.utcnow(),
                     })
 
-        # Batch insert weekly records
+        # Batch upsert weekly records
         if weekly_records:
-            client.table("plant_weekly_records").upsert(
-                weekly_records,
-                on_conflict="plant_id,year,week_number"
-            ).execute()
+            await executemany(
+                """INSERT INTO plant_weekly_records (
+                    submission_id, plant_id, location_id, year, week_number,
+                    week_ending_date, condition, hours_worked, standby_hours,
+                    breakdown_hours, off_hire, physical_verification, remarks, raw_remarks)
+                VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                ON CONFLICT (plant_id, year, week_number) DO UPDATE SET
+                    submission_id = EXCLUDED.submission_id, location_id = EXCLUDED.location_id,
+                    week_ending_date = EXCLUDED.week_ending_date, condition = EXCLUDED.condition,
+                    hours_worked = EXCLUDED.hours_worked, standby_hours = EXCLUDED.standby_hours,
+                    breakdown_hours = EXCLUDED.breakdown_hours, off_hire = EXCLUDED.off_hire,
+                    physical_verification = EXCLUDED.physical_verification,
+                    remarks = EXCLUDED.remarks, raw_remarks = EXCLUDED.raw_remarks""",
+                [
+                    (
+                        r["submission_id"], r["plant_id"], r["location_id"],
+                        r["year"], r["week_number"], r["week_ending_date"],
+                        r.get("condition"), r.get("hours_worked", 0),
+                        r.get("standby_hours", 0), r.get("breakdown_hours", 0),
+                        r.get("off_hire", False), r.get("physical_verification", True),
+                        r.get("remarks"), r.get("raw_remarks"),
+                    )
+                    for r in weekly_records
+                ],
+            )
 
         # Batch insert transfers
         if transfers_to_create:
-            client.table("plant_transfers").insert(transfers_to_create).execute()
+            await executemany(
+                """INSERT INTO plant_transfers (plant_id, from_location_id, to_location_id,
+                    transfer_date, status, direction, source_submission_id,
+                    created_at, actual_arrival_date)
+                VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7::uuid, $8, $9)""",
+                [
+                    (
+                        t["plant_id"], t.get("from_location_id"), t.get("to_location_id"),
+                        t.get("transfer_date"), t["status"], t.get("direction"),
+                        t.get("source_submission_id"), t.get("created_at"),
+                        t.get("actual_arrival_date"),
+                    )
+                    for t in transfers_to_create
+                ],
+            )
             result["transfers_created"] = len(transfers_to_create)
 
         # Handle missing plants actions
@@ -2138,37 +2239,33 @@ async def save_confirmed_weekly_report(
                     dest_location_id = action_data["transfer_to_location_id"]
 
                     # Create outbound transfer for missing plant
-                    transfers_to_create.append({
-                        "plant_id": plant_id,
-                        "from_location_id": location_id,
-                        "to_location_id": dest_location_id,
-                        "transfer_date": week_ending_date,
-                        "status": "pending",
-                        "direction": "outbound",
-                        "source_submission_id": submission_id,
-                        "created_at": datetime.utcnow().isoformat(),
-                    })
+                    await execute(
+                        """INSERT INTO plant_transfers (plant_id, from_location_id, to_location_id,
+                            transfer_date, status, direction, source_submission_id, created_at)
+                        VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'pending', 'outbound', $5::uuid, $6)""",
+                        plant_id, location_id, dest_location_id, week_ending_date,
+                        submission_id, datetime.utcnow(),
+                    )
+                    result["transfers_created"] = result.get("transfers_created", 0) + 1
 
                     # Update plant location to destination
-                    client.table("plants_master").update({
-                        "current_location_id": dest_location_id,
-                        "condition": "working",  # Assume working if transferred
-                        "updated_at": datetime.utcnow().isoformat(),
-                    }).eq("id", plant_id).execute()
+                    await execute(
+                        """UPDATE plants_master SET current_location_id = $1::uuid,
+                            condition = 'working', updated_at = $2 WHERE id = $3::uuid""",
+                        dest_location_id, datetime.utcnow(), plant_id,
+                    )
 
                 elif action == "scrap":
-                    # Mark as scrap
-                    client.table("plants_master").update({
-                        "condition": "scrap",
-                        "updated_at": datetime.utcnow().isoformat(),
-                    }).eq("id", plant_id).execute()
+                    await execute(
+                        "UPDATE plants_master SET condition = 'scrap', updated_at = $1 WHERE id = $2::uuid",
+                        datetime.utcnow(), plant_id,
+                    )
 
                 elif action == "missing":
-                    # Mark as missing
-                    client.table("plants_master").update({
-                        "condition": "missing",
-                        "updated_at": datetime.utcnow().isoformat(),
-                    }).eq("id", plant_id).execute()
+                    await execute(
+                        "UPDATE plants_master SET condition = 'missing', updated_at = $1 WHERE id = $2::uuid",
+                        datetime.utcnow(), plant_id,
+                    )
 
         # ============================================================
         # Create plant_events and notifications
@@ -2184,8 +2281,8 @@ async def save_confirmed_weekly_report(
         }
 
         # Get location name for notifications
-        loc_result = client.table("locations").select("name").eq("id", location_id).execute()
-        location_name = loc_result.data[0]["name"] if loc_result.data else "Unknown"
+        loc_row = await fetchrow("SELECT name FROM locations WHERE id = $1::uuid", location_id)
+        location_name = loc_row["name"] if loc_row else "Unknown"
 
         for plant_data in validated_plants:
             fleet_num = plant_data["fleet_number"]
@@ -2290,8 +2387,8 @@ async def save_confirmed_weekly_report(
                     dest_id = action_data.get("transfer_to_location_id")
                     dest_name = ""
                     if dest_id:
-                        d = client.table("locations").select("name").eq("id", dest_id).execute()
-                        dest_name = d.data[0]["name"] if d.data else "Unknown"
+                        d = await fetchrow("SELECT name FROM locations WHERE id = $1::uuid", dest_id)
+                        dest_name = d["name"] if d else "Unknown"
                     events_to_create.append({
                         "plant_id": plant_id,
                         "event_type": "movement",
@@ -2337,7 +2434,21 @@ async def save_confirmed_weekly_report(
         # Batch insert events
         if events_to_create:
             try:
-                client.table("plant_events").insert(events_to_create).execute()
+                await executemany(
+                    """INSERT INTO plant_events (plant_id, event_type, event_date, year, week_number,
+                        from_location_id, to_location_id, details, remarks, submission_id)
+                    VALUES ($1::uuid, $2, $3, $4, $5, $6::uuid, $7::uuid, $8::jsonb, $9, $10::uuid)""",
+                    [
+                        (
+                            e["plant_id"], e["event_type"], e["event_date"],
+                            e.get("year"), e.get("week_number"),
+                            e.get("from_location_id"), e.get("to_location_id"),
+                            json.dumps(e.get("details", {})), e.get("remarks"),
+                            e.get("submission_id"),
+                        )
+                        for e in events_to_create
+                    ],
+                )
                 result["events_created"] = len(events_to_create)
             except Exception as e:
                 logger.warning("Failed to create plant events", error=str(e))
@@ -2366,7 +2477,6 @@ async def save_confirmed_weekly_report(
 
             if parts:
                 await _create_notification(
-                    client,
                     title=f"Weekly Report: {location_name} W{week_number}",
                     message=f"{location_name} Week {week_number}: {', '.join(parts)}",
                     notification_type="weekly_report",
@@ -2383,13 +2493,14 @@ async def save_confirmed_weekly_report(
             logger.warning("Failed to create notification", error=str(e))
 
         # Update submission status
-        client.table("weekly_report_submissions").update({
-            "status": "completed",
-            "processing_completed_at": datetime.utcnow().isoformat(),
-            "plants_processed": result["plants_processed"],
-            "plants_created": result["plants_created"],
-            "plants_updated": result["plants_updated"],
-        }).eq("id", submission_id).execute()
+        await execute(
+            """UPDATE weekly_report_submissions SET
+                status = 'completed', processing_completed_at = $2,
+                plants_processed = $3, plants_created = $4, plants_updated = $5
+            WHERE id = $1::uuid""",
+            submission_id, datetime.utcnow(),
+            result["plants_processed"], result["plants_created"], result["plants_updated"],
+        )
 
         result["success"] = True
         logger.info(
@@ -2407,9 +2518,12 @@ async def save_confirmed_weekly_report(
         result["errors"].append(str(e))
 
         # Update submission status to failed
-        client.table("weekly_report_submissions").update({
-            "status": "failed",
-            "errors": [str(e)],
-        }).eq("id", submission_id).execute()
+        try:
+            await execute(
+                "UPDATE weekly_report_submissions SET status = 'failed', errors = $2::jsonb WHERE id = $1::uuid",
+                submission_id, json.dumps([str(e)]),
+            )
+        except Exception:
+            pass
 
     return result

@@ -11,6 +11,7 @@ from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from app.config import get_settings
 from app.core.database import get_supabase_admin_client, create_auth_client
+from app.core.pool import fetch, fetchrow, fetchval, execute
 from app.core.exceptions import AuthenticationError, ValidationError, NotFoundError
 from app.core.security import CurrentUser, get_current_user, require_admin, invalidate_user_cache
 from app.monitoring.logging import get_logger
@@ -113,13 +114,10 @@ async def login(
     t0 = time.perf_counter()
 
     # Run ALL THREE network calls in parallel:
-    #   1. Rate-limit check (RPC → Supabase)
-    #   2. Supabase Auth sign-in (Auth API → Supabase)
-    #   3. Fetch user details by email (PostgREST → Supabase)
-    # Each is ~500-1700ms due to network latency. Running sequentially = ~2.5s.
-    # Running in parallel = ~max(all three) ≈ 1.7s → saves ~800ms.
+    #   1. Rate-limit check (asyncpg → direct async)
+    #   2. Supabase Auth sign-in (Auth API → sync, to_thread)
+    #   3. Fetch user details by email (asyncpg → direct async)
     auth_client = create_auth_client()
-    admin_client = get_supabase_admin_client()
 
     def _sign_in():
         return auth_client.auth.sign_in_with_password({
@@ -127,22 +125,16 @@ async def login(
             "password": credentials.password,
         })
 
-    def _rate_limit():
-        auth_service.check_rate_limit(credentials.email, ip_address)
-
-    def _fetch_user():
-        return (
-            admin_client.table("users")
-            .select("id, email, role, full_name, is_active, must_change_password")
-            .eq("email", credentials.email)
-            .single()
-            .execute()
+    async def _fetch_user():
+        return await fetchrow(
+            "SELECT id, email, role, full_name, is_active, must_change_password FROM users WHERE email = $1",
+            credentials.email,
         )
 
     rate_limit_result, sign_in_result, user_fetch_result = await asyncio.gather(
-        asyncio.to_thread(_rate_limit),
+        auth_service.check_rate_limit(credentials.email, ip_address),
         asyncio.to_thread(_sign_in),
-        asyncio.to_thread(_fetch_user),
+        _fetch_user(),
         return_exceptions=True,
     )
 
@@ -179,19 +171,16 @@ async def login(
         # Use pre-fetched user data (already retrieved in parallel)
         if isinstance(user_fetch_result, Exception):
             # Fallback: fetch by ID if email fetch failed
-            user_data = (
-                admin_client.table("users")
-                .select("id, email, role, full_name, is_active, must_change_password")
-                .eq("id", user.id)
-                .single()
-                .execute()
+            user_data = await fetchrow(
+                "SELECT id, email, role, full_name, is_active, must_change_password FROM users WHERE id = $1::uuid",
+                str(user.id),
             )
         else:
             user_data = user_fetch_result
 
         logger.info("login_timing", step="total", duration_ms=round((time.perf_counter() - t0) * 1000, 1))
 
-        if not user_data.data:
+        if not user_data:
             background_tasks.add_task(
                 auth_service.record_login,
                 credentials.email, ip_address, False, "user_not_found",
@@ -199,7 +188,7 @@ async def login(
             )
             raise AuthenticationError("User not found in system")
 
-        if not user_data.data.get("is_active"):
+        if not user_data.get("is_active"):
             background_tasks.add_task(
                 auth_service.record_login,
                 credentials.email, ip_address, False, "account_deactivated",
@@ -208,19 +197,19 @@ async def login(
             raise AuthenticationError("User account is deactivated")
 
         # Update last login + log success in background (don't block response)
-        def _post_login(uid: str, email: str, ip: str | None, ua: str | None, role: str) -> None:
+        async def _post_login(uid: str, email: str, ip: str | None, ua: str | None, role: str) -> None:
             try:
-                post_client = get_supabase_admin_client()
-                post_client.table("users").update({
-                    "last_login_at": "now()"
-                }).eq("id", uid).execute()
+                await execute(
+                    "UPDATE users SET last_login_at = now() WHERE id = $1::uuid",
+                    uid,
+                )
             except Exception:
                 pass  # Non-critical
-            auth_service.record_login(email, ip, True, None, uid, ua, {"role": role})
+            await auth_service.record_login(email, ip, True, None, uid, ua, {"role": role})
 
         background_tasks.add_task(
             _post_login,
-            str(user.id), credentials.email, ip_address, user_agent, user_data.data["role"]
+            str(user.id), credentials.email, ip_address, user_agent, user_data["role"]
         )
 
         return LoginResponse(
@@ -228,11 +217,11 @@ async def login(
             refresh_token=session.refresh_token,
             expires_in=session.expires_in or 3600,
             user={
-                "id": user_data.data["id"],
-                "email": user_data.data["email"],
-                "role": user_data.data["role"],
-                "full_name": user_data.data.get("full_name"),
-                "must_change_password": user_data.data.get("must_change_password", False),
+                "id": user_data["id"],
+                "email": user_data["email"],
+                "role": user_data["role"],
+                "full_name": user_data.get("full_name"),
+                "must_change_password": user_data.get("must_change_password", False),
             },
         )
 
@@ -280,23 +269,19 @@ async def refresh_token(
         session = response.session
         user = response.user
 
-        # Get user details (admin client for service query)
-        admin_client = get_supabase_admin_client()
-        user_data = (
-            admin_client.table("users")
-            .select("id, email, role, full_name, is_active")
-            .eq("id", user.id)
-            .single()
-            .execute()
+        # Get user details via asyncpg
+        user_data = await fetchrow(
+            "SELECT id, email, role, full_name, is_active FROM users WHERE id = $1::uuid",
+            str(user.id),
         )
 
-        if not user_data.data or not user_data.data.get("is_active"):
+        if not user_data or not user_data.get("is_active"):
             raise AuthenticationError("User account is deactivated")
 
         # Log token refresh in background
         background_tasks.add_task(
             auth_service.log_auth_event,
-            "token_refreshed", user_data.data["email"], user.id,
+            "token_refreshed", user_data["email"], user.id,
             ip_address, user_agent
         )
 
@@ -305,10 +290,10 @@ async def refresh_token(
             refresh_token=session.refresh_token,
             expires_in=session.expires_in or 3600,
             user={
-                "id": user_data.data["id"],
-                "email": user_data.data["email"],
-                "role": user_data.data["role"],
-                "full_name": user_data.data.get("full_name"),
+                "id": user_data["id"],
+                "email": user_data["email"],
+                "role": user_data["role"],
+                "full_name": user_data.get("full_name"),
             },
         )
 
@@ -341,7 +326,7 @@ async def logout(
     user_agent = get_user_agent(request)
 
     # Run session revocation + logging in background so response is instant
-    def _background_logout(user_id: str, email: str, ip: str | None, ua: str | None) -> None:
+    async def _background_logout(user_id: str, email: str, ip: str | None, ua: str | None) -> None:
         try:
             admin_client = get_supabase_admin_client()
             admin_client.auth.admin.sign_out(user_id)
@@ -349,7 +334,7 @@ async def logout(
             # Sign-out failure is not critical — JWT expires naturally
             pass
 
-        auth_service.log_auth_event(
+        await auth_service.log_auth_event(
             "logout", email, user_id=user_id,
             ip_address=ip, user_agent=ua
         )
@@ -417,25 +402,20 @@ async def update_my_profile(
         Updated profile.
     """
     ip_address = get_client_ip(request)
-    client = get_supabase_admin_client()
 
     old_name = current_user.full_name
 
-    result = (
-        client.table("users")
-        .update({
-            "full_name": request_body.full_name,
-            "updated_at": "now()",
-        })
-        .eq("id", current_user.id)
-        .execute()
+    await execute(
+        "UPDATE users SET full_name = $1, updated_at = now() WHERE id = $2::uuid",
+        request_body.full_name,
+        current_user.id,
     )
 
     # Invalidate cache so next request picks up the new name
     invalidate_user_cache(current_user.id)
 
     # Log profile update
-    auth_service.log_auth_event(
+    await auth_service.log_auth_event(
         "user_updated", current_user.email, user_id=current_user.id,
         ip_address=ip_address,
         details={"field": "full_name", "old_value": old_name, "new_value": request_body.full_name, "self_update": True}
@@ -511,11 +491,11 @@ async def change_password(
             {"password": request_body.new_password},
         )
 
-        # Clear must_change_password flag
-        admin_client.table("users").update({
-            "must_change_password": False,
-            "updated_at": "now()",
-        }).eq("id", current_user.id).execute()
+        # Clear must_change_password flag via asyncpg
+        await execute(
+            "UPDATE users SET must_change_password = false, updated_at = now() WHERE id = $1::uuid",
+            current_user.id,
+        )
 
         # Log password change in background
         background_tasks.add_task(
@@ -554,11 +534,10 @@ async def skip_password_change(
         Success confirmation.
     """
     try:
-        admin_client = get_supabase_admin_client()
-        admin_client.table("users").update({
-            "must_change_password": False,
-            "updated_at": "now()",
-        }).eq("id", current_user.id).execute()
+        await execute(
+            "UPDATE users SET must_change_password = false, updated_at = now() WHERE id = $1::uuid",
+            current_user.id,
+        )
 
         logger.info(
             "User skipped password change",
@@ -608,7 +587,7 @@ async def get_auth_events(
     Returns:
         Paginated list of auth events.
     """
-    result = auth_service.get_auth_events(
+    result = await auth_service.get_auth_events(
         user_id=str(user_id) if user_id else None,
         email=email,
         event_type=event_type,
@@ -654,7 +633,7 @@ async def get_login_attempts(
     Returns:
         Paginated list of login attempts.
     """
-    result = auth_service.get_login_attempts(
+    result = await auth_service.get_login_attempts(
         email=email,
         ip_address=ip_address,
         success=success,
@@ -688,7 +667,7 @@ async def get_active_lockouts(
     Returns:
         List of active lockouts.
     """
-    lockouts = auth_service.get_active_lockouts()
+    lockouts = await auth_service.get_active_lockouts()
 
     return {
         "success": True,
@@ -716,10 +695,10 @@ async def unlock_account(
     """
     ip_address = get_client_ip(request)
 
-    success = auth_service.unlock_account(str(lockout_id), current_user.id)
+    success = await auth_service.unlock_account(str(lockout_id), current_user.id)
 
     if success:
-        auth_service.log_auth_event(
+        await auth_service.log_auth_event(
             "lockout_cleared", current_user.email, user_id=current_user.id,
             ip_address=ip_address,
             details={"lockout_id": str(lockout_id), "action": "manual_unlock"}
@@ -786,25 +765,23 @@ async def create_user(
         Created user details (without password).
     """
     ip_address = get_client_ip(request)
-    client = get_supabase_admin_client()
 
     # Check if user already exists
-    existing = (
-        client.table("users")
-        .select("id")
-        .eq("email", request_body.email)
-        .execute()
+    existing = await fetchrow(
+        "SELECT id FROM users WHERE email = $1",
+        request_body.email,
     )
 
-    if existing.data:
+    if existing:
         raise ValidationError(
             "User with this email already exists",
             details=[{"field": "email", "message": "Already exists", "code": "DUPLICATE"}],
         )
 
     try:
-        # Create user in Supabase Auth
-        auth_response = client.auth.admin.create_user({
+        # Create user in Supabase Auth (stays as SDK)
+        admin_client = get_supabase_admin_client()
+        auth_response = admin_client.auth.admin.create_user({
             "email": request_body.email,
             "password": request_body.password,
             "email_confirm": True,  # Skip email confirmation
@@ -815,24 +792,21 @@ async def create_user(
 
         user_id = auth_response.user.id
 
-        # Create user record in our users table
-        user_data = {
-            "id": user_id,
-            "email": request_body.email,
-            "full_name": request_body.full_name,
-            "role": request_body.role,
-            "is_active": True,
-            "must_change_password": False,  # Password set by admin is ready to use
-        }
-
-        result = (
-            client.table("users")
-            .insert(user_data)
-            .execute()
+        # Create user record in our users table via asyncpg
+        created = await fetchrow(
+            """INSERT INTO users (id, email, full_name, role, is_active, must_change_password)
+               VALUES ($1::uuid, $2, $3, $4, $5, $6)
+               RETURNING *""",
+            str(user_id),
+            request_body.email,
+            request_body.full_name,
+            request_body.role,
+            True,
+            False,  # Password set by admin is ready to use
         )
 
         # Log user creation
-        auth_service.log_auth_event(
+        await auth_service.log_auth_event(
             "user_created", request_body.email, user_id=user_id,
             ip_address=ip_address,
             details={
@@ -853,7 +827,7 @@ async def create_user(
         return {
             "success": True,
             "data": {
-                "id": user_id,
+                "id": str(user_id),
                 "email": request_body.email,
                 "full_name": request_body.full_name,
                 "role": request_body.role,
@@ -885,25 +859,30 @@ async def list_users(
     Returns:
         List of users.
     """
-    client = get_supabase_admin_client()
-
-    query = (
-        client.table("users")
-        .select("id, email, full_name, role, is_active, must_change_password, last_login_at, created_at")
-        .order("created_at", desc=True)
-    )
+    conditions: list[str] = []
+    params: list[Any] = []
 
     if role:
-        query = query.eq("role", role)
+        params.append(role)
+        conditions.append(f"role = ${len(params)}")
 
     if is_active is not None:
-        query = query.eq("is_active", is_active)
+        params.append(is_active)
+        conditions.append(f"is_active = ${len(params)}")
 
-    result = query.execute()
+    where = " AND ".join(conditions) if conditions else "TRUE"
+
+    data = await fetch(
+        f"""SELECT id, email, full_name, role, is_active, must_change_password, last_login_at, created_at
+            FROM users
+            WHERE {where}
+            ORDER BY created_at DESC""",
+        *params,
+    )
 
     return {
         "success": True,
-        "data": result.data,
+        "data": data,
     }
 
 
@@ -921,22 +900,17 @@ async def get_user(
     Returns:
         User details.
     """
-    client = get_supabase_admin_client()
-
-    result = (
-        client.table("users")
-        .select("id, email, full_name, role, is_active, must_change_password, last_login_at, created_at, updated_at")
-        .eq("id", str(user_id))
-        .single()
-        .execute()
+    row = await fetchrow(
+        "SELECT id, email, full_name, role, is_active, must_change_password, last_login_at, created_at, updated_at FROM users WHERE id = $1::uuid",
+        str(user_id),
     )
 
-    if not result.data:
+    if not row:
         raise NotFoundError("User", str(user_id))
 
     return {
         "success": True,
-        "data": result.data,
+        "data": row,
     }
 
 
@@ -959,18 +933,14 @@ async def update_user(
         Updated user details.
     """
     ip_address = get_client_ip(request)
-    client = get_supabase_admin_client()
 
     # Check user exists and get current values
-    existing = (
-        client.table("users")
-        .select("id, email, full_name, role, is_active")
-        .eq("id", str(user_id))
-        .single()
-        .execute()
+    existing = await fetchrow(
+        "SELECT id, email, full_name, role, is_active FROM users WHERE id = $1::uuid",
+        str(user_id),
     )
 
-    if not existing.data:
+    if not existing:
         raise NotFoundError("User", str(user_id))
 
     # Prevent admin from deactivating themselves
@@ -978,38 +948,46 @@ async def update_user(
         raise ValidationError("You cannot deactivate your own account")
 
     # Build update data and track changes
-    update_data = {}
-    changes = {}
+    update_data: dict[str, Any] = {}
+    changes: dict[str, dict] = {}
 
     if request_body.full_name is not None:
         update_data["full_name"] = request_body.full_name
-        changes["full_name"] = {"old": existing.data["full_name"], "new": request_body.full_name}
+        changes["full_name"] = {"old": existing["full_name"], "new": request_body.full_name}
     if request_body.role is not None:
         update_data["role"] = request_body.role
-        changes["role"] = {"old": existing.data["role"], "new": request_body.role}
+        changes["role"] = {"old": existing["role"], "new": request_body.role}
     if request_body.is_active is not None:
         update_data["is_active"] = request_body.is_active
-        changes["is_active"] = {"old": existing.data["is_active"], "new": request_body.is_active}
+        changes["is_active"] = {"old": existing["is_active"], "new": request_body.is_active}
 
     if not update_data:
         raise ValidationError("No fields to update")
 
-    update_data["updated_at"] = "now()"
+    # Build SET clause
+    set_parts: list[str] = []
+    params: list[Any] = []
+    for key, val in update_data.items():
+        params.append(val)
+        set_parts.append(f"{key} = ${len(params)}")
+    set_parts.append("updated_at = now()")
 
-    result = (
-        client.table("users")
-        .update(update_data)
-        .eq("id", str(user_id))
-        .execute()
+    params.append(str(user_id))
+    set_clause = ", ".join(set_parts)
+
+    updated = await fetchrow(
+        f"UPDATE users SET {set_clause} WHERE id = ${len(params)}::uuid RETURNING *",
+        *params,
     )
 
     # Invalidate cached user data so changes take effect immediately
     invalidate_user_cache(str(user_id))
 
-    # Revoke sessions if user was deactivated
+    # Revoke sessions if user was deactivated (Auth SDK stays)
     if request_body.is_active is False:
         try:
-            client.auth.admin.sign_out(str(user_id))
+            admin_client = get_supabase_admin_client()
+            admin_client.auth.admin.sign_out(str(user_id))
         except Exception as e:
             logger.warning("Failed to revoke sessions on deactivation", error=str(e), user_id=str(user_id))
 
@@ -1017,12 +995,12 @@ async def update_user(
     event_type = "user_updated"
     if request_body.is_active is False:
         event_type = "user_deactivated"
-    elif request_body.is_active is True and not existing.data["is_active"]:
+    elif request_body.is_active is True and not existing["is_active"]:
         event_type = "user_reactivated"
 
     # Log user update
-    auth_service.log_auth_event(
-        event_type, existing.data["email"], user_id=str(user_id),
+    await auth_service.log_auth_event(
+        event_type, existing["email"], user_id=str(user_id),
         ip_address=ip_address,
         details={
             "changes": changes,
@@ -1040,7 +1018,7 @@ async def update_user(
 
     return {
         "success": True,
-        "data": result.data[0],
+        "data": updated,
     }
 
 
@@ -1065,35 +1043,33 @@ async def reset_user_password(
         Success confirmation.
     """
     ip_address = get_client_ip(request)
-    client = get_supabase_admin_client()
 
     # Check user exists
-    existing = (
-        client.table("users")
-        .select("id, email")
-        .eq("id", str(user_id))
-        .single()
-        .execute()
+    existing = await fetchrow(
+        "SELECT id, email FROM users WHERE id = $1::uuid",
+        str(user_id),
     )
 
-    if not existing.data:
+    if not existing:
         raise NotFoundError("User", str(user_id))
 
     try:
-        # Update password in Supabase Auth
-        client.auth.admin.update_user_by_id(
+        # Update password in Supabase Auth (stays as SDK)
+        admin_client = get_supabase_admin_client()
+        admin_client.auth.admin.update_user_by_id(
             str(user_id),
             {"password": request_body.new_password},
         )
 
-        # Update timestamp
-        client.table("users").update({
-            "updated_at": "now()",
-        }).eq("id", str(user_id)).execute()
+        # Update timestamp via asyncpg
+        await execute(
+            "UPDATE users SET updated_at = now() WHERE id = $1::uuid",
+            str(user_id),
+        )
 
         # Log password reset
-        auth_service.log_auth_event(
-            "password_reset", existing.data["email"], user_id=str(user_id),
+        await auth_service.log_auth_event(
+            "password_reset", existing["email"], user_id=str(user_id),
             ip_address=ip_address,
             details={
                 "reset_by": current_user.id,
@@ -1136,40 +1112,37 @@ async def deactivate_user(
         Success confirmation.
     """
     ip_address = get_client_ip(request)
-    client = get_supabase_admin_client()
 
     # Prevent admin from deactivating themselves
     if str(user_id) == current_user.id:
         raise ValidationError("You cannot deactivate your own account")
 
     # Check user exists
-    existing = (
-        client.table("users")
-        .select("id, email")
-        .eq("id", str(user_id))
-        .single()
-        .execute()
+    existing = await fetchrow(
+        "SELECT id, email FROM users WHERE id = $1::uuid",
+        str(user_id),
     )
 
-    if not existing.data:
+    if not existing:
         raise NotFoundError("User", str(user_id))
 
-    # Deactivate user
-    client.table("users").update({
-        "is_active": False,
-        "updated_at": "now()",
-    }).eq("id", str(user_id)).execute()
+    # Deactivate user via asyncpg
+    await execute(
+        "UPDATE users SET is_active = false, updated_at = now() WHERE id = $1::uuid",
+        str(user_id),
+    )
 
-    # Invalidate cache + revoke sessions immediately
+    # Invalidate cache + revoke sessions immediately (Auth SDK stays)
     invalidate_user_cache(str(user_id))
     try:
-        client.auth.admin.sign_out(str(user_id))
+        admin_client = get_supabase_admin_client()
+        admin_client.auth.admin.sign_out(str(user_id))
     except Exception as e:
         logger.warning("Failed to revoke sessions on deactivation", error=str(e), user_id=str(user_id))
 
     # Log deactivation
-    auth_service.log_auth_event(
-        "user_deactivated", existing.data["email"], user_id=str(user_id),
+    await auth_service.log_auth_event(
+        "user_deactivated", existing["email"], user_id=str(user_id),
         ip_address=ip_address,
         details={
             "deactivated_by": current_user.id,

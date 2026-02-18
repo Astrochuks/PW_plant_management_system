@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     supabase_anon_key: str = Field(..., description="Supabase anonymous/public key")
     supabase_service_role_key: str = Field(..., description="Supabase service role key")
 
+    # Direct PostgreSQL (via Supavisor pooler on port 6543)
+    database_url: str = Field(..., description="PostgreSQL connection string via Supavisor")
+
     # CORS Settings
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:8000"]
 
@@ -77,8 +80,14 @@ class Settings(BaseSettings):
     @field_validator("cors_origins", mode="before")
     @classmethod
     def parse_cors_origins(cls, v: str | list[str]) -> list[str]:
-        """Parse CORS origins from comma-separated string or list."""
+        """Parse CORS origins from JSON array or comma-separated string."""
         if isinstance(v, str):
+            v = v.strip()
+            # JSON array format: ["https://a.com","https://b.com"]
+            if v.startswith("["):
+                import json
+                return json.loads(v)
+            # Comma-separated format: https://a.com,https://b.com
             return [origin.strip() for origin in v.split(",")]
         return v
 

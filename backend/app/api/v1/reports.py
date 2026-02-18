@@ -7,7 +7,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 
-from app.core.database import get_supabase_admin_client
+from app.core.pool import fetch, fetchrow, fetchval, fetch_json_rpc
 from app.core.security import (
     CurrentUser,
     require_management_or_admin,
@@ -30,48 +30,34 @@ async def get_dashboard_summary(
     Returns:
         Summary stats for the dashboard.
     """
-    client = get_supabase_admin_client()
     role = current_user.role
 
-    # Run all 4 independent queries concurrently (was sequential: ~800ms → ~300ms)
-    plant_stats, location_stats, recent_submissions, notifications = await asyncio.gather(
-        asyncio.to_thread(lambda: client.rpc("get_dashboard_plant_stats").execute()),
-        asyncio.to_thread(
-            lambda: client.table("v_location_stats")
-            .select("*")
-            .order("total_plants", desc=True)
-            .limit(10)
-            .execute()
+    # Run all 4 independent queries concurrently — truly async, no thread wrapping
+    plant_stats, location_stats, recent_submissions, unread_count = await asyncio.gather(
+        fetchrow("SELECT * FROM get_dashboard_plant_stats()"),
+        fetch(
+            "SELECT * FROM v_location_stats ORDER BY total_plants DESC LIMIT 10"
         ),
-        asyncio.to_thread(
-            lambda: client.table("weekly_report_submissions")
-            .select("*, locations(name)")
-            .order("submitted_at", desc=True)
-            .limit(5)
-            .execute()
+        fetch(
+            """SELECT s.*, l.name AS location_name
+               FROM weekly_report_submissions s
+               LEFT JOIN locations l ON l.id = s.location_id
+               ORDER BY s.submitted_at DESC
+               LIMIT 5"""
         ),
-        asyncio.to_thread(
-            lambda: client.table("notifications")
-            .select("id", count="estimated")
-            .eq("read", False)
-            .eq("target_role", role)
-            .execute()
+        fetchval(
+            "SELECT count(*) FROM notifications WHERE read = false AND target_role = $1",
+            role,
         ),
     )
 
     return {
         "success": True,
         "data": {
-            "plants": plant_stats.data[0] if plant_stats.data else {},
-            "top_locations": location_stats.data,
-            "recent_submissions": [
-                {
-                    **s,
-                    "location_name": s.get("locations", {}).get("name") if s.get("locations") else None,
-                }
-                for s in recent_submissions.data
-            ],
-            "unread_notifications": notifications.count or 0,
+            "plants": plant_stats or {},
+            "top_locations": location_stats,
+            "recent_submissions": recent_submissions,
+            "unread_notifications": unread_count or 0,
         },
     }
 
@@ -90,16 +76,14 @@ async def get_fleet_summary(
     Returns:
         Fleet counts grouped by type.
     """
-    client = get_supabase_admin_client()
-
-    result = client.rpc(
-        "get_fleet_summary_by_type",
-        {"p_location_id": str(location_id) if location_id else None},
-    ).execute()
+    data = await fetch(
+        "SELECT * FROM get_fleet_summary_by_type($1)",
+        str(location_id) if location_id else None,
+    )
 
     return {
         "success": True,
-        "data": result.data,
+        "data": data,
     }
 
 
@@ -135,27 +119,23 @@ async def get_maintenance_costs(
     Returns:
         Maintenance costs grouped by specified dimension.
     """
-    client = get_supabase_admin_client()
-
-    result = client.rpc(
-        "get_maintenance_cost_analysis",
-        {
-            "p_year": year,
-            "p_location_id": str(location_id) if location_id else None,
-            "p_plant_id": str(plant_id) if plant_id else None,
-            "p_fleet_type": fleet_type,
-            "p_group_by": group_by,
-        },
-    ).execute()
+    data = await fetch(
+        "SELECT * FROM get_maintenance_cost_analysis($1, $2, $3, $4, $5)",
+        year,
+        str(location_id) if location_id else None,
+        str(plant_id) if plant_id else None,
+        fleet_type,
+        group_by,
+    )
 
     return {
         "success": True,
-        "data": result.data,
+        "data": data,
         "meta": {
             "group_by": group_by,
             "year": year,
-            "total_groups": len(result.data) if result.data else 0,
-            "grand_total": sum(row.get("total_cost", 0) for row in result.data) if result.data else 0,
+            "total_groups": len(data),
+            "grand_total": sum(row.get("total_cost", 0) for row in data),
         },
     }
 
@@ -176,19 +156,15 @@ async def get_verification_status(
     Returns:
         Verification rates by location.
     """
-    client = get_supabase_admin_client()
-
-    result = client.rpc(
-        "get_verification_status_by_location",
-        {
-            "p_year": year,
-            "p_week_number": week_number,
-        },
-    ).execute()
+    data = await fetch(
+        "SELECT * FROM get_verification_status_by_location($1, $2)",
+        year,
+        week_number,
+    )
 
     return {
         "success": True,
-        "data": result.data,
+        "data": data,
     }
 
 
@@ -208,19 +184,15 @@ async def get_submission_compliance(
     Returns:
         Submission compliance rates by location.
     """
-    client = get_supabase_admin_client()
-
-    result = client.rpc(
-        "get_submission_compliance",
-        {
-            "p_year": year,
-            "p_weeks": weeks,
-        },
-    ).execute()
+    data = await fetch(
+        "SELECT * FROM get_submission_compliance($1, $2)",
+        year,
+        weeks,
+    )
 
     return {
         "success": True,
-        "data": result.data,
+        "data": data,
     }
 
 
@@ -242,20 +214,16 @@ async def get_plant_movement(
     Returns:
         Plant movement data between locations.
     """
-    client = get_supabase_admin_client()
-
-    result = client.rpc(
-        "get_plant_movement_report",
-        {
-            "p_date_from": str(date_from) if date_from else None,
-            "p_date_to": str(date_to) if date_to else None,
-            "p_fleet_type": fleet_type,
-        },
-    ).execute()
+    data = await fetch(
+        "SELECT * FROM get_plant_movement_report($1, $2, $3)",
+        date_from,
+        date_to,
+        fleet_type,
+    )
 
     return {
         "success": True,
-        "data": result.data,
+        "data": data,
     }
 
 
@@ -275,19 +243,15 @@ async def get_weekly_trend(
     Returns:
         Weekly plant counts and verification rates.
     """
-    client = get_supabase_admin_client()
-
-    result = client.rpc(
-        "get_weekly_trend",
-        {
-            "p_year": year,
-            "p_location_id": str(location_id) if location_id else None,
-        },
-    ).execute()
+    data = await fetch(
+        "SELECT * FROM get_weekly_trend($1, $2)",
+        year,
+        str(location_id) if location_id else None,
+    )
 
     return {
         "success": True,
-        "data": result.data,
+        "data": data,
     }
 
 
@@ -309,20 +273,16 @@ async def get_unverified_plants(
     Returns:
         List of plants missing verification.
     """
-    client = get_supabase_admin_client()
-
-    result = client.rpc(
-        "get_unverified_plants",
-        {
-            "p_location_id": str(location_id) if location_id else None,
-            "p_weeks_missing": weeks_missing,
-            "p_limit": limit,
-        },
-    ).execute()
+    data = await fetch(
+        "SELECT * FROM get_unverified_plants($1, $2, $3)",
+        str(location_id) if location_id else None,
+        weeks_missing,
+        limit,
+    )
 
     return {
         "success": True,
-        "data": result.data,
+        "data": data,
     }
 
 
@@ -344,46 +304,48 @@ async def export_plants(
     Returns:
         Exported data or download URL.
     """
-    client = get_supabase_admin_client()
-
-    query = client.table("v_plants_summary").select("*")
+    conditions: list[str] = []
+    params: list[Any] = []
 
     if status:
-        query = query.eq("status", status)
+        params.append(status)
+        conditions.append(f"status = ${len(params)}")
 
     if location_id:
-        query = query.eq("current_location_id", str(location_id))
+        params.append(str(location_id))
+        conditions.append(f"current_location_id = ${len(params)}::uuid")
 
-    query = query.order("fleet_number")
-
-    result = query.execute()
+    where = " AND ".join(conditions) if conditions else "TRUE"
+    data = await fetch(
+        f"SELECT * FROM v_plants_summary WHERE {where} ORDER BY fleet_number",
+        *params,
+    )
 
     if format == "csv":
-        # Convert to CSV format
         import io
         import csv
 
-        if not result.data:
+        if not data:
             return {"success": True, "data": "", "format": "csv"}
 
         output = io.StringIO()
-        writer = csv.DictWriter(output, fieldnames=result.data[0].keys())
+        writer = csv.DictWriter(output, fieldnames=data[0].keys())
         writer.writeheader()
-        writer.writerows(result.data)
+        writer.writerows(data)
         csv_data = output.getvalue()
 
         return {
             "success": True,
             "data": csv_data,
             "format": "csv",
-            "count": len(result.data),
+            "count": len(data),
         }
 
     return {
         "success": True,
-        "data": result.data,
+        "data": data,
         "format": "json",
-        "count": len(result.data),
+        "count": len(data),
     }
 
 
@@ -405,30 +367,28 @@ async def export_maintenance(
     Returns:
         Exported data or download URL.
     """
-    client = get_supabase_admin_client()
-
-    query = (
-        client.table("spare_parts")
-        .select("*, plants_master(fleet_number)")
-    )
+    conditions: list[str] = []
+    params: list[Any] = []
 
     if year:
-        query = query.gte("replaced_date", f"{year}-01-01").lte("replaced_date", f"{year}-12-31")
+        params.append(f"{year}-01-01")
+        conditions.append(f"sp.replaced_date >= ${len(params)}::date")
+        params.append(f"{year}-12-31")
+        conditions.append(f"sp.replaced_date <= ${len(params)}::date")
 
     if plant_id:
-        query = query.eq("plant_id", str(plant_id))
+        params.append(str(plant_id))
+        conditions.append(f"sp.plant_id = ${len(params)}::uuid")
 
-    query = query.order("replaced_date", desc=True)
-
-    result = query.execute()
-
-    # Transform data
-    data = []
-    for item in result.data:
-        item["fleet_number"] = item.get("plants_master", {}).get("fleet_number") if item.get("plants_master") else None
-        if "plants_master" in item:
-            del item["plants_master"]
-        data.append(item)
+    where = " AND ".join(conditions) if conditions else "TRUE"
+    data = await fetch(
+        f"""SELECT sp.*, pm.fleet_number
+            FROM spare_parts sp
+            LEFT JOIN plants_master pm ON pm.id = sp.plant_id
+            WHERE {where}
+            ORDER BY sp.replaced_date DESC""",
+        *params,
+    )
 
     if format == "csv":
         import io
