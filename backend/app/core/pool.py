@@ -40,11 +40,6 @@ async def init_pool() -> None:
     global _pool
     settings = get_settings()
 
-    # Supavisor requires SSL
-    ssl_ctx = ssl.create_default_context()
-    ssl_ctx.check_hostname = False
-    ssl_ctx.verify_mode = ssl.CERT_NONE
-
     async def _init_connection(conn: asyncpg.Connection) -> None:
         """Register JSON codecs so json/jsonb columns auto-decode to Python objects."""
         await conn.set_type_codec(
@@ -55,7 +50,18 @@ async def init_pool() -> None:
         )
 
     dsn = settings.database_url
-    logger.info("Connecting to database", host=dsn.split("@")[-1] if "@" in dsn else "unknown")
+    # Determine SSL mode: use simple 'require' for cloud deployments (more compatible)
+    # or a custom context for local dev if needed.
+    ssl_mode: Any = ssl.create_default_context()
+    ssl_mode.check_hostname = False
+    ssl_mode.verify_mode = ssl.CERT_NONE
+
+    # If DSN already specifies sslmode, let asyncpg handle it
+    if "sslmode=" in dsn:
+        ssl_mode = True  # let asyncpg parse sslmode from DSN
+
+    host_info = dsn.split("@")[-1] if "@" in dsn else "unknown"
+    logger.info("Connecting to database", host=host_info)
 
     try:
         _pool = await asyncpg.create_pool(
@@ -63,8 +69,8 @@ async def init_pool() -> None:
             min_size=2,
             max_size=10,
             command_timeout=15,
-            timeout=30,  # connection acquisition timeout
-            ssl=ssl_ctx,
+            timeout=60,  # generous timeout for first connection
+            ssl=ssl_mode,
             # Supavisor uses transaction-mode pooling, so we must not use
             # server-side prepared statements (they don't survive across
             # different backend connections).
