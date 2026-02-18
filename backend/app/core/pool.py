@@ -54,18 +54,26 @@ async def init_pool() -> None:
             "jsonb", encoder=json.dumps, decoder=json.loads, schema="pg_catalog"
         )
 
-    _pool = await asyncpg.create_pool(
-        dsn=settings.database_url,
-        min_size=2,
-        max_size=10,
-        command_timeout=15,
-        ssl=ssl_ctx,
-        # Supavisor uses transaction-mode pooling, so we must not use
-        # server-side prepared statements (they don't survive across
-        # different backend connections).
-        statement_cache_size=0,
-        init=_init_connection,
-    )
+    dsn = settings.database_url
+    logger.info("Connecting to database", host=dsn.split("@")[-1] if "@" in dsn else "unknown")
+
+    try:
+        _pool = await asyncpg.create_pool(
+            dsn=dsn,
+            min_size=2,
+            max_size=10,
+            command_timeout=15,
+            timeout=30,  # connection acquisition timeout
+            ssl=ssl_ctx,
+            # Supavisor uses transaction-mode pooling, so we must not use
+            # server-side prepared statements (they don't survive across
+            # different backend connections).
+            statement_cache_size=0,
+            init=_init_connection,
+        )
+    except Exception as e:
+        logger.error("Failed to create pool", error=str(e), error_type=type(e).__name__)
+        raise
 
     logger.info(
         "asyncpg pool initialized",
