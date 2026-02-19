@@ -27,6 +27,25 @@ setup_logging()
 logger = get_logger(__name__)
 
 
+async def _init_pool_with_retry(max_attempts: int = 5, delay: int = 5) -> None:
+    """Try to initialize the DB pool with retries, so the app can start even if DB is slow."""
+    for attempt in range(1, max_attempts + 1):
+        try:
+            await init_pool()
+            return
+        except Exception as e:
+            logger.warning(
+                "Pool init failed, retrying",
+                attempt=attempt,
+                max_attempts=max_attempts,
+                error=str(e),
+            )
+            if attempt == max_attempts:
+                logger.error("Pool init failed after all retries — DB will be unavailable")
+                return
+            await asyncio.sleep(delay)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan handler for startup and shutdown events."""
@@ -40,7 +59,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
 
     # Initialize asyncpg connection pool (direct PostgreSQL)
-    await init_pool()
+    # Use a background task so the app starts even if DB is slow to connect.
+    # The pool will retry and be ready by the time the first request arrives.
+    pool_task = asyncio.create_task(_init_pool_with_retry())
 
     # Start background tasks
     metrics_task = asyncio.create_task(start_metrics_flush_task())
@@ -51,11 +72,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Application shutting down")
 
     # Cancel background tasks
-    metrics_task.cancel()
-    try:
-        await metrics_task
-    except asyncio.CancelledError:
-        pass
+    for task in (pool_task, metrics_task):
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
 
     # Flush remaining metrics
     await get_metrics_collector().flush()
