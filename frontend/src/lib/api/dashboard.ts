@@ -65,11 +65,13 @@ export interface DashboardSummary {
 }
 
 export interface FleetSummaryItem {
-  fleet_type_id: string;
-  fleet_type_name: string;
-  total_count: number;
-  verified_count: number;
-  active_count: number;
+  fleet_type: string;
+  total: number;
+  working: number;
+  standby: number;
+  breakdown: number;
+  under_repair: number;
+  other: number;
 }
 
 export interface PlantEvent {
@@ -118,8 +120,16 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
 
 export async function getFleetSummary(locationId?: string): Promise<FleetSummaryItem[]> {
   const params = locationId ? { location_id: locationId } : {};
-  const response = await apiClient.get<ApiResponse<FleetSummaryItem[]>>('/reports/fleet-summary', { params });
-  return response.data.data;
+  const response = await apiClient.get<ApiResponse<Record<string, unknown>[]>>('/reports/fleet-summary', { params });
+  return response.data.data.map((row) => ({
+    fleet_type: String(row.fleet_type ?? 'Unknown'),
+    total: Number(row.total ?? 0),
+    working: Number(row.working ?? 0),
+    standby: Number(row.standby ?? 0),
+    breakdown: Number(row.breakdown ?? 0),
+    under_repair: Number(row.under_repair ?? 0),
+    other: Number(row.other ?? 0),
+  }));
 }
 
 export async function getPlantEvents(params?: {

@@ -7,13 +7,10 @@
 import { useState } from 'react';
 import { useTheme } from 'next-themes';
 import {
-  Bell,
   Moon,
   Sun,
   LogOut,
   User,
-  Settings,
-  HelpCircle,
   Menu,
   Calendar,
 } from 'lucide-react';
@@ -29,14 +26,15 @@ import {
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { useAuth } from '@/providers/auth-provider';
 import { cn } from '@/lib/utils';
+import Link from 'next/link';
+import { NotificationBell } from '@/components/notifications/notification-bell';
 
 interface HeaderProps {
   sidebarCollapsed: boolean;
   onMenuClick?: () => void;
-  unreadNotifications?: number;
 }
 
-export function Header({ sidebarCollapsed, onMenuClick, unreadNotifications = 0 }: HeaderProps) {
+export function Header({ sidebarCollapsed, onMenuClick }: HeaderProps) {
   const { theme, setTheme } = useTheme();
   const { user, logout } = useAuth();
   const [mounted, setMounted] = useState(false);
@@ -89,14 +87,7 @@ export function Header({ sidebarCollapsed, onMenuClick, unreadNotifications = 0 
         {/* Right side - Actions */}
         <div className="flex items-center gap-2">
           {/* Notifications */}
-          <Button variant="ghost" size="icon" className="relative">
-            <Bell className="h-5 w-5" />
-            {unreadNotifications > 0 && (
-              <span className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-destructive text-destructive-foreground text-xs flex items-center justify-center font-medium">
-                {unreadNotifications > 9 ? '9+' : unreadNotifications}
-              </span>
-            )}
-          </Button>
+          <NotificationBell />
 
           {/* Theme Toggle */}
           {mounted && (
@@ -112,11 +103,6 @@ export function Header({ sidebarCollapsed, onMenuClick, unreadNotifications = 0 
               )}
             </Button>
           )}
-
-          {/* Help */}
-          <Button variant="ghost" size="icon">
-            <HelpCircle className="h-5 w-5" />
-          </Button>
 
           {/* User Menu */}
           <DropdownMenu>
@@ -145,13 +131,11 @@ export function Header({ sidebarCollapsed, onMenuClick, unreadNotifications = 0 
                 </div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem>
-                <User className="mr-2 h-4 w-4" />
-                Profile
-              </DropdownMenuItem>
-              <DropdownMenuItem>
-                <Settings className="mr-2 h-4 w-4" />
-                Settings
+              <DropdownMenuItem asChild>
+                <Link href="/profile">
+                  <User className="mr-2 h-4 w-4" />
+                  Profile
+                </Link>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem

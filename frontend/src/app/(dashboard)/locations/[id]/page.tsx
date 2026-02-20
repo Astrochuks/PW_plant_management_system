@@ -20,6 +20,7 @@ import {
   BarChart3,
   AlertTriangle,
   ArrowLeftRight,
+  DollarSign,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -63,6 +64,7 @@ import {
   useLocationTransfers,
   useDeleteLocation,
 } from '@/hooks/use-locations'
+import { useLocationCosts } from '@/hooks/use-spare-parts'
 import { getErrorMessage } from '@/lib/api/client'
 import type { PlantCondition } from '@/lib/api/plants'
 import type { LocationSubmission } from '@/lib/api/locations'
@@ -109,6 +111,17 @@ export default function LocationDetailPage() {
 
   // Transfers tab state
   const { data: transfersData, isLoading: transfersLoading } = useLocationTransfers(id, { limit: 100 })
+
+  // Costs tab state
+  const [costYear, setCostYear] = useState<string>('')
+  const [costMonth, setCostMonth] = useState<string>('')
+  const costParams = (() => {
+    const p: { year?: number; month?: number } = {}
+    if (costYear) p.year = Number(costYear)
+    if (costMonth) p.month = Number(costMonth)
+    return p
+  })()
+  const { data: costsData, isLoading: costsLoading } = useLocationCosts(id, costParams)
 
   async function handleDelete() {
     try {
@@ -242,6 +255,10 @@ export default function LocationDetailPage() {
           <TabsTrigger value="transfers" className="gap-1.5">
             <ArrowLeftRight className="h-4 w-4" />
             Transfers
+          </TabsTrigger>
+          <TabsTrigger value="costs" className="gap-1.5">
+            <DollarSign className="h-4 w-4" />
+            Costs
           </TabsTrigger>
         </TabsList>
 
@@ -496,6 +513,108 @@ export default function LocationDetailPage() {
                   })}
                 </TableBody>
               </Table>
+            </div>
+          )}
+        </TabsContent>
+
+        {/* ================================================================ */}
+        {/* Costs Tab                                                        */}
+        {/* ================================================================ */}
+        <TabsContent value="costs" className="space-y-4">
+          <div className="flex items-center gap-3">
+            <h3 className="font-semibold">Maintenance Costs</h3>
+            <Select value={costYear || 'all'} onValueChange={(v) => { setCostYear(v === 'all' ? '' : v); setCostMonth(''); }}>
+              <SelectTrigger className="w-[140px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Time</SelectItem>
+                <SelectItem value={String(CURRENT_YEAR)}>This Year</SelectItem>
+                <SelectItem value={String(CURRENT_YEAR - 1)}>Last Year</SelectItem>
+                <SelectItem value={String(CURRENT_YEAR - 2)}>{CURRENT_YEAR - 2}</SelectItem>
+              </SelectContent>
+            </Select>
+            {costYear && (
+              <Select value={costMonth || 'all'} onValueChange={(v) => setCostMonth(v === 'all' ? '' : v)}>
+                <SelectTrigger className="w-[140px]">
+                  <SelectValue placeholder="Full Year" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Full Year</SelectItem>
+                  <SelectItem value="1">January</SelectItem>
+                  <SelectItem value="2">February</SelectItem>
+                  <SelectItem value="3">March</SelectItem>
+                  <SelectItem value="4">April</SelectItem>
+                  <SelectItem value="5">May</SelectItem>
+                  <SelectItem value="6">June</SelectItem>
+                  <SelectItem value="7">July</SelectItem>
+                  <SelectItem value="8">August</SelectItem>
+                  <SelectItem value="9">September</SelectItem>
+                  <SelectItem value="10">October</SelectItem>
+                  <SelectItem value="11">November</SelectItem>
+                  <SelectItem value="12">December</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+
+          {costsLoading ? (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <Skeleton key={i} className="h-24 rounded-lg" />
+              ))}
+            </div>
+          ) : !costsData ? (
+            <EmptyState
+              icon={DollarSign}
+              title="No cost data"
+              description="Maintenance cost data will appear here once spare parts are recorded."
+            />
+          ) : (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                <CostCard
+                  label="Total Cost"
+                  value={formatCurrency(costsData.costs.total_cost)}
+                  color="text-emerald-600 dark:text-emerald-400"
+                />
+                <CostCard
+                  label="Direct Cost"
+                  value={formatCurrency(costsData.costs.direct_cost)}
+                  color="text-blue-600 dark:text-blue-400"
+                />
+                <CostCard
+                  label="Workshop Cost"
+                  value={formatCurrency(costsData.costs.workshop_cost)}
+                  color="text-amber-600 dark:text-amber-400"
+                />
+                <CostCard
+                  label="Category Cost"
+                  value={formatCurrency(costsData.costs.category_cost)}
+                />
+                <CostCard
+                  label="Total Items"
+                  value={String(costsData.items_count)}
+                />
+                <CostCard
+                  label="Plants Serviced"
+                  value={String(costsData.plants_count)}
+                />
+              </div>
+
+              {/* Cost Distribution */}
+              {costsData.costs.total_cost > 0 && (
+                <Card>
+                  <CardContent className="pt-6">
+                    <h4 className="text-sm font-medium mb-3">Cost Distribution</h4>
+                    <div className="space-y-3">
+                      <CostBar label="Direct" amount={costsData.costs.direct_cost} total={costsData.costs.total_cost} color="bg-blue-500" />
+                      <CostBar label="Workshop" amount={costsData.costs.workshop_cost} total={costsData.costs.total_cost} color="bg-amber-500" />
+                      <CostBar label="Category" amount={costsData.costs.category_cost} total={costsData.costs.total_cost} color="bg-violet-500" />
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
             </div>
           )}
         </TabsContent>
@@ -803,7 +922,38 @@ function LocationDetailSkeleton() {
   )
 }
 
+function CostCard({ label, value, color }: { label: string; value: string; color?: string }) {
+  return (
+    <Card>
+      <CardContent className="pt-4 pb-3 px-4">
+        <p className={`text-xl font-bold ${color || ''}`}>{value}</p>
+        <p className="text-xs text-muted-foreground mt-0.5">{label}</p>
+      </CardContent>
+    </Card>
+  )
+}
+
+function CostBar({ label, amount, total, color }: { label: string; amount: number; total: number; color: string }) {
+  const pct = total > 0 ? Math.round((amount / total) * 100) : 0
+  return (
+    <div className="flex items-center gap-3">
+      <span className="text-sm w-20 text-muted-foreground">{label}</span>
+      <div className="flex-1 h-4 bg-muted rounded-full overflow-hidden">
+        <div className={`h-full ${color} rounded-full`} style={{ width: `${pct}%` }} />
+      </div>
+      <span className="text-sm font-medium w-12 text-right">{pct}%</span>
+      <span className="text-xs text-muted-foreground w-24 text-right">{formatCurrency(amount)}</span>
+    </div>
+  )
+}
+
 function formatCurrency(amount: number): string {
+  if (amount >= 1_000_000) {
+    return `\u20A6${(amount / 1_000_000).toFixed(1)}M`
+  }
+  if (amount >= 1_000) {
+    return `\u20A6${(amount / 1_000).toFixed(0)}K`
+  }
   return new Intl.NumberFormat('en-NG', {
     style: 'currency',
     currency: 'NGN',

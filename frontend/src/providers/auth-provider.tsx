@@ -5,7 +5,7 @@
  * Manages auth state across the application
  */
 
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   User,
@@ -16,6 +16,8 @@ import {
   saveAuthData,
   getSavedUser,
   isAuthenticated as checkIsAuthenticated,
+  getTokenExpiresAt,
+  refreshToken as apiRefreshToken,
 } from '@/lib/api/auth';
 import { getErrorMessage } from '@/lib/api/client';
 
@@ -34,35 +36,85 @@ interface AuthProviderProps {
   children: React.ReactNode;
 }
 
+// Refresh the token 5 minutes before it expires
+const REFRESH_BUFFER_MS = 5 * 60 * 1000;
+
 export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Schedule a proactive token refresh before the access token expires
+  const scheduleRefresh = useCallback(() => {
+    // Clear any existing timer
+    if (refreshTimerRef.current) {
+      clearTimeout(refreshTimerRef.current);
+      refreshTimerRef.current = null;
+    }
+
+    const expiresAt = getTokenExpiresAt();
+    if (!expiresAt) return;
+
+    const msUntilExpiry = expiresAt - Date.now();
+    const msUntilRefresh = msUntilExpiry - REFRESH_BUFFER_MS;
+
+    // If token is already close to expiry or expired, refresh now
+    // If it's still fresh, schedule a future refresh
+    const delay = Math.max(msUntilRefresh, 0);
+
+    refreshTimerRef.current = setTimeout(async () => {
+      try {
+        const response = await apiRefreshToken();
+        saveAuthData(response);
+        if (response.user) {
+          setUser(response.user);
+        }
+        // Schedule the next refresh
+        scheduleRefresh();
+      } catch {
+        // Refresh failed — user will be logged out on next 401
+      }
+    }, delay);
+  }, []);
 
   // Restore auth state from localStorage on mount (no network call)
   useEffect(() => {
     const savedUser = getSavedUser();
     if (savedUser && checkIsAuthenticated()) {
       setUser(savedUser);
+      scheduleRefresh();
     }
     setIsLoading(false);
+  }, [scheduleRefresh]);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current);
+      }
+    };
   }, []);
 
   const login = useCallback(async (credentials: LoginCredentials) => {
-    // Don't set isLoading here — it triggers the dashboard's full-screen spinner.
-    // The login page has its own loading state for the button.
     try {
       const response = await apiLogin(credentials);
       saveAuthData(response);
       setUser(response.user);
-      router.replace('/'); // replace so login page isn't in back-history
+      scheduleRefresh();
+      router.replace('/');
     } catch (error) {
       throw new Error(getErrorMessage(error));
     }
-  }, [router]);
+  }, [router, scheduleRefresh]);
 
   const logout = useCallback(() => {
-    apiLogout(); // Fire-and-forget (clears localStorage + sends server request)
+    if (refreshTimerRef.current) {
+      clearTimeout(refreshTimerRef.current);
+      refreshTimerRef.current = null;
+    }
+    apiLogout();
     setUser(null);
     router.push('/login');
   }, [router]);

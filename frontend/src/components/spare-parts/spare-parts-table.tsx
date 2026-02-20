@@ -46,6 +46,7 @@ export function SparePartsTable({ parts, loading, onRowClick }: SparePartsTableP
             <TableHead className="w-[100px]">Date</TableHead>
             <TableHead className="w-[100px]">Fleet #</TableHead>
             <TableHead>Part Description</TableHead>
+            <TableHead className="w-[130px]">PO Number</TableHead>
             <TableHead className="w-[150px]">Supplier</TableHead>
             <TableHead className="w-[60px] text-center">Qty</TableHead>
             <TableHead className="w-[100px] text-right">Unit Cost</TableHead>
@@ -63,7 +64,11 @@ export function SparePartsTable({ parts, loading, onRowClick }: SparePartsTableP
                 {part.replaced_date ? formatDate(part.replaced_date) : '-'}
               </TableCell>
               <TableCell className="font-mono font-medium">
-                {part.fleet_number || '-'}
+                {part.fleet_number
+                  || part.fleet_number_raw
+                  || (part.is_workshop ? 'WORKSHOP' : null)
+                  || (part.is_category ? (part.category_name || 'CATEGORY') : null)
+                  || '-'}
               </TableCell>
               <TableCell className="max-w-[300px]">
                 <div className="truncate" title={part.part_description}>
@@ -75,8 +80,11 @@ export function SparePartsTable({ parts, loading, onRowClick }: SparePartsTableP
                   </div>
                 )}
               </TableCell>
-              <TableCell className="text-sm truncate" title={part.supplier || ''}>
-                {part.supplier || '-'}
+              <TableCell className="font-mono text-sm">
+                {part.purchase_order_number || '-'}
+              </TableCell>
+              <TableCell className="text-sm truncate" title={part.supplier_name || part.supplier || ''}>
+                {part.supplier_name || part.supplier || '-'}
               </TableCell>
               <TableCell className="text-center">{part.quantity}</TableCell>
               <TableCell className="text-right">
@@ -102,6 +110,7 @@ function SparePartsTableSkeleton() {
             <TableHead className="w-[100px]">Date</TableHead>
             <TableHead className="w-[100px]">Fleet #</TableHead>
             <TableHead>Part Description</TableHead>
+            <TableHead className="w-[130px]">PO Number</TableHead>
             <TableHead className="w-[150px]">Supplier</TableHead>
             <TableHead className="w-[60px] text-center">Qty</TableHead>
             <TableHead className="w-[100px] text-right">Unit Cost</TableHead>
@@ -117,6 +126,7 @@ function SparePartsTableSkeleton() {
                 <Skeleton className="h-5 w-full max-w-[200px]" />
                 <Skeleton className="h-3 w-20 mt-1" />
               </TableCell>
+              <TableCell><Skeleton className="h-5 w-20" /></TableCell>
               <TableCell><Skeleton className="h-5 w-24" /></TableCell>
               <TableCell><Skeleton className="h-5 w-8 mx-auto" /></TableCell>
               <TableCell><Skeleton className="h-5 w-16 ml-auto" /></TableCell>

@@ -1,59 +1,6 @@
 # FRONTEND IMPLEMENTATION ROADMAP
 
-## Complete Guide: Connecting 140+ Backend Endpoints to Frontend Pages
-
----
-
-## CURRENT STATUS (Updated Feb 2026)
-
-### What's Built & Working
-| Module | Status | Details |
-|--------|--------|---------|
-| **Auth** | ✅ Complete | Login, logout, token refresh, role-based access, JWT interceptor, protected routes |
-| **Plants List** | ✅ Complete | Advanced filtering (condition, location, fleet_type, search, verified), pagination, column visibility, Excel export, dynamic stats cards (4 cards: condition, sites, fleet types, state distribution) |
-| **Plant Detail** | ✅ Complete | Full page with 5 tabs (Overview, Maintenance, Location History, Usage, Events), sidebar stats, pending transfer display, remarks, admin edit/delete, condition badges |
-| **Plant Create/Edit** | ✅ Complete | Form with all fields, fleet type auto-resolution, admin-only |
-| **User Management** | ✅ Complete | List with role/status filters, create, edit, deactivate, password reset |
-| **Dashboard Layout** | ✅ Complete | Responsive sidebar, header with theme toggle, user menu, prefetches locations/fleet types |
-| **Protected Routes** | ✅ Complete | Role-based route guards, access denied page |
-
-### What's Not Built Yet
-| Module | Backend Ready? | Priority | Endpoints Available |
-|--------|---------------|----------|-------------------|
-| **Weekly Report Upload** | ✅ 12+ endpoints | **P0 - CRITICAL** | Preview, confirm, submissions, file download, token management |
-| **Spare Parts / POs** | ✅ 30+ endpoints | **P1 - HIGH** | Full CRUD, bulk upload, PO management, analytics, autocomplete |
-| **Locations / Sites** | ✅ 9 endpoints | **P1 - HIGH** | CRUD, plants at location, submissions, usage stats, weekly records |
-| **Reports & Analytics** | ✅ 10 endpoints | **P1 - HIGH** | Dashboard KPIs, fleet summary, maintenance costs, verification, trends |
-| **Suppliers** | ✅ 6 endpoints | **P2 - MEDIUM** | CRUD, autocomplete, PO history |
-| **Transfers** | ✅ 6 endpoints | **P2 - MEDIUM** | List, pending, confirm, cancel, stats |
-| **Audit Logs** | ✅ 2 endpoints | **P3 - LOW** | List with filters, record history |
-| **States** | ✅ 7 endpoints | **P3 - LOW** | CRUD, sites in state, plants in state |
-| **Notifications** | ✅ 5 endpoints | **P3 - LOW** | List, mark read, unread count |
-| **Dashboard (Real)** | ✅ Via reports | **P1 - HIGH** | get_dashboard_stats RPC |
-| **Settings** | Partial | **P4 - LATER** | Minimal endpoints |
-
-### Key Architecture Decisions Already Made
-- **Next.js 16 App Router** with `(dashboard)` layout group
-- **React Query** for server state (staleTime: 2-10 min depending on data volatility)
-- **Axios** with JWT interceptor for API calls
-- **shadcn/ui** components (tabs, table, card, badge, select, input, form, dialog, tooltip, skeleton, etc.)
-- **ECharts** for charts (already used in weekly usage chart)
-- **date-fns** for date formatting
-- **Zod + React Hook Form** for form validation
-- **Prefetching**: Locations and fleet types prefetched in dashboard layout
-- **Debounced search**: 300ms delay via `useDebounce` hook
-
-### Database Tables (20 core tables)
-`users`, `plants_master`, `plant_events`, `plant_weekly_records`, `plant_location_history`, `plant_transfers`, `locations`, `states`, `suppliers`, `spare_parts`, `purchase_order_items`, `purchase_order_submissions`, `purchase_order_documents`, `shared_po_record`, `weekly_report_submissions`, `upload_tokens`, `upload_token_usage`, `audit_logs`, `notifications`, `fleet_number_prefixes`, `req_no_location_mapping`, `login_attempts`, `lockouts`, `auth_events`
-
-### Database Views (pre-computed)
-- `v_plants_summary` - Plants with location, state, maintenance costs, pending transfers (27+ fields)
-- `v_plant_utilization` - Plants with detailed utilization metrics (hours, rates, costs)
-- `v_location_stats` - Locations with plant counts by condition
-- `v_supplier_stats` - Suppliers with aggregated PO and cost data
-
-### Key RPC Functions
-`search_plants`, `transfer_plant`, `get_plant_maintenance_history`, `get_plant_location_history`, `get_plant_usage_summary`, `get_breakdown_report`, `get_dashboard_stats`, `get_spare_parts_summary`, `find_similar_supplier`, `generate_upload_token`, `validate_upload_token`
+## Complete Guide: Connecting 90+ Backend Endpoints to Frontend Pages
 
 ---
 
@@ -133,12 +80,11 @@ The system has **TWO roles**:
 - Frontend API calls will fail with 403 if role doesn't match
 - Frontend should catch 403 and show "Access Denied" message
 
-**Implementation Status:**
-1. ✅ Conditional navigation: Admin menu items hidden from management users (sidebar.tsx)
-2. ✅ Route guards: ProtectedRoute component with role checks (protected-route.tsx)
-3. ✅ API error handling: 401 → login redirect, 403 → access denied toast, 429 → rate limit (client.ts)
-4. ✅ Access denied page: /access-denied with back to dashboard link
-5. ⚠️ Form field restrictions: Some fields might be admin-only (future refinement)
+**What to implement:**
+1. ✅ Conditional navigation: Hide admin menu items from management users
+2. ✅ Route guards: Prevent direct URL access to admin pages
+3. ✅ API error handling: Catch 403 Forbidden and show friendly error
+4. ⚠️ Form field restrictions: Some fields might be admin-only (future refinement)
 
 ---
 
@@ -314,29 +260,30 @@ hooks/
 - `GET /api/v1/plants/search/{query}` - Full-text search
 - `GET /api/v1/plants/export/excel` - Export
 
-**Components — ALL BUILT:**
+**Components Needed:**
 ```
 pages/(dashboard)/plants/
-├── page.tsx                          # ✅ List + filters + stats cards + pagination + export
-├── create/page.tsx                   # ✅ Create form
-├── [id]/page.tsx                     # ✅ Detail with 5 tabs + sidebar + admin actions
-├── [id]/edit/page.tsx                # ✅ Edit form
+├── page.tsx                          # ✓ ALREADY BUILT
+├── create/page.tsx                   # NEW
+├── [id]/page.tsx                     # NEW (detail)
+├── [id]/edit/page.tsx                # NEW
 components/plants/
-├── plants-table.tsx                  # ✅ 17-column table with visibility toggle
-├── plants-filters.tsx                # ✅ Multi-select conditions/fleet types, search, export
-├── plants-stats-cards.tsx            # ✅ 4 stats cards (condition, sites, fleet types, state)
-├── plant-form.tsx                    # ✅ Create/edit form with Zod validation
-├── plant-maintenance-table.tsx       # ✅ Searchable maintenance records
-├── plant-location-history.tsx        # ✅ Timeline with gold dots
-├── plant-weekly-usage-chart.tsx      # ✅ ECharts stacked bar chart
-├── plant-events-feed.tsx             # ✅ Color-coded event cards
-├── plant-detail-modal.tsx            # ⚠️ Legacy (replaced by full page)
-├── pagination.tsx                    # ✅ Generic pagination
-├── transfer-plant-modal.tsx          # ⬜ NOT YET BUILT
+├── plants-table.tsx                  # ✓ ALREADY BUILT
+├── plants-filters.tsx                # ✓ ALREADY BUILT
+├── plant-form.tsx                    # NEW - create/edit
+├── plant-detail-tabs.tsx             # NEW
+├── plant-detail-header.tsx           # NEW
+├── plant-maintenance-table.tsx       # NEW
+├── plant-location-history.tsx        # NEW - timeline
+├── plant-weekly-usage-chart.tsx      # NEW
+├── plant-events-feed.tsx             # NEW
+├── transfer-plant-modal.tsx          # NEW
 lib/api/
-├── plants.ts                         # ✅ Complete (all endpoints)
+├── plants.ts                         # Already partially done
 hooks/
-├── use-plants.ts                     # ✅ Complete (12 hooks)
+├── use-plants.ts                     # Already partially done
+├── use-plant-detail.ts               # NEW
+├── use-plant-transfer.ts             # NEW
 ```
 
 **Key Considerations:**
@@ -1446,112 +1393,84 @@ npm run build -- --analyze
 
 ## SUMMARY: COMPLETE FEATURE CHECKLIST
 
-### PHASE 1: Foundation (COMPLETE)
-- [x] Users Management (ADMIN ONLY CRUD) - List, create, edit, deactivate, password reset
-- [x] Plant Management (ADMIN: CRUD | MANAGEMENT: View-Only) - List with filters, detail with 5 tabs, create, edit, delete, stats cards, export
-- [x] Role-based UI: Conditional buttons, forms, menus, protected routes, access denied page
-- [x] Auth: Login, logout, JWT interceptor, token refresh, role checks
-- [x] Dashboard Layout: Responsive sidebar, header, theme toggle, prefetching
+### PHASE 1 (Week 1-2): Critical Path ✓ MUST DO
+- [ ] Users Management (CRUD)
+- [ ] Plant Management (Full CRUD + Detail page)
+- [ ] Location Management (Full CRUD + Detail page)
+- [ ] Weekly Report Upload (The new system!)
+- [ ] All API integrations for above
 
-### PHASE 2: Core Business Features (NEXT UP)
-- [ ] **Dashboard** with real stats (get_dashboard_stats RPC, fleet summary, event feed)
-- [ ] Location Management (ADMIN: CRUD | MANAGEMENT: View-Only) - 9 backend endpoints ready
-- [ ] Weekly Report Upload (ADMIN ONLY) - **MOST COMPLEX**: preview 600 rows, inline editing, confirm flow
-- [ ] Spare Parts Management (ADMIN: CRUD + Bulk + Direct Entry | MANAGEMENT: View-Only) - 30+ endpoints
-- [ ] Suppliers Management (ADMIN: CRUD | MANAGEMENT: View-Only) - 6 endpoints
+### PHASE 2 (Week 2-3): Core Business
+- [ ] Spare Parts Management (CRUD + Bulk + Direct Entry)
+- [ ] Suppliers Management (Full CRUD)
+- [ ] All analytics/stats for above
 
-### PHASE 3: Reporting & Analytics
-- [ ] Fleet Summary Report (BOTH roles view)
-- [ ] Maintenance Costs Report (BOTH roles view) - time periods, location/plant/supplier breakdown
-- [ ] Verification Status Report (BOTH roles view)
-- [ ] Submission Compliance Heatmap (BOTH roles view)
-- [ ] Weekly Trends Report (BOTH roles view)
-- [ ] Unverified Plants Report (BOTH roles view)
-- [ ] Export functionality (BOTH roles) - CSV/Excel
-- [ ] Spare Parts Analytics: cost trends, top suppliers, high-cost plants, YoY comparison
+### PHASE 3 (Week 3-4): Reporting
+- [ ] Fleet Summary Report
+- [ ] Maintenance Costs Report
+- [ ] Verification Status Report
+- [ ] Submission Compliance Heatmap
+- [ ] Weekly Trends Report
+- [ ] Unverified Plants Report
+- [ ] Export functionality
 
-### PHASE 4: Administration
-- [ ] Transfers Management (ADMIN ONLY - List, Detail, Confirm, Cancel) - 6 endpoints
-- [ ] Audit Logs Viewer (ADMIN ONLY) - 2 endpoints
-- [ ] States Management (ADMIN ONLY - CRUD) - 7 endpoints
-- [ ] Upload Tokens Management (ADMIN ONLY)
-- [ ] Settings Page (ADMIN ONLY)
-- [ ] Notifications System (BOTH roles) - 5 endpoints
+### PHASE 4 (Week 4-5): Administration
+- [ ] Transfers Management (List, Detail, Confirm, Cancel)
+- [ ] Audit Logs Viewer
+- [ ] Upload Tokens Management
+- [ ] States Management (CRUD)
+- [ ] Settings Page
+- [ ] Notifications System
 
-### PHASE 5: Polish
+### PHASE 5 (Week 5-6): Polish
 - [ ] Full API integration & testing
-- [ ] Error handling edge cases (403 Forbidden handling)
-- [ ] Responsive design (mobile/tablet)
+- [ ] Error handling edge cases
+- [ ] Responsive design
 - [ ] Accessibility (WCAG AA)
-- [ ] Performance optimization (virtualization for 600+ rows)
+- [ ] Performance optimization
 - [ ] Dark mode polish
+- [ ] Documentation
 
-### TOTAL REMAINING WORK
-- **100+ endpoints** still to integrate (of 140+ total)
-- **30+ pages** to build (of ~40 total)
-- **40+ components** to create (of ~60 total)
-- Plants + Users + Auth already complete
+### TOTAL WORK
+- **90+ endpoints** to integrate
+- **40+ pages** to build
+- **60+ components** to create
+- **Estimated 6 weeks** for one developer
+- **Could be 3 weeks** with 2 developers (parallel on features)
 
 ---
 
 ## FILES TO CREATE/MODIFY
 
-### API Wrappers
+### New API Wrappers
 ```
-lib/api/auth.ts              ✅ DONE
-lib/api/client.ts            ✅ DONE (Axios + JWT interceptor)
-lib/api/plants.ts            ✅ DONE (list, detail, CRUD, stats, export, maintenance, location, usage, events)
-lib/api/admin.ts             ✅ DONE (users CRUD)
-lib/api/spare-parts.ts       ⬜ NEW (30+ endpoints: CRUD, bulk, PO management, analytics)
-lib/api/suppliers.ts         ⬜ NEW (CRUD, autocomplete, PO history)
-lib/api/locations.ts         ⬜ NEW (CRUD, plants, submissions, usage)
-lib/api/states.ts            ⬜ NEW (CRUD, sites, plants)
-lib/api/uploads.ts           ⬜ NEW (preview, confirm, submissions, tokens)
-lib/api/transfers.ts         ⬜ NEW (list, confirm, cancel, stats)
-lib/api/reports.ts           ⬜ NEW (dashboard, fleet, costs, verification, trends)
-lib/api/audit.ts             ⬜ NEW (logs, record history)
-lib/api/notifications.ts     ⬜ NEW (list, mark-read, unread count)
+lib/api/admin.ts (users CRUD)
+lib/api/states.ts
+lib/api/uploads.ts (preview, confirm, submissions, tokens)
+lib/api/transfers.ts
+lib/api/audit.ts
+lib/api/notifications.ts
 ```
 
-### Hooks
+### New Hooks
 ```
-hooks/use-plants.ts          ✅ DONE (12 hooks: list, detail, maintenance, location, usage, events, stats, CRUD mutations)
-hooks/use-users.ts           ✅ DONE (6 hooks: list, detail, create, update, reset, deactivate)
-hooks/use-debounce.ts        ✅ DONE
-hooks/use-dashboard.ts       ⬜ PARTIAL (exists but not connected)
-hooks/use-locations.ts       ⬜ PARTIAL (exists but page deleted)
-hooks/use-spare-parts.ts     ⬜ NEW
-hooks/use-suppliers.ts       ⬜ NEW
-hooks/use-states.ts          ⬜ NEW
-hooks/use-uploads.ts         ⬜ NEW
-hooks/use-transfers.ts       ⬜ NEW
-hooks/use-reports.ts         ⬜ NEW
-hooks/use-audit.ts           ⬜ NEW
-hooks/use-notifications.ts   ⬜ NEW
+hooks/use-users.ts
+hooks/use-states.ts
+hooks/use-uploads.ts
+hooks/use-submissions.ts
+hooks/use-upload-tokens.ts
+hooks/use-transfers.ts
+hooks/use-audit.ts
+hooks/use-notifications.ts
+hooks/use-reports.ts (enhanced)
 ```
 
-### Pages
+### New Pages (40 total)
 ```
-# Auth & Layout - ✅ DONE
-app/login/page.tsx                        ✅
-app/(dashboard)/layout.tsx                ✅
-app/(dashboard)/page.tsx                  ✅ (basic dashboard)
-app/(dashboard)/access-denied/page.tsx    ✅
-
-# Plants - ✅ DONE
-app/(dashboard)/plants/page.tsx           ✅ (list + filters + stats)
-app/(dashboard)/plants/[id]/page.tsx      ✅ (detail with 5 tabs)
-app/(dashboard)/plants/[id]/edit/page.tsx ✅
-app/(dashboard)/plants/create/page.tsx    ✅
-
-# Admin Users - ✅ DONE
-app/(dashboard)/admin/users/page.tsx              ✅
-app/(dashboard)/admin/users/create/page.tsx        ✅
-app/(dashboard)/admin/users/[id]/edit/page.tsx     ✅
-
-# Below: NOT YET BUILT
 # Admin
-app/(dashboard)/admin/transfers/page.tsx
+app/(dashboard)/admin/users/page.tsx
+app/(dashboard)/admin/users/create/page.tsx
+app/(dashboard)/admin/users/[id]/edit/page.tsx
 app/(dashboard)/admin/transfers/page.tsx
 app/(dashboard)/admin/transfers/[id]/page.tsx
 app/(dashboard)/admin/audit/page.tsx

@@ -2,7 +2,7 @@
 
 import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import {
   ArrowLeft,
   Edit2,
@@ -17,6 +17,8 @@ import {
   DollarSign,
   FileText,
   ArrowRightLeft,
+  Package,
+  TrendingUp,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -25,6 +27,21 @@ import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+import {
   usePlant,
   usePlantMaintenanceHistory,
   usePlantLocationHistory,
@@ -32,11 +49,14 @@ import {
   usePlantEvents,
   useDeletePlant,
 } from '@/hooks/use-plants'
+import { usePlantCosts, usePlantSharedCosts } from '@/hooks/use-spare-parts'
+import type { PlantRecentPart, PlantSharedCost } from '@/lib/api/spare-parts'
 import { useAuth } from '@/providers/auth-provider'
-import { PlantMaintenanceTable } from '@/components/plants/plant-maintenance-table'
+import { PlantMaintenanceTable, type MaintenanceRecord } from '@/components/plants/plant-maintenance-table'
 import { PlantLocationHistory } from '@/components/plants/plant-location-history'
 import { PlantWeeklyUsageChart } from '@/components/plants/plant-weekly-usage-chart'
 import { PlantEventsFeed } from '@/components/plants/plant-events-feed'
+import { SparePartDetailModal } from '@/components/spare-parts/spare-part-detail-modal'
 import type { PlantCondition } from '@/lib/api/plants'
 
 // ---------------------------------------------------------------------------
@@ -103,6 +123,20 @@ function PlantDetailContent({ plantId }: { plantId: string }) {
   const isAdmin = user?.role === 'admin'
 
   const [activeTab, setActiveTab] = useState('overview')
+  const [costYear, setCostYear] = useState<string>('')
+  const [costPeriod, setCostPeriod] = useState<string>('')
+
+  const currentYear = new Date().getFullYear()
+
+  // Cost params based on filter selections
+  const costParams = useMemo(() => {
+    const p: { year?: number; month?: number; quarter?: number; week?: number } = {}
+    if (costYear) p.year = Number(costYear)
+    if (costPeriod && costPeriod.startsWith('q')) p.quarter = Number(costPeriod.slice(1))
+    else if (costPeriod && costPeriod.startsWith('m')) p.month = Number(costPeriod.slice(1))
+    else if (costPeriod && costPeriod.startsWith('w')) p.week = Number(costPeriod.slice(1))
+    return p
+  }, [costYear, costPeriod])
 
   // Only fetch plant detail on mount; tab data loads lazily when tab is selected
   const { data: plant, isLoading } = usePlant(plantId)
@@ -110,9 +144,12 @@ function PlantDetailContent({ plantId }: { plantId: string }) {
   const { data: locationRecords = [], isLoading: locationLoading } = usePlantLocationHistory(activeTab === 'locations' ? plantId : null)
   const { data: weeklyRecords = [], isLoading: weeklyLoading } = usePlantWeeklyRecords(activeTab === 'usage' ? plantId : null)
   const { data: events = [], isLoading: eventsLoading } = usePlantEvents(activeTab === 'events' ? plantId : null)
+  const { data: costData, isLoading: costsLoading } = usePlantCosts(activeTab === 'costs' ? plantId : null, costParams)
+  const { data: sharedCostsData, isLoading: sharedCostsLoading } = usePlantSharedCosts(activeTab === 'costs' ? plantId : null)
   const deleteMutation = useDeletePlant()
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [selectedPartId, setSelectedPartId] = useState<string | null>(null)
 
   // Loading state
   if (isLoading) return <DetailSkeleton />
@@ -208,6 +245,7 @@ function PlantDetailContent({ plantId }: { plantId: string }) {
           <TabsList variant="line" className="w-full justify-start border-b">
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="maintenance">Maintenance</TabsTrigger>
+            <TabsTrigger value="costs">Costs</TabsTrigger>
             <TabsTrigger value="locations">Sites</TabsTrigger>
             <TabsTrigger value="usage">Usage</TabsTrigger>
             <TabsTrigger value="events">Events</TabsTrigger>
@@ -246,7 +284,213 @@ function PlantDetailContent({ plantId }: { plantId: string }) {
             <PlantMaintenanceTable
               records={maintenanceRecords}
               isLoading={maintenanceLoading}
+              onRowClick={(record: MaintenanceRecord) => setSelectedPartId(record.id)}
             />
+          </TabsContent>
+
+          {/* ── Costs Tab ───────────────────────────────────────── */}
+          <TabsContent value="costs" className="mt-4 space-y-4">
+            {/* Period Filter */}
+            <div className="flex items-center gap-3">
+              <Select value={costYear} onValueChange={(v) => { setCostYear(v === 'all' ? '' : v); setCostPeriod(''); }}>
+                <SelectTrigger className="w-[130px]">
+                  <SelectValue placeholder="All years" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Years</SelectItem>
+                  {[currentYear, currentYear - 1, currentYear - 2].map((y) => (
+                    <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {costYear && (
+                <Select value={costPeriod} onValueChange={(v) => setCostPeriod(v === 'all' ? '' : v)}>
+                  <SelectTrigger className="w-[140px]">
+                    <SelectValue placeholder="Full year" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Full Year</SelectItem>
+                    <SelectItem value="q1">Q1 (Jan-Mar)</SelectItem>
+                    <SelectItem value="q2">Q2 (Apr-Jun)</SelectItem>
+                    <SelectItem value="q3">Q3 (Jul-Sep)</SelectItem>
+                    <SelectItem value="q4">Q4 (Oct-Dec)</SelectItem>
+                    <SelectItem value="m1">January</SelectItem>
+                    <SelectItem value="m2">February</SelectItem>
+                    <SelectItem value="m3">March</SelectItem>
+                    <SelectItem value="m4">April</SelectItem>
+                    <SelectItem value="m5">May</SelectItem>
+                    <SelectItem value="m6">June</SelectItem>
+                    <SelectItem value="m7">July</SelectItem>
+                    <SelectItem value="m8">August</SelectItem>
+                    <SelectItem value="m9">September</SelectItem>
+                    <SelectItem value="m10">October</SelectItem>
+                    <SelectItem value="m11">November</SelectItem>
+                    <SelectItem value="m12">December</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+
+            {costsLoading ? (
+              <div className="space-y-4">
+                <div className="grid grid-cols-3 gap-4">
+                  {[1, 2, 3].map((i) => <Skeleton key={i} className="h-[80px]" />)}
+                </div>
+                <Skeleton className="h-[300px]" />
+              </div>
+            ) : costData ? (
+              <>
+                {/* Cost Stats */}
+                <div className="grid grid-cols-3 gap-4">
+                  <Card>
+                    <CardContent className="pt-6">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 rounded-lg bg-emerald-100 dark:bg-emerald-900">
+                          <DollarSign className="h-4 w-4 text-emerald-600 dark:text-emerald-300" />
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Total Cost</p>
+                          <p className="text-xl font-bold">{formatCurrency(costData.costs.total_cost)}</p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardContent className="pt-6">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-900">
+                          <Package className="h-4 w-4 text-blue-600 dark:text-blue-300" />
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Parts Replaced</p>
+                          <p className="text-xl font-bold">{costData.costs.parts_count}</p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardContent className="pt-6">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 rounded-lg bg-violet-100 dark:bg-violet-900">
+                          <TrendingUp className="h-4 w-4 text-violet-600 dark:text-violet-300" />
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Purchase Orders</p>
+                          <p className="text-xl font-bold">{costData.costs.po_count}</p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Recent Parts Table */}
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">Recent Parts</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {costData.recent_parts.length === 0 ? (
+                      <div className="text-center py-8 text-muted-foreground">
+                        <Package className="h-8 w-8 mx-auto mb-2 opacity-40" />
+                        <p className="text-sm">No parts found for this period</p>
+                      </div>
+                    ) : (
+                      <div className="rounded-md border">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Part Description</TableHead>
+                              <TableHead className="w-[60px] text-center">Qty</TableHead>
+                              <TableHead className="w-[120px] text-right">Cost</TableHead>
+                              <TableHead className="w-[130px]">PO Number</TableHead>
+                              <TableHead className="w-[100px]">Date</TableHead>
+                              <TableHead className="w-[130px]">Supplier</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {costData.recent_parts.map((part: PlantRecentPart) => (
+                              <TableRow key={part.id}>
+                                <TableCell className="max-w-[250px] truncate" title={part.part_description}>
+                                  {part.part_description}
+                                </TableCell>
+                                <TableCell className="text-center">{part.quantity}</TableCell>
+                                <TableCell className="text-right font-medium">
+                                  {part.total_cost != null ? formatCurrency(part.total_cost) : '-'}
+                                </TableCell>
+                                <TableCell className="font-mono text-sm">
+                                  {part.purchase_order_number || '-'}
+                                </TableCell>
+                                <TableCell className="text-sm">
+                                  {part.replaced_date ? formatDate(part.replaced_date) : '-'}
+                                </TableCell>
+                                <TableCell className="text-sm truncate max-w-[130px]">
+                                  {part.supplier || '-'}
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Shared Costs Section */}
+                {sharedCostsLoading ? (
+                  <Skeleton className="h-[120px]" />
+                ) : sharedCostsData && sharedCostsData.shared_costs_count > 0 ? (
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <ArrowRightLeft className="h-4 w-4" />
+                        Shared Costs ({sharedCostsData.shared_costs_count})
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      {sharedCostsData.shared_costs.map((sc: PlantSharedCost, idx: number) => (
+                        <div key={idx} className="p-3 bg-muted/50 rounded-lg space-y-2">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <span className="font-mono text-sm font-medium">{sc.po_number || 'N/A'}</span>
+                              {sc.po_date && (
+                                <span className="text-xs text-muted-foreground ml-2">
+                                  {formatDate(sc.po_date)}
+                                </span>
+                              )}
+                            </div>
+                            <span className="font-semibold">
+                              {formatCurrency(sc.total_amount)}
+                            </span>
+                          </div>
+                          {sc.supplier && (
+                            <p className="text-xs text-muted-foreground">Supplier: {sc.supplier}</p>
+                          )}
+                          {sc.shared_with && sc.shared_with.length > 0 && (
+                            <div className="flex items-center gap-1 flex-wrap">
+                              <span className="text-xs text-muted-foreground">Shared with:</span>
+                              {sc.shared_with.map((fleet: string) => (
+                                <span key={fleet} className="text-xs bg-background border rounded px-1.5 py-0.5 font-mono">
+                                  {fleet}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </CardContent>
+                  </Card>
+                ) : sharedCostsData ? (
+                  <div className="text-center py-4 text-muted-foreground">
+                    <p className="text-sm">No shared costs for this plant</p>
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                <DollarSign className="h-8 w-8 mx-auto mb-2 opacity-40" />
+                <p className="text-sm">No cost data available</p>
+              </div>
+            )}
           </TabsContent>
 
           {/* ── Site History Tab ────────────────────────────────── */}
@@ -347,6 +591,14 @@ function PlantDetailContent({ plantId }: { plantId: string }) {
           )}
         </div>
       </div>
+
+      {/* ── Spare Part Detail Modal ───────────────────────────── */}
+      {selectedPartId && (
+        <SparePartDetailModal
+          partId={selectedPartId}
+          onClose={() => setSelectedPartId(null)}
+        />
+      )}
 
       {/* ── Delete Confirmation ────────────────────────────────── */}
       {showDeleteConfirm && (

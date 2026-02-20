@@ -10,11 +10,11 @@ import { useTheme } from 'next-themes';
 
 interface FleetCategoryChartProps {
   data: Array<{
-    fleet_type_id: string;
-    fleet_type_name: string;
-    total_count: number;
-    verified_count: number;
-    active_count: number;
+    fleet_type: string;
+    total: number;
+    working: number;
+    standby: number;
+    breakdown: number;
   }>;
 }
 
@@ -41,8 +41,8 @@ export function FleetCategoryChart({ data }: FleetCategoryChartProps) {
 
     // Prepare data for donut chart
     const chartData = data.map((item) => ({
-      name: item.fleet_type_name || 'Uncategorized',
-      value: item.total_count,
+      name: item.fleet_type || 'Uncategorized',
+      value: item.total,
     }));
 
     // Brand colors palette

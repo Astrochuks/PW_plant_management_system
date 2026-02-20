@@ -32,32 +32,71 @@ async def get_dashboard_summary(
     """
     role = current_user.role
 
-    # Run all 4 independent queries concurrently — truly async, no thread wrapping
-    plant_stats, location_stats, recent_submissions, unread_count = await asyncio.gather(
-        fetchrow("SELECT * FROM get_dashboard_plant_stats()"),
-        fetch(
+    # Run each query independently so one failure doesn't kill the dashboard
+    plant_stats: dict[str, Any] = {}
+    location_stats: list[dict[str, Any]] = []
+    recent_submissions: list[dict[str, Any]] = []
+    unread_count: int = 0
+
+    async def _plant_stats() -> dict[str, Any]:
+        # Function returns TABLE type — use fetchrow with SELECT * to get named columns
+        row = await fetchrow("SELECT * FROM get_dashboard_plant_stats()")
+        return row or {}
+
+    async def _location_stats() -> list[dict[str, Any]]:
+        return await fetch(
             "SELECT * FROM v_location_stats ORDER BY total_plants DESC LIMIT 10"
-        ),
-        fetch(
+        )
+
+    async def _recent_submissions() -> list[dict[str, Any]]:
+        return await fetch(
             """SELECT s.*, l.name AS location_name
                FROM weekly_report_submissions s
                LEFT JOIN locations l ON l.id = s.location_id
                ORDER BY s.submitted_at DESC
                LIMIT 5"""
-        ),
-        fetchval(
-            "SELECT count(*) FROM notifications WHERE read = false AND target_role = $1",
+        )
+
+    async def _unread_count() -> int:
+        # "read" is a reserved word — must be quoted
+        val = await fetchval(
+            'SELECT count(*) FROM notifications WHERE "read" = false AND target_role = $1',
             role,
-        ),
+        )
+        return val or 0
+
+    results = await asyncio.gather(
+        _plant_stats(),
+        _location_stats(),
+        _recent_submissions(),
+        _unread_count(),
+        return_exceptions=True,
     )
+
+    # Unpack results, logging any failures
+    for i, (name, result) in enumerate(zip(
+        ["plant_stats", "location_stats", "recent_submissions", "unread_count"],
+        results,
+    )):
+        if isinstance(result, Exception):
+            logger.error("Dashboard query failed", query=name, error=str(result))
+        else:
+            if i == 0:
+                plant_stats = result
+            elif i == 1:
+                location_stats = result
+            elif i == 2:
+                recent_submissions = result
+            elif i == 3:
+                unread_count = result
 
     return {
         "success": True,
         "data": {
-            "plants": plant_stats or {},
+            "plants": plant_stats,
             "top_locations": location_stats,
             "recent_submissions": recent_submissions,
-            "unread_notifications": unread_count or 0,
+            "unread_notifications": unread_count,
         },
     }
 
@@ -123,9 +162,9 @@ async def get_maintenance_costs(
         "SELECT * FROM get_maintenance_cost_analysis($1, $2, $3, $4, $5)",
         year,
         str(location_id) if location_id else None,
+        group_by,
         str(plant_id) if plant_id else None,
         fleet_type,
-        group_by,
     )
 
     return {
@@ -260,7 +299,8 @@ async def get_unverified_plants(
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
     location_id: UUID | None = None,
     weeks_missing: int = Query(2, ge=1, le=12),
-    limit: int = Query(100, ge=1, le=500),
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=200),
 ) -> dict[str, Any]:
     """Get plants not verified in recent weeks.
 
@@ -268,21 +308,34 @@ async def get_unverified_plants(
         current_user: The authenticated user.
         location_id: Filter by location.
         weeks_missing: Number of weeks without verification.
-        limit: Maximum results.
+        page: Page number (1-based).
+        limit: Results per page.
 
     Returns:
-        List of plants missing verification.
+        Paginated list of plants missing verification.
     """
-    data = await fetch(
-        "SELECT * FROM get_unverified_plants($1, $2, $3)",
+    offset = (page - 1) * limit
+    rows = await fetch(
+        "SELECT * FROM get_unverified_plants($1, $2, $3, $4)",
         str(location_id) if location_id else None,
         weeks_missing,
         limit,
+        offset,
     )
+
+    total = rows[0].pop("_total_count", 0) if rows else 0
+    for row in rows:
+        row.pop("_total_count", None)
 
     return {
         "success": True,
-        "data": data,
+        "data": rows,
+        "meta": {
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "total_pages": max(1, -(-total // limit)),
+        },
     }
 
 

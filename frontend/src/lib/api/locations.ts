@@ -350,9 +350,148 @@ export async function getLocationTransfers(
 }
 
 /**
- * Get all states
+ * Get all states (basic list for dropdowns — active only)
  */
 export async function getStates(): Promise<State[]> {
   const response = await apiClient.get<ApiResponse<State[]>>('/states');
   return response.data.data;
+}
+
+// ============================================================================
+// States Admin API (CRUD)
+// ============================================================================
+
+export interface StateDetail extends State {
+  sites: LocationStats[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface StatePlant {
+  id: string;
+  fleet_number: string;
+  fleet_type: string | null;
+  description: string | null;
+  status: string | null;
+  location_name: string | null;
+  location_id: string | null;
+}
+
+export interface StatePlantsParams {
+  page?: number;
+  limit?: number;
+  status?: string;
+  fleet_type?: string;
+}
+
+export interface CreateStateRequest {
+  name: string;
+  code?: string;
+  region?: string;
+}
+
+export interface UpdateStateRequest {
+  name?: string;
+  code?: string;
+  region?: string;
+  is_active?: boolean;
+}
+
+/**
+ * Get all states with inactive support (admin page)
+ */
+export async function getStatesAdmin(
+  params: { include_inactive?: boolean } = {}
+): Promise<State[]> {
+  const queryParams: Record<string, string> = {};
+  if (params.include_inactive) queryParams.include_inactive = 'true';
+
+  const response = await apiClient.get<{
+    success: boolean;
+    data: State[];
+    meta: { total: number };
+  }>('/states', { params: queryParams });
+
+  return response.data.data;
+}
+
+/**
+ * Get a single state by ID (with sites)
+ */
+export async function getState(id: string): Promise<StateDetail> {
+  const response = await apiClient.get<ApiResponse<StateDetail>>(`/states/${id}`);
+  return response.data.data;
+}
+
+/**
+ * Get sites in a state
+ */
+export async function getStateSites(
+  id: string
+): Promise<{ data: LocationStats[]; meta: { state: { id: string; name: string }; total: number } }> {
+  const response = await apiClient.get<{
+    success: boolean;
+    data: LocationStats[];
+    meta: { state: { id: string; name: string }; total: number };
+  }>(`/states/${id}/sites`);
+
+  return { data: response.data.data, meta: response.data.meta };
+}
+
+/**
+ * Get plants across all sites in a state (paginated)
+ */
+export async function getStatePlants(
+  id: string,
+  params: StatePlantsParams = {}
+): Promise<{
+  data: StatePlant[];
+  meta: PaginatedMeta & { state: { id: string; name: string } };
+}> {
+  const queryParams: Record<string, string | number> = {};
+  if (params.page) queryParams.page = params.page;
+  if (params.limit) queryParams.limit = params.limit;
+  if (params.status) queryParams.status = params.status;
+  if (params.fleet_type) queryParams.fleet_type = params.fleet_type;
+
+  const response = await apiClient.get<{
+    success: boolean;
+    data: StatePlant[];
+    meta: PaginatedMeta & { state: { id: string; name: string } };
+  }>(`/states/${id}/plants`, { params: queryParams });
+
+  return { data: response.data.data, meta: response.data.meta };
+}
+
+/**
+ * Create a new state (admin only, query params)
+ */
+export async function createState(data: CreateStateRequest): Promise<State> {
+  const params: Record<string, string> = { name: data.name };
+  if (data.code) params.code = data.code;
+  if (data.region) params.region = data.region;
+
+  const response = await apiClient.post<ApiResponse<State>>('/states', null, { params });
+  return response.data.data;
+}
+
+/**
+ * Update a state (admin only, query params)
+ */
+export async function updateState(id: string, data: UpdateStateRequest): Promise<State> {
+  const params: Record<string, string> = {};
+  if (data.name !== undefined) params.name = data.name;
+  if (data.code !== undefined) params.code = data.code;
+  if (data.region !== undefined) params.region = data.region;
+  if (data.is_active !== undefined) params.is_active = String(data.is_active);
+
+  const response = await apiClient.patch<ApiResponse<State>>(`/states/${id}`, null, { params });
+  return response.data.data;
+}
+
+/**
+ * Delete a state (admin only — fails if sites are linked)
+ */
+export async function deleteState(id: string): Promise<void> {
+  await apiClient.delete(`/states/${id}`);
 }

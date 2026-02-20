@@ -13,11 +13,18 @@ import {
   LayoutDashboard,
   Truck,
   MapPin,
+  Wrench,
+  FileText,
   Upload,
   Users,
+  Building2,
   ArrowRightLeft,
+  BarChart3,
+  Map,
+  ScrollText,
   PanelLeftClose,
   PanelLeft,
+  PieChart,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -50,6 +57,24 @@ const mainNavItems = [
     href: '/locations',
     icon: MapPin,
   },
+  {
+    title: 'Spare Parts',
+    href: '/spare-parts',
+    icon: Wrench,
+    exact: true,
+  },
+  {
+    title: 'Purchase Orders',
+    href: '/spare-parts/pos',
+    icon: FileText,
+    // Also matches /spare-parts/po/*, /spare-parts/create
+    matchPrefix: '/spare-parts/',
+  },
+  {
+    title: 'Suppliers',
+    href: '/suppliers',
+    icon: Building2,
+  },
 ];
 
 // Visible to both management and admin
@@ -59,6 +84,16 @@ const managementNavItems = [
     href: '/transfers',
     icon: ArrowRightLeft,
     badgeKey: 'transfers' as const,
+  },
+  {
+    title: 'Reports',
+    href: '/reports',
+    icon: BarChart3,
+  },
+  {
+    title: 'Parts Analytics',
+    href: '/spare-parts/analytics',
+    icon: PieChart,
   },
 ];
 
@@ -73,6 +108,16 @@ const adminNavItems = [
     title: 'Users',
     href: '/admin/users',
     icon: Users,
+  },
+  {
+    title: 'States',
+    href: '/admin/states',
+    icon: Map,
+  },
+  {
+    title: 'Audit Log',
+    href: '/admin/audit',
+    icon: ScrollText,
   },
 ];
 
@@ -158,16 +203,26 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
               MAIN MENU
             </span>
           )}
-          {mainNavItems.map((item) => (
-            <NavItem
-              key={item.href}
-              href={item.href}
-              icon={item.icon}
-              title={item.title}
-              isActive={pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href))}
-              collapsed={collapsed}
-            />
-          ))}
+          {mainNavItems.map((item) => {
+            let active: boolean;
+            if (item.exact) {
+              active = pathname === item.href;
+            } else if (item.matchPrefix) {
+              active = pathname === item.href || pathname.startsWith(item.matchPrefix);
+            } else {
+              active = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
+            }
+            return (
+              <NavItem
+                key={item.href}
+                href={item.href}
+                icon={item.icon}
+                title={item.title}
+                isActive={active}
+                collapsed={collapsed}
+              />
+            );
+          })}
         </div>
 
         {/* Management Navigation (visible to management + admin) */}

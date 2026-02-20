@@ -33,9 +33,10 @@ export interface MaintenanceRecord {
 interface PlantMaintenanceTableProps {
   records: MaintenanceRecord[]
   isLoading?: boolean
+  onRowClick?: (record: MaintenanceRecord) => void
 }
 
-export function PlantMaintenanceTable({ records, isLoading }: PlantMaintenanceTableProps) {
+export function PlantMaintenanceTable({ records, isLoading, onRowClick }: PlantMaintenanceTableProps) {
   const [searchTerm, setSearchTerm] = useState('')
 
   // Debounce search with 300ms delay
@@ -104,7 +105,11 @@ export function PlantMaintenanceTable({ records, isLoading }: PlantMaintenanceTa
             </TableHeader>
             <TableBody>
               {filteredRecords.map((record) => (
-                <TableRow key={record.id}>
+                <TableRow
+                  key={record.id}
+                  className={onRowClick ? 'cursor-pointer hover:bg-muted/50' : ''}
+                  onClick={() => onRowClick?.(record)}
+                >
                   <TableCell>
                     <div>
                       <div className="font-medium">{record.part_description}</div>

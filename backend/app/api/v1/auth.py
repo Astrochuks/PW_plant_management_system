@@ -365,6 +365,11 @@ async def get_current_user_info(
     Returns:
         Current user details.
     """
+    # Fetch extra fields from users table
+    extra = await fetchrow(
+        "SELECT created_at, last_login_at FROM users WHERE id = $1::uuid",
+        current_user.id,
+    )
     return {
         "success": True,
         "data": {
@@ -373,6 +378,8 @@ async def get_current_user_info(
             "role": current_user.role,
             "full_name": current_user.full_name,
             "is_admin": current_user.is_admin,
+            "created_at": extra["created_at"] if extra else None,
+            "last_login_at": extra["last_login_at"] if extra else None,
         },
     }
 

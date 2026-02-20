@@ -1357,25 +1357,29 @@ async def list_purchase_orders(
     params.append(limit)
     params.append(offset)
     data = await fetch(
-        f"""SELECT *, count(*) OVER() AS _total_count FROM v_purchase_orders_summary
+        f"""SELECT v.*, l.name AS location_name,
+                   count(*) OVER() AS _total_count,
+                   SUM(v.total_amount) OVER() AS _grand_total
+            FROM v_purchase_orders_summary v
+            LEFT JOIN locations l ON l.id = v.location_id
             WHERE {where}
-            ORDER BY {safe_sort} {direction} NULLS LAST
+            ORDER BY v.{safe_sort} {direction} NULLS LAST
             LIMIT ${len(params) - 1} OFFSET ${len(params)}""",
         *params,
     )
 
     total = data[0].pop("_total_count", 0) if data else 0
+    grand_total = float(data[0].pop("_grand_total", 0) or 0) if data else 0
     for row in data[1:]:
         row.pop("_total_count", None)
-
-    total_amount = sum(float(po.get("total_amount") or 0) for po in data)
+        row.pop("_grand_total", None)
 
     return {
         "success": True,
         "data": data,
         "meta": {
             "page": page, "limit": limit, "total": total,
-            "total_amount": round(total_amount, 2),
+            "total_amount": round(grand_total, 2),
             "total_pages": (total + limit - 1) // limit if total > 0 else 0,
         },
     }

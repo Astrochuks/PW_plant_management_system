@@ -107,7 +107,6 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
       <Header
         sidebarCollapsed={sidebarCollapsed}
         onMenuClick={() => setMobileMenuOpen(true)}
-        unreadNotifications={0} // TODO: Connect to real data
       />
 
       {/* Main Content */}

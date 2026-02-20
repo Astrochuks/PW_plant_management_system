@@ -39,7 +39,7 @@ async def list_notifications(
     params: list[Any] = [current_user.role, current_user.id]
 
     if unread_only:
-        conditions.append("read = false")
+        conditions.append('"read" = false')
 
     where = " AND ".join(conditions)
     offset = (page - 1) * limit
@@ -85,7 +85,7 @@ async def get_unread_count(
     """
     count = await fetchval(
         """SELECT count(*) FROM notifications
-           WHERE read = false
+           WHERE "read" = false
              AND (target_role = $1 OR target_user_id = $2)""",
         current_user.role,
         current_user.id,
@@ -127,7 +127,7 @@ async def mark_as_read(
         raise NotFoundError("Notification", str(notification_id))
 
     updated = await fetchrow(
-        """UPDATE notifications SET read = true, read_at = now()
+        """UPDATE notifications SET "read" = true, read_at = now()
            WHERE id = $1::uuid
            RETURNING *""",
         str(notification_id),
@@ -152,8 +152,8 @@ async def mark_all_as_read(
         Count of notifications marked as read.
     """
     status = await execute(
-        """UPDATE notifications SET read = true, read_at = now()
-           WHERE read = false
+        """UPDATE notifications SET "read" = true, read_at = now()
+           WHERE "read" = false
              AND (target_role = $1 OR target_user_id = $2)""",
         current_user.role,
         current_user.id,
