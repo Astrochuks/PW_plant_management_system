@@ -90,7 +90,8 @@ def detect_condition_from_keywords(
 
     # 3. Check remarks for clear keywords
     if remarks:
-        r = remarks.upper()
+        # Normalize: uppercase, collapse whitespace
+        r = " ".join(remarks.upper().split())
 
         # SCRAP - very clear
         if any(kw in r for kw in ["SCRAP", "SCRAP YARD", "WRITE OFF", "CONDEMNED", "DECOMMISSION"]):
@@ -123,12 +124,30 @@ def detect_condition_from_keywords(
                 reason=f"Missing parts/damage: {remarks[:50]}"
             )
 
+        # WORKING - actively in use (check BEFORE under_repair so
+        # "working on the site" doesn't match "working on" in repair keywords)
+        working_keywords = [
+            "WORKING ON THE SITE", "WORKING ON SITE", "WORKING ON THE PROJECT",
+            "WORKING ON PROJECT", "WORKING IN THE YARD", "WORKING IN YARD",
+            "IN OPERATION", "IN USE", "RUNNING", "OPERATING", "ACTIVE",
+        ]
+        if r == "WORKING" or any(kw in r for kw in working_keywords):
+            return DetectedCondition(
+                condition="working",
+                confidence="high",
+                reason=f"Keyword detected: {remarks[:50]}"
+            )
+
         # UNDER REPAIR - active repair work
+        # Note: "WORKING ON" is intentionally specific (engine/pump/it) to
+        # avoid matching "working on the site" which means operational.
         repair_keywords = [
             "SENT FOR REBORE", "FOR REBORE", "SENT FOR REPAIRS", "FOR REPAIRS",
-            "STRIP IN PROGRESS", "STRIPPING", "WORKING ON",
+            "STRIP IN PROGRESS", "STRIPPING",
+            "WORKING ON IT", "WORKING ON THE ENGINE", "WORKING ON THE PUMP",
+            "WORKING ON ENGINE", "WORKING ON PUMP",
             "UNDER REPAIR", "UNDER MAINTENANCE", "BEING REPAIRED",
-            "AWAITING PARTS", "WAITING FOR PARTS", "PARTS ORDERED"
+            "AWAITING PARTS", "WAITING FOR PARTS", "PARTS ORDERED",
         ]
         if any(kw in r for kw in repair_keywords):
             return DetectedCondition(
@@ -145,17 +164,6 @@ def detect_condition_from_keywords(
         if any(kw in r for kw in faulty_keywords):
             return DetectedCondition(
                 condition="faulty",
-                confidence="high",
-                reason=f"Keyword detected: {remarks[:50]}"
-            )
-
-        # WORKING - actively in use
-        working_keywords = [
-            "WORKING", "IN USE", "RUNNING", "OPERATING", "ACTIVE"
-        ]
-        if any(kw in r for kw in working_keywords):
-            return DetectedCondition(
-                condition="working",
                 confidence="high",
                 reason=f"Keyword detected: {remarks[:50]}"
             )
@@ -196,7 +204,15 @@ def detect_condition_from_keywords(
                 reason=f"Repair completed: {remarks[:50]}"
             )
 
-    # 4. Use hours data (medium confidence - should verify)
+    # 4. Empty remarks with no usage data → missing
+    if (not remarks or not remarks.strip()) and hours_worked == 0 and standby_hours == 0 and breakdown_hours == 0:
+        return DetectedCondition(
+            condition="missing",
+            confidence="medium",
+            reason="No remarks or usage data"
+        )
+
+    # 5. Use hours data (medium confidence - should verify)
     if breakdown_hours > hours_worked and breakdown_hours > 0:
         return DetectedCondition(
             condition="breakdown",
@@ -216,19 +232,12 @@ def detect_condition_from_keywords(
             reason=f"Has standby hours: {standby_hours}"
         )
 
-    # 5. Default - low confidence, admin should check
-    if remarks and remarks.strip():
-        return DetectedCondition(
-            condition="standby",
-            confidence="low",
-            reason="No clear keywords, defaulting to standby"
-        )
-    else:
-        return DetectedCondition(
-            condition="standby",
-            confidence="low",
-            reason="No remarks or hours data"
-        )
+    # 6. Default - low confidence, admin should check
+    return DetectedCondition(
+        condition="unverified",
+        confidence="low",
+        reason="No clear keywords or data"
+    )
 
 
 def detect_transfers_from_remarks(remarks: str | None) -> DetectedTransfer:
