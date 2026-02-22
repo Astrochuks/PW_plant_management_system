@@ -112,11 +112,11 @@ function SubmissionDetailContent() {
             </p>
           </div>
         </div>
-        {file_url && (
+        {(file_url || submission.source_file_name) && (
           <Button
             variant="outline"
             size="sm"
-            onClick={() => downloadSubmissionFile(submissionId)}
+            onClick={() => downloadSubmissionFile(submissionId, submission.source_file_name || undefined)}
           >
             <Download className="h-4 w-4 mr-2" />
             Download File
@@ -162,7 +162,10 @@ function SubmissionDetailContent() {
 
       {/* File Info */}
       {submission.source_file_name && (
-        <Card>
+        <Card
+          className="cursor-pointer hover:bg-muted/50 transition-colors"
+          onClick={() => downloadSubmissionFile(submissionId, submission.source_file_name || undefined)}
+        >
           <CardContent className="pt-6">
             <div className="flex items-center gap-3">
               <FileSpreadsheet className="h-5 w-5 text-muted-foreground" />
@@ -172,6 +175,7 @@ function SubmissionDetailContent() {
                   {meta.file_size_formatted || ''} &middot; {meta.file_extension.toUpperCase()}
                 </p>
               </div>
+              <Download className="h-4 w-4 text-muted-foreground ml-auto" />
             </div>
           </CardContent>
         </Card>

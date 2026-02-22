@@ -128,7 +128,8 @@ export async function confirmWeeklyReport(
   weekNumber: number,
   weekEndingDate: string,
   plants: ConfirmedPlant[],
-  missingPlantActions?: MissingPlantAction[]
+  missingPlantActions?: MissingPlantAction[],
+  file?: File
 ): Promise<ConfirmResponse> {
   const formData = new FormData();
   formData.append('location_id', locationId);
@@ -138,6 +139,9 @@ export async function confirmWeeklyReport(
   formData.append('plants_json', JSON.stringify(plants));
   if (missingPlantActions && missingPlantActions.length > 0) {
     formData.append('missing_plants_json', JSON.stringify(missingPlantActions));
+  }
+  if (file) {
+    formData.append('file', file);
   }
 
   const response = await apiClient.post<ConfirmResponse>(
@@ -282,36 +286,45 @@ export async function getWeeklySubmission(id: string): Promise<{
 }> {
   const response = await apiClient.get<{
     success: boolean;
-    submission: WeeklySubmission;
-    plant_records: SubmissionPlantRecord[];
-    file_url: string | null;
+    data: {
+      submission: WeeklySubmission;
+      plant_records: SubmissionPlantRecord[];
+      file_url: string | null;
+    };
     meta: SubmissionDetailMeta;
   }>(`/uploads/submissions/weekly/${id}`);
   return {
-    data: {
-      submission: response.data.submission,
-      plant_records: response.data.plant_records,
-      file_url: response.data.file_url,
-    },
+    data: response.data.data,
     meta: response.data.meta,
   };
 }
 
 /**
- * Download submission source file (opens in new tab or downloads)
+ * Download submission source file via authenticated fetch
  */
-export function downloadSubmissionFile(id: string): void {
+export async function downloadSubmissionFile(id: string, fileName?: string): Promise<void> {
   const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
   const baseURL = apiClient.defaults.baseURL;
   const url = `${baseURL}/uploads/submissions/weekly/${id}/file`;
-  // Open in new window — the backend returns a 302 redirect to signed URL
+
+  const response = await fetch(url, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    redirect: 'follow',
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to download file');
+  }
+
+  const blob = await response.blob();
+  const blobUrl = URL.createObjectURL(blob);
   const link = document.createElement('a');
-  link.href = url + (token ? `?token=${encodeURIComponent(token)}` : '');
-  link.target = '_blank';
-  link.rel = 'noopener noreferrer';
+  link.href = blobUrl;
+  link.download = fileName || 'download';
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+  URL.revokeObjectURL(blobUrl);
 }
 
 // ============================================================================

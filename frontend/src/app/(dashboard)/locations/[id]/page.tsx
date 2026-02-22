@@ -21,6 +21,7 @@ import {
   AlertTriangle,
   ArrowLeftRight,
   DollarSign,
+  Download,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -68,6 +69,7 @@ import { useLocationCosts } from '@/hooks/use-spare-parts'
 import { getErrorMessage } from '@/lib/api/client'
 import type { PlantCondition } from '@/lib/api/plants'
 import type { LocationSubmission } from '@/lib/api/locations'
+import { downloadSubmissionFile } from '@/lib/api/uploads'
 
 const CONDITION_STYLES: Record<string, { label: string; className: string }> = {
   working: { label: 'Working', className: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200' },
@@ -357,6 +359,7 @@ export default function LocationDetailPage() {
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Plants Processed</TableHead>
                     <TableHead>Submitted</TableHead>
+                    <TableHead className="w-[40px]" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -681,11 +684,29 @@ function SubmissionRow({
             year: 'numeric',
           })}
         </TableCell>
+        <TableCell>
+          {sub.source_file_name && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 w-7 p-0"
+              title={`Download ${sub.source_file_name}`}
+              onClick={(e) => {
+                e.stopPropagation()
+                downloadSubmissionFile(sub.id, sub.source_file_name || undefined).catch(() => {
+                  toast.error('Failed to download file')
+                })
+              }}
+            >
+              <Download className="h-3.5 w-3.5" />
+            </Button>
+          )}
+        </TableCell>
       </TableRow>
 
       {isExpanded && (
         <TableRow className="bg-muted/30 hover:bg-muted/30">
-          <TableCell colSpan={7} className="p-0">
+          <TableCell colSpan={8} className="p-0">
             <div className="px-6 py-4">
               {isLoading ? (
                 <div className="space-y-2">

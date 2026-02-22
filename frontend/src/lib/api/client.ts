@@ -42,6 +42,10 @@ apiClient.interceptors.request.use(
 /**
  * Attempt to refresh the access token using the stored refresh token.
  * Returns the new access token on success, or null on failure.
+ *
+ * If the refresh fails (e.g., token already rotated by the proactive refresh
+ * in AuthProvider), check whether localStorage already has a newer token
+ * before returning null — avoids unnecessary hard-logouts.
  */
 async function tryRefreshToken(): Promise<string | null> {
   // Coalesce concurrent refresh attempts into one
@@ -51,6 +55,9 @@ async function tryRefreshToken(): Promise<string | null> {
 
   const storedRefreshToken = localStorage.getItem('refresh_token');
   if (!storedRefreshToken) return null;
+
+  // Remember the access token we had when we started
+  const tokenBefore = localStorage.getItem('access_token');
 
   isRefreshing = true;
   refreshPromise = (async () => {
@@ -80,6 +87,13 @@ async function tryRefreshToken(): Promise<string | null> {
       }
       return null;
     } catch {
+      // Refresh failed — but another refresh (proactive timer) may have
+      // already rotated the token and saved new ones to localStorage.
+      // If the stored token changed, use the new one instead of logging out.
+      const tokenNow = localStorage.getItem('access_token');
+      if (tokenNow && tokenNow !== tokenBefore) {
+        return tokenNow;
+      }
       return null;
     } finally {
       isRefreshing = false;

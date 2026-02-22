@@ -257,11 +257,24 @@ def fallback_parse(
     remarks_normalized = " ".join(remarks_upper.split())
 
     # Default values
-    condition = "unverified"
     transfer_detected = False
     transfer_direction = None
     transfer_location = None
     condition_notes = None
+
+    # 0. Empty remarks → missing (no site engineer comment = not verified)
+    if not remarks_normalized and not off_hire and hours_worked == 0 and standby_hours == 0 and breakdown_hours == 0:
+        return ParsedRemarks(
+            condition="missing",
+            transfer_detected=False,
+            transfer_direction=None,
+            transfer_location=None,
+            transfer_date=None,
+            condition_notes="No remarks or usage data",
+            confidence=0.7,
+        )
+
+    condition = "unverified"
 
     # 1. OFF HIRE COLUMN takes precedence
     if off_hire:
@@ -320,10 +333,23 @@ def fallback_parse(
         condition = "breakdown"
         condition_notes = "Missing parts or fire damage"
 
+    # WORKING / operational patterns - explicitly operating
+    elif (
+        remarks_normalized == "WORKING"
+        or any(kw in remarks_normalized for kw in [
+            "WORKING ON THE SITE", "WORKING ON SITE", "WORKING IN THE YARD",
+            "WORKING IN YARD", "WORKING ON THE PROJECT", "WORKING ON PROJECT",
+            "IN OPERATION", "OPERATIONAL", "IN USE",
+        ])
+    ):
+        condition = "working"
+        condition_notes = "Plant operational"
+
     # UNDER REPAIR patterns - active repair work
     elif any(kw in remarks_normalized for kw in [
         "SENT FOR", "FOR REBORE", "FOR REPAIRS", "FOR REPAIR",
-        "STRIP", "STRIPPING", "IN PROGRESS", "WORKING ON",
+        "STRIP", "STRIPPING", "IN PROGRESS", "WORKING ON IT",
+        "WORKING ON THE ENGINE", "WORKING ON THE PUMP",
         "UNDER REPAIR", "UNDER MAINTENANCE", "BEING REPAIRED",
         "AWAITING PARTS", "WAITING FOR PARTS", "PARTS ORDERED",
     ]):
@@ -348,13 +374,13 @@ def fallback_parse(
 
     # Repair completed
     elif any(kw in remarks_normalized for kw in ["(FIXED)", "(COMPLETED)", "(REPAIRED)", "FIXED", "REPAIRED"]):
-        condition = "operational"
+        condition = "working"
         condition_notes = "Repair completed"
 
     # Generic problem/fault keywords
     elif any(kw in remarks_normalized for kw in ["PROBLEM", "FAULT", "BROKEN", "DEFECT", "DAMAGE", "ISSUE", "FAULTY"]):
         if hours_worked > 0:
-            condition = "operational"
+            condition = "working"
             condition_notes = "Has issue but operational"
         else:
             condition = "breakdown"
@@ -372,7 +398,7 @@ def fallback_parse(
             condition = "breakdown"
             condition_notes = "Breakdown hours exceed working hours"
         elif hours_worked > 0:
-            condition = "operational"
+            condition = "working"
             condition_notes = None
         elif standby_hours > 0:
             condition = "standby"
@@ -414,7 +440,7 @@ async def parse_remarks(
     transfer_to: str | None = None,
     fleet_number: str = "",
 ) -> ParsedRemarks:
-    """Parse a single plant's remarks using AI (OpenAI ChatGPT).
+    """Parse a single plant's remarks using keyword pattern matching.
 
     Args:
         remarks: The free-text remarks from the report.
@@ -429,105 +455,14 @@ async def parse_remarks(
     Returns:
         ParsedRemarks with extracted information.
     """
-    # Try OpenAI first
-    client = _get_openai_client()
-
-    if client is None:
-        # Try Gemini as fallback (if configured)
-        # gemini_model = _get_gemini_model()
-        # if gemini_model is None:
-        return fallback_parse(
-            remarks, hours_worked, standby_hours, breakdown_hours,
-            off_hire, transfer_from, transfer_to
-        )
-
-    try:
-        prompt = PARSE_PROMPT.format(
-            fleet_number=fleet_number,
-            remarks=remarks or "",
-            hours_worked=hours_worked,
-            standby_hours=standby_hours,
-            breakdown_hours=breakdown_hours,
-            off_hire=off_hire,
-            transfer_from=transfer_from or "(not specified)",
-            transfer_to=transfer_to or "(not specified)",
-        )
-
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",  # More cost-effective than gpt-4
-            messages=[
-                {"role": "system", "content": "You are a plant management expert analyzing equipment remarks. Return only valid JSON."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.3,
-            max_tokens=500,
-        )
-
-        result_text = response.choices[0].message.content.strip()
-
-        # Clean up response - remove markdown, comments, and extract JSON
-        if result_text.startswith("```"):
-            result_text = re.sub(r"^```(?:json)?\n?", "", result_text)
-            result_text = re.sub(r"\n?```$", "", result_text)
-
-        # Try to extract JSON object if there's surrounding text
-        # Look for { to find start of JSON object
-        json_start = result_text.find('{')
-        if json_start > 0:
-            result_text = result_text[json_start:]
-
-        # Remove common JSON issues from LLM responses
-        # Remove trailing commas before } or ]
-        result_text = re.sub(r',(\s*[}\]])', r'\1', result_text)
-        # Remove comments (// style)
-        result_text = re.sub(r'//.*?$', '', result_text, flags=re.MULTILINE)
-        # Remove comments (/* */ style)
-        result_text = re.sub(r'/\*.*?\*/', '', result_text, flags=re.DOTALL)
-
-        data = json.loads(result_text)
-
-        # Validate condition value
-        condition = data.get("condition", "unverified")
-        if condition not in VALID_CONDITIONS:
-            condition = "unverified"
-
-        return ParsedRemarks(
-            condition=condition,
-            transfer_detected=data.get("transfer_detected", False),
-            transfer_direction=data.get("transfer_direction"),
-            transfer_location=data.get("transfer_location"),
-            transfer_date=data.get("transfer_date"),
-            condition_notes=data.get("condition_notes"),
-            confidence=float(data.get("confidence", 0.8)),
-        )
-
-    except json.JSONDecodeError as e:
-        logger.warning(
-            "OpenAI response contained invalid JSON, using fallback",
-            error=str(e),
-            remarks=remarks[:100] if remarks else None,
-        )
-        return fallback_parse(
-            remarks, hours_worked, standby_hours, breakdown_hours,
-            off_hire, transfer_from, transfer_to
-        )
-    except Exception as e:
-        logger.warning(
-            "OpenAI parsing failed, using fallback",
-            error=str(e),
-            remarks=remarks[:100] if remarks else None,
-        )
-        return fallback_parse(
-            remarks, hours_worked, standby_hours, breakdown_hours,
-            off_hire, transfer_from, transfer_to
-        )
+    return fallback_parse(
+        remarks, hours_worked, standby_hours, breakdown_hours,
+        off_hire, transfer_from, transfer_to
+    )
 
 
 async def parse_remarks_batch(plants_data: list[dict]) -> dict[str, ParsedRemarks]:
-    """Parse multiple plants' remarks in batches for efficiency (OpenAI ChatGPT).
-
-    Splits large batches into smaller chunks (max 150 plants per batch) to avoid
-    response issues and timeouts.
+    """Parse multiple plants' remarks using keyword pattern matching.
 
     Args:
         plants_data: List of dicts with keys:
@@ -546,151 +481,23 @@ async def parse_remarks_batch(plants_data: list[dict]) -> dict[str, ParsedRemark
     if not plants_data:
         return {}
 
-    client = _get_openai_client()
-
-    # If no OpenAI client, use fallback for all
-    if client is None:
-        results = {}
-        for plant in plants_data:
-            results[plant["fleet_number"]] = fallback_parse(
-                plant.get("remarks"),
-                plant.get("hours_worked", 0),
-                plant.get("standby_hours", 0),
-                plant.get("breakdown_hours", 0),
-                plant.get("off_hire", False),
-                plant.get("transfer_from"),
-                plant.get("transfer_to"),
-            )
-        return results
-
-    # Split into smaller batches to avoid response issues
-    # Max 50 plants per batch for reliable responses
-    batch_size = 50
     results = {}
-    batches_processed = 0
-    batches_failed = 0
-
-    for batch_start in range(0, len(plants_data), batch_size):
-        batch_end = min(batch_start + batch_size, len(plants_data))
-        batch_plants = plants_data[batch_start:batch_end]
-
-        try:
-            # Build batch prompt for this chunk
-            plants_text = ""
-            for i, plant in enumerate(batch_plants, 1):
-                plants_text += f"""
-Plant {i}:
-  Fleet Number: {plant["fleet_number"]}
-  Remarks: {plant.get("remarks") or "(no remarks)"}
-  Hours worked: {plant.get("hours_worked", 0)}
-  Standby hours: {plant.get("standby_hours", 0)}
-  Breakdown hours: {plant.get("breakdown_hours", 0)}
-  Off hire (column): {plant.get("off_hire", False)}
-  Transfer from (column): {plant.get("transfer_from") or "(not specified)"}
-  Transfer to (column): {plant.get("transfer_to") or "(not specified)"}
-"""
-
-            prompt = BATCH_PARSE_PROMPT.format(plants_text=plants_text)
-
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": "You are a plant management expert analyzing equipment remarks. Return only valid JSON array."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.3,
-                max_tokens=4000,  # Increased for larger batches
-            )
-
-            result_text = response.choices[0].message.content.strip()
-
-            # Clean up response - remove markdown, comments, and extract JSON
-            if result_text.startswith("```"):
-                result_text = re.sub(r"^```(?:json)?\n?", "", result_text)
-                result_text = re.sub(r"\n?```$", "", result_text)
-
-            # Try to extract JSON array if there's surrounding text
-            json_start = result_text.find('[')
-            if json_start > 0:
-                result_text = result_text[json_start:]
-
-            # Find matching ] at the end
-            json_end = result_text.rfind(']')
-            if json_end > 0:
-                result_text = result_text[:json_end + 1]
-
-            # Remove common JSON issues from LLM responses
-            # Remove trailing commas before } or ]
-            result_text = re.sub(r',(\s*[}\]])', r'\1', result_text)
-            # Remove comments (// style)
-            result_text = re.sub(r'//.*?$', '', result_text, flags=re.MULTILINE)
-            # Remove comments (/* */ style)
-            result_text = re.sub(r'/\*.*?\*/', '', result_text, flags=re.DOTALL)
-
-            data_list = json.loads(result_text)
-
-            # Process this batch's results
-            for data in data_list:
-                fleet_number = str(data.get("fleet_number", "")).upper().replace(" ", "")
-                if fleet_number:
-                    condition = data.get("condition", "unverified")
-                    if condition not in VALID_CONDITIONS:
-                        condition = "unverified"
-
-                    results[fleet_number] = ParsedRemarks(
-                        condition=condition,
-                        transfer_detected=data.get("transfer_detected", False),
-                        transfer_direction=data.get("transfer_direction"),
-                        transfer_location=data.get("transfer_location"),
-                        transfer_date=data.get("transfer_date"),
-                        condition_notes=data.get("condition_notes"),
-                        confidence=float(data.get("confidence", 0.8)),
-                    )
-
-            batches_processed += 1
-
-        except Exception as e:
-            # This batch failed - use fallback for these plants only
-            batches_failed += 1
-            logger.warning(
-                "Batch failed, using fallback for this batch",
-                error=str(e),
-                batch_start=batch_start,
-                batch_size=len(batch_plants),
-            )
-            for plant in batch_plants:
-                fn = plant["fleet_number"].upper().replace(" ", "")
-                if fn not in results:
-                    results[fn] = fallback_parse(
-                        plant.get("remarks"),
-                        plant.get("hours_worked", 0),
-                        plant.get("standby_hours", 0),
-                        plant.get("breakdown_hours", 0),
-                        plant.get("off_hire", False),
-                        plant.get("transfer_from"),
-                        plant.get("transfer_to"),
-                    )
-
-    # Fill in any missing with fallback
     for plant in plants_data:
         fn = plant["fleet_number"].upper().replace(" ", "")
-        if fn not in results:
-            results[fn] = fallback_parse(
-                plant.get("remarks"),
-                plant.get("hours_worked", 0),
-                plant.get("standby_hours", 0),
-                plant.get("breakdown_hours", 0),
-                plant.get("off_hire", False),
-                plant.get("transfer_from"),
-                plant.get("transfer_to"),
-            )
+        results[fn] = fallback_parse(
+            plant.get("remarks"),
+            plant.get("hours_worked", 0),
+            plant.get("standby_hours", 0),
+            plant.get("breakdown_hours", 0),
+            plant.get("off_hire", False),
+            plant.get("transfer_from"),
+            plant.get("transfer_to"),
+        )
 
     logger.info(
-        "Batch parsed remarks (OpenAI)",
+        "Batch parsed remarks (keyword)",
         total=len(plants_data),
-        batches_processed=batches_processed,
-        batches_failed=batches_failed,
-        ai_parsed=len([r for r in results.values() if r.confidence > 0.5]),
+        results_count=len(results),
     )
 
     return results

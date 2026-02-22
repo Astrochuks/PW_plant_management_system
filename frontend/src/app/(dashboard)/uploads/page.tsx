@@ -102,14 +102,16 @@ type Step = 'upload' | 'review' | 'success';
 function UploadPageContent() {
   const [step, setStep] = useState<Step>('upload');
   const [previewData, setPreviewData] = useState<PreviewResponse | null>(null);
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [editedConditions, setEditedConditions] = useState<Record<string, string>>({});
   const [editedTransferTo, setEditedTransferTo] = useState<Record<string, string>>({});
   const [editedTransferFrom, setEditedTransferFrom] = useState<Record<string, string>>({});
   const [missingActions, setMissingActions] = useState<Record<string, MissingPlantAction>>({});
   const [confirmResult, setConfirmResult] = useState<{ submissionId: string; count: number } | null>(null);
 
-  const handlePreviewSuccess = useCallback((data: PreviewResponse) => {
+  const handlePreviewSuccess = useCallback((data: PreviewResponse, file: File) => {
     setPreviewData(data);
+    setUploadedFile(file);
     setEditedConditions({});
     setEditedTransferTo({});
     setEditedTransferFrom({});
@@ -125,6 +127,7 @@ function UploadPageContent() {
   const handleReset = useCallback(() => {
     setStep('upload');
     setPreviewData(null);
+    setUploadedFile(null);
     setEditedConditions({});
     setEditedTransferTo({});
     setEditedTransferFrom({});
@@ -162,6 +165,7 @@ function UploadPageContent() {
       {step === 'review' && previewData && (
         <ReviewStep
           data={previewData}
+          file={uploadedFile}
           editedConditions={editedConditions}
           setEditedConditions={setEditedConditions}
           editedTransferTo={editedTransferTo}
@@ -231,7 +235,7 @@ function StepIndicator({ current }: { current: Step }) {
 // Step 1: Upload Form
 // ============================================================================
 
-function UploadStep({ onSuccess }: { onSuccess: (data: PreviewResponse) => void }) {
+function UploadStep({ onSuccess }: { onSuccess: (data: PreviewResponse, file: File) => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [locationId, setLocationId] = useState('');
   const [weekEndingDate, setWeekEndingDate] = useState('');
@@ -265,7 +269,7 @@ function UploadStep({ onSuccess }: { onSuccess: (data: PreviewResponse) => void 
       {
         onSuccess: (data) => {
           toast.success(`Preview loaded: ${data.summary.total_in_file} plants found`);
-          onSuccess(data);
+          onSuccess(data, file!);
         },
         onError: (error) => {
           toast.error(getErrorMessage(error));
@@ -402,6 +406,7 @@ function UploadStep({ onSuccess }: { onSuccess: (data: PreviewResponse) => void 
 
 interface ReviewStepProps {
   data: PreviewResponse;
+  file: File | null;
   editedConditions: Record<string, string>;
   setEditedConditions: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   editedTransferTo: Record<string, string>;
@@ -416,6 +421,7 @@ interface ReviewStepProps {
 
 function ReviewStep({
   data,
+  file,
   editedConditions,
   setEditedConditions,
   editedTransferTo,
@@ -503,6 +509,7 @@ function ReviewStep({
         weekEndingDate: data.week.week_ending_date,
         plants,
         missingPlantActions: missingPlantActions.length > 0 ? missingPlantActions : undefined,
+        file: file || undefined,
       },
       {
         onSuccess: (result) => {
@@ -620,7 +627,7 @@ function ReviewStep({
             <TableBody>
               {paginatedPlants.map((plant, idx) => (
                 <PlantRow
-                  key={plant.fleet_number}
+                  key={`${plant.fleet_number}-${idx}`}
                   plant={plant}
                   index={(page - 1) * PAGE_SIZE + idx + 1}
                   conditionOptions={data.condition_options}

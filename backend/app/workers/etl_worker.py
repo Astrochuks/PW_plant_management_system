@@ -13,7 +13,8 @@ Uses AI-powered remarks parsing for:
 import io
 import json
 import re
-from datetime import datetime
+import traceback
+from datetime import date, datetime
 from typing import Any
 
 import pandas as pd
@@ -538,11 +539,18 @@ async def process_weekly_report(
             result["errors"].append("No fleet_number column found in file")
             raise ValueError("Invalid file format: no fleet_number column")
 
-        # Get ALL existing plants (no pagination needed with asyncpg - no 1000 row limit)
-        all_plants = await fetch("SELECT id, fleet_number FROM plants_master")
+        # Extract fleet numbers from file and only fetch those from DB
+        file_fleet_numbers = [
+            normalize_fleet_number(fn) for fn in df.get("fleet_number", [])
+            if normalize_fleet_number(fn)
+        ]
+        relevant_plants = await fetch(
+            "SELECT id, fleet_number FROM plants_master WHERE fleet_number = ANY($1::text[])",
+            list(set(file_fleet_numbers)),
+        )
 
-        fleet_to_id = {p["fleet_number"]: p["id"] for p in all_plants}
-        logger.info("Loaded existing plants for lookup", count=len(fleet_to_id))
+        fleet_to_id = {p["fleet_number"]: p["id"] for p in relevant_plants}
+        logger.info("Loaded matching plants for lookup", count=len(fleet_to_id))
 
         # Process each row - first pass to collect data for batch AI parsing
         plants_to_insert = []
@@ -987,9 +995,10 @@ async def process_weekly_report(
         )
 
     except Exception as e:
-        logger.exception("Weekly report processing failed", job_id=job_id, error=str(e))
+        error_msg = repr(e) if not str(e) else str(e)
+        logger.exception("Weekly report processing failed", job_id=job_id, error=error_msg)
 
-        result["errors"].append(f"Processing failed: {str(e)}")
+        result["errors"].append(f"Processing failed: {error_msg}")
 
         # Update submission as failed
         try:
@@ -1005,7 +1014,7 @@ async def process_weekly_report(
         # Create failure notification
         await _create_notification(
             title="Weekly report processing failed",
-            message=f"Error: {str(e)[:200]}",
+            message=f"Error: {error_msg[:200]}",
             notification_type="report_failed",
             data={"job_id": job_id, "error": str(e)[:500]},
         )
@@ -1956,7 +1965,7 @@ async def save_confirmed_weekly_report(
     location_id: str,
     year: int,
     week_number: int,
-    week_ending_date: str,
+    week_ending_date: date,
     validated_plants: list[dict[str, Any]],
     missing_plants_actions: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
@@ -1970,7 +1979,7 @@ async def save_confirmed_weekly_report(
         location_id: Location UUID.
         year: Year.
         week_number: Week number.
-        week_ending_date: Week ending date (ISO format).
+        week_ending_date: Week ending date.
         validated_plants: List of validated plant data from admin.
         missing_plants_actions: Actions for missing plants (optional).
 
@@ -2001,23 +2010,35 @@ async def save_confirmed_weekly_report(
             total_plants=len(validated_plants),
         )
 
-        # Get all existing plants (no pagination needed with asyncpg)
-        all_plants = await fetch(
-            "SELECT id, fleet_number, last_verified_year, last_verified_week, condition, current_location_id FROM plants_master"
+        # Only fetch plants that are in this upload (+ missing plants)
+        upload_fleet_numbers = [p["fleet_number"] for p in validated_plants]
+        if missing_plants_actions:
+            upload_fleet_numbers.extend(a["fleet_number"] for a in missing_plants_actions)
+        # Deduplicate
+        upload_fleet_numbers = list(set(upload_fleet_numbers))
+
+        relevant_plants = await fetch(
+            """SELECT id, fleet_number, last_verified_year, last_verified_week,
+                      condition, current_location_id
+               FROM plants_master
+               WHERE fleet_number = ANY($1::text[])""",
+            upload_fleet_numbers,
         )
 
-        fleet_to_id = {p["fleet_number"]: p["id"] for p in all_plants}
+        fleet_to_id = {p["fleet_number"]: p["id"] for p in relevant_plants}
         fleet_to_verification = {
             p["fleet_number"]: (p.get("last_verified_year") or 0, p.get("last_verified_week") or 0)
-            for p in all_plants
+            for p in relevant_plants
         }
-        fleet_to_condition = {p["fleet_number"]: p.get("condition") for p in all_plants}
-        fleet_to_location = {p["fleet_number"]: p.get("current_location_id") for p in all_plants}
+        fleet_to_condition = {p["fleet_number"]: p.get("condition") for p in relevant_plants}
+        fleet_to_location = {p["fleet_number"]: p.get("current_location_id") for p in relevant_plants}
 
         # Prepare plants for upsert
         plants_to_upsert = []
+        new_fleet_numbers: set[str] = set()
         weekly_records = []
         transfers_to_create = []
+        inbound_transfers = []  # Collected for batch pending-transfer lookup
 
         for plant_data in validated_plants:
             fleet_num = plant_data["fleet_number"]
@@ -2051,55 +2072,120 @@ async def save_confirmed_weekly_report(
                     existing_week=f"{existing_verification[0]}-W{existing_verification[1]}",
                 )
 
-            # If new plant, set creation time and resolve fleet type
-            if fleet_num not in fleet_to_id:
+            # If new plant, set creation time and location
+            is_new = fleet_num not in fleet_to_id
+            if is_new:
                 plant_upsert["created_at"] = datetime.utcnow()
                 plant_upsert["current_location_id"] = location_id
                 plant_upsert["last_verified_date"] = week_ending_date
                 plant_upsert["last_verified_year"] = year
                 plant_upsert["last_verified_week"] = week_number
-                # Resolve fleet type from prefix using database function
-                resolved_type = await fetchval("SELECT resolve_fleet_type($1)", fleet_num)
-                plant_upsert["fleet_type"] = resolved_type
+                new_fleet_numbers.add(fleet_num)
 
             plants_to_upsert.append(plant_upsert)
 
-        # Upsert plants one by one (need RETURNING for new plant IDs)
+        # Batch resolve fleet types for new plants (1 query instead of N)
+        if new_fleet_numbers:
+            fleet_type_rows = await fetch(
+                "SELECT fn, resolve_fleet_type(fn) as ft FROM unnest($1::text[]) AS fn",
+                list(new_fleet_numbers),
+            )
+            fleet_type_map = {r["fn"]: r["ft"] for r in fleet_type_rows}
+            for p in plants_to_upsert:
+                if p["fleet_number"] in new_fleet_numbers:
+                    p["fleet_type"] = fleet_type_map.get(p["fleet_number"])
+
+        # Batch upsert all plants (1 executemany call instead of N fetchrow calls)
         if plants_to_upsert:
-            for plant_upsert in plants_to_upsert:
-                row = await fetchrow(
-                    """INSERT INTO plants_master (fleet_number, description, remarks, condition,
-                        physical_verification, updated_at, current_location_id,
-                        last_verified_date, last_verified_year, last_verified_week,
-                        fleet_type, created_at)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7::uuid, $8, $9, $10, $11, $12)
-                    ON CONFLICT (fleet_number) DO UPDATE SET
-                        description = COALESCE(EXCLUDED.description, plants_master.description),
-                        remarks = EXCLUDED.remarks, condition = EXCLUDED.condition,
-                        physical_verification = EXCLUDED.physical_verification,
-                        updated_at = EXCLUDED.updated_at,
-                        current_location_id = COALESCE(EXCLUDED.current_location_id, plants_master.current_location_id),
-                        last_verified_date = COALESCE(EXCLUDED.last_verified_date, plants_master.last_verified_date),
-                        last_verified_year = COALESCE(EXCLUDED.last_verified_year, plants_master.last_verified_year),
-                        last_verified_week = COALESCE(EXCLUDED.last_verified_week, plants_master.last_verified_week),
-                        fleet_type = COALESCE(EXCLUDED.fleet_type, plants_master.fleet_type)
-                    RETURNING id, fleet_number""",
-                    plant_upsert["fleet_number"], plant_upsert.get("description"),
-                    plant_upsert.get("remarks"), plant_upsert.get("condition"),
-                    plant_upsert.get("physical_verification"), plant_upsert.get("updated_at"),
-                    plant_upsert.get("current_location_id"), plant_upsert.get("last_verified_date"),
-                    plant_upsert.get("last_verified_year"), plant_upsert.get("last_verified_week"),
-                    plant_upsert.get("fleet_type"),
-                    plant_upsert.get("created_at", datetime.utcnow()),
-                )
-                if row:
-                    if plant_upsert["fleet_number"] not in fleet_to_id:
-                        fleet_to_id[row["fleet_number"]] = row["id"]
-                        result["plants_created"] += 1
-                    else:
-                        result["plants_updated"] += 1
+            await executemany(
+                """INSERT INTO plants_master (fleet_number, description, remarks, condition,
+                    physical_verification, updated_at, current_location_id,
+                    last_verified_date, last_verified_year, last_verified_week,
+                    fleet_type, created_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7::uuid, $8, $9, $10, $11, $12)
+                ON CONFLICT (fleet_number) DO UPDATE SET
+                    description = COALESCE(EXCLUDED.description, plants_master.description),
+                    remarks = EXCLUDED.remarks, condition = EXCLUDED.condition,
+                    physical_verification = EXCLUDED.physical_verification,
+                    updated_at = EXCLUDED.updated_at,
+                    current_location_id = COALESCE(EXCLUDED.current_location_id, plants_master.current_location_id),
+                    last_verified_date = COALESCE(EXCLUDED.last_verified_date, plants_master.last_verified_date),
+                    last_verified_year = COALESCE(EXCLUDED.last_verified_year, plants_master.last_verified_year),
+                    last_verified_week = COALESCE(EXCLUDED.last_verified_week, plants_master.last_verified_week),
+                    fleet_type = COALESCE(EXCLUDED.fleet_type, plants_master.fleet_type)""",
+                [
+                    (
+                        p["fleet_number"], p.get("description"),
+                        p.get("remarks"), p.get("condition"),
+                        p.get("physical_verification"), p.get("updated_at"),
+                        p.get("current_location_id"), p.get("last_verified_date"),
+                        p.get("last_verified_year"), p.get("last_verified_week"),
+                        p.get("fleet_type"),
+                        p.get("created_at", datetime.utcnow()),
+                    )
+                    for p in plants_to_upsert
+                ],
+            )
+
+            # Fetch IDs for all upserted plants (1 query)
+            upserted_fleet_numbers = [p["fleet_number"] for p in plants_to_upsert]
+            id_rows = await fetch(
+                "SELECT id, fleet_number FROM plants_master WHERE fleet_number = ANY($1::text[])",
+                upserted_fleet_numbers,
+            )
+            for r in id_rows:
+                if r["fleet_number"] not in fleet_to_id:
+                    result["plants_created"] += 1
+                else:
+                    result["plants_updated"] += 1
+                fleet_to_id[r["fleet_number"]] = r["id"]
 
         result["plants_processed"] = len(plants_to_upsert)
+
+        # Batch resolve inbound transfers — single query instead of N fetchrow calls
+        if inbound_transfers:
+            # Get all pending transfers that match any inbound plant+from_location pair
+            inbound_plant_ids = [t["plant_id"] for t in inbound_transfers]
+            pending_rows = await fetch(
+                """SELECT id, plant_id, from_location_id, to_location_id
+                   FROM plant_transfers
+                   WHERE plant_id = ANY($1::uuid[]) AND to_location_id = $2::uuid
+                     AND status = 'pending'""",
+                inbound_plant_ids, location_id,
+            )
+            # Index by (plant_id, from_location_id) for fast lookup
+            pending_map: dict[tuple[str, str], str] = {}
+            for r in pending_rows:
+                key = (str(r["plant_id"]), str(r["from_location_id"]))
+                pending_map[key] = str(r["id"])
+
+            confirm_ids = []
+            for t in inbound_transfers:
+                key = (str(t["plant_id"]), str(t["from_location_id"]))
+                pending_id = pending_map.get(key)
+                if pending_id:
+                    confirm_ids.append(pending_id)
+                else:
+                    transfers_to_create.append({
+                        "plant_id": t["plant_id"],
+                        "from_location_id": t["from_location_id"],
+                        "to_location_id": location_id,
+                        "transfer_date": week_ending_date,
+                        "actual_arrival_date": week_ending_date,
+                        "status": "confirmed",
+                        "direction": "inbound",
+                        "source_submission_id": submission_id,
+                        "created_at": datetime.utcnow(),
+                    })
+
+            # Batch confirm pending transfers
+            if confirm_ids:
+                await execute(
+                    """UPDATE plant_transfers
+                       SET status = 'confirmed', actual_arrival_date = $2, updated_at = $3
+                       WHERE id = ANY($1::uuid[])""",
+                    confirm_ids, week_ending_date, datetime.utcnow(),
+                )
 
         # Create weekly records
         for plant_data in validated_plants:
@@ -2129,7 +2215,7 @@ async def save_confirmed_weekly_report(
 
             weekly_records.append(weekly_record)
 
-            # Handle transfers
+            # Collect transfers for batch processing
             transfer_to_id = plant_data.get("transfer_to_location_id")
             transfer_from_id = plant_data.get("transfer_from_location_id")
 
@@ -2140,43 +2226,18 @@ async def save_confirmed_weekly_report(
                     "from_location_id": location_id,
                     "to_location_id": transfer_to_id,
                     "transfer_date": week_ending_date,
-                    "status": "pending",  # Confirmed when it appears at destination
+                    "status": "pending",
                     "direction": "outbound",
                     "source_submission_id": submission_id,
                     "created_at": datetime.utcnow(),
                 })
 
-            # INBOUND transfer (plant received FROM another location)
+            # INBOUND transfer — collect for batch lookup below
             if transfer_from_id:
-                # Check if there's a pending transfer to confirm
-                pending_transfer = await fetchrow(
-                    """SELECT id FROM plant_transfers
-                       WHERE plant_id = $1::uuid AND from_location_id = $2::uuid
-                         AND to_location_id = $3::uuid AND status = 'pending'""",
-                    plant_id, transfer_from_id, location_id,
-                )
-
-                if pending_transfer:
-                    # Confirm existing transfer
-                    await execute(
-                        """UPDATE plant_transfers SET status = 'confirmed',
-                            actual_arrival_date = $2, updated_at = $3
-                        WHERE id = $1::uuid""",
-                        pending_transfer["id"], week_ending_date, datetime.utcnow(),
-                    )
-                else:
-                    # Create confirmed transfer (no pending transfer exists)
-                    transfers_to_create.append({
-                        "plant_id": plant_id,
-                        "from_location_id": transfer_from_id,
-                        "to_location_id": location_id,
-                        "transfer_date": week_ending_date,
-                        "actual_arrival_date": week_ending_date,
-                        "status": "confirmed",
-                        "direction": "inbound",
-                        "source_submission_id": submission_id,
-                        "created_at": datetime.utcnow(),
-                    })
+                inbound_transfers.append({
+                    "plant_id": plant_id,
+                    "from_location_id": transfer_from_id,
+                })
 
         # Batch upsert weekly records
         if weekly_records:
@@ -2451,7 +2512,7 @@ async def save_confirmed_weekly_report(
                 )
                 result["events_created"] = len(events_to_create)
             except Exception as e:
-                logger.warning("Failed to create plant events", error=str(e))
+                logger.warning("Failed to create plant events", error=repr(e))
 
         # Create notifications for significant events
         try:
@@ -2490,7 +2551,7 @@ async def save_confirmed_weekly_report(
                     },
                 )
         except Exception as e:
-            logger.warning("Failed to create notification", error=str(e))
+            logger.warning("Failed to create notification", error=repr(e))
 
         # Update submission status
         await execute(
@@ -2510,18 +2571,21 @@ async def save_confirmed_weekly_report(
         )
 
     except Exception as e:
+        error_msg = repr(e) if not str(e) else str(e)
+        tb = traceback.format_exc()
         logger.error(
             "Error saving confirmed weekly report",
             submission_id=submission_id,
-            error=str(e),
+            error=error_msg,
+            traceback=tb,
         )
-        result["errors"].append(str(e))
+        result["errors"].append(error_msg)
 
         # Update submission status to failed
         try:
             await execute(
                 "UPDATE weekly_report_submissions SET status = 'failed', errors = $2::jsonb WHERE id = $1::uuid",
-                submission_id, json.dumps([str(e)]),
+                submission_id, json.dumps([error_msg]),
             )
         except Exception:
             pass

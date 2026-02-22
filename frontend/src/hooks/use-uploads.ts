@@ -84,10 +84,11 @@ export function useConfirmWeeklyReport() {
       weekEndingDate: string;
       plants: ConfirmedPlant[];
       missingPlantActions?: MissingPlantAction[];
+      file?: File;
     }
   >({
-    mutationFn: ({ locationId, year, weekNumber, weekEndingDate, plants, missingPlantActions }) =>
-      confirmWeeklyReport(locationId, year, weekNumber, weekEndingDate, plants, missingPlantActions),
+    mutationFn: ({ locationId, year, weekNumber, weekEndingDate, plants, missingPlantActions, file }) =>
+      confirmWeeklyReport(locationId, year, weekNumber, weekEndingDate, plants, missingPlantActions, file),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: submissionsKeys.all });
     },

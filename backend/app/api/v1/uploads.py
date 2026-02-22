@@ -120,7 +120,7 @@ async def upload_weekly_report(
                source_file_size = EXCLUDED.source_file_size,
                status = 'pending'
            RETURNING id""",
-        year, week_number, str(week_ending_date), str(final_location_id),
+        year, week_number, week_ending_date, str(final_location_id),
         submitter_name, submitter_email, token_info.get("token_id"),
         storage_path, file.filename, file_size,
     )
@@ -554,13 +554,13 @@ async def get_weekly_submission(
 @router.get("/submissions/weekly/{submission_id}/file")
 async def download_weekly_submission_file(
     submission_id: UUID,
-    current_user: Annotated[CurrentUser, Depends(require_admin)],
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
 ):
     """Download the uploaded file for a weekly report submission.
 
     Args:
         submission_id: The submission ID.
-        current_user: The authenticated admin user.
+        current_user: The authenticated user (admin or management).
 
     Returns:
         Redirect to signed download URL.
@@ -911,7 +911,7 @@ async def admin_upload_weekly_report(
                source_file_size = EXCLUDED.source_file_size,
                status = 'pending'
            RETURNING id""",
-        year, week_number, str(final_week_ending_date), str(final_location_id),
+        year, week_number, final_week_ending_date, str(final_location_id),
         current_user.full_name, current_user.email,
         storage_path, file.filename, file_size,
     )
@@ -1456,6 +1456,7 @@ async def confirm_weekly_report(
     week_ending_date: date = Form(...),
     plants_json: str = Form(...),  # JSON string of validated plants
     missing_plants_json: str | None = Form(None),  # JSON string of missing plant actions
+    file: UploadFile | None = File(None),  # Original Excel file for storage
     current_user: CurrentUser = Depends(require_admin),
 ) -> dict[str, Any]:
     """Confirm and save validated weekly report data.
@@ -1472,6 +1473,7 @@ async def confirm_weekly_report(
         week_ending_date: Week ending date.
         plants_json: JSON string of validated plants data.
         missing_plants_json: JSON string of missing plants actions (optional).
+        file: Original Excel file to store (optional).
         current_user: Authenticated admin user.
 
     Returns:
@@ -1486,6 +1488,26 @@ async def confirm_weekly_report(
 
     if not validated_plants:
         raise ValidationError("No plants data provided")
+
+    # Upload file to storage if provided
+    source_file_path = None
+    source_file_name = None
+    source_file_size = None
+    if file and file.filename:
+        file_content = await file.read()
+        source_file_name = file.filename
+        source_file_size = len(file_content)
+        storage_path = f"weekly-reports/{location_id}/{week_ending_date}/{file.filename}"
+        try:
+            storage_client = get_supabase_admin_client()
+            storage_client.storage.from_("reports").upload(
+                storage_path,
+                file_content,
+                file_options={"upsert": "true"},
+            )
+            source_file_path = storage_path
+        except Exception as e:
+            logger.warning("Failed to upload file to storage", error=repr(e))
 
     logger.info(
         "Confirming weekly report",
@@ -1513,10 +1535,13 @@ async def confirm_weekly_report(
                    submitted_by_name = $2, submitted_by_email = $3,
                    submitted_at = now(), status = 'pending',
                    week_ending_date = $4,
+                   source_file_path = COALESCE($5, source_file_path),
+                   source_file_name = COALESCE($6, source_file_name),
+                   source_file_size = COALESCE($7, source_file_size),
                    plants_processed = 0, plants_created = 0, plants_updated = 0
                WHERE id = $1::uuid""",
             submission_id, current_user.full_name, current_user.email,
-            str(week_ending_date),
+            week_ending_date, source_file_path, source_file_name, source_file_size,
         )
         logger.info("Reprocessing existing submission", submission_id=submission_id)
     else:
@@ -1524,11 +1549,14 @@ async def confirm_weekly_report(
         row = await fetchrow(
             """INSERT INTO weekly_report_submissions
                    (year, week_number, week_ending_date, location_id,
-                    submitted_by_name, submitted_by_email, source_type, status)
-               VALUES ($1, $2, $3, $4::uuid, $5, $6, 'admin_validated', 'pending')
+                    submitted_by_name, submitted_by_email, source_type, status,
+                    source_file_path, source_file_name, source_file_size)
+               VALUES ($1, $2, $3, $4::uuid, $5, $6, 'admin_validated', 'pending',
+                    $7, $8, $9)
                RETURNING id""",
-            year, week_number, str(week_ending_date), str(location_id),
+            year, week_number, week_ending_date, str(location_id),
             current_user.full_name, current_user.email,
+            source_file_path, source_file_name, source_file_size,
         )
 
         submission_id = str(row["id"])
@@ -1541,7 +1569,7 @@ async def confirm_weekly_report(
         location_id=str(location_id),
         year=year,
         week_number=week_number,
-        week_ending_date=str(week_ending_date),
+        week_ending_date=week_ending_date,
         validated_plants=validated_plants,
         missing_plants_actions=missing_plants_actions,
     )
