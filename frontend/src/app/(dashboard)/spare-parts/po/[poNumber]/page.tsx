@@ -185,7 +185,17 @@ export default function PODetailPage() {
   const poDate = parts[0]?.po_date;
   const poLocation = parts[0]?.location_id;
   const poReqNo = parts[0]?.requisition_number;
-  const costType = parts[0]?.cost_type;
+
+  // Use PO-level cost_type from backend meta (computed same as v_purchase_orders_summary view)
+  // Fallback: compute from parts if meta not available
+  const costType = meta?.cost_type ?? (() => {
+    if (parts.length === 0) return null;
+    const distinctPlants = new Set(parts.map(p => p.plant_id).filter(Boolean));
+    const hasWorkshop = parts.some(p => p.is_workshop);
+    const hasCategory = parts.some(p => p.is_category);
+    if (distinctPlants.size === 1 && !hasWorkshop && !hasCategory) return 'direct';
+    return 'shared';
+  })();
 
   return (
     <div className="space-y-6">

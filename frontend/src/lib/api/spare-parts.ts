@@ -102,6 +102,7 @@ export interface PODetailMeta {
   items_count: number;
   total_cost: number;
   distinct_plants: number;
+  cost_type?: 'direct' | 'shared';
   supplier: { id: string; name: string } | null;
   suppliers?: POSupplierSummary[];
 }

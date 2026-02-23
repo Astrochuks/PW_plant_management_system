@@ -887,6 +887,12 @@ async def get_spare_parts_by_po(
     # Keep backward compat: "supplier" = first/primary supplier
     primary_supplier = suppliers_list[0] if suppliers_list else None
 
+    # PO-level cost_type (same logic as v_purchase_orders_summary view)
+    distinct_plants = set(r.get("plant_id") for r in rows if r.get("plant_id"))
+    has_workshop = any(r.get("is_workshop") for r in rows)
+    has_category = any(r.get("is_category") for r in rows)
+    po_cost_type = "direct" if len(distinct_plants) == 1 and not has_workshop and not has_category else "shared"
+
     return {
         "success": True,
         "data": rows,
@@ -894,7 +900,8 @@ async def get_spare_parts_by_po(
             "po_number": po_number.upper(),
             "items_count": len(rows),
             "total_cost": round(total_cost, 2),
-            "distinct_plants": len(set(r.get("plant_id") for r in rows if r.get("plant_id"))),
+            "distinct_plants": len(distinct_plants),
+            "cost_type": po_cost_type,
             "supplier": primary_supplier,
             "suppliers": [
                 {"id": s["id"], "name": s["name"], "items_count": s["items_count"], "total_cost": round(s["total_cost"], 2)}
