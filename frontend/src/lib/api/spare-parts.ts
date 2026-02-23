@@ -97,6 +97,12 @@ export interface POSupplierSummary {
   total_cost: number;
 }
 
+export interface POOverhead {
+  vat_amount: number;
+  discount_amount: number;
+  other_costs: number;
+}
+
 export interface PODetailMeta {
   po_number: string;
   items_count: number;
@@ -105,6 +111,7 @@ export interface PODetailMeta {
   cost_type?: 'direct' | 'shared';
   supplier: { id: string; name: string } | null;
   suppliers?: POSupplierSummary[];
+  overhead?: POOverhead;
 }
 
 export interface UpdatePORequest {
@@ -701,7 +708,11 @@ export interface PlantSharedCost {
   label: string;
   po_number: string | null;
   po_date: string | null;
+  items_subtotal: number;
   total_amount: number;
+  po_vat: number;
+  po_discount: number;
+  po_other: number;
   supplier: string | null;
   shared_with: string[];
   items: string[];

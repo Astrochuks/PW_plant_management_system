@@ -349,7 +349,7 @@ function PlantDetailContent({ plantId }: { plantId: string }) {
                           <DollarSign className="h-4 w-4 text-emerald-600 dark:text-emerald-300" />
                         </div>
                         <div>
-                          <p className="text-xs text-muted-foreground">Total Cost</p>
+                          <p className="text-xs text-muted-foreground">Direct Cost</p>
                           <p className="text-xl font-bold">{formatCurrency(costData.costs.total_cost)}</p>
                         </div>
                       </div>
@@ -449,10 +449,13 @@ function PlantDetailContent({ plantId }: { plantId: string }) {
                 ) : sharedCostsData && sharedCostsData.shared_costs_count > 0 ? (
                   <Card>
                     <CardHeader className="pb-3">
-                      <CardTitle className="text-base flex items-center gap-2">
-                        <ArrowRightLeft className="h-4 w-4" />
-                        Shared Costs ({sharedCostsData.shared_costs_count})
-                      </CardTitle>
+                      <div>
+                        <CardTitle className="text-base flex items-center gap-2">
+                          <ArrowRightLeft className="h-4 w-4" />
+                          Shared Costs ({sharedCostsData.shared_costs_count})
+                        </CardTitle>
+                        <p className="text-xs text-muted-foreground mt-1">Not included in direct cost total</p>
+                      </div>
                     </CardHeader>
                     <CardContent className="space-y-3">
                       {sharedCostsData.shared_costs.map((sc: PlantSharedCost, idx: number) => (
@@ -481,6 +484,13 @@ function PlantDetailContent({ plantId }: { plantId: string }) {
                           </div>
                           {sc.supplier && (
                             <p className="text-xs text-muted-foreground">Supplier: {sc.supplier}</p>
+                          )}
+                          {(sc.po_vat > 0 || sc.po_discount > 0 || sc.po_other > 0) && (
+                            <div className="text-xs text-muted-foreground flex gap-3">
+                              {sc.po_vat > 0 && <span>VAT: {formatCurrency(sc.po_vat)}</span>}
+                              {sc.po_discount > 0 && <span>Discount: -{formatCurrency(sc.po_discount)}</span>}
+                              {sc.po_other > 0 && <span>Other: {formatCurrency(sc.po_other)}</span>}
+                            </div>
                           )}
                           {sc.shared_with && sc.shared_with.length > 0 && (
                             <div className="flex items-center gap-1 flex-wrap">
@@ -547,7 +557,7 @@ function PlantDetailContent({ plantId }: { plantId: string }) {
             </CardHeader>
             <CardContent className="space-y-4">
               <div>
-                <p className="text-xs text-muted-foreground">Total Maintenance Cost</p>
+                <p className="text-xs text-muted-foreground">Direct Maintenance Cost</p>
                 <p className="text-xl font-bold">
                   {plant.total_maintenance_cost != null
                     ? formatCurrency(plant.total_maintenance_cost)

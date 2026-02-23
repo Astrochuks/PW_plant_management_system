@@ -96,7 +96,7 @@ async def list_spare_parts(
     search: str | None = None,
 ) -> dict[str, Any]:
     """List spare parts (PO line items) with filtering and pagination."""
-    conds: list[str] = []
+    conds: list[str] = ["COALESCE(sp.is_po_overhead, false) = false"]
     params: list[Any] = []
 
     if plant_id:
@@ -539,6 +539,11 @@ async def create_spare_parts_bulk(
 
     cost_type = get_cost_classification(parsed_fleets)
 
+    # Detect multi-fleet PO (scenarios 2 & 3)
+    is_multi_fleet = len(parsed_fleets) > 1 or any(
+        f.get("is_workshop") or f.get("is_category") for f in parsed_fleets
+    )
+
     # Time dimensions
     calc_year = parsed_date.year if parsed_date else None
     calc_month = parsed_date.month if parsed_date else None
@@ -618,6 +623,17 @@ async def create_spare_parts_bulk(
             continue
 
         frac = item_subtotal / subtotal if subtotal > 0 else 0
+
+        # Multi-fleet POs: VAT/discount/other stay at PO level (overhead row)
+        if is_multi_fleet:
+            item_vat = None
+            item_discount = None
+            item_other = 0
+        else:
+            item_vat = round(total_vat * frac, 2) if total_vat * frac > 0 else None
+            item_discount = round(total_discount * frac, 2) if total_discount * frac > 0 else None
+            item_other = round(other_costs * frac, 2) if other_costs * frac > 0 else None
+
         rows.append((
             fleet.get("plant_id"),       # plant_id
             fleet.get("plant_id"),       # assigned_plant_id
@@ -636,19 +652,24 @@ async def create_spare_parts_bulk(
             loc_str,
             sup_id_str,
             resolved_supplier_name,
-            round(total_vat * frac, 2) if total_vat * frac > 0 else None,
-            round(total_discount * frac, 2) if total_discount * frac > 0 else None,
-            round(other_costs * frac, 2) if other_costs * frac > 0 else None,
+            item_vat,
+            item_discount,
+            item_other,
             calc_year, calc_month, calc_week, calc_quarter,
             current_user.id,
+            False,                       # is_po_overhead
         ))
         direct_count += 1
 
-    # Process SHARED items
+    # Process SHARED items — create N rows (one per fleet) with divided unit_cost
+    # VAT/discount/other go to the overhead row, not individual items
+    num_fleets = len(parsed_fleets)
     for fleet in parsed_fleets:
         for item in shared_items:
-            item_subtotal = (item.get("unit_cost") or 0) * (item.get("quantity") or 1)
-            frac = (item_subtotal / subtotal / len(parsed_fleets)) if subtotal > 0 else 0
+            item_unit_cost = item.get("unit_cost") or 0
+            # Divide cost evenly across fleets so SUM = original total
+            divided_unit_cost = round(item_unit_cost / num_fleets, 2) if num_fleets > 1 else item_unit_cost
+
             rows.append((
                 fleet["plant_id"],
                 None,                        # assigned_plant_id
@@ -660,20 +681,50 @@ async def create_spare_parts_bulk(
                 item["description"],
                 item.get("part_number"),
                 item.get("quantity", 1),
-                item.get("unit_cost"),
+                divided_unit_cost,
                 po_upper,
                 date_val,
                 req_upper,
                 loc_str,
                 sup_id_str,
                 resolved_supplier_name,
-                round(total_vat * frac, 2) if total_vat * frac > 0 else None,
-                round(total_discount * frac, 2) if total_discount * frac > 0 else None,
-                round(other_costs * frac, 2) if other_costs * frac > 0 else None,
+                None,                        # vat_amount — goes to overhead row
+                None,                        # discount_amount — goes to overhead row
+                0,                           # other_costs — goes to overhead row
                 calc_year, calc_month, calc_week, calc_quarter,
                 current_user.id,
+                False,                       # is_po_overhead
             ))
             shared_count += 1
+
+    # Create PO overhead row for multi-fleet POs with VAT/discount/other
+    has_overhead = is_multi_fleet and (total_vat > 0 or total_discount > 0 or other_costs > 0)
+    if has_overhead:
+        rows.append((
+            None,                            # plant_id
+            None,                            # assigned_plant_id
+            None,                            # fleet_number_raw
+            False,                           # is_workshop
+            False,                           # is_category
+            None,                            # category_name
+            "shared",                        # cost_type
+            "PO Overhead (VAT/Discount/Other)",  # part_description
+            None,                            # part_number
+            1,                               # quantity
+            0,                               # unit_cost (zero — cost from vat/discount/other)
+            po_upper,
+            date_val,
+            req_upper,
+            loc_str,
+            sup_id_str,
+            resolved_supplier_name,
+            round(total_vat, 2) if total_vat > 0 else None,
+            round(total_discount, 2) if total_discount > 0 else None,
+            round(other_costs, 2) if other_costs > 0 else None,
+            calc_year, calc_month, calc_week, calc_quarter,
+            current_user.id,
+            True,                            # is_po_overhead
+        ))
 
     # Single batch INSERT in a transaction with triggers disabled for speed.
     # Triggers skipped: audit_spare_parts (we log via background task already),
@@ -685,7 +736,7 @@ async def create_spare_parts_bulk(
          category_names, cost_types, descriptions, part_numbers, quantities,
          unit_costs, po_numbers, po_dates, req_numbers, loc_ids, sup_ids,
          sup_names, vat_amounts, disc_amounts, other_amounts,
-         years, months, weeks, quarters, created_bys) = zip(*rows)
+         years, months, weeks, quarters, created_bys, po_overheads) = zip(*rows)
 
         insert_args = [
             [str(v) if v else None for v in plant_ids],
@@ -713,6 +764,7 @@ async def create_spare_parts_bulk(
             [int(v) if v is not None else None for v in weeks],
             [int(v) if v is not None else None for v in quarters],
             [str(v) for v in created_bys],
+            list(po_overheads),
         ]
 
         pool = get_pool()
@@ -729,25 +781,26 @@ async def create_spare_parts_bulk(
                             purchase_order_number, po_date, replaced_date, requisition_number,
                             location_id, supplier_id, supplier,
                             vat_amount, discount_amount, other_costs, vat_percentage, discount_percentage,
-                            year, month, week_number, quarter, created_by)
+                            year, month, week_number, quarter, created_by, is_po_overhead)
                        SELECT
                             u.plant_id::uuid, u.assigned_id::uuid, u.fleet_raw, u.is_ws, u.is_cat,
                             u.cat_name, u.ctype, u.descr, u.part_no, u.qty, u.ucost,
                             u.po_num, u.po_dt::date, u.po_dt::date, u.req_num,
                             u.loc::uuid, u.sup_id::uuid, u.sup_name,
                             u.vat_amt, u.disc_amt, u.other_amt, 0, 0,
-                            u.yr, u.mo, u.wk, u.qtr, u.cb::uuid
+                            u.yr, u.mo, u.wk, u.qtr, u.cb::uuid, u.is_overhead
                        FROM UNNEST(
                             $1::text[], $2::text[], $3::text[], $4::bool[], $5::bool[],
                             $6::text[], $7::text[], $8::text[], $9::text[], $10::int[],
                             $11::float[], $12::text[], $13::date[], $14::text[], $15::text[],
                             $16::text[], $17::text[], $18::float[], $19::float[], $20::float[],
-                            $21::int[], $22::int[], $23::int[], $24::int[], $25::text[]
+                            $21::int[], $22::int[], $23::int[], $24::int[], $25::text[],
+                            $26::bool[]
                        ) AS u(plant_id, assigned_id, fleet_raw, is_ws, is_cat,
                               cat_name, ctype, descr, part_no, qty, ucost,
                               po_num, po_dt, req_num, loc, sup_id,
                               sup_name, vat_amt, disc_amt, other_amt,
-                              yr, mo, wk, qtr, cb)""",
+                              yr, mo, wk, qtr, cb, is_overhead)""",
                     *insert_args,
                 )
                 # result is like "INSERT 0 10" — parse the count
@@ -871,10 +924,20 @@ async def get_spare_parts_by_po(
         po_number,
     )
 
+    # Separate overhead row from item rows
+    overhead_row = None
+    item_rows = []
     total_cost = 0
-    suppliers_map: dict[str, dict[str, Any]] = {}
     for row in rows:
         total_cost += float(row.get("total_cost") or 0)
+        if row.get("is_po_overhead"):
+            overhead_row = row
+        else:
+            item_rows.append(row)
+
+    # Build supplier breakdown (exclude overhead)
+    suppliers_map: dict[str, dict[str, Any]] = {}
+    for row in item_rows:
         sid = row.get("supplier_table_id")
         sname = row.get("supplier_table_name") or row.get("supplier") or "Unknown"
         key = str(sid) if sid else sname
@@ -888,17 +951,24 @@ async def get_spare_parts_by_po(
     primary_supplier = suppliers_list[0] if suppliers_list else None
 
     # PO-level cost_type (same logic as v_purchase_orders_summary view)
-    distinct_plants = set(r.get("plant_id") for r in rows if r.get("plant_id"))
-    has_workshop = any(r.get("is_workshop") for r in rows)
-    has_category = any(r.get("is_category") for r in rows)
+    distinct_plants = set(r.get("plant_id") for r in item_rows if r.get("plant_id"))
+    has_workshop = any(r.get("is_workshop") for r in item_rows)
+    has_category = any(r.get("is_category") for r in item_rows)
     po_cost_type = "direct" if len(distinct_plants) == 1 and not has_workshop and not has_category else "shared"
+
+    # Overhead breakdown
+    overhead = {
+        "vat_amount": float(overhead_row.get("vat_amount") or 0) if overhead_row else 0,
+        "discount_amount": float(overhead_row.get("discount_amount") or 0) if overhead_row else 0,
+        "other_costs": float(overhead_row.get("other_costs") or 0) if overhead_row else 0,
+    }
 
     return {
         "success": True,
-        "data": rows,
+        "data": item_rows,
         "meta": {
             "po_number": po_number.upper(),
-            "items_count": len(rows),
+            "items_count": len(item_rows),
             "total_cost": round(total_cost, 2),
             "distinct_plants": len(distinct_plants),
             "cost_type": po_cost_type,
@@ -907,6 +977,7 @@ async def get_spare_parts_by_po(
                 {"id": s["id"], "name": s["name"], "items_count": s["items_count"], "total_cost": round(s["total_cost"], 2)}
                 for s in suppliers_list
             ],
+            "overhead": overhead,
         },
     }
 
@@ -1482,8 +1553,8 @@ async def get_plant_costs(
     )
     costs = costs or {"total_cost": 0, "parts_count": 0, "po_count": 0}
 
-    # Recent parts
-    conds = ["sp.plant_id = $1::uuid"]
+    # Recent parts (direct costs only, exclude overhead rows)
+    conds = ["sp.plant_id = $1::uuid", "sp.cost_type = 'direct'", "COALESCE(sp.is_po_overhead, false) = false"]
     params: list[Any] = [str(plant_id)]
     if year:
         params.append(year)
@@ -1548,7 +1619,11 @@ async def get_plant_shared_costs(
             "label": f"Shared Cost {idx}",
             "po_number": po.get("po_number"),
             "po_date": po.get("po_date"),
+            "items_subtotal": float(po.get("items_subtotal") or 0),
             "total_amount": float(po.get("total_amount") or 0),
+            "po_vat": float(po.get("po_vat") or 0),
+            "po_discount": float(po.get("po_discount") or 0),
+            "po_other": float(po.get("po_other") or 0),
             "supplier": po.get("supplier_name"),
             "shared_with": po.get("shared_with") or [],
             "items": po.get("items") or [],

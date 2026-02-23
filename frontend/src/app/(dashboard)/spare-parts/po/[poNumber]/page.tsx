@@ -101,12 +101,17 @@ export default function PODetailPage() {
 
   const startEditing = useCallback(() => {
     const parts = poData?.data ?? [];
+    const meta = poData?.meta;
     const first = parts[0];
+    // Use overhead from meta (covers both single-fleet and multi-fleet POs)
+    const overhead = meta?.overhead;
+    const vatFromParts = parts.reduce((s, p) => s + (Number(p.vat_amount) || 0), 0);
+    const discFromParts = parts.reduce((s, p) => s + (Number(p.discount_amount) || 0), 0);
     setEditForm({
       po_date: first?.po_date?.slice(0, 10) || '',
       supplier_id: first?.supplier_id || '',
-      vat_amount: parts.reduce((s, p) => s + (Number(p.vat_amount) || 0), 0) || undefined,
-      discount_amount: parts.reduce((s, p) => s + (Number(p.discount_amount) || 0), 0) || undefined,
+      vat_amount: (overhead?.vat_amount || vatFromParts) || undefined,
+      discount_amount: (overhead?.discount_amount || discFromParts) || undefined,
       location_id: first?.location_id || '',
       requisition_number: first?.requisition_number || '',
     });
@@ -446,12 +451,14 @@ export default function PODetailPage() {
       {/* Cost Breakdown */}
       {parts.length > 0 && (() => {
         const subtotal = parts.reduce((s, p) => s + (Number(p.unit_cost) || 0) * (p.quantity || 1), 0);
-        const totalVat = parts.reduce((s, p) => s + (Number(p.vat_amount) || 0), 0);
-        const totalDiscount = parts.reduce((s, p) => s + (Number(p.discount_amount) || 0), 0);
-        const totalOther = parts.reduce((s, p) => s + (Number(p.other_costs) || 0), 0);
+        // Use overhead from meta (PO-level costs for multi-fleet POs)
+        // Fall back to summing from parts for single-fleet POs where overhead is embedded
+        const overhead = meta?.overhead;
+        const totalVat = overhead?.vat_amount || parts.reduce((s, p) => s + (Number(p.vat_amount) || 0), 0);
+        const totalDiscount = overhead?.discount_amount || parts.reduce((s, p) => s + (Number(p.discount_amount) || 0), 0);
+        const totalOther = overhead?.other_costs || parts.reduce((s, p) => s + (Number(p.other_costs) || 0), 0);
         const grandTotal = Number(meta?.total_cost) || 0;
-        const vatPct = parts[0]?.vat_percentage;
-        const discPct = parts[0]?.discount_percentage;
+        const hasOverhead = totalVat > 0 || totalDiscount > 0 || totalOther > 0;
         return (
           <Card>
             <CardHeader className="pb-3">
@@ -463,22 +470,18 @@ export default function PODetailPage() {
             <CardContent>
               <div className="space-y-2 max-w-md">
                 <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Subtotal ({parts.length} items)</span>
+                  <span className="text-muted-foreground">Items Subtotal ({parts.length} items)</span>
                   <span>{formatCurrency(subtotal)}</span>
                 </div>
                 {totalVat > 0 && (
                   <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">
-                      VAT{vatPct ? ` (${Number(vatPct)}%)` : ''}
-                    </span>
+                    <span className="text-muted-foreground">VAT</span>
                     <span>{formatCurrency(totalVat)}</span>
                   </div>
                 )}
                 {totalDiscount > 0 && (
                   <div className="flex justify-between text-sm text-green-600">
-                    <span>
-                      Discount{discPct ? ` (${Number(discPct)}%)` : ''}
-                    </span>
+                    <span>Discount</span>
                     <span>-{formatCurrency(totalDiscount)}</span>
                   </div>
                 )}
@@ -488,9 +491,9 @@ export default function PODetailPage() {
                     <span>{formatCurrency(totalOther)}</span>
                   </div>
                 )}
-                <Separator />
-                <div className="flex justify-between font-medium text-base">
-                  <span>Total</span>
+                {hasOverhead && <Separator />}
+                <div className={`flex justify-between font-medium ${hasOverhead ? 'text-base' : 'text-sm'}`}>
+                  <span>{hasOverhead ? 'Grand Total' : 'Total'}</span>
                   <span>{formatCurrency(grandTotal)}</span>
                 </div>
               </div>
