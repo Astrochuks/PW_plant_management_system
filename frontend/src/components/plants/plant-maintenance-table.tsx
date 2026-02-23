@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo } from 'react'
+import Link from 'next/link'
 import { Input } from '@/components/ui/input'
 import {
   Table,
@@ -140,7 +141,14 @@ export function PlantMaintenanceTable({ records, isLoading, onRowClick }: PlantM
                   </TableCell>
                   <TableCell>
                     {record.purchase_order_number ? (
-                      <Badge variant="secondary">{record.purchase_order_number}</Badge>
+                      <Link
+                        href={`/spare-parts/po/${encodeURIComponent(record.purchase_order_number)}`}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <Badge variant="secondary" className="hover:bg-primary/20 cursor-pointer">
+                          {record.purchase_order_number}
+                        </Badge>
+                      </Link>
                     ) : (
                       <span className="text-muted-foreground">-</span>
                     )}

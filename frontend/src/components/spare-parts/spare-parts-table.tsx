@@ -5,6 +5,7 @@
  * Displays a paginated table of spare parts records
  */
 
+import Link from 'next/link';
 import { Calendar, Truck, Package } from 'lucide-react';
 import {
   Table,
@@ -81,7 +82,15 @@ export function SparePartsTable({ parts, loading, onRowClick }: SparePartsTableP
                 )}
               </TableCell>
               <TableCell className="font-mono text-sm">
-                {part.purchase_order_number || '-'}
+                {part.purchase_order_number ? (
+                  <Link
+                    href={`/spare-parts/po/${encodeURIComponent(part.purchase_order_number)}`}
+                    className="text-primary hover:underline"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {part.purchase_order_number}
+                  </Link>
+                ) : '-'}
               </TableCell>
               <TableCell className="text-sm truncate" title={part.supplier_name || part.supplier || ''}>
                 {part.supplier_name || part.supplier || '-'}

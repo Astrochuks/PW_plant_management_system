@@ -123,7 +123,7 @@ function PlantDetailContent({ plantId }: { plantId: string }) {
   const isAdmin = user?.role === 'admin'
 
   const [activeTab, setActiveTab] = useState('overview')
-  const [costYear, setCostYear] = useState<string>('')
+  const [costYear, setCostYear] = useState<string>(String(new Date().getFullYear()))
   const [costPeriod, setCostPeriod] = useState<string>('')
 
   const currentYear = new Date().getFullYear()
@@ -418,7 +418,15 @@ function PlantDetailContent({ plantId }: { plantId: string }) {
                                   {part.total_cost != null ? formatCurrency(part.total_cost) : '-'}
                                 </TableCell>
                                 <TableCell className="font-mono text-sm">
-                                  {part.purchase_order_number || '-'}
+                                  {part.purchase_order_number ? (
+                                    <Link
+                                      href={`/spare-parts/po/${encodeURIComponent(part.purchase_order_number)}`}
+                                      className="text-primary hover:underline"
+                                      onClick={(e) => e.stopPropagation()}
+                                    >
+                                      {part.purchase_order_number}
+                                    </Link>
+                                  ) : '-'}
                                 </TableCell>
                                 <TableCell className="text-sm">
                                   {part.replaced_date ? formatDate(part.replaced_date) : '-'}
@@ -451,7 +459,16 @@ function PlantDetailContent({ plantId }: { plantId: string }) {
                         <div key={idx} className="p-3 bg-muted/50 rounded-lg space-y-2">
                           <div className="flex items-center justify-between">
                             <div>
-                              <span className="font-mono text-sm font-medium">{sc.po_number || 'N/A'}</span>
+                              {sc.po_number ? (
+                                <Link
+                                  href={`/spare-parts/po/${encodeURIComponent(sc.po_number)}`}
+                                  className="font-mono text-sm font-medium text-primary hover:underline"
+                                >
+                                  {sc.po_number}
+                                </Link>
+                              ) : (
+                                <span className="font-mono text-sm font-medium">N/A</span>
+                              )}
                               {sc.po_date && (
                                 <span className="text-xs text-muted-foreground ml-2">
                                   {formatDate(sc.po_date)}
