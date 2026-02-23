@@ -458,8 +458,15 @@ async def create_spare_parts_bulk(
     supplier_matched_by = None
 
     if supplier_id:
-        # Trust admin-selected supplier_id from dropdown — skip verification query
-        resolved_supplier_id = str(supplier_id)
+        # Trust admin-selected supplier_id from dropdown — but still fetch the name
+        sup = await fetchrow(
+            "SELECT id, name FROM suppliers WHERE id = $1::uuid", str(supplier_id),
+        )
+        if sup:
+            resolved_supplier_id = sup["id"]
+            resolved_supplier_name = sup["name"]
+        else:
+            resolved_supplier_id = str(supplier_id)
         supplier_matched_by = "exact"
     elif supplier:
         supplier_input = supplier.strip()
