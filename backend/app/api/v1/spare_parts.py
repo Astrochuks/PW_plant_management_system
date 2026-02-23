@@ -704,34 +704,58 @@ async def create_spare_parts_bulk(
             ))
             shared_count += 1
 
-    # Create PO overhead row for multi-fleet POs with VAT/discount/other
+    # Create or merge PO overhead row for multi-fleet POs with VAT/discount/other
     has_overhead = is_multi_fleet and (total_vat > 0 or total_discount > 0 or other_costs > 0)
+    existing_overhead_id = None
     if has_overhead:
-        rows.append((
-            None,                            # plant_id
-            None,                            # assigned_plant_id
-            None,                            # fleet_number_raw
-            False,                           # is_workshop
-            False,                           # is_category
-            None,                            # category_name
-            "shared",                        # cost_type
-            "PO Overhead (VAT/Discount/Other)",  # part_description
-            None,                            # part_number
-            1,                               # quantity
-            0,                               # unit_cost (zero — cost from vat/discount/other)
+        # Check if this PO already has an overhead row (append scenario)
+        existing_overhead = await fetchrow(
+            "SELECT id, vat_amount, discount_amount, other_costs FROM spare_parts "
+            "WHERE purchase_order_number = $1 AND is_po_overhead = true",
             po_upper,
-            date_val,
-            req_upper,
-            loc_str,
-            sup_id_str,
-            resolved_supplier_name,
-            round(total_vat, 2) if total_vat > 0 else None,
-            round(total_discount, 2) if total_discount > 0 else None,
-            round(other_costs, 2) if other_costs > 0 else None,
-            calc_year, calc_month, calc_week, calc_quarter,
-            current_user.id,
-            True,                            # is_po_overhead
-        ))
+        )
+        if existing_overhead:
+            # Merge: add new values to existing overhead row
+            existing_overhead_id = existing_overhead["id"]
+            merged_vat = (float(existing_overhead["vat_amount"] or 0)) + (total_vat if total_vat > 0 else 0)
+            merged_discount = (float(existing_overhead["discount_amount"] or 0)) + (total_discount if total_discount > 0 else 0)
+            merged_other = (float(existing_overhead["other_costs"] or 0)) + (other_costs if other_costs > 0 else 0)
+            await execute(
+                "UPDATE spare_parts SET vat_amount = $2, discount_amount = $3, other_costs = $4 "
+                "WHERE id = $1",
+                str(existing_overhead_id),
+                round(merged_vat, 2) if merged_vat > 0 else None,
+                round(merged_discount, 2) if merged_discount > 0 else None,
+                round(merged_other, 2) if merged_other > 0 else None,
+            )
+            logger.info("Merged overhead into existing row", po=po_upper, overhead_id=str(existing_overhead_id))
+        else:
+            # Create new overhead row
+            rows.append((
+                None,                            # plant_id
+                None,                            # assigned_plant_id
+                None,                            # fleet_number_raw
+                False,                           # is_workshop
+                False,                           # is_category
+                None,                            # category_name
+                "shared",                        # cost_type
+                "PO Overhead (VAT/Discount/Other)",  # part_description
+                None,                            # part_number
+                1,                               # quantity
+                0,                               # unit_cost (zero — cost from vat/discount/other)
+                po_upper,
+                date_val,
+                req_upper,
+                loc_str,
+                sup_id_str,
+                resolved_supplier_name,
+                round(total_vat, 2) if total_vat > 0 else None,
+                round(total_discount, 2) if total_discount > 0 else None,
+                round(other_costs, 2) if other_costs > 0 else None,
+                calc_year, calc_month, calc_week, calc_quarter,
+                current_user.id,
+                True,                            # is_po_overhead
+            ))
 
     # Single batch INSERT in a transaction with triggers disabled for speed.
     # Triggers skipped: audit_spare_parts (we log via background task already),

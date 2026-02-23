@@ -178,6 +178,25 @@ function POCreateForm() {
     return { subtotal: total, validCount: count };
   }, [lineItems]);
 
+  // Compute real-time cost breakdown
+  const costBreakdown = useMemo(() => {
+    const vatValue =
+      vatMode === 'percentage' && form.vat_percentage
+        ? subtotal * Number(form.vat_percentage) / 100
+        : vatMode === 'amount' && form.vat_amount
+          ? Number(form.vat_amount)
+          : 0;
+    const discountValue =
+      discountMode === 'percentage' && form.discount_percentage
+        ? subtotal * Number(form.discount_percentage) / 100
+        : discountMode === 'amount' && form.discount_amount
+          ? Number(form.discount_amount)
+          : 0;
+    const otherValue = form.other_costs ? Number(form.other_costs) : 0;
+    const grandTotal = subtotal + vatValue - discountValue + otherValue;
+    return { vatValue, discountValue, otherValue, grandTotal };
+  }, [subtotal, vatMode, discountMode, form.vat_percentage, form.vat_amount, form.discount_percentage, form.discount_amount, form.other_costs]);
+
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
@@ -658,6 +677,50 @@ function POCreateForm() {
                 className="max-w-[200px]"
               />
             </div>
+
+            {/* Live Cost Breakdown */}
+            {subtotal > 0 && (costBreakdown.vatValue > 0 || costBreakdown.discountValue > 0 || costBreakdown.otherValue > 0) && (
+              <>
+                <Separator />
+                <div className="rounded-lg border bg-muted/30 p-4 space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Subtotal</span>
+                    <span>₦{formatCurrency(subtotal)}</span>
+                  </div>
+                  {costBreakdown.vatValue > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">
+                        + VAT{vatMode === 'percentage' && form.vat_percentage ? ` (${form.vat_percentage}%)` : ''}
+                      </span>
+                      <span className="text-green-600 dark:text-green-400">
+                        +₦{formatCurrency(costBreakdown.vatValue)}
+                      </span>
+                    </div>
+                  )}
+                  {costBreakdown.discountValue > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">
+                        - Discount{discountMode === 'percentage' && form.discount_percentage ? ` (${form.discount_percentage}%)` : ''}
+                      </span>
+                      <span className="text-red-600 dark:text-red-400">
+                        -₦{formatCurrency(costBreakdown.discountValue)}
+                      </span>
+                    </div>
+                  )}
+                  {costBreakdown.otherValue > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">+ Other Costs</span>
+                      <span>+₦{formatCurrency(costBreakdown.otherValue)}</span>
+                    </div>
+                  )}
+                  <Separator />
+                  <div className="flex justify-between font-semibold text-base">
+                    <span>Grand Total</span>
+                    <span>₦{formatCurrency(costBreakdown.grandTotal)}</span>
+                  </div>
+                </div>
+              </>
+            )}
           </CardContent>
         </Card>
 
