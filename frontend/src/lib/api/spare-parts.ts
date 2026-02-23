@@ -467,7 +467,7 @@ export async function bulkCreateSpareParts(data: BulkCreateRequest): Promise<{
     success: boolean;
     data: SparePart[];
     meta: Record<string, unknown>;
-  }>('/spare-parts/bulk', null, { params: queryParams });
+  }>('/spare-parts/bulk', null, { params: queryParams, timeout: 60000 });
   return { data: response.data.data, meta: response.data.meta };
 }
 

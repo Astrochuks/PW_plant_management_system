@@ -559,111 +559,104 @@ async def create_spare_parts_bulk(
     direct_items = [item for item in items_list if item.get("item_fleet")]
     shared_items = [item for item in items_list if not item.get("item_fleet")]
 
-    # Build fleet lookup
+    # Build fleet lookup — batch query instead of N individual queries
     fleet_lookup: dict[str, dict] = {}
+    plant_ids_to_resolve = []
     for fleet in parsed_fleets:
         fleet_lookup[fleet["fleet_number_raw"]] = fleet
         if fleet.get("plant_id"):
-            plant_row = await fetchrow(
-                "SELECT fleet_number FROM plants_master WHERE id = $1::uuid",
-                str(fleet["plant_id"]),
-            )
-            if plant_row:
-                fleet_lookup[plant_row["fleet_number"]] = fleet
+            plant_ids_to_resolve.append(str(fleet["plant_id"]))
 
-    created_parts = []
-    total_cost_sum = 0
+    if plant_ids_to_resolve:
+        plant_rows = await fetch(
+            "SELECT id, fleet_number FROM plants_master WHERE id = ANY($1::uuid[])",
+            plant_ids_to_resolve,
+        )
+        plant_id_to_fleet = {str(r["id"]): r["fleet_number"] for r in plant_rows}
+        for fleet in parsed_fleets:
+            pid = fleet.get("plant_id")
+            if pid and str(pid) in plant_id_to_fleet:
+                fleet_lookup[plant_id_to_fleet[str(pid)]] = fleet
+
+    date_val = parsed_date
+    req_upper = requisition_number.upper() if requisition_number else None
+    loc_str = str(location_id) if location_id else None
+    sup_id_str = str(resolved_supplier_id) if resolved_supplier_id else None
+
+    # Collect all rows to insert in one batch
+    # Each row is a tuple of column values
+    rows: list[tuple] = []
     direct_count = 0
     shared_count = 0
 
-    date_val = parsed_date
+    # Process DIRECT items — resolve fleets for unresolved ones in batch
+    unresolved_direct_fleets = set()
+    for item in direct_items:
+        item_fleet = item["item_fleet"]
+        if item_fleet not in fleet_lookup:
+            unresolved_direct_fleets.add(item_fleet)
 
-    # Process DIRECT items
+    if unresolved_direct_fleets:
+        # Batch resolve: look up all unresolved fleet numbers at once
+        resolved_plants = await fetch(
+            "SELECT id, fleet_number, fleet_type FROM plants_master WHERE fleet_number = ANY($1::text[])",
+            list(unresolved_direct_fleets),
+        )
+        for p in resolved_plants:
+            fleet_lookup[p["fleet_number"]] = {
+                "fleet_number_raw": p["fleet_number"],
+                "plant_id": p["id"],
+                "fleet_type": p.get("fleet_type"),
+                "is_workshop": False,
+                "is_category": False,
+                "category_name": None,
+                "is_resolved": True,
+            }
+
     for item in direct_items:
         item_fleet = item["item_fleet"]
         item_subtotal = (item.get("unit_cost") or 0) * (item.get("quantity") or 1)
 
         fleet = fleet_lookup.get(item_fleet)
         if not fleet:
-            resolved = await parse_fleet_input(item_fleet)
-            if resolved and resolved[0].get("plant_id"):
-                fleet = resolved[0]
-        if not fleet:
             logger.warning(f"Could not resolve fleet '{item_fleet}' for item '{item['description']}'")
             continue
 
         frac = item_subtotal / subtotal if subtotal > 0 else 0
-        item_vat = total_vat * frac
-        item_disc = total_discount * frac
-        item_other = other_costs * frac
-
-        created = await fetchrow(
-            """INSERT INTO spare_parts
-                   (plant_id, assigned_plant_id, fleet_number_raw, is_workshop, is_category,
-                    category_name, cost_type, part_description, part_number, quantity, unit_cost,
-                    purchase_order_number, po_date, replaced_date, requisition_number,
-                    location_id, supplier_id, supplier,
-                    vat_amount, discount_amount, other_costs, vat_percentage, discount_percentage,
-                    year, month, week_number, quarter, created_by)
-               VALUES ($1::uuid, $2::uuid, $3, $4, $5,
-                       $6, 'direct', $7, $8, $9, $10,
-                       $11, $12::date, $12::date, $13,
-                       $14::uuid, $15::uuid, $16,
-                       $17, $18, $19, 0, 0,
-                       $20, $21, $22, $23, $24)
-               RETURNING *""",
-            fleet.get("plant_id"),
-            fleet.get("plant_id"),
-            item_fleet,
+        rows.append((
+            fleet.get("plant_id"),       # plant_id
+            fleet.get("plant_id"),       # assigned_plant_id
+            item_fleet,                  # fleet_number_raw
             fleet.get("is_workshop", False),
             fleet.get("is_category", False),
             fleet.get("category_name"),
+            "direct",                    # cost_type
             item["description"],
             item.get("part_number"),
             item.get("quantity", 1),
             item.get("unit_cost"),
             po_upper,
             date_val,
-            requisition_number.upper() if requisition_number else None,
-            str(location_id) if location_id else None,
-            str(resolved_supplier_id) if resolved_supplier_id else None,
+            req_upper,
+            loc_str,
+            sup_id_str,
             resolved_supplier_name,
-            round(item_vat, 2) if item_vat > 0 else None,
-            round(item_disc, 2) if item_disc > 0 else None,
-            round(item_other, 2) if item_other > 0 else None,
+            round(total_vat * frac, 2) if total_vat * frac > 0 else None,
+            round(total_discount * frac, 2) if total_discount * frac > 0 else None,
+            round(other_costs * frac, 2) if other_costs * frac > 0 else None,
             calc_year, calc_month, calc_week, calc_quarter,
             current_user.id,
-        )
-        if created:
-            created_parts.append(created)
-            total_cost_sum += float(created.get("total_cost") or 0)
-            direct_count += 1
+        ))
+        direct_count += 1
 
     # Process SHARED items
     for fleet in parsed_fleets:
         for item in shared_items:
             item_subtotal = (item.get("unit_cost") or 0) * (item.get("quantity") or 1)
             frac = (item_subtotal / subtotal / len(parsed_fleets)) if subtotal > 0 else 0
-            item_vat = total_vat * frac
-            item_disc = total_discount * frac
-            item_other = other_costs * frac
-
-            created = await fetchrow(
-                """INSERT INTO spare_parts
-                       (plant_id, assigned_plant_id, fleet_number_raw, is_workshop, is_category,
-                        category_name, cost_type, part_description, part_number, quantity, unit_cost,
-                        purchase_order_number, po_date, replaced_date, requisition_number,
-                        location_id, supplier_id, supplier,
-                        vat_amount, discount_amount, other_costs, vat_percentage, discount_percentage,
-                        year, month, week_number, quarter, created_by)
-                   VALUES ($1::uuid, NULL, $2, $3, $4,
-                           $5, $6, $7, $8, $9, $10,
-                           $11, $12::date, $12::date, $13,
-                           $14::uuid, $15::uuid, $16,
-                           $17, $18, $19, 0, 0,
-                           $20, $21, $22, $23, $24)
-                   RETURNING *""",
+            rows.append((
                 fleet["plant_id"],
+                None,                        # assigned_plant_id
                 fleet["fleet_number_raw"],
                 fleet["is_workshop"],
                 fleet.get("is_category", False),
@@ -675,20 +668,84 @@ async def create_spare_parts_bulk(
                 item.get("unit_cost"),
                 po_upper,
                 date_val,
-                requisition_number.upper() if requisition_number else None,
-                str(location_id) if location_id else None,
-                str(resolved_supplier_id) if resolved_supplier_id else None,
+                req_upper,
+                loc_str,
+                sup_id_str,
                 resolved_supplier_name,
-                round(item_vat, 2) if item_vat > 0 else None,
-                round(item_disc, 2) if item_disc > 0 else None,
-                round(item_other, 2) if item_other > 0 else None,
+                round(total_vat * frac, 2) if total_vat * frac > 0 else None,
+                round(total_discount * frac, 2) if total_discount * frac > 0 else None,
+                round(other_costs * frac, 2) if other_costs * frac > 0 else None,
                 calc_year, calc_month, calc_week, calc_quarter,
                 current_user.id,
-            )
-            if created:
-                created_parts.append(created)
-                total_cost_sum += float(created.get("total_cost") or 0)
-                shared_count += 1
+            ))
+            shared_count += 1
+
+    # Single batch INSERT — 1 DB round-trip instead of N
+    created_parts = []
+    total_cost_sum = 0
+    if rows:
+        # Unzip rows into column arrays for UNNEST
+        (plant_ids, assigned_ids, fleet_raws, is_workshops, is_categories,
+         category_names, cost_types, descriptions, part_numbers, quantities,
+         unit_costs, po_numbers, po_dates, req_numbers, loc_ids, sup_ids,
+         sup_names, vat_amounts, disc_amounts, other_amounts,
+         years, months, weeks, quarters, created_bys) = zip(*rows)
+
+        created_parts = await fetch(
+            """INSERT INTO spare_parts
+                   (plant_id, assigned_plant_id, fleet_number_raw, is_workshop, is_category,
+                    category_name, cost_type, part_description, part_number, quantity, unit_cost,
+                    purchase_order_number, po_date, replaced_date, requisition_number,
+                    location_id, supplier_id, supplier,
+                    vat_amount, discount_amount, other_costs, vat_percentage, discount_percentage,
+                    year, month, week_number, quarter, created_by)
+               SELECT
+                    u.plant_id::uuid, u.assigned_id::uuid, u.fleet_raw, u.is_ws, u.is_cat,
+                    u.cat_name, u.ctype, u.descr, u.part_no, u.qty, u.ucost,
+                    u.po_num, u.po_dt::date, u.po_dt::date, u.req_num,
+                    u.loc::uuid, u.sup_id::uuid, u.sup_name,
+                    u.vat_amt, u.disc_amt, u.other_amt, 0, 0,
+                    u.yr, u.mo, u.wk, u.qtr, u.cb::uuid
+               FROM UNNEST(
+                    $1::text[], $2::text[], $3::text[], $4::bool[], $5::bool[],
+                    $6::text[], $7::text[], $8::text[], $9::text[], $10::int[],
+                    $11::float[], $12::text[], $13::date[], $14::text[], $15::text[],
+                    $16::text[], $17::text[], $18::float[], $19::float[], $20::float[],
+                    $21::int[], $22::int[], $23::int[], $24::int[], $25::text[]
+               ) AS u(plant_id, assigned_id, fleet_raw, is_ws, is_cat,
+                      cat_name, ctype, descr, part_no, qty, ucost,
+                      po_num, po_dt, req_num, loc, sup_id,
+                      sup_name, vat_amt, disc_amt, other_amt,
+                      yr, mo, wk, qtr, cb)
+               RETURNING *""",
+            # Convert to lists, casting UUIDs/None to strings for text[] arrays
+            [str(v) if v else None for v in plant_ids],
+            [str(v) if v else None for v in assigned_ids],
+            list(fleet_raws),
+            list(is_workshops),
+            list(is_categories),
+            list(category_names),
+            list(cost_types),
+            list(descriptions),
+            list(part_numbers),
+            [int(q) if q is not None else 1 for q in quantities],
+            [float(c) if c is not None else None for c in unit_costs],
+            list(po_numbers),
+            [date_val] * len(rows),
+            list(req_numbers),
+            list(loc_ids),
+            list(sup_ids),
+            list(sup_names),
+            [float(v) if v is not None else None for v in vat_amounts],
+            [float(v) if v is not None else None for v in disc_amounts],
+            [float(v) if v is not None else None for v in other_amounts],
+            [int(v) if v is not None else None for v in years],
+            [int(v) if v is not None else None for v in months],
+            [int(v) if v is not None else None for v in weeks],
+            [int(v) if v is not None else None for v in quarters],
+            [str(v) for v in created_bys],
+        )
+        total_cost_sum = sum(float(r.get("total_cost") or 0) for r in created_parts)
 
     resolved_fleets = [f["fleet_number_raw"] for f in parsed_fleets]
     plants_resolved = [f for f in parsed_fleets if f["plant_id"]]
