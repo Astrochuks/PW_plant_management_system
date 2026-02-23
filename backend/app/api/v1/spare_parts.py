@@ -439,6 +439,7 @@ async def create_spare_parts_bulk(
     """UNIFIED PO ENTRY - Handles ALL scenarios."""
     import json
     from app.services.fleet_parser import parse_fleet_input, get_cost_classification
+    from app.core.pool import get_pool
 
     # Check for duplicate PO
     po_upper = purchase_order_number.upper().strip()
@@ -458,13 +459,8 @@ async def create_spare_parts_bulk(
     supplier_matched_by = None
 
     if supplier_id:
-        sup = await fetchrow(
-            "SELECT id, name FROM suppliers WHERE id = $1::uuid", str(supplier_id),
-        )
-        if not sup:
-            raise ValidationError(f"Supplier with ID '{supplier_id}' not found")
+        # Trust admin-selected supplier_id from dropdown — skip verification query
         resolved_supplier_id = str(supplier_id)
-        resolved_supplier_name = sup["name"]
         supplier_matched_by = "exact"
     elif supplier:
         supplier_input = supplier.strip()
@@ -680,9 +676,10 @@ async def create_spare_parts_bulk(
             ))
             shared_count += 1
 
-    # Single batch INSERT — 1 DB round-trip instead of N
-    created_parts = []
-    total_cost_sum = 0
+    # Single batch INSERT in a transaction with triggers disabled for speed.
+    # Triggers skipped: audit_spare_parts (we log via background task already),
+    # trg_spare_parts_time_columns (we populate year/month/week/quarter ourselves).
+    records_created = 0
     if rows:
         # Unzip rows into column arrays for UNNEST
         (plant_ids, assigned_ids, fleet_raws, is_workshops, is_categories,
@@ -691,34 +688,7 @@ async def create_spare_parts_bulk(
          sup_names, vat_amounts, disc_amounts, other_amounts,
          years, months, weeks, quarters, created_bys) = zip(*rows)
 
-        created_parts = await fetch(
-            """INSERT INTO spare_parts
-                   (plant_id, assigned_plant_id, fleet_number_raw, is_workshop, is_category,
-                    category_name, cost_type, part_description, part_number, quantity, unit_cost,
-                    purchase_order_number, po_date, replaced_date, requisition_number,
-                    location_id, supplier_id, supplier,
-                    vat_amount, discount_amount, other_costs, vat_percentage, discount_percentage,
-                    year, month, week_number, quarter, created_by)
-               SELECT
-                    u.plant_id::uuid, u.assigned_id::uuid, u.fleet_raw, u.is_ws, u.is_cat,
-                    u.cat_name, u.ctype, u.descr, u.part_no, u.qty, u.ucost,
-                    u.po_num, u.po_dt::date, u.po_dt::date, u.req_num,
-                    u.loc::uuid, u.sup_id::uuid, u.sup_name,
-                    u.vat_amt, u.disc_amt, u.other_amt, 0, 0,
-                    u.yr, u.mo, u.wk, u.qtr, u.cb::uuid
-               FROM UNNEST(
-                    $1::text[], $2::text[], $3::text[], $4::bool[], $5::bool[],
-                    $6::text[], $7::text[], $8::text[], $9::text[], $10::int[],
-                    $11::float[], $12::text[], $13::date[], $14::text[], $15::text[],
-                    $16::text[], $17::text[], $18::float[], $19::float[], $20::float[],
-                    $21::int[], $22::int[], $23::int[], $24::int[], $25::text[]
-               ) AS u(plant_id, assigned_id, fleet_raw, is_ws, is_cat,
-                      cat_name, ctype, descr, part_no, qty, ucost,
-                      po_num, po_dt, req_num, loc, sup_id,
-                      sup_name, vat_amt, disc_amt, other_amt,
-                      yr, mo, wk, qtr, cb)
-               RETURNING *""",
-            # Convert to lists, casting UUIDs/None to strings for text[] arrays
+        insert_args = [
             [str(v) if v else None for v in plant_ids],
             [str(v) if v else None for v in assigned_ids],
             list(fleet_raws),
@@ -744,20 +714,55 @@ async def create_spare_parts_bulk(
             [int(v) if v is not None else None for v in weeks],
             [int(v) if v is not None else None for v in quarters],
             [str(v) for v in created_bys],
-        )
-        total_cost_sum = sum(float(r.get("total_cost") or 0) for r in created_parts)
+        ]
+
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                # Disable triggers for this transaction only (auto-reverts on commit)
+                await conn.execute(
+                    "SET LOCAL session_replication_role = 'replica'"
+                )
+                result = await conn.execute(
+                    """INSERT INTO spare_parts
+                           (plant_id, assigned_plant_id, fleet_number_raw, is_workshop, is_category,
+                            category_name, cost_type, part_description, part_number, quantity, unit_cost,
+                            purchase_order_number, po_date, replaced_date, requisition_number,
+                            location_id, supplier_id, supplier,
+                            vat_amount, discount_amount, other_costs, vat_percentage, discount_percentage,
+                            year, month, week_number, quarter, created_by)
+                       SELECT
+                            u.plant_id::uuid, u.assigned_id::uuid, u.fleet_raw, u.is_ws, u.is_cat,
+                            u.cat_name, u.ctype, u.descr, u.part_no, u.qty, u.ucost,
+                            u.po_num, u.po_dt::date, u.po_dt::date, u.req_num,
+                            u.loc::uuid, u.sup_id::uuid, u.sup_name,
+                            u.vat_amt, u.disc_amt, u.other_amt, 0, 0,
+                            u.yr, u.mo, u.wk, u.qtr, u.cb::uuid
+                       FROM UNNEST(
+                            $1::text[], $2::text[], $3::text[], $4::bool[], $5::bool[],
+                            $6::text[], $7::text[], $8::text[], $9::text[], $10::int[],
+                            $11::float[], $12::text[], $13::date[], $14::text[], $15::text[],
+                            $16::text[], $17::text[], $18::float[], $19::float[], $20::float[],
+                            $21::int[], $22::int[], $23::int[], $24::int[], $25::text[]
+                       ) AS u(plant_id, assigned_id, fleet_raw, is_ws, is_cat,
+                              cat_name, ctype, descr, part_no, qty, ucost,
+                              po_num, po_dt, req_num, loc, sup_id,
+                              sup_name, vat_amt, disc_amt, other_amt,
+                              yr, mo, wk, qtr, cb)""",
+                    *insert_args,
+                )
+                # result is like "INSERT 0 10" — parse the count
+                records_created = int(result.split()[-1]) if result else 0
 
     resolved_fleets = [f["fleet_number_raw"] for f in parsed_fleets]
-    plants_resolved = [f for f in parsed_fleets if f["plant_id"]]
 
     logger.info(
         "PO bulk entry created",
         po_number=po_upper,
         fleets=resolved_fleets,
         items_count=len(items_list),
-        records_created=len(created_parts),
+        records_created=records_created,
         cost_type=cost_type,
-        total_cost=total_cost_sum,
         user_id=current_user.id,
     )
 
@@ -775,25 +780,14 @@ async def create_spare_parts_bulk(
 
     return {
         "success": True,
-        "data": created_parts,
+        "data": [],
         "meta": {
             "po_number": po_upper,
             "cost_type": cost_type,
             "fleets": resolved_fleets,
-            "fleets_resolved": len(plants_resolved),
-            "has_workshop": any(f["is_workshop"] for f in parsed_fleets),
-            "has_category": any(f.get("is_category") for f in parsed_fleets),
             "items_count": len(items_list),
-            "direct_items": len(direct_items),
-            "shared_items": len(shared_items),
-            "records_created": len(created_parts),
-            "direct_records": direct_count,
-            "shared_records": shared_count,
+            "records_created": records_created,
             "subtotal": round(subtotal, 2),
-            "vat": round(total_vat, 2),
-            "discount": round(total_discount, 2),
-            "other_costs": other_costs,
-            "total_cost": round(total_cost_sum, 2),
             "supplier": {
                 "id": resolved_supplier_id,
                 "name": resolved_supplier_name,

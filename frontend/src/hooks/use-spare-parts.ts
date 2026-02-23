@@ -192,6 +192,8 @@ export function useBulkCreateSpareParts() {
     mutationFn: (data: BulkCreateRequest) => bulkCreateSpareParts(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: sparePartsKeys.all });
+      // Also refresh suppliers list in case a new supplier was auto-created
+      queryClient.invalidateQueries({ queryKey: ['suppliers'] });
     },
   });
 }

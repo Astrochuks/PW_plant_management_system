@@ -5,7 +5,7 @@
  * Form for creating a purchase order with structured line items
  */
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -14,6 +14,9 @@ import {
   Loader2,
   HelpCircle,
   Trash2,
+  Upload,
+  FileText,
+  X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -33,7 +36,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { Separator } from '@/components/ui/separator';
-import { useBulkCreateSpareParts, type BulkCreateRequest } from '@/hooks/use-spare-parts';
+import { useBulkCreateSpareParts, useUploadPODocument, type BulkCreateRequest } from '@/hooks/use-spare-parts';
 import { useLocationsWithStats } from '@/hooks/use-locations';
 import { ProtectedRoute } from '@/components/protected-route';
 import { SupplierCombobox } from '@/components/spare-parts/supplier-combobox';
@@ -110,12 +113,15 @@ function formatCurrency(amount: number): string {
 function POCreateForm() {
   const router = useRouter();
   const bulkCreate = useBulkCreateSpareParts();
+  const uploadDoc = useUploadPODocument();
   const { data: locations } = useLocationsWithStats();
 
   const [form, setForm] = useState<FormState>(INITIAL_FORM);
   const [lineItems, setLineItems] = useState<LineItem[]>([createEmptyItem()]);
   const [vatMode, setVatMode] = useState<'percentage' | 'amount'>('percentage');
   const [discountMode, setDiscountMode] = useState<'percentage' | 'amount'>('percentage');
+  const [poDocument, setPoDocument] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const updateField = useCallback(
     <K extends keyof FormState>(key: K, value: FormState[K]) => {
@@ -217,8 +223,23 @@ function POCreateForm() {
 
       bulkCreate.mutate(payload, {
         onSuccess: (result) => {
-          const count = result.data?.length ?? 0;
+          const meta = result.meta as Record<string, number> | undefined;
+          const count = meta?.records_created ?? result.data?.length ?? 0;
           toast.success(`Created ${count} spare part records for PO ${form.purchase_order_number}`);
+
+          // Upload document in background — don't block navigation
+          if (poDocument) {
+            const poNum = form.purchase_order_number.trim();
+            uploadDoc.mutate(
+              { poNumber: poNum, file: poDocument },
+              {
+                onSuccess: () => toast.success('PO document uploaded'),
+                onError: () => toast.error('Document upload failed. You can upload it later from the PO page.'),
+              }
+            );
+          }
+
+          // Navigate immediately — don't wait for document upload
           router.push(`/spare-parts/po/${encodeURIComponent(form.purchase_order_number)}`);
         },
         onError: (err) => {
@@ -228,7 +249,7 @@ function POCreateForm() {
         },
       });
     },
-    [form, lineItems, vatMode, discountMode, bulkCreate, router]
+    [form, lineItems, vatMode, discountMode, bulkCreate, uploadDoc, poDocument, router]
   );
 
   return (
@@ -589,6 +610,61 @@ function POCreateForm() {
                 className="max-w-[200px]"
               />
             </div>
+          </CardContent>
+        </Card>
+
+        {/* PO Document (Optional) */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">PO Document (Optional)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,.png,.jpg,.jpeg,.webp"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0] ?? null;
+                setPoDocument(file);
+              }}
+            />
+            {poDocument ? (
+              <div className="flex items-center gap-3 p-3 rounded-lg border bg-muted/30">
+                <FileText className="h-5 w-5 text-primary shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{poDocument.name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {(poDocument.size / 1024).toFixed(0)} KB
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 shrink-0"
+                  onClick={() => {
+                    setPoDocument(null);
+                    if (fileInputRef.current) fileInputRef.current.value = '';
+                  }}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            ) : (
+              <Button
+                type="button"
+                variant="outline"
+                className="gap-2"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <Upload className="h-4 w-4" />
+                Attach PO Document
+              </Button>
+            )}
+            <p className="text-xs text-muted-foreground mt-2">
+              PDF or image of the purchase order. You can also upload this later.
+            </p>
           </CardContent>
         </Card>
 
