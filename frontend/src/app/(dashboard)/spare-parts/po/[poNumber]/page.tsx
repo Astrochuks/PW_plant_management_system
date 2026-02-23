@@ -206,9 +206,9 @@ export default function PODetailPage() {
             <div>
               <h1 className="text-2xl font-bold tracking-tight font-mono">{poNumber}</h1>
               <div className="flex items-center gap-2 mt-1 flex-wrap">
-                {meta?.supplier?.name && (
+                {meta?.suppliers && meta.suppliers.length > 0 && (
                   <span className="text-sm text-muted-foreground">
-                    {meta.supplier.name}
+                    {meta.suppliers.map((s: { name: string }) => s.name).join(' / ')}
                   </span>
                 )}
                 {poDate && (
@@ -417,10 +417,16 @@ export default function PODetailPage() {
                 <Users className="h-4 w-4 text-amber-600 dark:text-amber-300" />
               </div>
               <div>
-                <p className="text-xs text-muted-foreground">Supplier</p>
-                <p className="text-sm font-medium truncate max-w-[140px]">
-                  {meta?.supplier?.name || '-'}
+                <p className="text-xs text-muted-foreground">
+                  {(meta?.suppliers?.length ?? 0) > 1 ? 'Suppliers' : 'Supplier'}
                 </p>
+                {(meta?.suppliers?.length ?? 0) > 1 ? (
+                  <p className="text-xl font-bold">{meta?.suppliers?.length}</p>
+                ) : (
+                  <p className="text-sm font-medium truncate max-w-[140px]">
+                    {meta?.supplier?.name || '-'}
+                  </p>
+                )}
               </div>
             </div>
           </CardContent>
@@ -586,67 +592,110 @@ export default function PODetailPage() {
         </CardContent>
       </Card>
 
-      {/* Line Items Table */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Line Items</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {parts.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              <Package className="h-8 w-8 mx-auto mb-2 opacity-40" />
-              <p className="text-sm">No items in this PO</p>
-            </div>
-          ) : (
-            <div className="rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[100px]">Fleet #</TableHead>
-                    <TableHead>Part Description</TableHead>
-                    <TableHead className="w-[120px]">Part Number</TableHead>
-                    <TableHead className="w-[60px] text-center">Qty</TableHead>
-                    <TableHead className="w-[110px] text-right">Unit Cost</TableHead>
-                    <TableHead className="w-[120px] text-right">Total Cost</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {parts.map((part) => (
-                    <TableRow
-                      key={part.id}
-                      className="cursor-pointer hover:bg-muted/50"
-                      onClick={() => setSelectedPartId(part.id)}
-                    >
-                      <TableCell className="font-mono font-medium">
-                        {part.fleet_number
-                          || part.fleet_number_raw
-                          || (part.is_workshop ? 'WORKSHOP' : null)
-                          || (part.is_category ? (part.category_name || 'CATEGORY') : null)
-                          || '-'}
-                      </TableCell>
-                      <TableCell>
-                        <div className="truncate max-w-[300px]" title={part.part_description}>
-                          {part.part_description}
-                        </div>
-                      </TableCell>
-                      <TableCell className="font-mono text-sm">
-                        {part.part_number || '-'}
-                      </TableCell>
-                      <TableCell className="text-center">{part.quantity}</TableCell>
-                      <TableCell className="text-right">
-                        {part.unit_cost != null ? formatCurrency(part.unit_cost) : '-'}
-                      </TableCell>
-                      <TableCell className="text-right font-medium">
-                        {part.total_cost != null ? formatCurrency(part.total_cost) : '-'}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      {/* Line Items — grouped by supplier */}
+      {(() => {
+        // Group parts by supplier
+        const groups = parts.reduce<Record<string, { name: string; parts: typeof parts }>>((acc, part) => {
+          const key = part.supplier_id || part.supplier_name || part.supplier || 'Unknown';
+          const name = part.supplier_name || part.supplier || 'Unknown';
+          if (!acc[key]) acc[key] = { name, parts: [] };
+          acc[key].parts.push(part);
+          return acc;
+        }, {});
+        const supplierGroups = Object.entries(groups);
+        const hasMultipleSuppliers = supplierGroups.length > 1;
+
+        if (parts.length === 0) {
+          return (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Line Items</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-center py-8 text-muted-foreground">
+                  <Package className="h-8 w-8 mx-auto mb-2 opacity-40" />
+                  <p className="text-sm">No items in this PO</p>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        }
+
+        return supplierGroups.map(([key, group]) => {
+          const groupSubtotal = group.parts.reduce(
+            (s, p) => s + (Number(p.total_cost) || 0),
+            0
+          );
+          return (
+            <Card key={key}>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    {hasMultipleSuppliers && <Users className="h-4 w-4" />}
+                    {hasMultipleSuppliers ? group.name : 'Line Items'}
+                  </CardTitle>
+                  <div className="text-sm text-muted-foreground">
+                    {group.parts.length} item{group.parts.length !== 1 ? 's' : ''}
+                    {hasMultipleSuppliers && (
+                      <span className="ml-2 font-medium text-foreground">
+                        {formatCurrency(groupSubtotal)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-[100px]">Fleet #</TableHead>
+                        <TableHead>Part Description</TableHead>
+                        <TableHead className="w-[120px]">Part Number</TableHead>
+                        <TableHead className="w-[60px] text-center">Qty</TableHead>
+                        <TableHead className="w-[110px] text-right">Unit Cost</TableHead>
+                        <TableHead className="w-[120px] text-right">Total Cost</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {group.parts.map((part) => (
+                        <TableRow
+                          key={part.id}
+                          className="cursor-pointer hover:bg-muted/50"
+                          onClick={() => setSelectedPartId(part.id)}
+                        >
+                          <TableCell className="font-mono font-medium">
+                            {part.fleet_number
+                              || part.fleet_number_raw
+                              || (part.is_workshop ? 'WORKSHOP' : null)
+                              || (part.is_category ? (part.category_name || 'CATEGORY') : null)
+                              || '-'}
+                          </TableCell>
+                          <TableCell>
+                            <div className="truncate max-w-[300px]" title={part.part_description}>
+                              {part.part_description}
+                            </div>
+                          </TableCell>
+                          <TableCell className="font-mono text-sm">
+                            {part.part_number || '-'}
+                          </TableCell>
+                          <TableCell className="text-center">{part.quantity}</TableCell>
+                          <TableCell className="text-right">
+                            {part.unit_cost != null ? formatCurrency(part.unit_cost) : '-'}
+                          </TableCell>
+                          <TableCell className="text-right font-medium">
+                            {part.total_cost != null ? formatCurrency(part.total_cost) : '-'}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        });
+      })()}
 
       {/* Spare Part Detail Modal */}
       {selectedPartId && (

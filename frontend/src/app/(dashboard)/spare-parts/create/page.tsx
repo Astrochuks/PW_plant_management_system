@@ -17,6 +17,8 @@ import {
   Upload,
   FileText,
   X,
+  AlertTriangle,
+  ExternalLink,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -36,7 +38,8 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { Separator } from '@/components/ui/separator';
-import { useBulkCreateSpareParts, useUploadPODocument, type BulkCreateRequest } from '@/hooks/use-spare-parts';
+import { Badge } from '@/components/ui/badge';
+import { useBulkCreateSpareParts, useUploadPODocument, useAutocompletePONumbers, type BulkCreateRequest } from '@/hooks/use-spare-parts';
 import { useLocationsWithStats } from '@/hooks/use-locations';
 import { ProtectedRoute } from '@/components/protected-route';
 import { SupplierCombobox } from '@/components/spare-parts/supplier-combobox';
@@ -122,6 +125,16 @@ function POCreateForm() {
   const [discountMode, setDiscountMode] = useState<'percentage' | 'amount'>('percentage');
   const [poDocument, setPoDocument] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Live PO existence check
+  const poQuery = form.purchase_order_number.trim().toUpperCase();
+  const { data: poSuggestions } = useAutocompletePONumbers(poQuery);
+  const existingPO = useMemo(() => {
+    if (!poQuery || !poSuggestions) return null;
+    return poSuggestions.find(
+      (s) => s.po_number.toUpperCase() === poQuery
+    ) ?? null;
+  }, [poQuery, poSuggestions]);
 
   const updateField = useCallback(
     <K extends keyof FormState>(key: K, value: FormState[K]) => {
@@ -225,7 +238,11 @@ function POCreateForm() {
         onSuccess: (result) => {
           const meta = result.meta as Record<string, number> | undefined;
           const count = meta?.records_created ?? result.data?.length ?? 0;
-          toast.success(`Created ${count} spare part records for PO ${form.purchase_order_number}`);
+          toast.success(
+            existingPO
+              ? `Added ${count} items to existing PO ${form.purchase_order_number}`
+              : `Created ${count} spare part records for PO ${form.purchase_order_number}`
+          );
 
           // Upload document in background — don't block navigation
           if (poDocument) {
@@ -249,7 +266,7 @@ function POCreateForm() {
         },
       });
     },
-    [form, lineItems, vatMode, discountMode, bulkCreate, uploadDoc, poDocument, router]
+    [form, lineItems, vatMode, discountMode, bulkCreate, uploadDoc, poDocument, router, existingPO]
   );
 
   return (
@@ -291,8 +308,39 @@ function POCreateForm() {
                   placeholder="e.g. PO-2024-001"
                   value={form.purchase_order_number}
                   onChange={(e) => updateField('purchase_order_number', e.target.value)}
+                  className={existingPO ? 'border-amber-500 focus-visible:ring-amber-500' : ''}
                   required
                 />
+                {existingPO && (
+                  <div className="flex items-start gap-2 p-3 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/50">
+                    <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+                        PO already exists
+                      </p>
+                      <p className="text-xs text-amber-700 dark:text-amber-300 mt-0.5">
+                        {existingPO.items_count} item{existingPO.items_count !== 1 ? 's' : ''}
+                        {existingPO.suppliers && existingPO.suppliers.length > 0 && (
+                          <> from {existingPO.suppliers.join(', ')}</>
+                        )}
+                        {existingPO.total_cost ? (
+                          <> — ₦{formatCurrency(existingPO.total_cost)}</>
+                        ) : null}
+                      </p>
+                      <div className="flex items-center gap-3 mt-2">
+                        <Link
+                          href={`/spare-parts/po/${encodeURIComponent(existingPO.po_number)}`}
+                          className="inline-flex items-center gap-1 text-xs font-medium text-amber-700 hover:text-amber-900 dark:text-amber-300 dark:hover:text-amber-100 underline underline-offset-2"
+                        >
+                          View existing PO <ExternalLink className="h-3 w-3" />
+                        </Link>
+                        <Badge variant="outline" className="text-[10px] border-amber-300 text-amber-700 dark:border-amber-700 dark:text-amber-300">
+                          Submitting will add items to this PO
+                        </Badge>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="po_date">PO Date</Label>
@@ -677,12 +725,12 @@ function POCreateForm() {
             {bulkCreate.isPending ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Creating...
+                {existingPO ? 'Adding Items...' : 'Creating...'}
               </>
             ) : (
               <>
                 <Plus className="h-4 w-4 mr-2" />
-                Create Purchase Order
+                {existingPO ? 'Add Items to Existing PO' : 'Create Purchase Order'}
               </>
             )}
           </Button>

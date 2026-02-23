@@ -90,12 +90,20 @@ export interface POSummary {
   updated_at: string;
 }
 
+export interface POSupplierSummary {
+  id: string | null;
+  name: string;
+  items_count: number;
+  total_cost: number;
+}
+
 export interface PODetailMeta {
   po_number: string;
   items_count: number;
   total_cost: number;
   distinct_plants: number;
   supplier: { id: string; name: string } | null;
+  suppliers?: POSupplierSummary[];
 }
 
 export interface UpdatePORequest {
@@ -720,6 +728,8 @@ export interface YearOverYearResponse {
 export interface PONumberSuggestion {
   po_number: string;
   items_count: number;
+  total_cost?: number;
+  suppliers?: string[];
 }
 
 /**

@@ -211,11 +211,15 @@ async def autocomplete_po_numbers(
 ) -> dict[str, Any]:
     """Get PO number suggestions for autocomplete."""
     rows = await fetch(
-        """SELECT purchase_order_number, count(*)::int AS items_count
-           FROM spare_parts
-           WHERE purchase_order_number ILIKE $1
-             AND purchase_order_number IS NOT NULL
-           GROUP BY purchase_order_number
+        """SELECT sp.purchase_order_number,
+                  count(*)::int AS items_count,
+                  COALESCE(sum(sp.total_cost), 0)::numeric AS total_cost,
+                  array_agg(DISTINCT COALESCE(s.name, sp.supplier)) FILTER (WHERE COALESCE(s.name, sp.supplier) IS NOT NULL) AS suppliers
+           FROM spare_parts sp
+           LEFT JOIN suppliers s ON s.id = sp.supplier_id
+           WHERE sp.purchase_order_number ILIKE $1
+             AND sp.purchase_order_number IS NOT NULL
+           GROUP BY sp.purchase_order_number
            ORDER BY count(*) DESC
            LIMIT $2""",
         f"%{q.upper()}%",
@@ -223,7 +227,12 @@ async def autocomplete_po_numbers(
     )
 
     suggestions = [
-        {"po_number": row["purchase_order_number"], "items_count": row["items_count"]}
+        {
+            "po_number": row["purchase_order_number"],
+            "items_count": row["items_count"],
+            "total_cost": float(row.get("total_cost") or 0),
+            "suppliers": row.get("suppliers") or [],
+        }
         for row in rows
     ]
 
@@ -441,17 +450,7 @@ async def create_spare_parts_bulk(
     from app.services.fleet_parser import parse_fleet_input, get_cost_classification
     from app.core.pool import get_pool
 
-    # Check for duplicate PO
     po_upper = purchase_order_number.upper().strip()
-    existing_po = await fetchrow(
-        "SELECT id FROM spare_parts WHERE purchase_order_number = $1 LIMIT 1",
-        po_upper,
-    )
-    if existing_po:
-        raise ValidationError(
-            f"PO '{po_upper}' already exists. Use PATCH /spare-parts/{{id}} to edit existing line items.",
-            details=[{"field": "purchase_order_number", "message": "Already exists", "code": "DUPLICATE_PO"}],
-        )
 
     # Resolve supplier
     resolved_supplier_id = None
@@ -873,11 +872,20 @@ async def get_spare_parts_by_po(
     )
 
     total_cost = 0
-    supplier_info = None
+    suppliers_map: dict[str, dict[str, Any]] = {}
     for row in rows:
         total_cost += float(row.get("total_cost") or 0)
-        if not supplier_info and row.get("supplier_table_id"):
-            supplier_info = {"id": row["supplier_table_id"], "name": row["supplier_table_name"]}
+        sid = row.get("supplier_table_id")
+        sname = row.get("supplier_table_name") or row.get("supplier") or "Unknown"
+        key = str(sid) if sid else sname
+        if key not in suppliers_map:
+            suppliers_map[key] = {"id": sid, "name": sname, "items_count": 0, "total_cost": 0}
+        suppliers_map[key]["items_count"] += 1
+        suppliers_map[key]["total_cost"] += float(row.get("total_cost") or 0)
+
+    suppliers_list = sorted(suppliers_map.values(), key=lambda s: s["total_cost"], reverse=True)
+    # Keep backward compat: "supplier" = first/primary supplier
+    primary_supplier = suppliers_list[0] if suppliers_list else None
 
     return {
         "success": True,
@@ -887,7 +895,11 @@ async def get_spare_parts_by_po(
             "items_count": len(rows),
             "total_cost": round(total_cost, 2),
             "distinct_plants": len(set(r.get("plant_id") for r in rows if r.get("plant_id"))),
-            "supplier": supplier_info,
+            "supplier": primary_supplier,
+            "suppliers": [
+                {"id": s["id"], "name": s["name"], "items_count": s["items_count"], "total_cost": round(s["total_cost"], 2)}
+                for s in suppliers_list
+            ],
         },
     }
 
