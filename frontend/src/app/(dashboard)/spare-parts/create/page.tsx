@@ -2,10 +2,10 @@
 
 /**
  * PO Entry / Bulk Create Page
- * Form for creating a purchase order with multiple line items
+ * Form for creating a purchase order with structured line items
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -13,13 +13,13 @@ import {
   Plus,
   Loader2,
   HelpCircle,
+  Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
   SelectContent,
@@ -36,11 +36,24 @@ import { Separator } from '@/components/ui/separator';
 import { useBulkCreateSpareParts, type BulkCreateRequest } from '@/hooks/use-spare-parts';
 import { useLocationsWithStats } from '@/hooks/use-locations';
 import { ProtectedRoute } from '@/components/protected-route';
+import { SupplierCombobox } from '@/components/spare-parts/supplier-combobox';
+
+// ============================================================================
+// Types
+// ============================================================================
+
+interface LineItem {
+  id: string;
+  description: string;
+  quantity: string;
+  unit_cost: string;
+  part_number: string;
+  fleet: string;
+}
 
 interface FormState {
   purchase_order_number: string;
   fleet_numbers: string;
-  items: string;
   po_date: string;
   supplier: string;
   supplier_id: string;
@@ -56,7 +69,6 @@ interface FormState {
 const INITIAL_FORM: FormState = {
   purchase_order_number: '',
   fleet_numbers: '',
-  items: '',
   po_date: '',
   supplier: '',
   supplier_id: '',
@@ -69,12 +81,39 @@ const INITIAL_FORM: FormState = {
   requisition_number: '',
 };
 
+// ============================================================================
+// Helpers
+// ============================================================================
+
+function createEmptyItem(): LineItem {
+  return {
+    id: crypto.randomUUID(),
+    description: '',
+    quantity: '1',
+    unit_cost: '',
+    part_number: '',
+    fleet: '',
+  };
+}
+
+function formatCurrency(amount: number): string {
+  return new Intl.NumberFormat('en-NG', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount);
+}
+
+// ============================================================================
+// Component
+// ============================================================================
+
 function POCreateForm() {
   const router = useRouter();
   const bulkCreate = useBulkCreateSpareParts();
   const { data: locations } = useLocationsWithStats();
 
   const [form, setForm] = useState<FormState>(INITIAL_FORM);
+  const [lineItems, setLineItems] = useState<LineItem[]>([createEmptyItem()]);
   const [vatMode, setVatMode] = useState<'percentage' | 'amount'>('percentage');
   const [discountMode, setDiscountMode] = useState<'percentage' | 'amount'>('percentage');
 
@@ -85,11 +124,45 @@ function POCreateForm() {
     []
   );
 
+  const updateLineItem = useCallback(
+    (id: string, field: keyof LineItem, value: string) => {
+      setLineItems((prev) =>
+        prev.map((item) => (item.id === id ? { ...item, [field]: value } : item))
+      );
+    },
+    []
+  );
+
+  const addLineItem = useCallback(() => {
+    setLineItems((prev) => [...prev, createEmptyItem()]);
+  }, []);
+
+  const removeLineItem = useCallback((id: string) => {
+    setLineItems((prev) => {
+      if (prev.length <= 1) return prev;
+      return prev.filter((item) => item.id !== id);
+    });
+  }, []);
+
+  // Compute subtotal from line items
+  const { subtotal, validCount } = useMemo(() => {
+    let total = 0;
+    let count = 0;
+    for (const item of lineItems) {
+      if (item.description.trim()) {
+        const qty = Number(item.quantity) || 1;
+        const cost = Number(item.unit_cost) || 0;
+        total += qty * cost;
+        count++;
+      }
+    }
+    return { subtotal: total, validCount: count };
+  }, [lineItems]);
+
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
 
-      // Validate required fields
       if (!form.purchase_order_number.trim()) {
         toast.error('PO Number is required');
         return;
@@ -98,15 +171,28 @@ function POCreateForm() {
         toast.error('Fleet numbers are required');
         return;
       }
-      if (!form.items.trim()) {
-        toast.error('At least one item is required');
+
+      const validItems = lineItems.filter((item) => item.description.trim());
+      if (validItems.length === 0) {
+        toast.error('At least one item with a description is required');
         return;
       }
+
+      // Serialize line items as JSON array (backend auto-detects)
+      const itemsJson = JSON.stringify(
+        validItems.map((item) => ({
+          description: item.description.trim(),
+          quantity: Number(item.quantity) || 1,
+          unit_cost: Number(item.unit_cost) || 0,
+          part_number: item.part_number.trim() || undefined,
+          item_fleet: item.fleet.trim() || undefined,
+        }))
+      );
 
       const payload: BulkCreateRequest = {
         purchase_order_number: form.purchase_order_number.trim(),
         fleet_numbers: form.fleet_numbers.trim(),
-        items: form.items.trim(),
+        items: itemsJson,
       };
 
       if (form.po_date) payload.po_date = form.po_date;
@@ -142,11 +228,11 @@ function POCreateForm() {
         },
       });
     },
-    [form, vatMode, discountMode, bulkCreate, router]
+    [form, lineItems, vatMode, discountMode, bulkCreate, router]
   );
 
   return (
-    <div className="space-y-6 max-w-3xl">
+    <div className="space-y-6 max-w-4xl">
       {/* Header */}
       <div>
         <Link
@@ -199,15 +285,17 @@ function POCreateForm() {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="supplier">Supplier Name</Label>
-                <Input
-                  id="supplier"
-                  placeholder="Enter supplier name"
+                <Label>Supplier Name</Label>
+                <SupplierCombobox
                   value={form.supplier}
-                  onChange={(e) => updateField('supplier', e.target.value)}
+                  supplierId={form.supplier_id}
+                  onChange={(name, id) => {
+                    updateField('supplier', name);
+                    updateField('supplier_id', id ?? '');
+                  }}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Will auto-match or create a new supplier
+                  Start typing to search existing suppliers, or enter a new name
                 </p>
               </div>
               <div className="space-y-2">
@@ -283,32 +371,116 @@ function POCreateForm() {
                   <HelpCircle className="h-4 w-4 text-muted-foreground" />
                 </TooltipTrigger>
                 <TooltipContent side="right" className="max-w-sm">
-                  <p className="mb-2">
-                    Format: <code>description|qty|cost|part_no</code>
-                  </p>
-                  <p className="mb-1">Separate items with semicolons or new lines.</p>
-                  <p className="text-xs">
-                    Example:<br />
-                    Oil Filter|2|5000|OF-123;<br />
-                    Brake Pad|4|8500|BP-456
+                  <p>
+                    Add each item individually. Use the + button to add more rows.
+                    The &quot;Fleet&quot; field is optional — use it to assign a specific item
+                    to a fleet (for direct cost tracking).
                   </p>
                 </TooltipContent>
               </Tooltip>
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            <Textarea
-              placeholder={`Oil Filter|2|5000|OF-123\nBrake Pad|4|8500|BP-456\nFan Belt|1|3200`}
-              value={form.items}
-              onChange={(e) => updateField('items', e.target.value)}
-              rows={6}
-              className="font-mono text-sm"
-              required
-            />
-            <p className="text-xs text-muted-foreground mt-2">
-              Format: <code>description|quantity|unit_cost|part_number</code> (part_number is optional).
-              One item per line or separate with semicolons.
-            </p>
+          <CardContent className="space-y-3">
+            {/* Column headers */}
+            <div className="hidden sm:grid sm:grid-cols-[1fr_5rem_6.5rem_7rem_5.5rem_2rem] gap-2 text-xs font-medium text-muted-foreground px-1">
+              <span>Description *</span>
+              <span>Qty</span>
+              <span>Unit Cost</span>
+              <span>Part No.</span>
+              <span>Fleet</span>
+              <span></span>
+            </div>
+
+            {/* Item rows */}
+            {lineItems.map((item, index) => (
+              <div
+                key={item.id}
+                className="grid grid-cols-1 sm:grid-cols-[1fr_5rem_6.5rem_7rem_5.5rem_2rem] gap-2 items-start p-3 sm:p-0 rounded-lg sm:rounded-none border sm:border-0 bg-muted/30 sm:bg-transparent"
+              >
+                <div>
+                  <Label className="sm:hidden text-xs text-muted-foreground mb-1">Description *</Label>
+                  <Input
+                    placeholder={`Item ${index + 1} description`}
+                    value={item.description}
+                    onChange={(e) => updateLineItem(item.id, 'description', e.target.value)}
+                  />
+                </div>
+                <div>
+                  <Label className="sm:hidden text-xs text-muted-foreground mb-1">Qty</Label>
+                  <Input
+                    type="number"
+                    min="1"
+                    step="1"
+                    placeholder="1"
+                    value={item.quantity}
+                    onChange={(e) => updateLineItem(item.id, 'quantity', e.target.value)}
+                  />
+                </div>
+                <div>
+                  <Label className="sm:hidden text-xs text-muted-foreground mb-1">Unit Cost</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="0.00"
+                    value={item.unit_cost}
+                    onChange={(e) => updateLineItem(item.id, 'unit_cost', e.target.value)}
+                  />
+                </div>
+                <div>
+                  <Label className="sm:hidden text-xs text-muted-foreground mb-1">Part No.</Label>
+                  <Input
+                    placeholder="Optional"
+                    value={item.part_number}
+                    onChange={(e) => updateLineItem(item.id, 'part_number', e.target.value)}
+                  />
+                </div>
+                <div>
+                  <Label className="sm:hidden text-xs text-muted-foreground mb-1">Fleet</Label>
+                  <Input
+                    placeholder="e.g. T468"
+                    value={item.fleet}
+                    onChange={(e) => updateLineItem(item.id, 'fleet', e.target.value)}
+                  />
+                </div>
+                <div className="flex items-center justify-end sm:justify-center pt-1 sm:pt-0">
+                  {lineItems.length > 1 && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                      onClick={() => removeLineItem(item.id)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ))}
+
+            {/* Add item + subtotal */}
+            <div className="flex items-center justify-between pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={addLineItem}
+                className="gap-1.5"
+              >
+                <Plus className="h-4 w-4" />
+                Add Item
+              </Button>
+              {subtotal > 0 && (
+                <div className="text-sm text-muted-foreground">
+                  Subtotal:{' '}
+                  <span className="font-semibold text-foreground">
+                    ₦{formatCurrency(subtotal)}
+                  </span>{' '}
+                  ({validCount} {validCount === 1 ? 'item' : 'items'})
+                </div>
+              )}
+            </div>
           </CardContent>
         </Card>
 
