@@ -40,6 +40,7 @@ export interface SparePart {
   is_category: boolean;
   category_name: string | null;
   cost_type: string | null;            // "direct" | "shared"
+  submission_number?: number;           // batch within a PO
   // Timestamps & time bucketing
   year: number | null;
   month: number | null;
@@ -103,6 +104,23 @@ export interface POOverhead {
   other_costs: number;
 }
 
+export interface POSubmissionDocument {
+  url: string;
+  name: string;
+  uploaded_at: string | null;
+}
+
+export interface POSubmission {
+  submission_number: number;
+  items_count: number;
+  subtotal: number;
+  vat_amount: number;
+  discount_amount: number;
+  other_costs: number;
+  total: number;
+  document: POSubmissionDocument | null;
+}
+
 export interface PODetailMeta {
   po_number: string;
   items_count: number;
@@ -112,6 +130,7 @@ export interface PODetailMeta {
   supplier: { id: string; name: string } | null;
   suppliers?: POSupplierSummary[];
   overhead?: POOverhead;
+  submissions?: POSubmission[];
 }
 
 export interface UpdatePORequest {
@@ -488,21 +507,23 @@ export async function bulkCreateSpareParts(data: BulkCreateRequest): Promise<{
 }
 
 /**
- * Get PO document URL
+ * Get PO document URL (scoped to submission)
  */
-export async function getPODocument(poNumber: string): Promise<{
+export async function getPODocument(poNumber: string, submissionNumber?: number): Promise<{
   po_number: string;
   document_url: string;
   document_name: string;
   uploaded_at: string;
 } | null> {
   try {
+    const params: Record<string, string> = {};
+    if (submissionNumber != null) params.submission_number = String(submissionNumber);
     const response = await apiClient.get<ApiResponse<{
       po_number: string;
       document_url: string;
       document_name: string;
       uploaded_at: string;
-    }>>(`/spare-parts/by-po/${encodeURIComponent(poNumber)}/document`);
+    }>>(`/spare-parts/by-po/${encodeURIComponent(poNumber)}/document`, { params });
     return response.data.data;
   } catch {
     return null;
@@ -510,21 +531,24 @@ export async function getPODocument(poNumber: string): Promise<{
 }
 
 /**
- * Upload PO document (admin only)
+ * Upload PO document (admin only, scoped to submission)
  */
-export async function uploadPODocument(poNumber: string, file: File): Promise<{
+export async function uploadPODocument(poNumber: string, file: File, submissionNumber?: number): Promise<{
   po_number: string;
   document_url: string;
   document_name: string;
 }> {
   const formData = new FormData();
   formData.append('file', file);
+  const params: Record<string, string> = {};
+  if (submissionNumber != null) params.submission_number = String(submissionNumber);
   const response = await apiClient.post<ApiResponse<{
     po_number: string;
     document_url: string;
     document_name: string;
   }>>(`/spare-parts/by-po/${encodeURIComponent(poNumber)}/document`, formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
+    params,
   });
   return response.data.data;
 }
@@ -555,10 +579,12 @@ export async function updatePO(poNumber: string, data: UpdatePORequest): Promise
 }
 
 /**
- * Delete PO document (admin only)
+ * Delete PO document (admin only, scoped to submission)
  */
-export async function deletePODocument(poNumber: string): Promise<void> {
-  await apiClient.delete(`/spare-parts/by-po/${encodeURIComponent(poNumber)}/document`);
+export async function deletePODocument(poNumber: string, submissionNumber?: number): Promise<void> {
+  const params: Record<string, string> = {};
+  if (submissionNumber != null) params.submission_number = String(submissionNumber);
+  await apiClient.delete(`/spare-parts/by-po/${encodeURIComponent(poNumber)}/document`, { params });
 }
 
 // ============================================================================

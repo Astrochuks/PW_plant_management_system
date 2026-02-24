@@ -452,6 +452,13 @@ async def create_spare_parts_bulk(
 
     po_upper = purchase_order_number.upper().strip()
 
+    # Determine submission_number for this batch (1 for new POs, 2+ for appends)
+    next_sub = await fetchval(
+        "SELECT COALESCE(MAX(submission_number), 0) + 1 FROM spare_parts "
+        "WHERE purchase_order_number = $1",
+        po_upper,
+    )
+
     # Resolve supplier
     resolved_supplier_id = None
     resolved_supplier_name = None
@@ -704,58 +711,35 @@ async def create_spare_parts_bulk(
             ))
             shared_count += 1
 
-    # Create or merge PO overhead row for multi-fleet POs with VAT/discount/other
+    # Create PO overhead row for multi-fleet POs with VAT/discount/other
+    # Each submission gets its own overhead row (no merging across submissions)
     has_overhead = is_multi_fleet and (total_vat > 0 or total_discount > 0 or other_costs > 0)
-    existing_overhead_id = None
     if has_overhead:
-        # Check if this PO already has an overhead row (append scenario)
-        existing_overhead = await fetchrow(
-            "SELECT id, vat_amount, discount_amount, other_costs FROM spare_parts "
-            "WHERE purchase_order_number = $1 AND is_po_overhead = true",
+        rows.append((
+            None,                            # plant_id
+            None,                            # assigned_plant_id
+            None,                            # fleet_number_raw
+            False,                           # is_workshop
+            False,                           # is_category
+            None,                            # category_name
+            "shared",                        # cost_type
+            "PO Overhead (VAT/Discount/Other)",  # part_description
+            None,                            # part_number
+            1,                               # quantity
+            0,                               # unit_cost (zero — cost from vat/discount/other)
             po_upper,
-        )
-        if existing_overhead:
-            # Merge: add new values to existing overhead row
-            existing_overhead_id = existing_overhead["id"]
-            merged_vat = (float(existing_overhead["vat_amount"] or 0)) + (total_vat if total_vat > 0 else 0)
-            merged_discount = (float(existing_overhead["discount_amount"] or 0)) + (total_discount if total_discount > 0 else 0)
-            merged_other = (float(existing_overhead["other_costs"] or 0)) + (other_costs if other_costs > 0 else 0)
-            await execute(
-                "UPDATE spare_parts SET vat_amount = $2, discount_amount = $3, other_costs = $4 "
-                "WHERE id = $1",
-                str(existing_overhead_id),
-                round(merged_vat, 2) if merged_vat > 0 else None,
-                round(merged_discount, 2) if merged_discount > 0 else None,
-                round(merged_other, 2) if merged_other > 0 else None,
-            )
-            logger.info("Merged overhead into existing row", po=po_upper, overhead_id=str(existing_overhead_id))
-        else:
-            # Create new overhead row
-            rows.append((
-                None,                            # plant_id
-                None,                            # assigned_plant_id
-                None,                            # fleet_number_raw
-                False,                           # is_workshop
-                False,                           # is_category
-                None,                            # category_name
-                "shared",                        # cost_type
-                "PO Overhead (VAT/Discount/Other)",  # part_description
-                None,                            # part_number
-                1,                               # quantity
-                0,                               # unit_cost (zero — cost from vat/discount/other)
-                po_upper,
-                date_val,
-                req_upper,
-                loc_str,
-                sup_id_str,
-                resolved_supplier_name,
-                round(total_vat, 2) if total_vat > 0 else None,
-                round(total_discount, 2) if total_discount > 0 else None,
-                round(other_costs, 2) if other_costs > 0 else None,
-                calc_year, calc_month, calc_week, calc_quarter,
-                current_user.id,
-                True,                            # is_po_overhead
-            ))
+            date_val,
+            req_upper,
+            loc_str,
+            sup_id_str,
+            resolved_supplier_name,
+            round(total_vat, 2) if total_vat > 0 else None,
+            round(total_discount, 2) if total_discount > 0 else None,
+            round(other_costs, 2) if other_costs > 0 else None,
+            calc_year, calc_month, calc_week, calc_quarter,
+            current_user.id,
+            True,                            # is_po_overhead
+        ))
 
     # Single batch INSERT in a transaction with triggers disabled for speed.
     # Triggers skipped: audit_spare_parts (we log via background task already),
@@ -796,6 +780,7 @@ async def create_spare_parts_bulk(
             [int(v) if v is not None else None for v in quarters],
             [str(v) for v in created_bys],
             list(po_overheads),
+            [next_sub] * len(rows),
         ]
 
         pool = get_pool()
@@ -812,26 +797,29 @@ async def create_spare_parts_bulk(
                             purchase_order_number, po_date, replaced_date, requisition_number,
                             location_id, supplier_id, supplier,
                             vat_amount, discount_amount, other_costs, vat_percentage, discount_percentage,
-                            year, month, week_number, quarter, created_by, is_po_overhead)
+                            year, month, week_number, quarter, created_by, is_po_overhead,
+                            submission_number)
                        SELECT
                             u.plant_id::uuid, u.assigned_id::uuid, u.fleet_raw, u.is_ws, u.is_cat,
                             u.cat_name, u.ctype, u.descr, u.part_no, u.qty, u.ucost,
                             u.po_num, u.po_dt::date, u.po_dt::date, u.req_num,
                             u.loc::uuid, u.sup_id::uuid, u.sup_name,
                             u.vat_amt, u.disc_amt, u.other_amt, 0, 0,
-                            u.yr, u.mo, u.wk, u.qtr, u.cb::uuid, u.is_overhead
+                            u.yr, u.mo, u.wk, u.qtr, u.cb::uuid, u.is_overhead,
+                            u.sub_num
                        FROM UNNEST(
                             $1::text[], $2::text[], $3::text[], $4::bool[], $5::bool[],
                             $6::text[], $7::text[], $8::text[], $9::text[], $10::int[],
                             $11::float[], $12::text[], $13::date[], $14::text[], $15::text[],
                             $16::text[], $17::text[], $18::float[], $19::float[], $20::float[],
                             $21::int[], $22::int[], $23::int[], $24::int[], $25::text[],
-                            $26::bool[]
+                            $26::bool[], $27::int[]
                        ) AS u(plant_id, assigned_id, fleet_raw, is_ws, is_cat,
                               cat_name, ctype, descr, part_no, qty, ucost,
                               po_num, po_dt, req_num, loc, sup_id,
                               sup_name, vat_amt, disc_amt, other_amt,
-                              yr, mo, wk, qtr, cb, is_overhead)""",
+                              yr, mo, wk, qtr, cb, is_overhead,
+                              sub_num)""",
                     *insert_args,
                 )
                 # result is like "INSERT 0 10" — parse the count
@@ -871,6 +859,7 @@ async def create_spare_parts_bulk(
             "items_count": len(items_list),
             "records_created": records_created,
             "subtotal": round(subtotal, 2),
+            "submission_number": next_sub,
             "supplier": {
                 "id": resolved_supplier_id,
                 "name": resolved_supplier_name,
@@ -941,7 +930,7 @@ async def get_spare_parts_by_po(
     po_number: str,
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
 ) -> dict[str, Any]:
-    """Get all spare parts for a specific PO number."""
+    """Get all spare parts for a specific PO number, grouped by submission."""
     rows = await fetch(
         """SELECT sp.*,
                   pm.fleet_number, pm.description AS plant_description,
@@ -951,20 +940,78 @@ async def get_spare_parts_by_po(
            LEFT JOIN plants_master pm ON pm.id = sp.plant_id
            LEFT JOIN suppliers s ON s.id = sp.supplier_id
            WHERE sp.purchase_order_number ILIKE $1
-           ORDER BY sp.created_at""",
+           ORDER BY sp.submission_number, sp.created_at""",
         po_number,
     )
 
-    # Separate overhead row from item rows
-    overhead_row = None
-    item_rows = []
-    total_cost = 0
+    # Group rows by submission_number
+    sub_map: dict[int, dict[str, Any]] = {}
+    item_rows: list[dict] = []
+    grand_total = 0.0
+    combined_vat = 0.0
+    combined_discount = 0.0
+    combined_other = 0.0
+
     for row in rows:
-        total_cost += float(row.get("total_cost") or 0)
+        sn = row.get("submission_number") or 1
+        if sn not in sub_map:
+            sub_map[sn] = {"items": [], "overhead": None}
+        grand_total += float(row.get("total_cost") or 0)
         if row.get("is_po_overhead"):
-            overhead_row = row
+            sub_map[sn]["overhead"] = row
+            combined_vat += float(row.get("vat_amount") or 0)
+            combined_discount += float(row.get("discount_amount") or 0)
+            combined_other += float(row.get("other_costs") or 0)
         else:
+            sub_map[sn]["items"].append(row)
             item_rows.append(row)
+            # For single-fleet POs, VAT is on the items themselves
+            if not row.get("is_po_overhead"):
+                combined_vat += float(row.get("vat_amount") or 0)
+                combined_discount += float(row.get("discount_amount") or 0)
+
+    # Build per-submission breakdown
+    submissions = []
+    for sn in sorted(sub_map.keys()):
+        s = sub_map[sn]
+        oh = s["overhead"]
+        items = s["items"]
+        sub_subtotal = sum(
+            (float(r.get("unit_cost") or 0) * (r.get("quantity") or 1))
+            for r in items
+        )
+        # VAT/discount: from overhead row if exists, else sum from items
+        if oh:
+            sub_vat = float(oh.get("vat_amount") or 0)
+            sub_discount = float(oh.get("discount_amount") or 0)
+            sub_other = float(oh.get("other_costs") or 0)
+        else:
+            sub_vat = sum(float(r.get("vat_amount") or 0) for r in items)
+            sub_discount = sum(float(r.get("discount_amount") or 0) for r in items)
+            sub_other = sum(float(r.get("other_costs") or 0) for r in items)
+        sub_total = sum(float(r.get("total_cost") or 0) for r in items)
+        if oh:
+            sub_total += float(oh.get("total_cost") or 0)
+
+        # Document from overhead row (or first item with doc in this submission)
+        doc_row = oh if oh and oh.get("document_url") else None
+        if not doc_row:
+            doc_row = next((r for r in items if r.get("document_url")), None)
+
+        submissions.append({
+            "submission_number": sn,
+            "items_count": len(items),
+            "subtotal": round(sub_subtotal, 2),
+            "vat_amount": round(sub_vat, 2),
+            "discount_amount": round(sub_discount, 2),
+            "other_costs": round(sub_other, 2),
+            "total": round(sub_total, 2),
+            "document": {
+                "url": doc_row.get("document_url"),
+                "name": doc_row.get("document_name"),
+                "uploaded_at": str(doc_row.get("document_uploaded_at")) if doc_row.get("document_uploaded_at") else None,
+            } if doc_row and doc_row.get("document_url") else None,
+        })
 
     # Build supplier breakdown (exclude overhead)
     suppliers_map: dict[str, dict[str, Any]] = {}
@@ -978,20 +1025,19 @@ async def get_spare_parts_by_po(
         suppliers_map[key]["total_cost"] += float(row.get("total_cost") or 0)
 
     suppliers_list = sorted(suppliers_map.values(), key=lambda s: s["total_cost"], reverse=True)
-    # Keep backward compat: "supplier" = first/primary supplier
     primary_supplier = suppliers_list[0] if suppliers_list else None
 
-    # PO-level cost_type (same logic as v_purchase_orders_summary view)
+    # PO-level cost_type
     distinct_plants = set(r.get("plant_id") for r in item_rows if r.get("plant_id"))
     has_workshop = any(r.get("is_workshop") for r in item_rows)
     has_category = any(r.get("is_category") for r in item_rows)
     po_cost_type = "direct" if len(distinct_plants) == 1 and not has_workshop and not has_category else "shared"
 
-    # Overhead breakdown
+    # Combined overhead (backward compat — sum across all submissions)
     overhead = {
-        "vat_amount": float(overhead_row.get("vat_amount") or 0) if overhead_row else 0,
-        "discount_amount": float(overhead_row.get("discount_amount") or 0) if overhead_row else 0,
-        "other_costs": float(overhead_row.get("other_costs") or 0) if overhead_row else 0,
+        "vat_amount": round(sum(s["vat_amount"] for s in submissions), 2),
+        "discount_amount": round(sum(s["discount_amount"] for s in submissions), 2),
+        "other_costs": round(sum(s["other_costs"] for s in submissions), 2),
     }
 
     return {
@@ -1000,7 +1046,7 @@ async def get_spare_parts_by_po(
         "meta": {
             "po_number": po_number.upper(),
             "items_count": len(item_rows),
-            "total_cost": round(total_cost, 2),
+            "total_cost": round(grand_total, 2),
             "distinct_plants": len(distinct_plants),
             "cost_type": po_cost_type,
             "supplier": primary_supplier,
@@ -1009,6 +1055,7 @@ async def get_spare_parts_by_po(
                 for s in suppliers_list
             ],
             "overhead": overhead,
+            "submissions": submissions,
         },
     }
 
@@ -1175,15 +1222,16 @@ async def upload_po_document(
     background_tasks: BackgroundTasks,
     current_user: Annotated[CurrentUser, Depends(require_admin)],
     file: UploadFile = File(..., description="PO document (PDF or image)"),
+    submission_number: int = Query(1, ge=1, description="Submission number to attach document to"),
 ) -> dict[str, Any]:
-    """Upload a document for a PO. Storage stays on Supabase SDK."""
-    # Verify PO exists
+    """Upload a document for a specific submission of a PO."""
+    # Verify PO + submission exists
     existing = await fetchrow(
-        "SELECT id FROM spare_parts WHERE purchase_order_number ILIKE $1 LIMIT 1",
-        po_number,
+        "SELECT id FROM spare_parts WHERE purchase_order_number ILIKE $1 AND submission_number = $2 LIMIT 1",
+        po_number, submission_number,
     )
     if not existing:
-        raise NotFoundError("PO", po_number)
+        raise NotFoundError("PO submission", f"{po_number} sub#{submission_number}")
 
     allowed_types = ["application/pdf", "image/jpeg", "image/png", "image/jpg"]
     if file.content_type not in allowed_types:
@@ -1193,10 +1241,10 @@ async def upload_po_document(
         )
 
     ext = file.filename.split(".")[-1] if file.filename and "." in file.filename else "pdf"
-    unique_filename = f"po-documents/{po_number.upper()}/{uuid4()}.{ext}"
+    unique_filename = f"po-documents/{po_number.upper()}/sub-{submission_number}/{uuid4()}.{ext}"
     file_content = await file.read()
 
-    # Upload to Supabase Storage (SDK stays)
+    # Upload to Supabase Storage
     try:
         client = get_supabase_admin_client()
         storage = client.storage.from_("documents")
@@ -1206,30 +1254,36 @@ async def upload_po_document(
         logger.error("Failed to upload document", error=str(e), po_number=po_number)
         raise ValidationError(f"Failed to upload document: {str(e)}")
 
-    # Update DB via asyncpg
-    await execute(
+    # Update the overhead row for this submission first (preferred single row)
+    result = await execute(
         """UPDATE spare_parts
            SET document_url = $1, document_name = $2, document_uploaded_at = now()
-           WHERE purchase_order_number ILIKE $3""",
-        document_url,
-        file.filename,
-        po_number,
+           WHERE purchase_order_number ILIKE $3 AND submission_number = $4 AND is_po_overhead = true""",
+        document_url, file.filename, po_number, submission_number,
     )
+    # Fallback: if no overhead row (single-fleet submission), update all rows in that submission
+    if result and result.endswith("0"):
+        await execute(
+            """UPDATE spare_parts
+               SET document_url = $1, document_name = $2, document_uploaded_at = now()
+               WHERE purchase_order_number ILIKE $3 AND submission_number = $4""",
+            document_url, file.filename, po_number, submission_number,
+        )
 
-    logger.info("PO document uploaded", po_number=po_number.upper(), filename=file.filename, user_id=current_user.id)
+    logger.info("PO document uploaded", po_number=po_number.upper(), submission=submission_number, filename=file.filename, user_id=current_user.id)
 
     background_tasks.add_task(
         audit_service.log,
         user_id=current_user.id, user_email=current_user.email,
         action="upload", table_name="spare_parts", record_id=po_number.upper(),
-        new_values={"document_name": file.filename, "document_url": document_url},
+        new_values={"document_name": file.filename, "document_url": document_url, "submission_number": submission_number},
         ip_address=get_client_ip(request),
-        description=f"Uploaded document for PO {po_number.upper()}: {file.filename}",
+        description=f"Uploaded document for PO {po_number.upper()} submission #{submission_number}: {file.filename}",
     )
 
     return {
         "success": True,
-        "data": {"po_number": po_number.upper(), "document_url": document_url, "document_name": file.filename},
+        "data": {"po_number": po_number.upper(), "document_url": document_url, "document_name": file.filename, "submission_number": submission_number},
     }
 
 
@@ -1237,22 +1291,24 @@ async def upload_po_document(
 async def get_po_document(
     po_number: str,
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+    submission_number: int = Query(1, ge=1),
 ) -> dict[str, Any]:
-    """Get the document URL for a PO."""
+    """Get the document URL for a specific submission of a PO."""
     doc = await fetchrow(
         """SELECT document_url, document_name, document_uploaded_at
            FROM spare_parts
-           WHERE purchase_order_number ILIKE $1 AND document_url IS NOT NULL
+           WHERE purchase_order_number ILIKE $1 AND submission_number = $2 AND document_url IS NOT NULL
            LIMIT 1""",
-        po_number,
+        po_number, submission_number,
     )
     if not doc or not doc.get("document_url"):
-        raise NotFoundError("Document for PO", po_number)
+        raise NotFoundError("Document for PO", f"{po_number} sub#{submission_number}")
 
     return {
         "success": True,
         "data": {
             "po_number": po_number.upper(),
+            "submission_number": submission_number,
             "document_url": doc["document_url"],
             "document_name": doc["document_name"],
             "uploaded_at": doc["document_uploaded_at"],
@@ -1266,37 +1322,38 @@ async def delete_po_document(
     request: Request,
     background_tasks: BackgroundTasks,
     current_user: Annotated[CurrentUser, Depends(require_admin)],
+    submission_number: int = Query(1, ge=1),
 ) -> dict[str, Any]:
-    """Delete the document for a PO."""
+    """Delete the document for a specific submission of a PO."""
     old_doc = await fetchrow(
         """SELECT document_url, document_name
            FROM spare_parts
-           WHERE purchase_order_number ILIKE $1 AND document_url IS NOT NULL
+           WHERE purchase_order_number ILIKE $1 AND submission_number = $2 AND document_url IS NOT NULL
            LIMIT 1""",
-        po_number,
+        po_number, submission_number,
     )
     if not old_doc or not old_doc.get("document_url"):
-        raise NotFoundError("Document for PO", po_number)
+        raise NotFoundError("Document for PO", f"{po_number} sub#{submission_number}")
 
     await execute(
         """UPDATE spare_parts
            SET document_url = NULL, document_name = NULL, document_uploaded_at = NULL
-           WHERE purchase_order_number ILIKE $1""",
-        po_number,
+           WHERE purchase_order_number ILIKE $1 AND submission_number = $2""",
+        po_number, submission_number,
     )
 
-    logger.info("PO document deleted", po_number=po_number.upper(), user_id=current_user.id)
+    logger.info("PO document deleted", po_number=po_number.upper(), submission=submission_number, user_id=current_user.id)
 
     background_tasks.add_task(
         audit_service.log,
         user_id=current_user.id, user_email=current_user.email,
         action="delete", table_name="spare_parts", record_id=po_number.upper(),
-        old_values={"document_name": old_doc["document_name"]},
+        old_values={"document_name": old_doc["document_name"], "submission_number": submission_number},
         ip_address=get_client_ip(request),
-        description=f"Deleted document for PO {po_number.upper()}",
+        description=f"Deleted document for PO {po_number.upper()} submission #{submission_number}",
     )
 
-    return {"success": True, "message": f"Document deleted for PO {po_number.upper()}"}
+    return {"success": True, "message": f"Document deleted for PO {po_number.upper()} submission #{submission_number}"}
 
 
 @router.patch("/{part_id}")

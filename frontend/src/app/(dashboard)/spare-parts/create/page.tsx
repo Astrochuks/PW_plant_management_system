@@ -266,8 +266,9 @@ function POCreateForm() {
           // Upload document in background — don't block navigation
           if (poDocument) {
             const poNum = form.purchase_order_number.trim();
+            const submissionNumber = (meta as Record<string, number> | undefined)?.submission_number;
             uploadDoc.mutate(
-              { poNumber: poNum, file: poDocument },
+              { poNumber: poNum, file: poDocument, submissionNumber },
               {
                 onSuccess: () => toast.success('PO document uploaded'),
                 onError: () => toast.error('Document upload failed. You can upload it later from the PO page.'),
@@ -354,7 +355,7 @@ function POCreateForm() {
                           View existing PO <ExternalLink className="h-3 w-3" />
                         </Link>
                         <Badge variant="outline" className="text-[10px] border-amber-300 text-amber-700 dark:border-amber-700 dark:text-amber-300">
-                          Submitting will add items to this PO
+                          Submitting will create a new submission on this PO
                         </Badge>
                       </div>
                     </div>

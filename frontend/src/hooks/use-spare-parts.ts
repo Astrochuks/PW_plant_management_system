@@ -229,29 +229,32 @@ export function useUpdatePO() {
 }
 
 /**
- * Upload PO document (admin only)
+ * Upload PO document (admin only, scoped to submission)
  */
 export function useUploadPODocument() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ poNumber, file }: { poNumber: string; file: File }) =>
-      uploadPODocument(poNumber, file),
+    mutationFn: ({ poNumber, file, submissionNumber }: { poNumber: string; file: File; submissionNumber?: number }) =>
+      uploadPODocument(poNumber, file, submissionNumber),
     onSuccess: (_result, { poNumber }) => {
+      queryClient.invalidateQueries({ queryKey: sparePartsKeys.byPO(poNumber) });
       queryClient.invalidateQueries({ queryKey: sparePartsKeys.poDocument(poNumber) });
     },
   });
 }
 
 /**
- * Delete PO document (admin only)
+ * Delete PO document (admin only, scoped to submission)
  */
 export function useDeletePODocument() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: deletePODocument,
-    onSuccess: () => {
+    mutationFn: ({ poNumber, submissionNumber }: { poNumber: string; submissionNumber?: number }) =>
+      deletePODocument(poNumber, submissionNumber),
+    onSuccess: (_result, { poNumber }) => {
+      queryClient.invalidateQueries({ queryKey: sparePartsKeys.byPO(poNumber) });
       queryClient.invalidateQueries({ queryKey: sparePartsKeys.all });
     },
   });

@@ -2,7 +2,7 @@
 
 /**
  * Purchase Order Detail Page
- * Shows PO items, cost summary, document management, edit/delete actions
+ * Shows PO items grouped by submission, cost summary, document management, edit/delete actions
  */
 
 import { useState, useCallback, useRef } from 'react';
@@ -65,12 +65,10 @@ import {
   useDeletePODocument,
   useUpdatePO,
 } from '@/hooks/use-spare-parts';
-import { getPODocument, type UpdatePORequest } from '@/lib/api/spare-parts';
+import type { UpdatePORequest, POSubmission, SparePart } from '@/lib/api/spare-parts';
 import { useAuth } from '@/providers/auth-provider';
 import { useLocationsWithStats } from '@/hooks/use-locations';
 import { SparePartDetailModal } from '@/components/spare-parts/spare-part-detail-modal';
-import { useQuery } from '@tanstack/react-query';
-import { sparePartsKeys } from '@/hooks/use-spare-parts';
 
 export default function PODetailPage() {
   const params = useParams();
@@ -81,11 +79,6 @@ export default function PODetailPage() {
   const poNumber = decodeURIComponent(params.poNumber as string);
 
   const { data: poData, isLoading } = usePartsByPO(poNumber);
-  const { data: docData } = useQuery({
-    queryKey: sparePartsKeys.poDocument(poNumber),
-    queryFn: () => getPODocument(poNumber),
-    staleTime: 5 * 60 * 1000,
-  });
 
   const deletePO = useDeletePartsByPO();
   const uploadDoc = useUploadPODocument();
@@ -95,7 +88,7 @@ export default function PODetailPage() {
   const [selectedPartId, setSelectedPartId] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState<UpdatePORequest>({});
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRefs = useRef<Record<number, HTMLInputElement | null>>({});
 
   const { data: locations } = useLocationsWithStats();
 
@@ -103,7 +96,6 @@ export default function PODetailPage() {
     const parts = poData?.data ?? [];
     const meta = poData?.meta;
     const first = parts[0];
-    // Use overhead from meta (covers both single-fleet and multi-fleet POs)
     const overhead = meta?.overhead;
     const vatFromParts = parts.reduce((s, p) => s + (Number(p.vat_amount) || 0), 0);
     const discFromParts = parts.reduce((s, p) => s + (Number(p.discount_amount) || 0), 0);
@@ -157,42 +149,51 @@ export default function PODetailPage() {
   }, [deletePO, poNumber, router]);
 
   const handleUploadDocument = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
+    (e: React.ChangeEvent<HTMLInputElement>, submissionNumber?: number) => {
       const file = e.target.files?.[0];
       if (!file) return;
       uploadDoc.mutate(
-        { poNumber, file },
+        { poNumber, file, submissionNumber },
         {
           onSuccess: () => toast.success('Document uploaded'),
           onError: (err) =>
             toast.error(`Upload failed: ${err instanceof Error ? err.message : 'Unknown error'}`),
         }
       );
-      if (fileInputRef.current) fileInputRef.current.value = '';
+      // Reset the input
+      if (submissionNumber != null && fileInputRefs.current[submissionNumber]) {
+        fileInputRefs.current[submissionNumber]!.value = '';
+      }
     },
     [uploadDoc, poNumber]
   );
 
-  const handleDeleteDocument = useCallback(() => {
-    deleteDoc.mutate(poNumber, {
-      onSuccess: () => toast.success('Document deleted'),
-      onError: (err) =>
-        toast.error(`Delete failed: ${err instanceof Error ? err.message : 'Unknown error'}`),
-    });
-  }, [deleteDoc, poNumber]);
+  const handleDeleteDocument = useCallback(
+    (submissionNumber?: number) => {
+      deleteDoc.mutate(
+        { poNumber, submissionNumber },
+        {
+          onSuccess: () => toast.success('Document deleted'),
+          onError: (err) =>
+            toast.error(`Delete failed: ${err instanceof Error ? err.message : 'Unknown error'}`),
+        }
+      );
+    },
+    [deleteDoc, poNumber]
+  );
 
   if (isLoading) return <PODetailSkeleton />;
 
   const parts = poData?.data ?? [];
   const meta = poData?.meta;
+  const submissions = meta?.submissions ?? [];
+  const hasMultipleSubmissions = submissions.length > 1;
 
   // Derive PO-level info from parts
   const poDate = parts[0]?.po_date;
   const poLocation = parts[0]?.location_id;
   const poReqNo = parts[0]?.requisition_number;
 
-  // Use PO-level cost_type from backend meta (computed same as v_purchase_orders_summary view)
-  // Fallback: compute from parts if meta not available
   const costType = meta?.cost_type ?? (() => {
     if (parts.length === 0) return null;
     const distinctPlants = new Set(parts.map(p => p.plant_id).filter(Boolean));
@@ -235,6 +236,11 @@ export default function PODetailPage() {
                 {costType && (
                   <Badge variant={costType === 'shared' ? 'secondary' : 'outline'}>
                     {costType === 'shared' ? 'Shared' : 'Direct'}
+                  </Badge>
+                )}
+                {hasMultipleSubmissions && (
+                  <Badge variant="outline">
+                    {submissions.length} submissions
                   </Badge>
                 )}
               </div>
@@ -448,60 +454,6 @@ export default function PODetailPage() {
         </Card>
       </div>
 
-      {/* Cost Breakdown */}
-      {parts.length > 0 && (() => {
-        const subtotal = parts.reduce((s, p) => s + (Number(p.unit_cost) || 0) * (p.quantity || 1), 0);
-        // Use overhead from meta (PO-level costs for multi-fleet POs)
-        // Fall back to summing from parts for single-fleet POs where overhead is embedded
-        const overhead = meta?.overhead;
-        const totalVat = overhead?.vat_amount || parts.reduce((s, p) => s + (Number(p.vat_amount) || 0), 0);
-        const totalDiscount = overhead?.discount_amount || parts.reduce((s, p) => s + (Number(p.discount_amount) || 0), 0);
-        const totalOther = overhead?.other_costs || parts.reduce((s, p) => s + (Number(p.other_costs) || 0), 0);
-        const grandTotal = Number(meta?.total_cost) || 0;
-        const hasOverhead = totalVat > 0 || totalDiscount > 0 || totalOther > 0;
-        return (
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
-                <DollarSign className="h-4 w-4" />
-                Cost Breakdown
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2 max-w-md">
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Items Subtotal ({parts.length} items)</span>
-                  <span>{formatCurrency(subtotal)}</span>
-                </div>
-                {totalVat > 0 && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">VAT</span>
-                    <span>{formatCurrency(totalVat)}</span>
-                  </div>
-                )}
-                {totalDiscount > 0 && (
-                  <div className="flex justify-between text-sm text-green-600">
-                    <span>Discount</span>
-                    <span>-{formatCurrency(totalDiscount)}</span>
-                  </div>
-                )}
-                {totalOther > 0 && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Other Costs</span>
-                    <span>{formatCurrency(totalOther)}</span>
-                  </div>
-                )}
-                {hasOverhead && <Separator />}
-                <div className={`flex justify-between font-medium ${hasOverhead ? 'text-base' : 'text-sm'}`}>
-                  <span>{hasOverhead ? 'Grand Total' : 'Total'}</span>
-                  <span>{formatCurrency(grandTotal)}</span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        );
-      })()}
-
       {/* PO Info */}
       {(poReqNo || poLocation) && (
         <Card>
@@ -528,187 +480,157 @@ export default function PODetailPage() {
         </Card>
       )}
 
-      {/* Document Section */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base flex items-center gap-2">
-            <FileText className="h-4 w-4" />
-            PO Document
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {docData ? (
-            <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
-              <div className="flex items-center gap-3">
-                <FileText className="h-5 w-5 text-muted-foreground" />
-                <div>
-                  <p className="text-sm font-medium">{docData.document_name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    Uploaded {new Date(docData.uploaded_at).toLocaleDateString()}
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" asChild>
-                  <a href={docData.document_url} target="_blank" rel="noopener noreferrer">
-                    <Download className="h-4 w-4 mr-1" />
-                    View
-                  </a>
-                </Button>
-                {isAdmin && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleDeleteDocument}
-                    disabled={deleteDoc.isPending}
-                  >
-                    {deleteDoc.isPending ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <X className="h-4 w-4" />
-                    )}
-                  </Button>
-                )}
-              </div>
-            </div>
-          ) : (
-            <div className="text-center py-6 text-muted-foreground">
-              <FileText className="h-8 w-8 mx-auto mb-2 opacity-40" />
-              <p className="text-sm">No document attached</p>
-              {isAdmin && (
-                <>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".pdf,.jpg,.jpeg,.png"
-                    className="hidden"
-                    onChange={handleUploadDocument}
-                  />
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="mt-3"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={uploadDoc.isPending}
-                  >
-                    {uploadDoc.isPending ? (
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    ) : (
-                      <Upload className="h-4 w-4 mr-2" />
-                    )}
-                    Upload Document
-                  </Button>
-                </>
-              )}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Line Items — grouped by supplier */}
-      {(() => {
-        // Group parts by supplier
-        const groups = parts.reduce<Record<string, { name: string; parts: typeof parts }>>((acc, part) => {
-          const key = part.supplier_id || part.supplier_name || part.supplier || 'Unknown';
-          const name = part.supplier_name || part.supplier || 'Unknown';
-          if (!acc[key]) acc[key] = { name, parts: [] };
-          acc[key].parts.push(part);
-          return acc;
-        }, {});
-        const supplierGroups = Object.entries(groups);
-        const hasMultipleSuppliers = supplierGroups.length > 1;
-
-        if (parts.length === 0) {
-          return (
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Line Items</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-center py-8 text-muted-foreground">
-                  <Package className="h-8 w-8 mx-auto mb-2 opacity-40" />
-                  <p className="text-sm">No items in this PO</p>
-                </div>
-              </CardContent>
-            </Card>
-          );
-        }
-
-        return supplierGroups.map(([key, group]) => {
-          const groupSubtotal = group.parts.reduce(
-            (s, p) => s + (Number(p.total_cost) || 0),
-            0
-          );
-          return (
-            <Card key={key}>
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
+      {/* === SINGLE SUBMISSION: render exactly as before === */}
+      {!hasMultipleSubmissions && (
+        <>
+          {/* Cost Breakdown */}
+          {parts.length > 0 && (() => {
+            const subtotal = parts.reduce((s, p) => s + (Number(p.unit_cost) || 0) * (p.quantity || 1), 0);
+            const overhead = meta?.overhead;
+            const totalVat = overhead?.vat_amount || parts.reduce((s, p) => s + (Number(p.vat_amount) || 0), 0);
+            const totalDiscount = overhead?.discount_amount || parts.reduce((s, p) => s + (Number(p.discount_amount) || 0), 0);
+            const totalOther = overhead?.other_costs || parts.reduce((s, p) => s + (Number(p.other_costs) || 0), 0);
+            const grandTotal = Number(meta?.total_cost) || 0;
+            const hasOverhead = totalVat > 0 || totalDiscount > 0 || totalOther > 0;
+            return (
+              <Card>
+                <CardHeader className="pb-3">
                   <CardTitle className="text-base flex items-center gap-2">
-                    {hasMultipleSuppliers && <Users className="h-4 w-4" />}
-                    {hasMultipleSuppliers ? group.name : 'Line Items'}
+                    <DollarSign className="h-4 w-4" />
+                    Cost Breakdown
                   </CardTitle>
-                  <div className="text-sm text-muted-foreground">
-                    {group.parts.length} item{group.parts.length !== 1 ? 's' : ''}
-                    {hasMultipleSuppliers && (
+                </CardHeader>
+                <CardContent>
+                  <CostBreakdownSection
+                    itemCount={parts.length}
+                    subtotal={subtotal}
+                    vat={totalVat}
+                    discount={totalDiscount}
+                    other={totalOther}
+                    total={grandTotal}
+                    hasOverhead={hasOverhead}
+                  />
+                </CardContent>
+              </Card>
+            );
+          })()}
+
+          {/* Single Document Section */}
+          <DocumentSection
+            document={submissions[0]?.document ?? null}
+            isAdmin={isAdmin}
+            uploadPending={uploadDoc.isPending}
+            deletePending={deleteDoc.isPending}
+            onUpload={(e) => handleUploadDocument(e, submissions[0]?.submission_number ?? 1)}
+            onDelete={() => handleDeleteDocument(submissions[0]?.submission_number ?? 1)}
+            fileInputRef={(el) => { fileInputRefs.current[1] = el; }}
+          />
+
+          {/* Line Items */}
+          <ItemsTableGroupedBySupplier
+            parts={parts}
+            onPartClick={setSelectedPartId}
+          />
+        </>
+      )}
+
+      {/* === MULTIPLE SUBMISSIONS: per-submission sections === */}
+      {hasMultipleSubmissions && (
+        <>
+          {/* Grand total cost breakdown (aggregate) */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <DollarSign className="h-4 w-4" />
+                Combined Cost Breakdown
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {(() => {
+                const subtotal = submissions.reduce((s, sub) => s + sub.subtotal, 0);
+                const totalVat = submissions.reduce((s, sub) => s + sub.vat_amount, 0);
+                const totalDiscount = submissions.reduce((s, sub) => s + sub.discount_amount, 0);
+                const totalOther = submissions.reduce((s, sub) => s + sub.other_costs, 0);
+                const grandTotal = Number(meta?.total_cost) || 0;
+                const hasOverhead = totalVat > 0 || totalDiscount > 0 || totalOther > 0;
+                return (
+                  <CostBreakdownSection
+                    itemCount={meta?.items_count ?? parts.length}
+                    subtotal={subtotal}
+                    vat={totalVat}
+                    discount={totalDiscount}
+                    other={totalOther}
+                    total={grandTotal}
+                    hasOverhead={hasOverhead}
+                  />
+                );
+              })()}
+            </CardContent>
+          </Card>
+
+          {/* Per-submission sections */}
+          {submissions.map((sub) => {
+            const subParts = parts.filter(
+              (p) => (p.submission_number ?? 1) === sub.submission_number
+            );
+            const hasOverhead = sub.vat_amount > 0 || sub.discount_amount > 0 || sub.other_costs > 0;
+
+            return (
+              <Card key={sub.submission_number} className="border-l-4 border-l-primary/30">
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Package className="h-4 w-4" />
+                      Submission {sub.submission_number}
+                    </CardTitle>
+                    <div className="text-sm text-muted-foreground">
+                      {sub.items_count} item{sub.items_count !== 1 ? 's' : ''}
                       <span className="ml-2 font-medium text-foreground">
-                        {formatCurrency(groupSubtotal)}
+                        {formatCurrency(sub.total)}
                       </span>
-                    )}
+                    </div>
                   </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="rounded-md border">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-[100px]">Fleet #</TableHead>
-                        <TableHead>Part Description</TableHead>
-                        <TableHead className="w-[120px]">Part Number</TableHead>
-                        <TableHead className="w-[60px] text-center">Qty</TableHead>
-                        <TableHead className="w-[110px] text-right">Unit Cost</TableHead>
-                        <TableHead className="w-[120px] text-right">Total Cost</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {group.parts.map((part) => (
-                        <TableRow
-                          key={part.id}
-                          className="cursor-pointer hover:bg-muted/50"
-                          onClick={() => setSelectedPartId(part.id)}
-                        >
-                          <TableCell className="font-mono font-medium">
-                            {part.fleet_number
-                              || part.fleet_number_raw
-                              || (part.is_workshop ? 'WORKSHOP' : null)
-                              || (part.is_category ? (part.category_name || 'CATEGORY') : null)
-                              || '-'}
-                          </TableCell>
-                          <TableCell>
-                            <div className="truncate max-w-[300px]" title={part.part_description}>
-                              {part.part_description}
-                            </div>
-                          </TableCell>
-                          <TableCell className="font-mono text-sm">
-                            {part.part_number || '-'}
-                          </TableCell>
-                          <TableCell className="text-center">{part.quantity}</TableCell>
-                          <TableCell className="text-right">
-                            {part.unit_cost != null ? formatCurrency(part.unit_cost) : '-'}
-                          </TableCell>
-                          <TableCell className="text-right font-medium">
-                            {part.total_cost != null ? formatCurrency(part.total_cost) : '-'}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              </CardContent>
-            </Card>
-          );
-        });
-      })()}
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  {/* Items table for this submission */}
+                  <ItemsTable
+                    parts={subParts}
+                    onPartClick={setSelectedPartId}
+                  />
+
+                  {/* Cost breakdown for this submission */}
+                  {hasOverhead && (
+                    <div className="rounded-lg border bg-muted/30 p-4">
+                      <CostBreakdownSection
+                        itemCount={sub.items_count}
+                        subtotal={sub.subtotal}
+                        vat={sub.vat_amount}
+                        discount={sub.discount_amount}
+                        other={sub.other_costs}
+                        total={sub.total}
+                        hasOverhead={hasOverhead}
+                      />
+                    </div>
+                  )}
+
+                  {/* Document for this submission */}
+                  <div className="border-t pt-4">
+                    <SubmissionDocumentInline
+                      document={sub.document}
+                      isAdmin={isAdmin}
+                      uploadPending={uploadDoc.isPending}
+                      deletePending={deleteDoc.isPending}
+                      onUpload={(e) => handleUploadDocument(e, sub.submission_number)}
+                      onDelete={() => handleDeleteDocument(sub.submission_number)}
+                      fileInputRef={(el) => { fileInputRefs.current[sub.submission_number] = el; }}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </>
+      )}
 
       {/* Spare Part Detail Modal */}
       {selectedPartId && (
@@ -716,6 +638,354 @@ export default function PODetailPage() {
           partId={selectedPartId}
           onClose={() => setSelectedPartId(null)}
         />
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// Sub-components
+// ============================================================================
+
+function CostBreakdownSection({
+  itemCount,
+  subtotal,
+  vat,
+  discount,
+  other,
+  total,
+  hasOverhead,
+}: {
+  itemCount: number;
+  subtotal: number;
+  vat: number;
+  discount: number;
+  other: number;
+  total: number;
+  hasOverhead: boolean;
+}) {
+  return (
+    <div className="space-y-2 max-w-md">
+      <div className="flex justify-between text-sm">
+        <span className="text-muted-foreground">Items Subtotal ({itemCount} items)</span>
+        <span>{formatCurrency(subtotal)}</span>
+      </div>
+      {vat > 0 && (
+        <div className="flex justify-between text-sm">
+          <span className="text-muted-foreground">VAT</span>
+          <span>{formatCurrency(vat)}</span>
+        </div>
+      )}
+      {discount > 0 && (
+        <div className="flex justify-between text-sm text-green-600">
+          <span>Discount</span>
+          <span>-{formatCurrency(discount)}</span>
+        </div>
+      )}
+      {other > 0 && (
+        <div className="flex justify-between text-sm">
+          <span className="text-muted-foreground">Other Costs</span>
+          <span>{formatCurrency(other)}</span>
+        </div>
+      )}
+      {hasOverhead && <Separator />}
+      <div className={`flex justify-between font-medium ${hasOverhead ? 'text-base' : 'text-sm'}`}>
+        <span>{hasOverhead ? 'Grand Total' : 'Total'}</span>
+        <span>{formatCurrency(total)}</span>
+      </div>
+    </div>
+  );
+}
+
+function ItemsTable({
+  parts,
+  onPartClick,
+}: {
+  parts: SparePart[];
+  onPartClick: (id: string) => void;
+}) {
+  if (parts.length === 0) return null;
+  return (
+    <div className="rounded-md border">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-[100px]">Fleet #</TableHead>
+            <TableHead>Part Description</TableHead>
+            <TableHead className="w-[120px]">Part Number</TableHead>
+            <TableHead className="w-[60px] text-center">Qty</TableHead>
+            <TableHead className="w-[110px] text-right">Unit Cost</TableHead>
+            <TableHead className="w-[120px] text-right">Total Cost</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {parts.map((part) => (
+            <TableRow
+              key={part.id}
+              className="cursor-pointer hover:bg-muted/50"
+              onClick={() => onPartClick(part.id)}
+            >
+              <TableCell className="font-mono font-medium">
+                {part.fleet_number
+                  || part.fleet_number_raw
+                  || (part.is_workshop ? 'WORKSHOP' : null)
+                  || (part.is_category ? (part.category_name || 'CATEGORY') : null)
+                  || '-'}
+              </TableCell>
+              <TableCell>
+                <div className="truncate max-w-[300px]" title={part.part_description}>
+                  {part.part_description}
+                </div>
+              </TableCell>
+              <TableCell className="font-mono text-sm">
+                {part.part_number || '-'}
+              </TableCell>
+              <TableCell className="text-center">{part.quantity}</TableCell>
+              <TableCell className="text-right">
+                {part.unit_cost != null ? formatCurrency(part.unit_cost) : '-'}
+              </TableCell>
+              <TableCell className="text-right font-medium">
+                {part.total_cost != null ? formatCurrency(part.total_cost) : '-'}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+function ItemsTableGroupedBySupplier({
+  parts,
+  onPartClick,
+}: {
+  parts: SparePart[];
+  onPartClick: (id: string) => void;
+}) {
+  const groups = parts.reduce<Record<string, { name: string; parts: SparePart[] }>>((acc, part) => {
+    const key = part.supplier_id || part.supplier_name || part.supplier || 'Unknown';
+    const name = part.supplier_name || part.supplier || 'Unknown';
+    if (!acc[key]) acc[key] = { name, parts: [] };
+    acc[key].parts.push(part);
+    return acc;
+  }, {});
+  const supplierGroups = Object.entries(groups);
+  const hasMultipleSuppliers = supplierGroups.length > 1;
+
+  if (parts.length === 0) {
+    return (
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Line Items</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="text-center py-8 text-muted-foreground">
+            <Package className="h-8 w-8 mx-auto mb-2 opacity-40" />
+            <p className="text-sm">No items in this PO</p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <>
+      {supplierGroups.map(([key, group]) => {
+        const groupSubtotal = group.parts.reduce(
+          (s, p) => s + (Number(p.total_cost) || 0),
+          0
+        );
+        return (
+          <Card key={key}>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base flex items-center gap-2">
+                  {hasMultipleSuppliers && <Users className="h-4 w-4" />}
+                  {hasMultipleSuppliers ? group.name : 'Line Items'}
+                </CardTitle>
+                <div className="text-sm text-muted-foreground">
+                  {group.parts.length} item{group.parts.length !== 1 ? 's' : ''}
+                  {hasMultipleSuppliers && (
+                    <span className="ml-2 font-medium text-foreground">
+                      {formatCurrency(groupSubtotal)}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <ItemsTable parts={group.parts} onPartClick={onPartClick} />
+            </CardContent>
+          </Card>
+        );
+      })}
+    </>
+  );
+}
+
+function DocumentSection({
+  document,
+  isAdmin,
+  uploadPending,
+  deletePending,
+  onUpload,
+  onDelete,
+  fileInputRef,
+}: {
+  document: { url: string; name: string; uploaded_at: string | null } | null;
+  isAdmin: boolean;
+  uploadPending: boolean;
+  deletePending: boolean;
+  onUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onDelete: () => void;
+  fileInputRef: (el: HTMLInputElement | null) => void;
+}) {
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <FileText className="h-4 w-4" />
+          PO Document
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <DocumentDisplay
+          document={document}
+          isAdmin={isAdmin}
+          uploadPending={uploadPending}
+          deletePending={deletePending}
+          onUpload={onUpload}
+          onDelete={onDelete}
+          fileInputRef={fileInputRef}
+        />
+      </CardContent>
+    </Card>
+  );
+}
+
+function SubmissionDocumentInline({
+  document,
+  isAdmin,
+  uploadPending,
+  deletePending,
+  onUpload,
+  onDelete,
+  fileInputRef,
+}: {
+  document: { url: string; name: string; uploaded_at: string | null } | null;
+  isAdmin: boolean;
+  uploadPending: boolean;
+  deletePending: boolean;
+  onUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onDelete: () => void;
+  fileInputRef: (el: HTMLInputElement | null) => void;
+}) {
+  return (
+    <DocumentDisplay
+      document={document}
+      isAdmin={isAdmin}
+      uploadPending={uploadPending}
+      deletePending={deletePending}
+      onUpload={onUpload}
+      onDelete={onDelete}
+      fileInputRef={fileInputRef}
+      compact
+    />
+  );
+}
+
+function DocumentDisplay({
+  document,
+  isAdmin,
+  uploadPending,
+  deletePending,
+  onUpload,
+  onDelete,
+  fileInputRef,
+  compact,
+}: {
+  document: { url: string; name: string; uploaded_at: string | null } | null;
+  isAdmin: boolean;
+  uploadPending: boolean;
+  deletePending: boolean;
+  onUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onDelete: () => void;
+  fileInputRef: (el: HTMLInputElement | null) => void;
+  compact?: boolean;
+}) {
+  const localRef = useRef<HTMLInputElement | null>(null);
+
+  if (document) {
+    return (
+      <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+        <div className="flex items-center gap-3">
+          <FileText className="h-5 w-5 text-muted-foreground" />
+          <div>
+            <p className="text-sm font-medium">{document.name}</p>
+            {document.uploaded_at && (
+              <p className="text-xs text-muted-foreground">
+                Uploaded {new Date(document.uploaded_at).toLocaleDateString()}
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" asChild>
+            <a href={document.url} target="_blank" rel="noopener noreferrer">
+              <Download className="h-4 w-4 mr-1" />
+              View
+            </a>
+          </Button>
+          {isAdmin && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onDelete}
+              disabled={deletePending}
+            >
+              {deletePending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <X className="h-4 w-4" />
+              )}
+            </Button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`${compact ? 'flex items-center gap-3' : 'text-center py-6'} text-muted-foreground`}>
+      {!compact && <FileText className="h-8 w-8 mx-auto mb-2 opacity-40" />}
+      <p className="text-sm">{compact ? 'No document' : 'No document attached'}</p>
+      {isAdmin && (
+        <>
+          <input
+            ref={(el) => {
+              localRef.current = el;
+              fileInputRef(el);
+            }}
+            type="file"
+            accept=".pdf,.jpg,.jpeg,.png"
+            className="hidden"
+            onChange={onUpload}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            className={compact ? '' : 'mt-3'}
+            onClick={() => localRef.current?.click()}
+            disabled={uploadPending}
+          >
+            {uploadPending ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <Upload className="h-4 w-4 mr-2" />
+            )}
+            Upload
+          </Button>
+        </>
       )}
     </div>
   );
