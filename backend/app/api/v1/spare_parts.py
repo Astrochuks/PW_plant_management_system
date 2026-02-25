@@ -676,13 +676,26 @@ async def create_spare_parts_bulk(
         direct_count += 1
 
     # Process SHARED items — create N rows (one per fleet) with divided unit_cost
-    # VAT/discount/other go to the overhead row, not individual items
+    # Multi-fleet: VAT/discount/other go to a separate overhead row
+    # Single-fleet: distribute VAT/discount/other proportionally to each item
     num_fleets = len(parsed_fleets)
     for fleet in parsed_fleets:
         for item in shared_items:
             item_unit_cost = item.get("unit_cost") or 0
             # Divide cost evenly across fleets so SUM = original total
             divided_unit_cost = round(item_unit_cost / num_fleets, 2) if num_fleets > 1 else item_unit_cost
+
+            if is_multi_fleet:
+                item_vat = None
+                item_discount = None
+                item_other = 0
+            else:
+                # Single fleet: distribute VAT/discount proportionally
+                item_subtotal = item_unit_cost * (item.get("quantity") or 1)
+                frac = item_subtotal / subtotal if subtotal > 0 else 0
+                item_vat = round(total_vat * frac, 2) if total_vat * frac > 0 else None
+                item_discount = round(total_discount * frac, 2) if total_discount * frac > 0 else None
+                item_other = round(other_costs * frac, 2) if other_costs * frac > 0 else None
 
             rows.append((
                 fleet["plant_id"],
@@ -702,9 +715,9 @@ async def create_spare_parts_bulk(
                 loc_str,
                 sup_id_str,
                 resolved_supplier_name,
-                None,                        # vat_amount — goes to overhead row
-                None,                        # discount_amount — goes to overhead row
-                0,                           # other_costs — goes to overhead row
+                item_vat,
+                item_discount,
+                item_other,
                 calc_year, calc_month, calc_week, calc_quarter,
                 current_user.id,
                 False,                       # is_po_overhead
