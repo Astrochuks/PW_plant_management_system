@@ -29,6 +29,8 @@ export interface MaintenanceRecord {
   replaced_date: string
   purchase_order_number: string | null
   remarks: string | null
+  shared_fleet_numbers?: string[] | null
+  cost_type?: string | null
 }
 
 interface PlantMaintenanceTableProps {
@@ -113,7 +115,14 @@ export function PlantMaintenanceTable({ records, isLoading, onRowClick }: PlantM
                 >
                   <TableCell>
                     <div>
-                      <div className="font-medium">{record.part_description}</div>
+                      <div className="font-medium flex items-center gap-2">
+                        {record.part_description}
+                        {record.cost_type === 'shared' && record.shared_fleet_numbers && record.shared_fleet_numbers.length > 0 && (
+                          <Badge variant="outline" className="text-xs font-normal shrink-0">
+                            Shared: {record.shared_fleet_numbers.join(', ')}
+                          </Badge>
+                        )}
+                      </div>
                       {record.remarks && (
                         <div className="text-sm text-muted-foreground mt-1">{record.remarks}</div>
                       )}

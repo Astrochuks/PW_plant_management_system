@@ -41,6 +41,7 @@ export interface SparePart {
   category_name: string | null;
   cost_type: string | null;            // "direct" | "shared"
   submission_number?: number;           // batch within a PO
+  shared_fleet_numbers?: string[] | null; // fleets sharing this cost item
   // Timestamps & time bucketing
   year: number | null;
   month: number | null;

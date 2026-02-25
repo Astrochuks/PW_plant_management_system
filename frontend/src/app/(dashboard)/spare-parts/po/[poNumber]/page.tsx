@@ -726,7 +726,9 @@ function ItemsTable({
               onClick={() => onPartClick(part.id)}
             >
               <TableCell className="font-mono font-medium">
-                {part.fleet_number
+                {part.shared_fleet_numbers && part.shared_fleet_numbers.length > 0
+                  ? part.shared_fleet_numbers.join(', ')
+                  : part.fleet_number
                   || part.fleet_number_raw
                   || (part.is_workshop ? 'WORKSHOP' : null)
                   || (part.is_category ? (part.category_name || 'CATEGORY') : null)
