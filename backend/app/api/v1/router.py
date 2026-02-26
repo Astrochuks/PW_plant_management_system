@@ -16,6 +16,7 @@ from app.api.v1 import (
     notifications,
     audit,
     transfers,
+    projects,
 )
 
 api_router = APIRouter()
@@ -34,6 +35,7 @@ api_router.include_router(reports.router, prefix="/reports", tags=["Reports"])
 api_router.include_router(notifications.router, prefix="/notifications", tags=["Notifications"])
 api_router.include_router(audit.router, prefix="/audit", tags=["Audit"])
 api_router.include_router(transfers.router)
+api_router.include_router(projects.router, prefix="/projects", tags=["Projects"])
 
 # Future routers to add:
 # api_router.include_router(analytics.router, prefix="/analytics", tags=["Analytics"])

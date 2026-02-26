@@ -14,10 +14,15 @@ export interface LocationStats {
   id: string;
   location_name: string;
   state_id: string | null;
+  project_id: string | null;
   state_name: string | null;
   state_code: string | null;
   region: string | null;
   created_at: string;
+  linked_project_id: string | null;
+  linked_project_name: string | null;
+  linked_project_client: string | null;
+  linked_project_status: string | null;
   total_plants: number;
   working_plants: number;
   standby_plants: number;
@@ -144,6 +149,7 @@ export interface CreateLocationRequest {
 export interface UpdateLocationRequest {
   name?: string;
   state_id?: string;
+  project_id?: string | null;
 }
 
 // Params types
@@ -234,7 +240,15 @@ export async function updateLocation(id: string, data: UpdateLocationRequest): P
   const params: Record<string, string> = {};
   if (data.name) params.name = data.name;
   if (data.state_id) params.state_id = data.state_id;
+  if (data.project_id !== undefined) {
+    params.project_id = data.project_id === null ? 'unlink' : data.project_id;
+  }
   const response = await apiClient.patch<ApiResponse<LocationRecord>>(`/locations/${id}`, null, { params });
+  return response.data.data;
+}
+
+export async function getUnlinkedLocations(): Promise<Array<{ id: string; name: string; state: string | null }>> {
+  const response = await apiClient.get<ApiResponse<Array<{ id: string; name: string; state: string | null }>>>('/locations/unlinked');
   return response.data.data;
 }
 

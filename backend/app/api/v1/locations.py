@@ -55,6 +55,17 @@ async def list_locations(
     return response
 
 
+@router.get("/unlinked")
+async def list_unlinked_locations(
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+) -> dict[str, Any]:
+    """List locations that have no project linked (for linking UI)."""
+    data = await fetch(
+        "SELECT id, name, state FROM locations WHERE project_id IS NULL ORDER BY name"
+    )
+    return {"success": True, "data": data}
+
+
 @router.get("/{location_id}")
 async def get_location(
     location_id: UUID,
@@ -172,6 +183,7 @@ async def update_location(
     current_user: Annotated[CurrentUser, Depends(require_admin)],
     name: str | None = Query(None, min_length=2),
     state_id: UUID | None = Query(None, description="New state UUID"),
+    project_id: str | None = Query(None, description="Link project UUID, or 'unlink' to clear"),
 ) -> dict[str, Any]:
     """Update an existing site (location).
 
@@ -182,6 +194,7 @@ async def update_location(
         current_user: The authenticated admin user.
         name: New site name.
         state_id: New state UUID.
+        project_id: Link a project (UUID) or 'unlink' to clear the link.
 
     Returns:
         Updated site.
@@ -199,6 +212,26 @@ async def update_location(
             raise NotFoundError("State", str(state_id))
         update_data["state_id"] = str(state_id)
         update_data["state"] = state["name"]
+    if project_id is not None:
+        if project_id == "unlink":
+            update_data["project_id"] = None
+        else:
+            # Verify project exists
+            proj = await fetchrow(
+                "SELECT id FROM projects WHERE id = $1::uuid", project_id
+            )
+            if not proj:
+                raise NotFoundError("Project", project_id)
+            # Verify no other location has this project (1:1)
+            conflict = await fetchrow(
+                "SELECT id, name FROM locations WHERE project_id = $1::uuid AND id != $2::uuid",
+                project_id, str(location_id),
+            )
+            if conflict:
+                raise ValidationError(
+                    f"Project already linked to site '{conflict['name']}'",
+                )
+            update_data["project_id"] = project_id
 
     if not update_data:
         raise ValidationError("No fields to update")
@@ -219,7 +252,7 @@ async def update_location(
     params: list[Any] = []
     for key, val in update_data.items():
         params.append(val)
-        if key == "state_id":
+        if key in ("state_id", "project_id"):
             set_parts.append(f"{key} = ${len(params)}::uuid")
         else:
             set_parts.append(f"{key} = ${len(params)}")

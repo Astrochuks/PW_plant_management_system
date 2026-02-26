@@ -12,6 +12,7 @@ import {
   getLocationWeeklyRecords,
   getLocationTransfers,
   getStates,
+  getUnlinkedLocations,
   createLocation,
   updateLocation,
   deleteLocation,
@@ -43,6 +44,7 @@ export type {
 export const locationsKeys = {
   all: ['locations'] as const,
   lists: () => [...locationsKeys.all, 'list'] as const,
+  unlinked: () => [...locationsKeys.all, 'unlinked'] as const,
   detail: (id: string) => [...locationsKeys.all, 'detail', id] as const,
   plants: (id: string, params?: LocationPlantsParams) =>
     [...locationsKeys.detail(id), 'plants', params] as const,
@@ -151,6 +153,17 @@ export function useLocationTransfers(id: string | null, params: LocationTransfer
 }
 
 /**
+ * Fetch locations that have no project linked
+ */
+export function useUnlinkedLocations() {
+  return useQuery({
+    queryKey: locationsKeys.unlinked(),
+    queryFn: getUnlinkedLocations,
+    staleTime: 2 * 60 * 1000,
+  });
+}
+
+/**
  * Fetch all states (for form dropdowns)
  */
 export function useStates() {
@@ -189,6 +202,8 @@ export function useUpdateLocation(locationId: string) {
     mutationFn: (data: UpdateLocationRequest) => updateLocation(locationId, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: locationsKeys.all });
+      // Also invalidate projects when project link changes
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
     },
   });
 }

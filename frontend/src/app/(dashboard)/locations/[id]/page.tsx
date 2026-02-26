@@ -65,6 +65,7 @@ import {
   useLocationTransfers,
   useDeleteLocation,
 } from '@/hooks/use-locations'
+import { LocationProjectLink } from '@/components/locations/location-project-link'
 import { useLocationCosts } from '@/hooks/use-spare-parts'
 import { getErrorMessage } from '@/lib/api/client'
 import type { PlantCondition } from '@/lib/api/plants'
@@ -230,6 +231,9 @@ export default function LocationDetailPage() {
           </div>
         )}
       </div>
+
+      {/* Linked Project */}
+      <LocationProjectLink location={location} />
 
       {/* Stats Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">

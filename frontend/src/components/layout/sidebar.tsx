@@ -2,6 +2,8 @@
 
 /**
  * Dashboard Sidebar Navigation
+ *
+ * 5 sections: Overview, Plant & Equipment, Projects, Shared, Administration
  */
 
 import Link from 'next/link';
@@ -25,6 +27,7 @@ import {
   PanelLeftClose,
   PanelLeft,
   PieChart,
+  FolderKanban,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -41,21 +44,21 @@ interface SidebarProps {
   onToggle: () => void;
 }
 
-const mainNavItems = [
+// ── Section: OVERVIEW ─────────────────────────────────────────────────────
+const overviewNavItems = [
   {
     title: 'Dashboard',
     href: '/',
     icon: LayoutDashboard,
   },
+];
+
+// ── Section: PLANT & EQUIPMENT ────────────────────────────────────────────
+const plantNavItems = [
   {
-    title: 'Plants',
+    title: 'Fleet Register',
     href: '/plants',
     icon: Truck,
-  },
-  {
-    title: 'Sites',
-    href: '/locations',
-    icon: MapPin,
   },
   {
     title: 'Spare Parts',
@@ -67,18 +70,8 @@ const mainNavItems = [
     title: 'Purchase Orders',
     href: '/spare-parts/pos',
     icon: FileText,
-    // Also matches /spare-parts/po/*, /spare-parts/create
     matchPrefix: '/spare-parts/',
   },
-  {
-    title: 'Suppliers',
-    href: '/suppliers',
-    icon: Building2,
-  },
-];
-
-// Visible to both management and admin
-const managementNavItems = [
   {
     title: 'Transfers',
     href: '/transfers',
@@ -86,18 +79,41 @@ const managementNavItems = [
     badgeKey: 'transfers' as const,
   },
   {
-    title: 'Reports',
-    href: '/reports',
-    icon: BarChart3,
-  },
-  {
-    title: 'Parts Analytics',
+    title: 'Plant Analytics',
     href: '/spare-parts/analytics',
     icon: PieChart,
   },
 ];
 
-// Admin-only items
+// ── Section: PROJECTS ─────────────────────────────────────────────────────
+const projectNavItems = [
+  {
+    title: 'Project Registry',
+    href: '/projects',
+    icon: FolderKanban,
+  },
+];
+
+// ── Section: SHARED ───────────────────────────────────────────────────────
+const sharedNavItems = [
+  {
+    title: 'Sites',
+    href: '/locations',
+    icon: MapPin,
+  },
+  {
+    title: 'Suppliers',
+    href: '/suppliers',
+    icon: Building2,
+  },
+  {
+    title: 'Reports',
+    href: '/reports',
+    icon: BarChart3,
+  },
+];
+
+// ── Section: ADMINISTRATION ───────────────────────────────────────────────
 const adminNavItems = [
   {
     title: 'Upload',
@@ -105,7 +121,7 @@ const adminNavItems = [
     icon: Upload,
   },
   {
-    title: 'Users',
+    title: 'Users & Roles',
     href: '/admin/users',
     icon: Users,
   },
@@ -133,13 +149,11 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const TRANSFERS_LAST_SEEN_KEY = 'transfers_last_seen_at';
   const [lastSeenAt, setLastSeenAt] = useState<string | undefined>(undefined);
 
-  // Load last seen timestamp from localStorage on mount
   useEffect(() => {
     const stored = localStorage.getItem(TRANSFERS_LAST_SEEN_KEY);
     setLastSeenAt(stored || undefined);
   }, []);
 
-  // When user navigates to /transfers, save the current time
   useEffect(() => {
     if (pathname.startsWith('/transfers')) {
       const now = new Date().toISOString();
@@ -148,7 +162,6 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
     }
   }, [pathname]);
 
-  // Fetch transfer stats with "since" to get new_since count
   const { data: transferStats } = useTransferStats(lastSeenAt);
   const newTransfers = transferStats?.data?.new_since ?? 0;
 
@@ -156,15 +169,16 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
     transfers: newTransfers,
   };
 
-  // Prefetch all nav routes so page transitions are instant
+  // Prefetch all nav routes for instant transitions
   useEffect(() => {
-    mainNavItems.forEach((item) => router.prefetch(item.href));
-    if (showManagementItems) {
-      managementNavItems.forEach((item) => router.prefetch(item.href));
-    }
-    if (isAdmin) {
-      adminNavItems.forEach((item) => router.prefetch(item.href));
-    }
+    const allItems = [
+      ...overviewNavItems,
+      ...(showManagementItems ? plantNavItems : []),
+      ...projectNavItems,
+      ...(showManagementItems ? sharedNavItems : []),
+      ...(isAdmin ? adminNavItems : []),
+    ];
+    allItems.forEach((item) => router.prefetch(item.href));
   }, [router, isAdmin, showManagementItems]);
 
   return (
@@ -188,7 +202,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           {!collapsed && (
             <div className="flex flex-col">
               <span className="font-bold text-[13px] leading-tight text-sidebar-foreground">P.W. NIGERIA LTD.</span>
-              <span className="text-[10px] text-muted-foreground">Plant Management</span>
+              <span className="text-[10px] text-muted-foreground">Central Reporting</span>
             </div>
           )}
         </Link>
@@ -196,90 +210,98 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
       {/* Navigation */}
       <nav className="flex-1 flex flex-col gap-1 p-3 overflow-y-auto">
-        {/* Main Navigation */}
-        <div className="space-y-1">
-          {!collapsed && (
-            <span className="text-xs font-medium text-muted-foreground px-3 py-2 block">
-              MAIN MENU
-            </span>
-          )}
-          {mainNavItems.map((item) => {
-            let active: boolean;
-            if (item.exact) {
-              active = pathname === item.href;
-            } else if (item.matchPrefix) {
-              active = pathname === item.href || pathname.startsWith(item.matchPrefix);
-            } else {
-              active = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
-            }
-            return (
-              <NavItem
-                key={item.href}
-                href={item.href}
-                icon={item.icon}
-                title={item.title}
-                isActive={active}
-                collapsed={collapsed}
-              />
-            );
-          })}
-        </div>
 
-        {/* Management Navigation (visible to management + admin) */}
+        {/* OVERVIEW — all authenticated users */}
+        <NavSection label="OVERVIEW" collapsed={collapsed}>
+          {overviewNavItems.map((item) => (
+            <NavItem
+              key={item.href}
+              href={item.href}
+              icon={item.icon}
+              title={item.title}
+              isActive={pathname === item.href}
+              collapsed={collapsed}
+            />
+          ))}
+        </NavSection>
+
+        {/* PLANT & EQUIPMENT — management + admin */}
         {showManagementItems && (
-          <>
-            <Separator className="my-3" />
-            <div className="space-y-1">
-              {!collapsed && (
-                <span className="text-xs font-medium text-muted-foreground px-3 py-2 block">
-                  MANAGEMENT
-                </span>
-              )}
-              {managementNavItems.map((item) => {
-                const badgeKey = 'badgeKey' in item ? item.badgeKey : undefined;
-                const badge = badgeKey ? badgeCounts[badgeKey] : 0;
-                return (
-                  <NavItem
-                    key={item.href}
-                    href={item.href}
-                    icon={item.icon}
-                    title={item.title}
-                    isActive={pathname.startsWith(item.href)}
-                    collapsed={collapsed}
-                    badge={badge}
-                  />
-                );
-              })}
-            </div>
-          </>
-        )}
-
-        {/* Admin Navigation */}
-        {isAdmin && (
-          <>
-            <Separator className="my-3" />
-            <div className="space-y-1">
-              {!collapsed && (
-                <span className="text-xs font-medium text-muted-foreground px-3 py-2 block">
-                  ADMINISTRATION
-                </span>
-              )}
-              {adminNavItems.map((item) => (
+          <NavSection label="PLANT & EQUIPMENT" collapsed={collapsed} separator>
+            {plantNavItems.map((item) => {
+              const badgeKey = 'badgeKey' in item ? item.badgeKey : undefined;
+              const badge = badgeKey ? badgeCounts[badgeKey] : 0;
+              let active: boolean;
+              if ('exact' in item && item.exact) {
+                active = pathname === item.href;
+              } else if ('matchPrefix' in item && item.matchPrefix) {
+                active = pathname === item.href || pathname.startsWith(item.matchPrefix);
+              } else {
+                active = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
+              }
+              return (
                 <NavItem
                   key={item.href}
                   href={item.href}
                   icon={item.icon}
                   title={item.title}
-                  isActive={pathname.startsWith(item.href)}
+                  isActive={active}
                   collapsed={collapsed}
+                  badge={badge}
                 />
-              ))}
-            </div>
-          </>
+              );
+            })}
+          </NavSection>
+        )}
+
+        {/* PROJECTS — all authenticated users */}
+        <NavSection label="PROJECTS" collapsed={collapsed} separator>
+          {projectNavItems.map((item) => (
+            <NavItem
+              key={item.href}
+              href={item.href}
+              icon={item.icon}
+              title={item.title}
+              isActive={pathname === item.href || pathname.startsWith(item.href + '/')}
+              collapsed={collapsed}
+            />
+          ))}
+        </NavSection>
+
+        {/* SHARED — management + admin */}
+        {showManagementItems && (
+          <NavSection label="SHARED" collapsed={collapsed} separator>
+            {sharedNavItems.map((item) => (
+              <NavItem
+                key={item.href}
+                href={item.href}
+                icon={item.icon}
+                title={item.title}
+                isActive={pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href))}
+                collapsed={collapsed}
+              />
+            ))}
+          </NavSection>
+        )}
+
+        {/* ADMINISTRATION — admin only */}
+        {isAdmin && (
+          <NavSection label="ADMINISTRATION" collapsed={collapsed} separator>
+            {adminNavItems.map((item) => (
+              <NavItem
+                key={item.href}
+                href={item.href}
+                icon={item.icon}
+                title={item.title}
+                isActive={pathname.startsWith(item.href)}
+                collapsed={collapsed}
+              />
+            ))}
+          </NavSection>
         )}
       </nav>
 
-      {/* Collapse Toggle - Always visible at bottom */}
+      {/* Collapse Toggle */}
       <div className="border-t border-sidebar-border p-3">
         <Tooltip>
           <TooltipTrigger asChild>
@@ -312,6 +334,37 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
     </aside>
   );
 }
+
+// ============================================================================
+// NavSection — renders a labelled group with optional separator
+// ============================================================================
+
+interface NavSectionProps {
+  label: string;
+  collapsed: boolean;
+  separator?: boolean;
+  children: React.ReactNode;
+}
+
+function NavSection({ label, collapsed, separator, children }: NavSectionProps) {
+  return (
+    <>
+      {separator && <Separator className="my-3" />}
+      <div className="space-y-1">
+        {!collapsed && (
+          <span className="text-xs font-medium text-muted-foreground px-3 py-2 block">
+            {label}
+          </span>
+        )}
+        {children}
+      </div>
+    </>
+  );
+}
+
+// ============================================================================
+// NavItem — single navigation link with optional badge
+// ============================================================================
 
 interface NavItemProps {
   href: string;
