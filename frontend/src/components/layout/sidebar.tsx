@@ -28,6 +28,7 @@ import {
   PanelLeft,
   PieChart,
   FolderKanban,
+  Lightbulb,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -50,6 +51,11 @@ const overviewNavItems = [
     title: 'Dashboard',
     href: '/',
     icon: LayoutDashboard,
+  },
+  {
+    title: 'Insights',
+    href: '/insights',
+    icon: Lightbulb,
   },
 ];
 
@@ -202,7 +208,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           {!collapsed && (
             <div className="flex flex-col">
               <span className="font-bold text-[13px] leading-tight text-sidebar-foreground">P.W. NIGERIA LTD.</span>
-              <span className="text-[10px] text-muted-foreground">Central Reporting</span>
+              <span className="text-[10px] text-muted-foreground">Central Reporting System</span>
             </div>
           )}
         </Link>
@@ -219,7 +225,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
               href={item.href}
               icon={item.icon}
               title={item.title}
-              isActive={pathname === item.href}
+              isActive={item.href === '/' ? pathname === '/' : pathname.startsWith(item.href)}
               collapsed={collapsed}
             />
           ))}

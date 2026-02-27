@@ -133,8 +133,11 @@ export default function LoginPage() {
 
             {/* System Name */}
             <h2 className="text-xl font-semibold text-white tracking-wide">
-              PLANT MANAGEMENT SYSTEM
+              CENTRAL REPORTING SYSTEM
             </h2>
+            <p className="text-gray-400 text-sm mt-3 tracking-wide">
+              Fleet Management &middot; Project Management &middot; Data Analytics &middot; Intelligent Insights
+            </p>
           </div>
         </div>
 
@@ -162,7 +165,7 @@ export default function LoginPage() {
             </div>
             <h1 className="text-2xl font-bold text-foreground">P.W. NIGERIA LTD.</h1>
             <p className="text-sm text-[#ffbf36]">Your Engineering Partner in Africa</p>
-            <p className="text-xs text-muted-foreground mt-1 tracking-wide">PLANT MANAGEMENT SYSTEM</p>
+            <p className="text-xs text-muted-foreground mt-1 tracking-wide">CENTRAL REPORTING SYSTEM</p>
           </div>
 
           {/* Form Header */}

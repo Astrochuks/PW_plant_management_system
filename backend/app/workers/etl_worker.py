@@ -985,6 +985,19 @@ async def process_weekly_report(
             data={"job_id": job_id, "location_id": location_id},
         )
 
+        # Generate automated insights for this site + week
+        try:
+            from app.services.insights_service import generate_site_insights
+            insight_result = await generate_site_insights(location_id, submission_week_ending)
+            result["insights_generated"] = insight_result.get("insights_generated", 0)
+            logger.info(
+                "Post-ETL insights generated",
+                job_id=job_id,
+                insights=result["insights_generated"],
+            )
+        except Exception as ie:
+            logger.warning("Insight generation failed (non-fatal)", error=str(ie))
+
         logger.info(
             "Weekly report processing complete",
             job_id=job_id,

@@ -26,10 +26,12 @@ import {
   CircleDot,
   Plus,
   Calendar,
+  Lightbulb,
 } from 'lucide-react'
 import { useAuth } from '@/providers/auth-provider'
 import { useDashboardSummary, usePlantEvents } from '@/hooks/use-dashboard'
 import { usePlants } from '@/hooks/use-plants'
+import { useInsightsSummary } from '@/hooks/use-insights'
 import type { DashboardPlantStats, LocationStat, RecentSubmission } from '@/lib/api/dashboard'
 import type { PlantSummary } from '@/lib/api/plants'
 
@@ -61,6 +63,7 @@ export default function DashboardPage() {
     sort_order: 'desc',
     limit: 30,
   })
+  const { data: insightsSummary } = useInsightsSummary()
 
   const plants = summary?.plants
   const verificationRate = plants
@@ -123,6 +126,66 @@ export default function DashboardPage() {
           />
         </div>
       ) : null}
+
+      {/* Insights Summary */}
+      {insightsSummary && insightsSummary.total > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Lightbulb className="h-4 w-4 text-amber-500" />
+                This Week&apos;s Intelligence
+              </CardTitle>
+              <Link
+                href="/insights"
+                className="text-xs text-primary hover:underline flex items-center gap-1"
+              >
+                View all ({insightsSummary.total}) <ArrowRight className="h-3 w-3" />
+              </Link>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center gap-4 mb-3">
+              {insightsSummary.critical > 0 && (
+                <Badge variant="destructive" className="text-xs gap-1">
+                  <AlertTriangle className="h-3 w-3" />
+                  {insightsSummary.critical} critical
+                </Badge>
+              )}
+              {insightsSummary.warning > 0 && (
+                <Badge variant="outline" className="text-xs gap-1 text-amber-600 border-amber-300">
+                  {insightsSummary.warning} warnings
+                </Badge>
+              )}
+              {insightsSummary.unacknowledged > 0 && (
+                <span className="text-xs text-muted-foreground">
+                  {insightsSummary.unacknowledged} unacknowledged
+                </span>
+              )}
+            </div>
+            {insightsSummary.top_insights && insightsSummary.top_insights.length > 0 && (
+              <div className="space-y-2">
+                {insightsSummary.top_insights.slice(0, 3).map((insight) => (
+                  <div
+                    key={insight.id}
+                    className="flex items-start gap-2 text-sm"
+                  >
+                    <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${
+                      insight.severity === 'critical' ? 'bg-red-500' : 'bg-amber-500'
+                    }`} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{insight.title}</p>
+                      {insight.location_name && (
+                        <p className="text-xs text-muted-foreground">{insight.location_name}</p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Middle Section: Condition Breakdown + Top Sites */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
