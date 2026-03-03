@@ -36,9 +36,8 @@ async def generate_site_insights(
         Dict with counts of insights generated.
     """
     result = {"insights_generated": 0, "errors": []}
-    year = week_ending_date.isocalendar()[1]
-    week_number = week_ending_date.isocalendar()[1]
     year = week_ending_date.year
+    week_number = week_ending_date.isocalendar()[1]
 
     # Delete existing insights for this site + week to avoid duplicates on reprocessing
     await execute(
