@@ -60,7 +60,7 @@ export function ImportAwardLettersDialog() {
           <DialogTitle>Import Award Letters</DialogTitle>
           <DialogDescription>
             Upload the Award Letters & Completion Certificates Excel file.
-            Each sheet (client/state) will be parsed into project records.
+            Existing legacy projects will be replaced with the new data.
           </DialogDescription>
         </DialogHeader>
 
@@ -117,6 +117,8 @@ export function ImportAwardLettersDialog() {
                 <div className="font-medium">{result.sheets_processed}</div>
                 <div>Projects parsed:</div>
                 <div className="font-medium">{result.total_parsed}</div>
+                <div>Old legacy removed:</div>
+                <div className="font-medium text-muted-foreground">{result.deleted}</div>
                 <div>Projects created:</div>
                 <div className="font-medium text-emerald-600">{result.created}</div>
                 {result.errors.length > 0 && (

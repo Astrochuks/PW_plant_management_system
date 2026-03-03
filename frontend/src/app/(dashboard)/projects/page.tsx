@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import Link from 'next/link'
 import { FolderKanban, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -15,7 +15,8 @@ import { useStates } from '@/hooks/use-locations'
 import { useDebounce } from '@/hooks/use-debounce'
 import { ProjectsStatsCards } from '@/components/projects/projects-stats-cards'
 import { ProjectsFilters } from '@/components/projects/projects-filters'
-import { ProjectsTable } from '@/components/projects/projects-table'
+import { ProjectsTable, DEFAULT_VISIBLE_COLUMNS } from '@/components/projects/projects-table'
+import type { ColumnKey } from '@/components/projects/projects-table'
 import { ImportAwardLettersDialog } from '@/components/projects/import-award-letters-dialog'
 
 type ViewMode = 'active' | 'legacy' | 'all'
@@ -25,7 +26,7 @@ export default function ProjectsPage() {
   const isAdmin = user?.role === 'admin'
 
   // View mode
-  const [viewMode, setViewMode] = useState<ViewMode>('active')
+  const [viewMode, setViewMode] = useState<ViewMode>('legacy')
 
   // Filter state
   const [search, setSearch] = useState('')
@@ -33,16 +34,17 @@ export default function ProjectsPage() {
   const [status, setStatus] = useState('all')
   const [stateId, setStateId] = useState('all')
   const [page, setPage] = useState(1)
+  const [visibleColumns, setVisibleColumns] = useState<ColumnKey[]>(DEFAULT_VISIBLE_COLUMNS)
 
   const debouncedSearch = useDebounce(search, 300)
+  const isLegacyParam = viewMode === 'all' ? undefined : viewMode === 'legacy'
 
-  // Data
-  const { data: statsData, isLoading: statsLoading } = useProjectStats()
+  // Data — global stats for tab counts, filtered stats for cards
+  const { data: globalStats } = useProjectStats()
+  const { data: statsData, isLoading: statsLoading } = useProjectStats(isLegacyParam)
   const { data: clientsData } = useProjectClients()
   const { data: statesData } = useStates()
   const prefetch = usePrefetchProjectDetail()
-
-  const isLegacyParam = viewMode === 'all' ? undefined : viewMode === 'legacy'
 
   const { data, isLoading } = useProjects({
     page,
@@ -59,7 +61,7 @@ export default function ProjectsPage() {
   const clients = clientsData ?? []
   const states = Array.isArray(statesData) ? statesData : (statesData as any)?.data ?? []
 
-  const totals = statsData?.totals
+  const globalTotals = globalStats?.totals
 
   // Reset page on filter change
   const handleSearchChange = (v: string) => { setSearch(v); setPage(1) }
@@ -67,6 +69,14 @@ export default function ProjectsPage() {
   const handleStatusChange = (v: string) => { setStatus(v); setPage(1) }
   const handleStateIdChange = (v: string) => { setStateId(v); setPage(1) }
   const handleViewModeChange = (mode: ViewMode) => { setViewMode(mode); setPage(1) }
+  const handleVisibleColumnsChange = useCallback((columns: ColumnKey[]) => {
+    setVisibleColumns(columns)
+  }, [])
+
+  // Result count text
+  const resultText = meta
+    ? `Showing ${((meta.page - 1) * meta.limit) + 1}–${Math.min(meta.page * meta.limit, meta.total)} of ${meta.total.toLocaleString()} projects`
+    : ''
 
   return (
     <div className="space-y-6">
@@ -100,14 +110,14 @@ export default function ProjectsPage() {
       </div>
 
       {/* Stats */}
-      <ProjectsStatsCards stats={statsData} isLoading={statsLoading} />
+      <ProjectsStatsCards stats={statsData} isLoading={statsLoading} viewMode={viewMode} />
 
       {/* Active / Legacy / All Toggle */}
       <div className="flex items-center gap-1 rounded-lg bg-muted p-1 w-fit">
         {([
-          { key: 'active' as const, label: 'Active', count: totals?.non_legacy },
-          { key: 'legacy' as const, label: 'Legacy', count: totals?.legacy },
-          { key: 'all' as const, label: 'All', count: totals?.total },
+          { key: 'active' as const, label: 'Active', count: globalTotals?.non_legacy },
+          { key: 'legacy' as const, label: 'Legacy', count: globalTotals?.legacy },
+          { key: 'all' as const, label: 'All', count: globalTotals?.total },
         ]).map(({ key, label, count }) => (
           <button
             key={key}
@@ -145,6 +155,9 @@ export default function ProjectsPage() {
         projects={projects}
         isLoading={isLoading}
         onPrefetch={prefetch}
+        visibleColumns={visibleColumns}
+        onVisibleColumnsChange={handleVisibleColumnsChange}
+        resultText={resultText}
       />
 
       {/* Pagination */}

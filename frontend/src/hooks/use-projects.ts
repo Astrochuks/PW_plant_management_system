@@ -71,10 +71,10 @@ export function useProject(id: string | null) {
   });
 }
 
-export function useProjectStats() {
+export function useProjectStats(isLegacy?: boolean) {
   return useQuery({
-    queryKey: projectsKeys.stats(),
-    queryFn: getProjectStats,
+    queryKey: [...projectsKeys.stats(), isLegacy],
+    queryFn: () => getProjectStats(isLegacy),
     staleTime: 5 * 60 * 1000,
   });
 }

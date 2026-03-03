@@ -260,7 +260,6 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           </NavSection>
         )}
 
-        {/* PROJECTS — all authenticated users */}
         <NavSection label="PROJECTS" collapsed={collapsed} separator>
           {projectNavItems.map((item) => (
             <NavItem

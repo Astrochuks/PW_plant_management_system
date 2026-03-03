@@ -58,10 +58,17 @@ _UUID_FIELDS = {"state_id", "created_by", "updated_by", "import_batch_id"}
 @router.get("/stats")
 async def get_project_stats(
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    is_legacy: bool | None = Query(None, description="Filter stats by legacy status"),
 ) -> dict[str, Any]:
     """Dashboard summary: counts by status, total contract value, top clients."""
+    where = "TRUE"
+    params: list[Any] = []
+    if is_legacy is not None:
+        params.append(is_legacy)
+        where = "is_legacy = $1::boolean"
+
     stats_row = await fetchrow(
-        """SELECT
+        f"""SELECT
                count(*)::int AS total,
                count(*) FILTER (WHERE status = 'active')::int AS active,
                count(*) FILTER (WHERE status = 'completed')::int AS completed,
@@ -72,17 +79,19 @@ async def get_project_stats(
                count(*) FILTER (WHERE NOT is_legacy)::int AS non_legacy,
                COALESCE(SUM(current_contract_sum), 0)::float AS total_contract_value,
                count(DISTINCT client)::int AS total_clients
-           FROM projects"""
+           FROM projects WHERE {where}""",
+        *params,
     )
 
     top_clients = await fetch(
-        """SELECT client,
+        f"""SELECT client,
                   count(*)::int AS project_count,
                   COALESCE(SUM(current_contract_sum), 0)::float AS total_value
-           FROM projects
+           FROM projects WHERE {where}
            GROUP BY client
            ORDER BY project_count DESC
-           LIMIT 10"""
+           LIMIT 10""",
+        *params,
     )
 
     return {
@@ -117,8 +126,8 @@ async def import_award_letters(
 ) -> dict[str, Any]:
     """Import projects from an Award Letters Excel workbook.
 
-    Parses all sheets (each sheet = one client/state).
-    Batch-inserts all parsed projects in a single transaction.
+    Deletes existing legacy projects first, then parses all sheets
+    and batch-inserts in a single transaction for a clean reimport.
     """
     from app.services.award_letters_parser import parse_award_letters_excel
 
@@ -144,26 +153,21 @@ async def import_award_letters(
             },
         }
 
-    # Resolve state_id from sheet names
-    states = await fetch(
-        "SELECT id, name, UPPER(TRIM(name)) AS name_upper FROM states"
-    )
-    state_map = {s["name_upper"]: s["id"] for s in states}
+    # Build state_name → state_id lookup (case-insensitive)
+    states = await fetch("SELECT id, name FROM states")
+    state_map: dict[str, str] = {}
+    for s in states:
+        state_map[s["name"].strip().lower()] = str(s["id"])
 
-    # Enrich projects with state_id and user refs
+    # Enrich projects: resolve state_name → state_id, add user refs
     for proj in parsed["projects"]:
-        sheet_upper = (proj.get("source_sheet") or "").upper().strip()
-        state_id = state_map.get(sheet_upper)
-        if state_id:
-            proj["state_id"] = str(state_id)
+        state_name = proj.pop("state_name", None)
+        if state_name:
+            sid = state_map.get(state_name.strip().lower())
+            if sid:
+                proj["state_id"] = sid
         proj["created_by"] = current_user.id
         proj["updated_by"] = current_user.id
-        proj["is_legacy"] = True
-
-    # Batch insert using executemany — single round-trip per batch
-    pool = get_pool()
-    created_count = 0
-    insert_errors: list[dict[str, Any]] = []
 
     # Collect all unique columns across all projects
     all_cols: set[str] = set()
@@ -176,7 +180,7 @@ async def import_award_letters(
     for i, col in enumerate(col_list):
         if col in _UUID_FIELDS:
             placeholders.append(f"${i + 1}::uuid")
-        elif col == "has_award_letter":
+        elif col in ("has_award_letter", "is_legacy"):
             placeholders.append(f"${i + 1}::boolean")
         else:
             placeholders.append(f"${i + 1}")
@@ -186,20 +190,30 @@ async def import_award_letters(
         f"VALUES ({', '.join(placeholders)})"
     )
 
+    pool = get_pool()
+    created_count = 0
+    deleted_count = 0
+    insert_errors: list[dict[str, Any]] = []
+
     async with pool.acquire() as conn:
         async with conn.transaction():
-            # executemany sends all rows in a single protocol-level batch
-            args_list = []
-            for proj in parsed["projects"]:
-                args_list.append(
-                    [proj.get(col) for col in col_list]
-                )
+            # Delete existing legacy projects first (clean reimport)
+            deleted_count = await conn.fetchval(
+                "WITH d AS (DELETE FROM projects WHERE is_legacy = true RETURNING 1) "
+                "SELECT count(*) FROM d"
+            )
+
+            # Batch insert all parsed projects
+            args_list = [
+                [proj.get(col) for col in col_list]
+                for proj in parsed["projects"]
+            ]
 
             try:
                 await conn.executemany(sql, args_list)
                 created_count = len(args_list)
-            except Exception as e:
-                # If batch fails, fall back to row-by-row to identify bad rows
+            except Exception:
+                # Batch failed — fall back to row-by-row to identify bad rows
                 created_count = 0
                 for proj_args, proj in zip(args_list, parsed["projects"]):
                     try:
@@ -224,10 +238,11 @@ async def import_award_letters(
             "sheets_processed": parsed["sheets_processed"],
             "total_parsed": len(parsed["projects"]),
             "created": created_count,
+            "deleted": deleted_count,
             "errors": len(insert_errors),
         },
         ip_address=get_client_ip(request),
-        description=f"Imported {created_count} projects from Award Letters Excel",
+        description=f"Reimported {created_count} legacy projects (deleted {deleted_count} old)",
     )
 
     return {
@@ -237,6 +252,7 @@ async def import_award_letters(
             "sheets_processed": parsed["sheets_processed"],
             "total_parsed": len(parsed["projects"]),
             "created": created_count,
+            "deleted": deleted_count,
             "errors": insert_errors[:20],
             "warnings": parsed["warnings"][:20],
             "parse_errors": parsed["errors"][:20],
@@ -275,7 +291,7 @@ async def list_projects(
     client: str | None = Query(None),
     state_id: UUID | None = None,
     status: str | None = Query(
-        None, pattern=r"^(active|completed|on_hold|cancelled|retention_period)$"
+        None, pattern=r"^(active|completed|on_hold|cancelled|retention_period|legacy)$"
     ),
     is_legacy: bool | None = Query(None, description="Filter by legacy status"),
     sort_by: str = Query("created_at"),

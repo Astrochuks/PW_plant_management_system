@@ -40,6 +40,13 @@ export interface TransferStats {
   new_since: number;
 }
 
+export interface CreateTransferPayload {
+  plant_id: string;
+  to_location_id: string;
+  transfer_date?: string;
+  notes?: string;
+}
+
 export interface TransfersParams {
   status?: string;
   plant_id?: string;
@@ -94,6 +101,15 @@ export async function confirmTransfer(transferId: string) {
     data: Transfer;
     message: string;
   }>(`/transfers/${transferId}/confirm`);
+  return response.data;
+}
+
+export async function createTransfer(payload: CreateTransferPayload) {
+  const response = await apiClient.post<{
+    success: boolean;
+    data: Transfer;
+    message: string;
+  }>('/transfers', payload);
   return response.data;
 }
 

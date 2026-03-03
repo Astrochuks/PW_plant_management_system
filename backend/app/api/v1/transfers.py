@@ -2,22 +2,32 @@
 
 Provides endpoints for:
 - Viewing pending and confirmed transfers
-- Manual transfer confirmation/cancellation
+- Manual transfer creation, confirmation/cancellation
 - Transfer history for plants
 """
 
 import json
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from app.core.pool import fetch, fetchrow, fetchval, execute
 from app.core.security import CurrentUser, require_admin, require_management_or_admin
 from app.services.transfer_service import get_transfer_service
 
 router = APIRouter(prefix="/transfers", tags=["Transfers"])
+
+
+class CreateTransferRequest(BaseModel):
+    """Request body for creating a manual transfer."""
+
+    plant_id: UUID
+    to_location_id: UUID
+    transfer_date: date | None = None
+    notes: str | None = Field(None, max_length=500)
 
 
 @router.get("")
@@ -89,6 +99,98 @@ async def list_transfers(
             "limit": limit,
             "offset": offset,
         },
+    }
+
+
+@router.post("", status_code=201)
+async def create_transfer(
+    body: CreateTransferRequest,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+) -> dict[str, Any]:
+    """Manually create a plant transfer (admin only).
+
+    Creates a confirmed transfer, updates the plant's current location,
+    and records the movement in location history.
+    """
+    transfer_date = body.transfer_date or date.today()
+
+    # Fetch the plant
+    plant = await fetchrow(
+        "SELECT id, fleet_number, description, current_location_id FROM plants_master WHERE id = $1::uuid",
+        str(body.plant_id),
+    )
+    if not plant:
+        raise HTTPException(status_code=404, detail="Plant not found")
+
+    from_location_id = str(plant["current_location_id"]) if plant["current_location_id"] else None
+
+    # Validate destination location exists
+    to_location = await fetchrow(
+        "SELECT id, name FROM locations WHERE id = $1::uuid",
+        str(body.to_location_id),
+    )
+    if not to_location:
+        raise HTTPException(status_code=404, detail="Destination location not found")
+
+    # Cannot transfer to the same location
+    if from_location_id and from_location_id == str(body.to_location_id):
+        raise HTTPException(status_code=400, detail="Plant is already at this location")
+
+    # Get from location name
+    from_location_name = None
+    if from_location_id:
+        from_loc = await fetchrow("SELECT name FROM locations WHERE id = $1::uuid", from_location_id)
+        if from_loc:
+            from_location_name = from_loc["name"]
+
+    # Create the confirmed transfer record
+    transfer = await fetchrow(
+        """INSERT INTO plant_transfers
+           (plant_id, from_location_id, to_location_id, transfer_date,
+            actual_arrival_date, direction, status, confirmed_at, source_remarks)
+           VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $4, 'inbound', 'confirmed', now(), $5)
+           RETURNING *""",
+        str(body.plant_id),
+        from_location_id,
+        str(body.to_location_id),
+        transfer_date,
+        body.notes,
+    )
+
+    # Update plant's current location
+    await execute(
+        "UPDATE plants_master SET current_location_id = $1::uuid WHERE id = $2::uuid",
+        str(body.to_location_id),
+        str(body.plant_id),
+    )
+
+    # Update location history — same pattern as confirm_transfer
+    today = transfer_date
+    await execute(
+        """UPDATE plant_location_history
+           SET end_date = $1::date
+           WHERE plant_id = $2::uuid AND end_date IS NULL""",
+        today,
+        str(body.plant_id),
+    )
+    await execute(
+        """INSERT INTO plant_location_history (plant_id, location_id, start_date, transfer_reason)
+           VALUES ($1::uuid, $2::uuid, $3::date, $4)""",
+        str(body.plant_id),
+        str(body.to_location_id),
+        today,
+        body.notes or "Manual transfer",
+    )
+
+    return {
+        "success": True,
+        "data": {
+            **transfer,
+            "plant": {"id": str(plant["id"]), "fleet_number": plant["fleet_number"], "description": plant["description"]},
+            "from_location": {"id": from_location_id, "name": from_location_name} if from_location_id else None,
+            "to_location": {"id": str(to_location["id"]), "name": to_location["name"]},
+        },
+        "message": f"Transfer created: {plant['fleet_number']} → {to_location['name']}",
     }
 
 

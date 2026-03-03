@@ -39,6 +39,7 @@ const SEVERITY_CONFIG = {
 }
 
 const TYPE_LABELS: Record<string, string> = {
+  fleet_overview: 'Fleet Overview',
   condition_change: 'Condition Change',
   utilization_alert: 'Utilization',
   missing_plants: 'Missing Plants',
@@ -200,6 +201,44 @@ function _renderDataPreview(insight: Insight) {
               <span className="font-medium w-10 text-right">{t.rate}%</span>
             </div>
           ))}
+        </div>
+      </div>
+    )
+  }
+
+  if (insight.insight_type === 'fleet_overview' && typeof data.total_plants === 'number') {
+    const total = data.total_plants as number
+    const segments = [
+      { label: 'Working', count: data.working as number, color: 'bg-emerald-500' },
+      { label: 'Standby', count: data.standby as number, color: 'bg-blue-400' },
+      { label: 'Under Repair', count: data.under_repair as number, color: 'bg-amber-400' },
+      { label: 'Breakdown/Faulty', count: data.breakdown_faulty as number, color: 'bg-red-500' },
+      { label: 'Missing', count: data.missing as number, color: 'bg-purple-500' },
+      { label: 'Scrap', count: data.scrap as number, color: 'bg-gray-400' },
+    ]
+    return (
+      <div className="mt-2 space-y-1.5">
+        <div className="flex h-2.5 rounded-full overflow-hidden bg-muted">
+          {segments.map((s) =>
+            s.count > 0 ? (
+              <div
+                key={s.label}
+                className={s.color}
+                style={{ width: `${(100 * s.count / total)}%` }}
+                title={`${s.label}: ${s.count}`}
+              />
+            ) : null
+          )}
+        </div>
+        <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+          {segments.map((s) =>
+            s.count > 0 ? (
+              <span key={s.label} className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                <span className={`inline-block w-2 h-2 rounded-full ${s.color}`} />
+                {s.label}: {s.count.toLocaleString()}
+              </span>
+            ) : null
+          )}
         </div>
       </div>
     )

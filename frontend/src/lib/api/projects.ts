@@ -9,7 +9,7 @@ import apiClient from './client';
 // Types
 // ============================================================================
 
-export type ProjectStatus = 'active' | 'completed' | 'on_hold' | 'cancelled' | 'retention_period';
+export type ProjectStatus = 'active' | 'completed' | 'on_hold' | 'cancelled' | 'retention_period' | 'legacy';
 
 export interface Project {
   id: string;
@@ -150,8 +150,9 @@ export interface ImportResult {
   sheets_processed: number;
   total_parsed: number;
   created: number;
+  deleted: number;
   errors: Array<{ project_name?: string; sheet?: string; error: string }>;
-  warnings: Array<{ sheet: string; message: string }>;
+  warnings: Array<{ sheet: string; message: string; project?: string; row?: number }>;
   parse_errors: Array<{ sheet: string; row?: number; error: string }>;
 }
 
@@ -183,8 +184,10 @@ export async function getProject(id: string): Promise<Project> {
   return response.data.data;
 }
 
-export async function getProjectStats(): Promise<ProjectStats> {
-  const response = await apiClient.get('/projects/stats');
+export async function getProjectStats(isLegacy?: boolean): Promise<ProjectStats> {
+  const params: Record<string, string> = {};
+  if (isLegacy !== undefined) params.is_legacy = String(isLegacy);
+  const response = await apiClient.get('/projects/stats', { params });
   return response.data.data;
 }
 

@@ -52,6 +52,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/providers/auth-provider';
+import { CreateTransferDialog } from '@/components/transfers/create-transfer-dialog';
 
 const PAGE_SIZE = 20;
 
@@ -98,11 +99,14 @@ function TransfersPageContent() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Transfers</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Track and manage plant transfers between sites
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Transfers</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Track and manage plant transfers between sites
+          </p>
+        </div>
+        {isAdmin && <CreateTransferDialog />}
       </div>
 
       {/* Stats Cards */}
@@ -156,7 +160,7 @@ function TransfersPageContent() {
             <ArrowRightLeft className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
             <p className="text-lg text-muted-foreground">No transfers found</p>
             <p className="text-sm text-muted-foreground mt-1">
-              Transfers are created when weekly reports are processed
+              Transfers are auto-detected from weekly reports or created manually
             </p>
           </CardContent>
         </Card>

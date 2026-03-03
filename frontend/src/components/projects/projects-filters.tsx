@@ -26,6 +26,7 @@ interface ProjectsFiltersProps {
 
 const STATUS_OPTIONS: Array<{ value: ProjectStatus | ''; label: string }> = [
   { value: '', label: 'All Statuses' },
+  { value: 'legacy', label: 'Legacy' },
   { value: 'active', label: 'Active' },
   { value: 'completed', label: 'Completed' },
   { value: 'retention_period', label: 'Retention Period' },

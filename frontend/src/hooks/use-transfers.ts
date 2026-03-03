@@ -7,12 +7,14 @@ import {
   getTransfers,
   getPendingTransfers,
   getTransferStats,
+  createTransfer,
   confirmTransfer,
   cancelTransfer,
   type TransfersParams,
+  type CreateTransferPayload,
 } from '@/lib/api/transfers';
 
-export type { Transfer, TransferStats, TransfersParams } from '@/lib/api/transfers';
+export type { Transfer, TransferStats, TransfersParams, CreateTransferPayload } from '@/lib/api/transfers';
 
 // ============================================================================
 // Query Keys
@@ -58,6 +60,16 @@ export function useTransferStats(since?: string) {
 // ============================================================================
 // Mutations
 // ============================================================================
+
+export function useCreateTransfer() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: CreateTransferPayload) => createTransfer(payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: transfersKeys.all });
+    },
+  });
+}
 
 export function useConfirmTransfer() {
   const queryClient = useQueryClient();

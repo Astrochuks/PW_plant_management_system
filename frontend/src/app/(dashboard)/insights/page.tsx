@@ -16,6 +16,7 @@ type SeverityFilter = 'all' | InsightSeverity
 
 const INSIGHT_TYPES: { value: string; label: string }[] = [
   { value: 'all', label: 'All Types' },
+  { value: 'fleet_overview', label: 'Fleet Overview' },
   { value: 'condition_change', label: 'Condition Changes' },
   { value: 'utilization_alert', label: 'Utilization Alerts' },
   { value: 'idle_fleet', label: 'Idle Fleet' },

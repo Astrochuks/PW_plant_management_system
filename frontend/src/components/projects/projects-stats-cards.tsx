@@ -8,6 +8,7 @@ import type { ProjectStats } from '@/hooks/use-projects'
 interface ProjectsStatsCardsProps {
   stats: ProjectStats | undefined
   isLoading: boolean
+  viewMode?: 'active' | 'legacy' | 'all'
 }
 
 function formatCurrency(amount: number): string {
@@ -25,7 +26,7 @@ function formatCurrency(amount: number): string {
   }).format(amount)
 }
 
-export function ProjectsStatsCards({ stats, isLoading }: ProjectsStatsCardsProps) {
+export function ProjectsStatsCards({ stats, isLoading, viewMode = 'all' }: ProjectsStatsCardsProps) {
   if (isLoading) {
     return (
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
@@ -43,11 +44,16 @@ export function ProjectsStatsCards({ stats, isLoading }: ProjectsStatsCardsProps
 
   const totals = stats?.totals
 
+  const projectsSubtext =
+    viewMode === 'all' && totals?.legacy
+      ? `+ ${totals.legacy} legacy`
+      : undefined
+
   const cards = [
     {
-      label: 'Projects',
-      value: totals?.non_legacy ?? 0,
-      subtext: totals?.legacy ? `+ ${totals.legacy} legacy` : undefined,
+      label: viewMode === 'legacy' ? 'Legacy Projects' : 'Projects',
+      value: totals?.total ?? 0,
+      subtext: projectsSubtext,
       icon: FolderKanban,
       color: 'text-blue-600',
     },

@@ -7,6 +7,7 @@ import apiClient from './client';
 // Types
 
 export type InsightType =
+  | 'fleet_overview'
   | 'condition_change'
   | 'utilization_alert'
   | 'missing_plants'
