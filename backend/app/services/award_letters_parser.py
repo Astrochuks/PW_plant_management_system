@@ -106,12 +106,31 @@ _CERT_DATE_TARGETS: dict[str, str] = {
 }
 
 
+_NOISE_DATE_VALUES: frozenset[str] = frozenset({
+    "nil", "n/a", "na", "-", "none", "nill", "", "no", "yes",
+    "ongoing", "n.a", "tbc", "tbd",
+})
+
+# Months for regex extraction from narrative text
+_MONTH_PAT = (
+    r"(?:January|February|March|April|May|June|July|August|"
+    r"September|October|November|December|"
+    r"Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
+)
+
+
 def parse_free_text_date(text: str | None) -> date | None:
-    """Parse free-text dates like '30th March, 2006', 'Jan 2020', '2018'."""
+    """Parse free-text dates like '30th March, 2006', 'Jan 2020', '2018'.
+
+    Also extracts dates embedded in narrative text such as:
+    - 'Applied for 17th November, 2014'
+    - 'Application submitted: 15th November, 2014'
+    - 'Applied 13th November, 2014 (14,761,734.91)'
+    """
     if not text or not isinstance(text, str):
         return None
     text = text.strip()
-    if not text or text.lower() in ("nil", "n/a", "-", "none", "nill", ""):
+    if not text or text.lower() in _NOISE_DATE_VALUES:
         return None
 
     # If it's already a datetime-like object from pandas
@@ -133,7 +152,7 @@ def parse_free_text_date(text: str | None) -> date | None:
         "%d %b, %Y", "%d %b %Y", "%b %d, %Y", "%b %d %Y",
         "%d/%m/%Y", "%m/%d/%Y", "%Y-%m-%d", "%d-%m-%Y",
         "%d-%B-%Y", "%d-%b-%Y",
-        "%B, %Y", "%B %Y", "%b %Y",
+        "%B, %Y", "%B %Y", "%b, %Y", "%b %Y",
         "%Y",
     ]
     for fmt in formats:
@@ -141,6 +160,27 @@ def parse_free_text_date(text: str | None) -> date | None:
             return datetime.strptime(cleaned, fmt).date()
         except ValueError:
             continue
+
+    # Fallback: extract a date substring from narrative text (search `cleaned` — post ordinal strip).
+    # Handles "Applied for 17th November, 2014", "Application submitted: 15th March, 2020", etc.
+    m = re.search(rf"\b(\d{{1,2}})\s+({_MONTH_PAT}),?\s+(\d{{4}})\b", cleaned, re.IGNORECASE)
+    if m:
+        sub = f"{m.group(1)} {m.group(2)}, {m.group(3)}"
+        for fmt in ("%d %B, %Y", "%d %b, %Y"):
+            try:
+                return datetime.strptime(sub, fmt).date()
+            except ValueError:
+                continue
+
+    # Month + year only embedded in text: "Feb, 2002"
+    m2 = re.search(rf"\b({_MONTH_PAT}),?\s+(\d{{4}})\b", cleaned, re.IGNORECASE)
+    if m2:
+        sub = f"{m2.group(1)} {m2.group(2)}"
+        for fmt in ("%B %Y", "%b %Y"):
+            try:
+                return datetime.strptime(sub, fmt).date()
+            except ValueError:
+                continue
 
     logger.debug("Could not parse date", raw_text=text)
     return None
@@ -396,7 +436,8 @@ def _is_noise_value(val: str) -> bool:
     lower = val.strip().lower()
     noise_patterns = [
         "file not in", "file not seen", "not concluded",
-        "abuja to advice", "not given",
+        "abuja to advice", "abuja to advise", "not given",
+        "pending legal", "100%", "claimed",
     ]
     return any(p in lower for p in noise_patterns)
 
