@@ -501,7 +501,9 @@ def _parse_row(
             # Try to parse the date companion (store as date object for asyncpg)
             date_field = field_name.replace("_raw", "")
             if isinstance(val, (datetime, date)):
-                parsed_date = val if isinstance(val, date) else val.date()
+                # datetime (and pd.Timestamp) is a subclass of date, so check
+                # datetime first to always get a native datetime.date from asyncpg.
+                parsed_date = val.date() if isinstance(val, datetime) else val
             else:
                 parsed_date = parse_free_text_date(val_str)
             if parsed_date:

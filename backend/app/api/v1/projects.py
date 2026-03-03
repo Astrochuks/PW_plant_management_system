@@ -213,11 +213,13 @@ async def import_award_letters(
                 await conn.executemany(sql, args_list)
                 created_count = len(args_list)
             except Exception:
-                # Batch failed — fall back to row-by-row to identify bad rows
+                # Batch failed — fall back to row-by-row with savepoints so
+                # individual row failures don't abort the outer transaction.
                 created_count = 0
                 for proj_args, proj in zip(args_list, parsed["projects"]):
                     try:
-                        await conn.execute(sql, *proj_args)
+                        async with conn.transaction():  # SAVEPOINT inside outer tx
+                            await conn.execute(sql, *proj_args)
                         created_count += 1
                     except Exception as row_err:
                         insert_errors.append({
