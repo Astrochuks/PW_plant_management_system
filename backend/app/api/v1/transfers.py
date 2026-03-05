@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from app.core.pool import fetch, fetchrow, fetchval, execute
 from app.core.security import CurrentUser, require_admin, require_management_or_admin
+from app.core.events import broadcast
 from app.services.transfer_service import get_transfer_service
 
 router = APIRouter(prefix="/transfers", tags=["Transfers"])
@@ -192,6 +193,8 @@ async def create_transfer(
         },
         "message": f"Transfer created: {plant['fleet_number']} → {to_location['name']}",
     }
+    broadcast("transfers", "create")
+    broadcast("plants", "update")
 
 
 @router.get("/pending")
@@ -383,6 +386,9 @@ async def confirm_transfer(
         today,
     )
 
+    broadcast("transfers", "confirm")
+    broadcast("plants", "update")
+
     return {
         "success": True,
         "data": updated,
@@ -409,6 +415,8 @@ async def cancel_transfer(
             status_code=400,
             detail="Failed to cancel transfer. It may not exist or is not pending."
         )
+
+    broadcast("transfers", "cancel")
 
     return {
         "success": True,
@@ -438,6 +446,7 @@ async def reject_transfer(
         "UPDATE plant_transfers SET status = 'rejected' WHERE id = $1::uuid",
         str(transfer_id),
     )
+    broadcast("transfers", "reject")
     return {"success": True, "message": "Transfer request rejected"}
 
 

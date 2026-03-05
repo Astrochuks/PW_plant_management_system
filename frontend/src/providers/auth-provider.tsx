@@ -21,6 +21,7 @@ import {
 } from '@/lib/api/auth';
 import { getErrorMessage } from '@/lib/api/client';
 import { silentRefreshToken } from '@/lib/api/silent-refresh';
+import { useEventStream } from '@/hooks/use-event-stream';
 
 interface AuthContextType {
   user: User | null;
@@ -206,6 +207,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setUser(null);
     }
   }, []);
+
+  // Real-time updates: connect SSE when authenticated
+  useEventStream(!!user);
 
   const value = {
     user,

@@ -1,5 +1,7 @@
 # Production Architecture & Deployment
 
+> For the complete system architecture, technology stack, and design decisions, see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
 ## Database Connection Architecture
 
 ### Before: Supabase PostgREST (REST API Gateway)
@@ -116,6 +118,33 @@ await executemany(
     [(val1a, val2a), (val1b, val2b), ...],
 )
 ```
+
+## Real-Time Data Sync (SSE)
+
+Server-Sent Events push cache invalidation events to all connected clients.
+
+### How It Works
+```
+Backend mutation → broadcast("plants", "update")
+                → SSE pushes to all connected clients
+                → Frontend invalidates matching React Query keys
+                → UI auto-updates (no manual refresh)
+```
+
+### Key Files
+| File | Purpose |
+|---|---|
+| `backend/app/core/events.py` | In-memory event bus (subscribe/broadcast) |
+| `backend/app/api/v1/events.py` | SSE streaming endpoint (`GET /events/stream?token=JWT`) |
+| `frontend/src/hooks/use-event-stream.ts` | EventSource hook + React Query invalidation |
+
+### Broadcast Points
+All mutation endpoints call `broadcast()`: plants (CRUD + transfer), transfers (create/confirm/cancel/reject), projects (import/CRUD), ETL worker (weekly report + PO processing).
+
+### Scaling Note
+Current implementation is in-memory (single-process). For multiple workers, swap for Redis Pub/Sub — see `docs/ARCHITECTURE.md` Section 15.
+
+---
 
 ## Scaling Considerations
 

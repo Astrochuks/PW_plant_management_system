@@ -25,6 +25,8 @@ from app.monitoring.logging import get_logger
 
 logger = get_logger(__name__)
 
+# Max length for project_name in the DB
+_MAX_PROJECT_NAME_LEN = 500
 
 # ── All 36 Nigerian states + FCT ──────────────────────────────────────────
 NIGERIAN_STATES: set[str] = {
@@ -88,6 +90,7 @@ _COLUMN_MAP: dict[str, str] = {
     "contract sum": "contract_sum_raw",
     "award letter": "has_award_letter",
     "award letter (notification)": "has_award_letter",
+    "award letter(notification)": "has_award_letter",
     "substantial completion cert": "substantial_completion_cert",
     "final completion cert": "final_completion_cert",
     "maintenance cert": "maintenance_cert",
@@ -98,8 +101,10 @@ _COLUMN_MAP: dict[str, str] = {
     "amount paid": "retention_amount_paid",
 }
 
-# Columns whose next "date" sibling maps to a specific raw field
+# Columns whose next "Date" sibling maps to a specific raw date field.
+# Award letter is included so the "Date" column after it gets mapped.
 _CERT_DATE_TARGETS: dict[str, str] = {
+    "has_award_letter": "award_date_raw",
     "substantial_completion_cert": "substantial_completion_date_raw",
     "final_completion_cert": "final_completion_date_raw",
     "maintenance_cert": "maintenance_cert_date_raw",
@@ -118,6 +123,19 @@ _MONTH_PAT = (
     r"Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
 )
 
+# Common typos in the data
+_MONTH_TYPOS: dict[str, str] = {
+    "februar": "February",
+    "novemebr": "November",
+    "novemeber": "November",
+    "septmber": "September",
+    "sepetember": "September",
+    "ocotber": "October",
+    "agust": "August",
+    "feburary": "February",
+    "januray": "January",
+}
+
 
 def parse_free_text_date(text: str | None) -> date | None:
     """Parse free-text dates like '30th March, 2006', 'Jan 2020', '2018'.
@@ -126,6 +144,7 @@ def parse_free_text_date(text: str | None) -> date | None:
     - 'Applied for 17th November, 2014'
     - 'Application submitted: 15th November, 2014'
     - 'Applied 13th November, 2014 (14,761,734.91)'
+    - 'JAN,8TH, 2018'
     """
     if not text or not isinstance(text, str):
         return None
@@ -137,8 +156,15 @@ def parse_free_text_date(text: str | None) -> date | None:
     if isinstance(text, (datetime, date)):
         return text if isinstance(text, date) else text.date()
 
-    # Remove ordinal suffixes: 1st, 2nd, 3rd, 4th
-    cleaned = re.sub(r"(\d+)(st|nd|rd|th)", r"\1", text)
+    # Fix known month typos (e.g. "Februar" → "February")
+    cleaned = text
+    for typo, fix in _MONTH_TYPOS.items():
+        cleaned = re.sub(rf"\b{typo}\b", fix, cleaned, flags=re.IGNORECASE)
+
+    # Remove ordinal suffixes: 1st, 2nd, 3rd, 4th (including typos like "4ht")
+    cleaned = re.sub(r"(\d+)(st|nd|rd|th|ht)\b", r"\1", cleaned, flags=re.IGNORECASE)
+    # Handle "JAN,8TH, 2018" → "JAN 8, 2018" (month,day format)
+    cleaned = re.sub(r"([A-Za-z]{3,}),\s*(\d{1,2})\b", r"\1 \2", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip().rstrip(",").strip()
     # Handle period instead of comma (e.g. "13th December. 2012")
     cleaned = re.sub(r"\.(\s*\d{4})", r",\1", cleaned)
@@ -146,23 +172,23 @@ def parse_free_text_date(text: str | None) -> date | None:
     # If multiple dates separated by &, just take the first one
     if "&" in cleaned:
         cleaned = cleaned.split("&")[0].strip().rstrip(",").strip()
+    # Also handle comma-separated multiple dates
+    if "," in cleaned:
+        parts = cleaned.split(",")
+        if len(parts) >= 3:
+            # Could be "15th February, 2001, 16th November, 2006..."
+            # Just take the first date: first two parts
+            candidate = f"{parts[0].strip()}, {parts[1].strip()}"
+            try_date = _try_parse_formats(candidate)
+            if try_date:
+                return try_date
 
-    formats = [
-        "%d %B, %Y", "%d %B %Y", "%B %d, %Y", "%B %d %Y",
-        "%d %b, %Y", "%d %b %Y", "%b %d, %Y", "%b %d %Y",
-        "%d/%m/%Y", "%m/%d/%Y", "%Y-%m-%d", "%d-%m-%Y",
-        "%d-%B-%Y", "%d-%b-%Y",
-        "%B, %Y", "%B %Y", "%b, %Y", "%b %Y",
-        "%Y",
-    ]
-    for fmt in formats:
-        try:
-            return datetime.strptime(cleaned, fmt).date()
-        except ValueError:
-            continue
+    result = _try_parse_formats(cleaned)
+    if result:
+        return result
 
-    # Fallback: extract a date substring from narrative text (search `cleaned` — post ordinal strip).
-    # Handles "Applied for 17th November, 2014", "Application submitted: 15th March, 2020", etc.
+    # Fallback: extract a date substring from narrative text.
+    # Handles "Applied for 17 November, 2014", etc.
     m = re.search(rf"\b(\d{{1,2}})\s+({_MONTH_PAT}),?\s+(\d{{4}})\b", cleaned, re.IGNORECASE)
     if m:
         sub = f"{m.group(1)} {m.group(2)}, {m.group(3)}"
@@ -172,7 +198,7 @@ def parse_free_text_date(text: str | None) -> date | None:
             except ValueError:
                 continue
 
-    # Month + year only embedded in text: "Feb, 2002"
+    # Month + year only embedded in text: "Feb, 2002", "March, 2009"
     m2 = re.search(rf"\b({_MONTH_PAT}),?\s+(\d{{4}})\b", cleaned, re.IGNORECASE)
     if m2:
         sub = f"{m2.group(1)} {m2.group(2)}"
@@ -186,10 +212,33 @@ def parse_free_text_date(text: str | None) -> date | None:
     return None
 
 
+def _try_parse_formats(cleaned: str) -> date | None:
+    """Try common date formats on a cleaned string."""
+    formats = [
+        "%d %B, %Y", "%d %B %Y", "%B %d, %Y", "%B %d %Y",
+        "%d %b, %Y", "%d %b %Y", "%b %d, %Y", "%b %d %Y",
+        "%d/%m/%Y", "%m/%d/%Y", "%Y-%m-%d", "%d-%m-%Y",
+        "%d-%B-%Y", "%d-%b-%Y",
+        "%B, %Y", "%B %Y", "%b, %Y", "%b %Y",
+        "%Y",
+    ]
+    for fmt in formats:
+        try:
+            return datetime.strptime(cleaned, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
 def parse_contract_sum(raw: Any) -> dict[str, Any]:
     """Parse contract sum — may be numeric, or narrative text.
 
-    Returns dict with original_contract_sum, variation_sum, contract_sum_raw.
+    Handles patterns:
+    - Plain number: 18461415
+    - "Original: X, Variation: Y, TOTAL: Z"
+    - "Revised from X to Y" / "X then to Y" → use the final (revised) value
+    - "Euro 108,313.00" → store numeric
+    - "100,042,061.74 NGN & 126,098.12 USD" → use NGN value
     """
     result: dict[str, Any] = {
         "original_contract_sum": None,
@@ -209,27 +258,148 @@ def parse_contract_sum(raw: Any) -> dict[str, Any]:
     text = str(raw).strip()
     if not text:
         return result
+    if _is_noise_value(text):
+        return result
     result["contract_sum_raw"] = text
 
-    # Extract all numbers from the text
-    numbers = re.findall(r"[\d,]+\.?\d*", text.replace("N", "").replace("₦", ""))
-    cleaned: list[float] = []
-    for n in numbers:
-        try:
-            cleaned.append(float(n.replace(",", "")))
-        except ValueError:
-            continue
+    text_lower = text.lower()
 
-    if len(cleaned) == 1:
-        result["original_contract_sum"] = cleaned[0]
-    elif len(cleaned) >= 2:
-        if "variation" in text.lower():
-            result["original_contract_sum"] = cleaned[0]
-            result["variation_sum"] = cleaned[1]
+    # Pattern: "Original: X, Variation: Y. TOTAL: Z"
+    if "total" in text_lower and ("variation" in text_lower or "original" in text_lower):
+        numbers = _extract_numbers(text)
+        if len(numbers) >= 3:
+            result["original_contract_sum"] = numbers[0]
+            result["variation_sum"] = numbers[1]
+            # Use the TOTAL as current_contract_sum (computed later if not set)
+            return result
+        elif len(numbers) == 2:
+            result["original_contract_sum"] = numbers[0]
+            result["variation_sum"] = numbers[1]
+            return result
+
+    # Pattern: "Revised from X to Y" / "Revised to Y from X" / "X then to Y"
+    if "revised" in text_lower or "then to" in text_lower:
+        numbers = _extract_numbers(text)
+        if len(numbers) >= 2:
+            # "Revised to Y from X" → Y comes first, use it
+            # "Revised from X to Y" → Y comes last, use it
+            # "X then to Y" → Y comes last, use it
+            # In all patterns the value after "to" is the revised one.
+            m_to = re.search(r"\bto\s+([\d,]+\.?\d*)", text, re.IGNORECASE)
+            if m_to:
+                try:
+                    result["original_contract_sum"] = float(m_to.group(1).replace(",", ""))
+                    return result
+                except ValueError:
+                    pass
+            result["original_contract_sum"] = numbers[-1]
+            return result
+        elif len(numbers) == 1:
+            result["original_contract_sum"] = numbers[0]
+            return result
+
+    # Pattern: "X NGN & Y USD" — use NGN value (before "NGN")
+    if "ngn" in text_lower and "usd" in text_lower:
+        # Take the number before "NGN"
+        m = re.search(r"([\d,]+\.?\d*)\s*NGN", text, re.IGNORECASE)
+        if m:
+            try:
+                result["original_contract_sum"] = float(m.group(1).replace(",", ""))
+                return result
+            except ValueError:
+                pass
+
+    # Pattern: "Euro X" or similar foreign currency
+    if "euro" in text_lower or "usd" in text_lower:
+        numbers = _extract_numbers(text)
+        if numbers:
+            result["original_contract_sum"] = numbers[0]
+            return result
+
+    # Generic: extract all numbers and use the first
+    numbers = _extract_numbers(text)
+    if len(numbers) == 1:
+        result["original_contract_sum"] = numbers[0]
+    elif len(numbers) >= 2:
+        if "variation" in text_lower:
+            result["original_contract_sum"] = numbers[0]
+            result["variation_sum"] = numbers[1]
         else:
-            result["original_contract_sum"] = cleaned[0]
+            result["original_contract_sum"] = numbers[0]
 
     return result
+
+
+def _extract_numbers(text: str) -> list[float]:
+    """Extract all numeric values from text, ignoring currency symbols."""
+    cleaned_text = text.replace("N", "").replace("₦", "").replace("€", "").replace("$", "")
+    raw_numbers = re.findall(r"[\d,]+\.?\d*", cleaned_text)
+    result: list[float] = []
+    for n in raw_numbers:
+        try:
+            val = float(n.replace(",", ""))
+            if val > 0:  # Skip zero and negative
+                result.append(val)
+        except ValueError:
+            continue
+    return result
+
+
+def parse_amount(raw: Any) -> float | None:
+    """Parse an amount value — handles shorthand like '18.5 million', '74m', 'Nil'.
+
+    Returns None for noise values and unparseable text.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, (int, float)):
+        if pd.isna(raw):
+            return None
+        return float(raw)
+
+    text = str(raw).strip()
+    if not text:
+        return None
+
+    lower = text.lower()
+    if lower in ("nil", "nill", "none", "n/a", "-", ""):
+        return None
+    if _is_noise_value(text):
+        return None
+
+    # "18.5 million" → 18_500_000
+    m = re.match(r"([\d,.]+)\s*million", lower)
+    if m:
+        try:
+            return float(m.group(1).replace(",", "")) * 1_000_000
+        except ValueError:
+            pass
+
+    # "74m" or "17m" → 74_000_000
+    m = re.match(r"([\d,.]+)\s*m\b", lower)
+    if m:
+        try:
+            return float(m.group(1).replace(",", "")) * 1_000_000
+        except ValueError:
+            pass
+
+    # "74b" → billion
+    m = re.match(r"([\d,.]+)\s*b\b", lower)
+    if m:
+        try:
+            return float(m.group(1).replace(",", "")) * 1_000_000_000
+        except ValueError:
+            pass
+
+    # Plain number with commas/currency symbols
+    try:
+        cleaned = re.sub(r"[^\d.]", "", text.replace(",", ""))
+        if cleaned:
+            return float(cleaned)
+    except (ValueError, TypeError):
+        pass
+
+    return None
 
 
 def _is_nigerian_state(name: str) -> bool:
@@ -269,16 +439,7 @@ def _resolve_state_for_row(
     project_name: str,
     row_number: int,
 ) -> str | None:
-    """Determine the state_name for a project row.
-
-    Logic:
-    - State-named sheets → sheet name is the state
-    - FERMA → extract from project name
-    - PRIVATE CLIENTS → hardcoded by row number
-    - FCDA ABUJA → FCT
-    - FAAN → hardcoded by row number
-    - FMW → hardcoded by row number
-    """
+    """Determine the state_name for a project row."""
     sheet_upper = sheet_name.strip().upper()
 
     # State-named sheets
@@ -400,7 +561,7 @@ def _find_header_row(df: pd.DataFrame) -> int | None:
 def _build_column_map(columns: list[str]) -> dict[int, str]:
     """Map column index → DB field name.
 
-    Handles positional 'Date' columns that follow each cert column.
+    Handles positional 'Date' columns that follow each cert/award column.
     """
     col_map: dict[int, str] = {}
     # Queue of date field names to assign to upcoming "Date" columns
@@ -422,10 +583,12 @@ def _build_column_map(columns: list[str]) -> dict[int, str]:
 
         if matched_field:
             col_map[i] = matched_field
-            # If this is a cert column, queue the date target
+            # If this is a cert/award column, queue the date target for the
+            # next "Date" column that follows it
             if matched_field in _CERT_DATE_TARGETS:
                 date_queue.append(_CERT_DATE_TARGETS[matched_field])
-        elif col_lower == "date" and date_queue:
+        elif re.match(r"^date(\.\d+)?$", col_lower) and date_queue:
+            # pandas renames duplicate "Date" columns to "Date.1", "Date.2", etc.
             col_map[i] = date_queue.pop(0)
 
     return col_map
@@ -437,7 +600,10 @@ def _is_noise_value(val: str) -> bool:
     noise_patterns = [
         "file not in", "file not seen", "not concluded",
         "abuja to advice", "abuja to advise", "not given",
-        "pending legal", "100%", "claimed",
+        "pending legal", "100% claimed",
+        "work on going", "work ongoing", "no advance payment",
+        "request for", "snagging", "not yet due",
+        "vetted waiting", "inspection by",
     ]
     return any(p in lower for p in noise_patterns)
 
@@ -459,13 +625,17 @@ def _parse_row(
     if pd.isna(project_name) or not str(project_name).strip():
         return None
 
+    # Truncate project name to DB column limit
+    clean_name = str(project_name).strip()
+    if len(clean_name) > _MAX_PROJECT_NAME_LEN:
+        clean_name = clean_name[:_MAX_PROJECT_NAME_LEN]
+
     project: dict[str, Any] = {
-        "project_name": str(project_name).strip(),
+        "project_name": clean_name,
         "source_sheet": sheet_name,
         "source_row": row_idx + 1,
         "import_batch_id": batch_id,
         "client": sheet_name.strip().upper(),
-        "status": "legacy",
         "is_legacy": True,
     }
 
@@ -501,22 +671,18 @@ def _parse_row(
             # Try to parse the date companion (store as date object for asyncpg)
             date_field = field_name.replace("_raw", "")
             if isinstance(val, (datetime, date)):
-                # datetime (and pd.Timestamp) is a subclass of date, so check
-                # datetime first to always get a native datetime.date from asyncpg.
                 parsed_date = val.date() if isinstance(val, datetime) else val
+            elif isinstance(val, pd.Timestamp):
+                parsed_date = val.date()
             else:
                 parsed_date = parse_free_text_date(val_str)
             if parsed_date:
                 project[date_field] = parsed_date
 
         elif field_name == "retention_amount_paid":
-            try:
-                cleaned_val = str(val).replace(",", "").replace("N", "").replace("₦", "")
-                cleaned_val = re.sub(r"[^\d.]", "", cleaned_val)
-                if cleaned_val:
-                    project[field_name] = float(cleaned_val)
-            except (ValueError, TypeError):
-                pass
+            parsed_amt = parse_amount(val)
+            if parsed_amt is not None:
+                project[field_name] = parsed_amt
 
         elif field_name == "retention_paid":
             clean = val_str.lower().strip()
@@ -532,9 +698,26 @@ def _parse_row(
             # Skip noise values
             if _is_noise_value(val_str):
                 continue
-            # Normalize
-            clean = val_str.lower().strip()[:50]
-            project[field_name] = clean
+
+            clean = val_str.strip()
+
+            # Some cert columns contain actual dates (e.g. "9th March, 2017")
+            # instead of "yes"/"no" — detect and store the date too
+            parsed_cert_date = parse_free_text_date(clean)
+            if parsed_cert_date:
+                date_field = {
+                    "substantial_completion_cert": "substantial_completion_date",
+                    "final_completion_cert": "final_completion_date",
+                    "maintenance_cert": "maintenance_cert_date",
+                }[field_name]
+                raw_field = date_field + "_raw"
+                if date_field not in project:
+                    project[date_field] = parsed_cert_date
+                if raw_field not in project:
+                    project[raw_field] = clean
+
+            # Normalize the cert text: lowercase and truncate to 50 chars
+            project[field_name] = clean.lower()[:50]
 
     # Compute current_contract_sum
     orig = project.get("original_contract_sum")

@@ -1,1672 +1,899 @@
-# Plant Management System - Architecture Blueprint
+# PW Central Reporting System - Architecture & Technical Documentation
 
-> **Version:** 1.0 (Draft)
-> **Last Updated:** 2026-02-02
-> **Status:** Under Review
+> **Version:** 2.0
+> **Last Updated:** 2026-03-05
+> **Status:** Production
 
 ---
 
 ## Table of Contents
 
-1. [Executive Summary](#1-executive-summary)
-2. [System Goals & Requirements](#2-system-goals--requirements)
-3. [High-Level Architecture](#3-high-level-architecture)
-4. [Data Architecture](#4-data-architecture)
-5. [Backend Architecture](#5-backend-architecture)
-6. [Frontend Architecture](#6-frontend-architecture)
-7. [ETL & Data Pipeline](#7-etl--data-pipeline)
-8. [Security Architecture](#8-security-architecture)
-9. [Observability & Monitoring](#9-observability--monitoring)
-10. [Scalability Strategy](#10-scalability-strategy)
-11. [Failure Handling & Resilience](#11-failure-handling--resilience)
-12. [AI Integration Strategy](#12-ai-integration-strategy)
-13. [Technology Stack](#13-technology-stack)
-14. [Trade-offs & Alternatives](#14-trade-offs--alternatives)
-15. [Risks & Mitigations](#15-risks--mitigations)
-16. [Implementation Roadmap](#16-implementation-roadmap)
+1. [System Overview](#1-system-overview)
+2. [Technology Stack](#2-technology-stack)
+3. [System Architecture](#3-system-architecture)
+4. [Backend Architecture](#4-backend-architecture)
+5. [Frontend Architecture](#5-frontend-architecture)
+6. [Database Architecture](#6-database-architecture)
+7. [Authentication & Authorization](#7-authentication--authorization)
+8. [Real-Time Data Sync (SSE)](#8-real-time-data-sync-sse)
+9. [ETL & Data Pipeline](#9-etl--data-pipeline)
+10. [AI Integration](#10-ai-integration)
+11. [File Storage](#11-file-storage)
+12. [Observability & Monitoring](#12-observability--monitoring)
+13. [Deployment & Infrastructure](#13-deployment--infrastructure)
+14. [API Reference](#14-api-reference)
+15. [Scaling Strategy](#15-scaling-strategy)
+16. [Key Design Decisions](#16-key-design-decisions)
 
 ---
 
-## 1. Executive Summary
+## 1. System Overview
 
-### What We're Building
+### What It Does
 
-A comprehensive **Plant Management System** for tracking, maintaining, and analyzing industrial plant equipment across multiple locations. The system will:
+A **Central Reporting System** built for **P.W Nigeria Limited** — a construction and infrastructure company operating across 27+ project sites nationwide. Originally focused on plant and equipment management, the system has evolved into a comprehensive operational platform that centralises reporting, asset tracking, procurement, and project intelligence. The system handles:
 
-- **Store** asset data securely with full audit trails
-- **Track** equipment locations, maintenance history, and spare parts
-- **Analyze** operational data for business intelligence
-- **Predict** maintenance needs using AI/ML
-- **Automate** reporting and data pipelines
-- **Scale** to handle growing data volumes and users
+- **Plant & equipment management** — 2,000+ plants with real-time location and condition monitoring across all sites
+- **Weekly reporting** — Site engineers upload Excel reports; ETL pipeline parses, validates, and imports data
+- **Transfer management** — Track equipment movements between sites with approval workflows
+- **Spare parts & procurement** — Purchase order tracking, supplier management, cost analytics
+- **Project management** — Award letters import, contract tracking, legacy project data (FERMA, state, and federal contracts)
+- **Fleet Intelligence** — AI-powered insights engine for operational analytics
+- **Site engineer portal** — Dedicated interface for field officers to submit reports and manage site-level operations
+- **Audit trails** — Full change history for compliance
 
-### Design Principles
+### User Roles
 
-| Principle | Description |
-|-----------|-------------|
-| **Sustainability** | System must run without constant manual intervention |
-| **Automation** | Repeatable processes, CI/CD, scheduled jobs |
-| **Observability** | Know what's happening at all times |
-| **Security** | Defense in depth, least privilege |
-| **Simplicity** | Avoid over-engineering; complexity only when justified |
-| **Evolvability** | Easy to change, extend, and maintain |
-
----
-
-## 2. System Goals & Requirements
-
-### Functional Requirements
-
-| ID | Requirement | Priority |
-|----|-------------|----------|
-| FR-01 | CRUD operations for plants, spare parts, locations | Must Have |
-| FR-02 | Track plant location history over time | Must Have |
-| FR-03 | Role-based access control (Admin, Management) | Must Have |
-| FR-04 | Import data from Excel files (ETL) | Must Have |
-| FR-05 | Generate reports (PDF, Excel exports) | Must Have |
-| FR-06 | Real-time dashboard with key metrics | Should Have |
-| FR-07 | Search and filter across all entities | Must Have |
-| FR-08 | Audit log for all data changes | Should Have |
-| FR-09 | Predictive maintenance alerts (AI) | Nice to Have |
-| FR-10 | Natural language queries (AI) | Nice to Have |
-
-### Non-Functional Requirements
-
-| ID | Requirement | Target |
-|----|-------------|--------|
-| NFR-01 | Availability | 99.5% uptime |
-| NFR-02 | Response Time | < 200ms for 95th percentile API calls |
-| NFR-03 | Data Retention | 7 years for audit/compliance |
-| NFR-04 | Concurrent Users | Support 50+ simultaneous users |
-| NFR-05 | Data Volume | Handle 100K+ plants, 1M+ spare parts |
-| NFR-06 | Recovery Time | < 1 hour RPO, < 4 hours RTO |
-| NFR-07 | Security | SOC 2 Type II compliance ready |
+| Role | Access | Description |
+|------|--------|-------------|
+| `admin` | Full system | Manage users, upload reports, approve transfers, view all data |
+| `management` | Read + limited write | View dashboards, reports, analytics across all sites |
+| `site_engineer` | Site-scoped | Upload weekly reports, request transfers, view own site data |
 
 ---
 
-## 3. High-Level Architecture
+## 2. Technology Stack
 
-### Architecture Pattern: **Hybrid Backend (FastAPI + Supabase)**
+### Backend
 
-We choose a **hybrid architecture** combining FastAPI (Python) with Supabase because:
-- **Single language (Python)** for ETL, API, and AI - no context switching
-- **Native data science tools** - pandas, numpy, scikit-learn for analytics
-- **AI/ML first-class support** - langchain, anthropic SDK, embeddings
-- **Full control** over complex business logic (Excel processing, email parsing)
-- **Supabase strengths** retained - auth, real-time, storage, PostgreSQL
-- Team already proficient in Python from ETL development
+| Technology | Version | Purpose |
+|------------|---------|---------|
+| **Python** | 3.11+ | Runtime |
+| **FastAPI** | >= 0.109 | REST API framework (async, auto-docs) |
+| **Uvicorn** | >= 0.27 | ASGI server |
+| **asyncpg** | >= 0.29 | Direct PostgreSQL driver (binary protocol, 1-5ms queries) |
+| **Pydantic** | >= 2.5 | Request/response validation |
+| **Pandas** | >= 2.0 | Excel parsing and data transformation |
+| **openpyxl** | >= 3.1 | Excel file reading |
+| **PyJWT** | >= 2.8 | Local JWT verification (ES256 via JWKS) |
+| **structlog** | >= 24.1 | Structured JSON logging |
+| **httpx** | >= 0.26 | Async HTTP client |
+| **tenacity** | >= 8.2 | Retry logic with exponential backoff |
+| **OpenAI SDK** | >= 1.3 | GPT-4 for remarks parsing and insights |
+| **Google GenAI** | >= 0.8 | Gemini fallback for AI features |
+| **Supabase SDK** | >= 2.3 | Auth API + Storage API only (NOT for DB queries) |
+| **Pillow** | >= 10.0 | Image processing |
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              PRESENTATION LAYER                              │
-│  ┌─────────────────────┐  ┌─────────────────────┐  ┌─────────────────────┐  │
-│  │   Web Application   │  │   Upload Portal     │  │   Mobile (Future)   │  │
-│  │   (Next.js/React)   │  │  (File Ingestion)   │  │   (React Native)    │  │
-│  └──────────┬──────────┘  └──────────┬──────────┘  └──────────┬──────────┘  │
-└─────────────┼────────────────────────┼────────────────────────┼─────────────┘
-              │                        │                        │
-              ▼                        ▼                        ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                                 API LAYER                                    │
-│                                                                              │
-│  ┌────────────────────────────────┐  ┌────────────────────────────────┐    │
-│  │         FASTAPI (Python)       │  │      SUPABASE (BaaS)           │    │
-│  │  ┌──────────────────────────┐  │  │  ┌──────────────────────────┐  │    │
-│  │  │ • File Processing        │  │  │  │ • Authentication (JWT)   │  │    │
-│  │  │ • Excel/Email Parsing    │  │  │  │ • Real-time Subscriptions│  │    │
-│  │  │ • ETL Orchestration      │  │  │  │ • File Storage (S3)      │  │    │
-│  │  │ • AI/ML Processing       │  │  │  │ • Simple CRUD (backup)   │  │    │
-│  │  │ • Complex Business Logic │  │  │  │ • Row-Level Security     │  │    │
-│  │  │ • Report Generation      │  │  │  └──────────────────────────┘  │    │
-│  │  │ • Analytics Queries      │  │  │                                │    │
-│  │  │ • Webhooks (Email/WA)    │  │  │  Used for:                     │    │
-│  │  └──────────────────────────┘  │  │  • User login/logout           │    │
-│  │                                │  │  • Real-time dashboard updates │    │
-│  │  Deployed on: Railway/Render   │  │  • File upload storage         │    │
-│  └────────────────────────────────┘  └────────────────────────────────┘    │
-│                     │                              │                        │
-│                     └──────────────┬───────────────┘                        │
-│                                    │                                        │
-└────────────────────────────────────┼────────────────────────────────────────┘
-                                     │
-                                     ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           BUSINESS LOGIC LAYER                               │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │                     FastAPI Application (Python)                     │   │
-│  │                                                                       │   │
-│  │  ┌───────────┐  ┌───────────┐  ┌───────────┐  ┌───────────┐        │   │
-│  │  │  Plants   │  │   Parts   │  │  Reports  │  │    AI     │        │   │
-│  │  │  Service  │  │  Service  │  │  Service  │  │  Service  │        │   │
-│  │  └───────────┘  └───────────┘  └───────────┘  └───────────┘        │   │
-│  │                                                                       │   │
-│  │  ┌───────────┐  ┌───────────┐  ┌───────────┐  ┌───────────┐        │   │
-│  │  │ Ingestion │  │    ETL    │  │ Analytics │  │  Notify   │        │   │
-│  │  │  Service  │  │  Pipeline │  │  Engine   │  │  Service  │        │   │
-│  │  └───────────┘  └───────────┘  └───────────┘  └───────────┘        │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────────────┘
-              │
-              ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                               DATA LAYER                                     │
-│                                                                              │
-│  ┌─────────────────────────────┐    ┌─────────────────────────────┐        │
-│  │     OPERATIONAL DATABASE    │    │      DATA WAREHOUSE         │        │
-│  │      (OLTP - Supabase)      │    │    (OLAP - Analytics)       │        │
-│  │  ┌───────────────────────┐  │    │  ┌───────────────────────┐  │        │
-│  │  │   public schema       │  │    │  │   analytics schema    │  │        │
-│  │  │   - plants            │  │    │  │   - fact_maintenance  │  │        │
-│  │  │   - spare_parts       │  │    │  │   - fact_transfers    │  │        │
-│  │  │   - locations         │  │    │  │   - dim_plants        │  │        │
-│  │  │   - users             │  │    │  │   - dim_locations     │  │        │
-│  │  │   - audit_logs        │  │    │  │   - dim_time          │  │        │
-│  │  └───────────────────────┘  │    │  └───────────────────────┘  │        │
-│  └─────────────────────────────┘    └─────────────────────────────┘        │
-│                │                                  ▲                         │
-│                │              ETL                 │                         │
-│                └──────────────────────────────────┘                         │
-│                                                                              │
-│  ┌─────────────────────────────┐    ┌─────────────────────────────┐        │
-│  │       VECTOR STORE          │    │         CACHE               │        │
-│  │    (pgvector extension)     │    │   (Supabase/Redis Future)   │        │
-│  │   - document_embeddings     │    │   - session cache           │        │
-│  │   - query_cache             │    │   - query results           │        │
-│  └─────────────────────────────┘    └─────────────────────────────┘        │
-└─────────────────────────────────────────────────────────────────────────────┘
-              │
-              ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          EXTERNAL INTEGRATIONS                               │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐    │
-│  │   ETL Jobs   │  │   AI/LLM     │  │    Email     │  │   Storage    │    │
-│  │   (Python)   │  │   (Claude)   │  │  (Resend)    │  │  (Supabase)  │    │
-│  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘    │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+### Frontend
 
-### Component Responsibilities
+| Technology | Version | Purpose |
+|------------|---------|---------|
+| **Next.js** | 16.1 | React framework (App Router, SSR) |
+| **React** | 19.2 | UI library |
+| **TypeScript** | 5 | Type safety |
+| **Tailwind CSS** | 4 | Utility-first styling |
+| **shadcn/ui** | Latest | Accessible component library (Radix UI primitives) |
+| **TanStack React Query** | 5.90 | Server state management, caching, background refetch |
+| **Zustand** | 5.0 | Client-side UI state |
+| **Axios** | 1.13 | HTTP client with JWT interceptor |
+| **React Hook Form** | 7.71 | Form state management |
+| **Zod** | 4.3 | Schema validation |
+| **ECharts** | 6.0 | Data visualization and charts |
+| **date-fns** | 4.1 | Date formatting and manipulation |
+| **Lucide React** | 0.563 | Icon library |
+| **Sonner** | 2.0 | Toast notifications |
+| **cmdk** | 1.1 | Command palette (Ctrl+K search) |
+| **next-themes** | 0.4 | Theme switching (light/dark) |
 
-| Component | Responsibility | Technology |
-|-----------|---------------|------------|
-| Web App | User interface, forms, dashboards | Next.js 14 (App Router) |
-| API Gateway | Auth, rate limiting, routing | Supabase Gateway |
-| REST API | Auto-generated CRUD endpoints | PostgREST |
-| GraphQL API | Flexible queries, relationships | pg_graphql |
-| Edge Functions | Custom business logic, webhooks | Deno (Supabase Edge) |
-| OLTP Database | Transactional data, real-time | PostgreSQL (Supabase) |
-| OLAP Database | Analytics, reporting | PostgreSQL (same instance, different schema) |
-| Vector Store | AI embeddings, semantic search | pgvector |
-| ETL Pipeline | Data ingestion, transformation | Python (existing) |
+### Infrastructure
+
+| Technology | Purpose |
+|------------|---------|
+| **PostgreSQL** | Primary database (via Supabase) |
+| **Supavisor** | Connection pooler (port 6543, transaction-mode) |
+| **Supabase Auth** | User authentication (JWT, session management) |
+| **Supabase Storage** | File storage (weekly reports, documents) |
+| **Render** | Backend hosting (Docker, Frankfurt EU) |
+| **Vercel** | Frontend hosting (Next.js, edge network) |
+| **Docker** | Backend containerization (Python 3.11-slim) |
+
+### Dev Tools
+
+| Tool | Purpose |
+|------|---------|
+| **Ruff** | Python linting + formatting |
+| **mypy** | Python type checking |
+| **ESLint** | TypeScript/React linting |
+| **pytest** | Backend testing (async support) |
+| **React Query DevTools** | Frontend cache debugging |
 
 ---
 
-## 4. Data Architecture
+## 3. System Architecture
 
-### 4.1 Database Schema Strategy
-
-We use **schema separation** to organize different concerns:
+### High-Level Data Flow
 
 ```
-PostgreSQL Database
-├── public          # Core application tables (OLTP)
-├── analytics       # Data warehouse tables (OLAP)
-├── audit           # Audit logs and change tracking
-├── monitoring      # Performance metrics (existing)
-└── ai              # Vector embeddings and AI cache
+Browser (React)
+    |
+    |  HTTPS (REST + SSE)
+    v
+Vercel (Next.js SSR)  ──>  Render (FastAPI + Uvicorn)
+                                |           |
+                    +-----------+-----------+-----------+
+                    |           |           |           |
+              asyncpg pool  Supabase    Supabase    OpenAI
+              (port 6543)    Auth SDK   Storage     GPT-4
+                    |                      |
+              Supavisor                 S3-compat
+              (pooler)                  bucket
+                    |
+              PostgreSQL
+              (Supabase)
 ```
 
-### 4.2 OLTP Schema (public) - Current + Enhancements
-
-```sql
--- EXISTING TABLES (Enhanced)
-plants                    -- Master equipment registry
-├── id (PK)
-├── fleet_number (UNIQUE)
-├── description
-├── fleet_type_id (FK)
-├── make, model, chassis_number
-├── year_of_manufacture
-├── purchase_cost
-├── status (active/archived/disposed)
-├── physical_verification
-├── current_location_id (FK)
-├── created_at, updated_at
-└── [NEW] deleted_at      -- Soft delete support
-
-spare_parts               -- Maintenance history
-├── id (PK)
-├── plant_id (FK)
-├── replaced_date
-├── part_number, part_description
-├── supplier, reason_for_change
-├── unit_cost, quantity
-├── vat_percentage, discount_percentage
-├── other_costs, total_cost (computed)
-└── created_by (FK), created_at
-
-plant_location_history    -- Location tracking
-├── id (PK)
-├── plant_id (FK)
-├── location_id (FK)
-├── start_date, end_date
-├── transfer_reason
-└── created_by (FK), created_at
-
-locations                 -- Physical sites
-├── id (PK)
-├── name (UNIQUE)
-├── [NEW] address
-├── [NEW] coordinates (PostGIS point)
-└── created_at
-
-fleet_types               -- Equipment categories
-├── id (PK)
-├── name (UNIQUE)
-├── description
-└── created_at
-
-users                     -- System users
-├── id (PK)
-├── email (UNIQUE)
-├── password_hash
-├── full_name
-├── role (admin/management)
-├── is_active
-├── must_change_password
-├── last_login_at
-└── created_at, updated_at
-
--- NEW TABLES
-audit_logs                -- Change tracking
-├── id (PK)
-├── table_name
-├── record_id
-├── action (INSERT/UPDATE/DELETE)
-├── old_values (JSONB)
-├── new_values (JSONB)
-├── user_id (FK)
-├── ip_address
-└── created_at
-
-attachments               -- File storage metadata
-├── id (PK)
-├── entity_type (plant/spare_part)
-├── entity_id
-├── file_name
-├── file_path (Supabase Storage)
-├── file_size
-├── mime_type
-├── uploaded_by (FK)
-└── created_at
-
-notifications             -- User notifications
-├── id (PK)
-├── user_id (FK)
-├── type (alert/info/warning)
-├── title, message
-├── read_at
-├── action_url
-└── created_at
-```
-
-### 4.3 OLAP Schema (analytics) - Data Warehouse
-
-Using **Star Schema** for optimal query performance:
-
-```sql
--- DIMENSION TABLES
-dim_plants                -- Slowly Changing Dimension Type 2
-├── plant_key (PK, surrogate)
-├── plant_id (natural key)
-├── fleet_number
-├── description
-├── fleet_type_name
-├── make, model
-├── year_of_manufacture
-├── purchase_cost
-├── valid_from, valid_to  -- SCD Type 2
-├── is_current
-└── row_hash              -- Change detection
-
-dim_locations
-├── location_key (PK, surrogate)
-├── location_id (natural key)
-├── name
-├── region                -- Derived/enriched
-├── is_current
-└── valid_from, valid_to
-
-dim_time                  -- Pre-populated date dimension
-├── date_key (PK, YYYYMMDD integer)
-├── full_date
-├── day, month, year
-├── quarter
-├── day_of_week, day_name
-├── week_of_year
-├── is_weekend
-├── is_holiday
-└── fiscal_year, fiscal_quarter
-
-dim_suppliers
-├── supplier_key (PK)
-├── supplier_name
-├── first_seen_date
-└── is_active
-
--- FACT TABLES
-fact_maintenance          -- Grain: one row per spare part replacement
-├── maintenance_key (PK)
-├── plant_key (FK)
-├── location_key (FK)
-├── supplier_key (FK)
-├── date_key (FK)
-├── part_number
-├── part_description
-├── quantity
-├── unit_cost
-├── total_cost
-├── reason_for_change
-└── created_at
-
-fact_plant_snapshots      -- Grain: one row per plant per month
-├── snapshot_key (PK)
-├── plant_key (FK)
-├── location_key (FK)
-├── date_key (FK)
-├── status
-├── physical_verification
-├── cumulative_maintenance_cost
-├── parts_replaced_count
-└── months_at_location
-
-fact_transfers            -- Grain: one row per location change
-├── transfer_key (PK)
-├── plant_key (FK)
-├── from_location_key (FK)
-├── to_location_key (FK)
-├── date_key (FK)
-├── transfer_reason
-└── days_at_previous_location
-```
-
-### 4.4 Data Flow Architecture
+### Request Flow
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                           DATA SOURCES                                   │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐               │
-│  │  Excel   │  │   Web    │  │   API    │  │  Manual  │               │
-│  │  Files   │  │   Forms  │  │  Imports │  │  Entry   │               │
-│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘               │
-└───────┼─────────────┼─────────────┼─────────────┼───────────────────────┘
-        │             │             │             │
-        ▼             ▼             ▼             ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         INGESTION LAYER                                  │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │                    ETL Pipeline (Python)                         │   │
-│  │   Extract → Clean → Validate → Transform → Load                  │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
-│                              │                                          │
-│                              ▼                                          │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │                    Change Data Capture                           │   │
-│  │   PostgreSQL Triggers → audit_logs table                         │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        STORAGE LAYER                                     │
-│  ┌──────────────────────┐         ┌──────────────────────┐             │
-│  │   OLTP (public)      │ ──ETL──▶│   OLAP (analytics)   │             │
-│  │   Normalized         │         │   Denormalized       │             │
-│  │   Real-time          │         │   Optimized for BI   │             │
-│  └──────────────────────┘         └──────────────────────┘             │
-│                                              │                          │
-│                                              ▼                          │
-│                                   ┌──────────────────────┐             │
-│                                   │   Materialized Views │             │
-│                                   │   Pre-aggregated     │             │
-│                                   └──────────────────────┘             │
-└─────────────────────────────────────────────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                      CONSUMPTION LAYER                                   │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐               │
-│  │   API    │  │ Reports  │  │Dashboards│  │    AI    │               │
-│  │ Queries  │  │  (PDF)   │  │  (BI)    │  │ Analysis │               │
-│  └──────────┘  └──────────┘  └──────────┘  └──────────┘               │
-└─────────────────────────────────────────────────────────────────────────┘
+1. Browser sends request with JWT in Authorization header
+2. Axios interceptor attaches token from sessionStorage
+3. FastAPI receives request → HTTPBearer extracts token
+4. security.py verifies JWT locally (ES256 JWKS) → cache user data
+5. Endpoint executes query via asyncpg pool → Supavisor → PostgreSQL
+6. Response returns with _record_to_dict() auto-conversion
+7. React Query caches response (staleTime: 2-10 min)
+```
+
+### Real-Time Flow (SSE)
+
+```
+1. Frontend opens EventSource to /api/v1/events/stream?token=JWT
+2. Backend authenticates token, creates asyncio.Queue subscriber
+3. When any mutation occurs (upload, create, transfer, etc.):
+   a. Backend calls broadcast(entity, action)
+   b. Event pushed to all subscriber queues
+   c. SSE streams "data: {...}\n\n" to all connected clients
+4. Frontend receives event → invalidates matching React Query keys
+5. React Query refetches stale data in background
+6. UI updates automatically — no manual refresh needed
 ```
 
 ---
 
-## 5. Backend Architecture
+## 4. Backend Architecture
 
-### 5.1 API Strategy: Hybrid Approach
-
-We use a **hybrid API strategy** leveraging Supabase's built-in capabilities:
-
-| API Type | Use Case | Implementation |
-|----------|----------|----------------|
-| REST (PostgREST) | Simple CRUD, filtering, pagination | Auto-generated from schema |
-| GraphQL | Complex queries, relationships, mobile apps | pg_graphql extension |
-| Edge Functions | Custom logic, webhooks, external APIs | Deno runtime |
-| RPC Functions | Complex business logic, transactions | PostgreSQL functions |
-
-### 5.2 API Layer Design
+### Directory Structure
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                          API ENDPOINTS                                   │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│  REST API (Auto-generated via PostgREST)                                │
-│  ────────────────────────────────────────                               │
-│  GET    /rest/v1/plants              - List plants (with filters)       │
-│  GET    /rest/v1/plants?id=eq.{id}   - Get single plant                 │
-│  POST   /rest/v1/plants              - Create plant                     │
-│  PATCH  /rest/v1/plants?id=eq.{id}   - Update plant                     │
-│  DELETE /rest/v1/plants?id=eq.{id}   - Delete plant (soft)              │
-│                                                                          │
-│  GET    /rest/v1/spare_parts?plant_id=eq.{id}  - Parts for plant       │
-│  GET    /rest/v1/plant_location_history?...    - Location history       │
-│                                                                          │
-│  GraphQL API (via pg_graphql)                                           │
-│  ─────────────────────────────                                          │
-│  POST   /graphql/v1                                                     │
-│  │                                                                       │
-│  │  query {                                                             │
-│  │    plants(filter: { status: { eq: "active" } }) {                   │
-│  │      fleetNumber                                                     │
-│  │      description                                                     │
-│  │      currentLocation { name }                                        │
-│  │      spareParts(first: 10) { partDescription, totalCost }           │
-│  │    }                                                                 │
-│  │  }                                                                   │
-│                                                                          │
-│  Edge Functions (Custom Logic)                                          │
-│  ─────────────────────────────                                          │
-│  POST   /functions/v1/run-etl        - Trigger ETL pipeline            │
-│  POST   /functions/v1/generate-report - Generate PDF/Excel report      │
-│  POST   /functions/v1/ai-query       - Natural language query          │
-│  POST   /functions/v1/predict-maintenance - AI predictions             │
-│  POST   /functions/v1/bulk-import    - Bulk data import                │
-│  POST   /functions/v1/send-notification - Send email/push              │
-│                                                                          │
-│  RPC Functions (Database Functions)                                     │
-│  ──────────────────────────────────                                     │
-│  POST   /rest/v1/rpc/transfer_plant  - Transfer plant to location      │
-│  POST   /rest/v1/rpc/get_plant_summary - Complex aggregation           │
-│  POST   /rest/v1/rpc/search_plants   - Full-text search                │
-│  POST   /rest/v1/rpc/get_dashboard_stats - Dashboard metrics           │
-│                                                                          │
-└─────────────────────────────────────────────────────────────────────────┘
+backend/
+  app/
+    api/v1/                 # Route handlers (23 files)
+      router.py             # Central router — includes all sub-routers
+      auth.py               # Login, logout, user CRUD, token refresh
+      plants.py             # Plant CRUD, search, transfer, bulk ops
+      uploads.py            # File upload + ETL trigger
+      transfers.py          # Transfer create, confirm, cancel, reject
+      projects.py           # Project import (award letters), CRUD
+      spare_parts.py        # PO management, cost analytics (largest: 83KB)
+      locations.py          # Site management
+      reports.py            # Report generation
+      insights.py           # Fleet Intelligence queries
+      site_report.py        # Site engineer endpoints
+      events.py             # SSE streaming endpoint
+      health.py             # Health/readiness probes
+      notifications.py      # In-app notifications
+      audit.py              # Audit log queries
+      states.py             # State reference data
+      fleet_types.py        # Fleet type management
+      suppliers.py          # Supplier CRUD
+      public_upload.py      # Unauthenticated file uploads
+    core/                   # Framework-level modules
+      pool.py               # asyncpg connection pool + helpers
+      database.py           # Supabase SDK client (Auth + Storage)
+      security.py           # JWT verification, role guards, user cache
+      events.py             # In-memory SSE event bus (broadcast/subscribe)
+      exceptions.py         # Custom exception hierarchy
+      cache.py              # Caching utilities
+    services/               # Business logic layer
+      auth_service.py       # Auth business logic
+      transfer_service.py   # Transfer workflow engine
+      insights_service.py   # Fleet Intelligence AI engine (28KB)
+      remarks_parser.py     # AI-powered plant condition parsing
+      award_letters_parser.py  # Excel project import parser
+      file_metadata_extractor.py  # Upload metadata extraction
+      fleet_parser.py       # Fleet number normalization
+      preview_service.py    # Report preview generation
+      audit_service.py      # Audit trail recording
+    workers/                # Background processing
+      etl_worker.py         # ETL pipeline (128KB — weekly reports, POs, site submissions)
+    models/                 # Pydantic models
+      common.py, plant.py, project.py, upload.py
+    monitoring/             # Observability
+      logging.py            # structlog configuration
+      metrics.py            # Custom metrics collection
+      middleware.py         # Request logging + alerting middleware
+    config.py               # Settings via pydantic-settings
+    main.py                 # App factory, lifespan, middleware stack
 ```
 
-### 5.3 Business Logic Placement
+### Key Patterns
 
-| Logic Type | Location | Rationale |
-|------------|----------|-----------|
-| Validation | Database (CHECK constraints) + Edge Functions | Defense in depth |
-| Authorization | RLS Policies + Edge Functions | Row-level security |
-| Simple Queries | PostgREST / GraphQL | No custom code needed |
-| Complex Queries | Database Functions (RPC) | Performance, atomicity |
-| Workflows | Edge Functions | Orchestration, external calls |
-| Scheduled Jobs | pg_cron + Edge Functions | Automation |
+**Database access** — All queries go through asyncpg helpers:
+```python
+from app.core.pool import fetch, fetchrow, fetchval, execute, executemany
 
-### 5.4 Database Functions (RPC)
+# Single row
+row = await fetchrow("SELECT * FROM plants_master WHERE id = $1::uuid", plant_id)
 
-```sql
--- Example: Transfer plant to new location (atomic transaction)
-CREATE OR REPLACE FUNCTION transfer_plant(
-  p_plant_id UUID,
-  p_new_location_id UUID,
-  p_transfer_reason TEXT,
-  p_user_id UUID
-) RETURNS JSONB AS $$
-DECLARE
-  v_old_location_id UUID;
-  v_result JSONB;
-BEGIN
-  -- Get current location
-  SELECT current_location_id INTO v_old_location_id
-  FROM plants WHERE id = p_plant_id;
+# Multiple rows with pagination
+rows = await fetch("""
+    SELECT *, count(*) OVER() AS _total_count
+    FROM plants_master WHERE condition = $1
+    LIMIT $2 OFFSET $3
+""", condition, limit, offset)
 
-  -- Close previous location history
-  UPDATE plant_location_history
-  SET end_date = NOW()
-  WHERE plant_id = p_plant_id AND end_date IS NULL;
+# Batch insert
+await executemany("INSERT INTO t (a, b) VALUES ($1, $2)", [(1, 2), (3, 4)])
+```
 
-  -- Create new location history
-  INSERT INTO plant_location_history
-    (plant_id, location_id, start_date, transfer_reason, created_by)
-  VALUES
-    (p_plant_id, p_new_location_id, NOW(), p_transfer_reason, p_user_id);
+**Auto-conversion** — `pool.py`'s `_record_to_dict()` converts UUID to str, Decimal to float, datetime to ISO string, date to ISO string automatically.
 
-  -- Update plant's current location
-  UPDATE plants
-  SET current_location_id = p_new_location_id, updated_at = NOW()
-  WHERE id = p_plant_id;
+**Error handling** — Custom exceptions (`AppException`, `AuthenticationError`, `AuthorizationError`, `ValidationError`, `NotFoundError`) with consistent JSON error responses.
 
-  -- Return result
-  v_result := jsonb_build_object(
-    'success', true,
-    'plant_id', p_plant_id,
-    'from_location', v_old_location_id,
-    'to_location', p_new_location_id
-  );
+**Background tasks** — FastAPI `BackgroundTasks` for audit logging and ETL processing (no external task queue needed for single-process deployment).
 
-  RETURN v_result;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+### Middleware Stack (order matters)
+
+```
+Request → CORS → Alerting → RequestLogging → Route Handler → Response
 ```
 
 ---
 
-## 6. Frontend Architecture
+## 5. Frontend Architecture
 
-### 6.1 Technology Choice: Next.js 14 (App Router)
-
-**Why Next.js?**
-- Server-side rendering for SEO and performance
-- API routes for BFF (Backend for Frontend) pattern
-- React Server Components reduce client bundle
-- Built-in optimization (images, fonts, scripts)
-- TypeScript first-class support
-- Excellent Supabase integration
-
-### 6.2 Frontend Structure
+### Directory Structure
 
 ```
-frontend/
-├── app/                          # Next.js App Router
-│   ├── (auth)/                   # Auth group (login, register)
-│   │   ├── login/page.tsx
-│   │   └── layout.tsx
-│   ├── (dashboard)/              # Protected routes
-│   │   ├── layout.tsx            # Dashboard layout with sidebar
-│   │   ├── page.tsx              # Dashboard home
-│   │   ├── plants/
-│   │   │   ├── page.tsx          # Plants list
-│   │   │   ├── [id]/page.tsx     # Plant detail
-│   │   │   └── new/page.tsx      # Create plant
-│   │   ├── spare-parts/
-│   │   ├── locations/
-│   │   ├── reports/
-│   │   ├── analytics/
-│   │   └── settings/
-│   ├── api/                      # API routes (BFF)
-│   │   ├── reports/route.ts
-│   │   └── ai/route.ts
-│   ├── layout.tsx                # Root layout
-│   └── globals.css
-├── components/
-│   ├── ui/                       # Base UI components (shadcn/ui)
-│   ├── forms/                    # Form components
-│   ├── tables/                   # Data tables
-│   ├── charts/                   # Chart components
-│   └── layouts/                  # Layout components
-├── lib/
-│   ├── supabase/
-│   │   ├── client.ts             # Browser client
-│   │   ├── server.ts             # Server client
-│   │   └── middleware.ts         # Auth middleware
-│   ├── utils.ts
-│   └── validations.ts            # Zod schemas
-├── hooks/                        # Custom React hooks
-├── types/                        # TypeScript types (generated)
-└── public/
+frontend/src/
+  app/                      # Next.js App Router pages
+    (dashboard)/            # Protected dashboard layout
+      page.tsx              # Main dashboard (KPI cards, charts)
+      plants/               # Plant list + detail pages
+      locations/[id]/       # Location detail with plant breakdown
+      spare-parts/          # PO management, cost reports
+      transfers/            # Transfer tracking
+      projects/             # Project management
+      reports/              # Report generation
+      insights/             # Fleet Intelligence
+      admin/
+        users/              # User management (admin only)
+        transfers/          # Transfer approval queue
+    (site)/                 # Site engineer layout
+      dashboard/            # Site-specific dashboard
+    login/                  # Public login page
+  providers/                # React context providers
+    index.tsx               # Root provider wrapper (Theme → Query → Auth)
+    auth-provider.tsx       # JWT auth state, token refresh, SSE integration
+    query-provider.tsx      # TanStack React Query config
+    theme-provider.tsx      # Light/dark theme
+  hooks/                    # Custom React hooks (17 files)
+    use-plants.ts           # Plant CRUD + search
+    use-locations.ts        # Location queries
+    use-spare-parts.ts      # PO + cost queries
+    use-transfers.ts        # Transfer management
+    use-uploads.ts          # File upload state
+    use-projects.ts         # Project queries
+    use-reports.ts          # Report generation
+    use-insights.ts         # Fleet Intelligence
+    use-dashboard.ts        # Dashboard aggregation
+    use-users.ts            # User management
+    use-site-report.ts      # Site engineer data
+    use-event-stream.ts     # SSE real-time updates
+    use-notifications.ts    # Notifications
+    use-audit.ts            # Audit logs
+    use-suppliers.ts        # Supplier data
+    use-states.ts           # State reference data
+    use-debounce.ts         # Input debouncing (300ms)
+  lib/api/                  # API client layer (17 files)
+    client.ts               # Axios instance + JWT interceptor + auto-refresh
+    auth.ts                 # Auth API calls
+    plants.ts               # Plant API
+    silent-refresh.ts       # Background token refresh
+    [... one file per domain]
+  components/               # React components
+    ui/                     # shadcn/ui base components
+    layout/                 # Header, Sidebar, navigation
+    plants/                 # Plant-specific UI
+    admin/                  # Admin panels
+    charts/                 # ECharts visualizations
+    site/                   # Site engineer components
+    [... per-feature directories]
 ```
 
-### 6.3 State Management Strategy
+### State Management Strategy
 
-| State Type | Solution | Rationale |
-|------------|----------|-----------|
-| Server State | TanStack Query | Caching, background refetch, optimistic updates |
-| URL State | nuqs (URL search params) | Shareable, bookmarkable filters |
-| Form State | React Hook Form + Zod | Validation, performance |
-| UI State | Zustand (minimal) | Only for truly global UI state |
-| Real-time | Supabase Realtime | WebSocket subscriptions |
+| Layer | Technology | Purpose |
+|-------|-----------|---------|
+| **Server state** | React Query | API data caching, background refetch, optimistic updates |
+| **Client state** | Zustand | UI state (filters, sidebar open, modals) |
+| **Form state** | React Hook Form + Zod | Form validation, submission |
+| **Auth state** | React Context | User session, JWT tokens (sessionStorage) |
+| **URL state** | Next.js searchParams | Pagination, filters, sorting |
 
-### 6.4 Key UI Features
+### React Query Configuration
 
+```typescript
+defaultOptions: {
+  queries: {
+    staleTime: 2 * 60 * 1000,      // 2 min — data considered fresh
+    gcTime: 10 * 60 * 1000,         // 10 min — garbage collect unused
+    refetchOnWindowFocus: false,     // SSE handles real-time sync
+    refetchOnReconnect: 'always',    // Refetch all after network recovery
+    retry: 1,
+  }
+}
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│  ┌─────┐                    Plant Management System              👤 Ram │
-│  │ ≡   │  Dashboard   Plants   Parts   Locations   Reports   Analytics │
-├──┴─────┴────────────────────────────────────────────────────────────────┤
-│ ┌─────────────────────────────────────────────────────────────────────┐ │
-│ │  📊 Dashboard                                                        │ │
-│ │                                                                      │ │
-│ │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐            │ │
-│ │  │  2,007   │  │    458   │  │    23    │  │  ₦45.2M  │            │ │
-│ │  │  Plants  │  │  Parts   │  │ Locations│  │ Maint.   │            │ │
-│ │  └──────────┘  └──────────┘  └──────────┘  └──────────┘            │ │
-│ │                                                                      │ │
-│ │  ┌────────────────────────────┐  ┌────────────────────────────┐    │ │
-│ │  │  Maintenance Costs (YTD)   │  │  Plants by Location        │    │ │
-│ │  │  ▁▂▃▄▅▆▇█▇▅▄▃▂▁           │  │  [PIE CHART]               │    │ │
-│ │  │  Jan Feb Mar Apr May Jun   │  │                            │    │ │
-│ │  └────────────────────────────┘  └────────────────────────────┘    │ │
-│ │                                                                      │ │
-│ │  ┌──────────────────────────────────────────────────────────────┐  │ │
-│ │  │  Recent Activity                                              │  │ │
-│ │  │  • PT169 transferred to LAGOS AIRPORT                         │  │ │
-│ │  │  • AC10 maintenance: ₦125,000                                 │  │ │
-│ │  │  • New plant added: T450                                      │  │ │
-│ │  └──────────────────────────────────────────────────────────────┘  │ │
-│ └─────────────────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────────────┘
+
+### Key Frontend Patterns
+
+**API client with auto-refresh:**
 ```
+Request → Axios interceptor attaches JWT → API call
+  ↓ (if 401)
+  tryRefreshToken() → retry original request with new token
+  ↓ (if refresh fails)
+  hardLogout() → redirect to /login
+```
+
+**Protected routes:**
+```tsx
+<ProtectedRoute requiredRole="admin">
+  <AdminPanel />
+</ProtectedRoute>
+```
+
+**Debounced search:** All search inputs use `useDebounce(value, 300)` to avoid hammering the API.
 
 ---
 
-## 7. Data Ingestion Workflow
+## 6. Database Architecture
 
-### 7.1 Current Problem
-
-```
-CURRENT STATE (Manual, Error-Prone):
-
-Site Officers                     Plant Officer                    Analysis
-   │                                   │                               │
-   │  1. Create Excel report           │                               │
-   │  2. Email to plant officer ──────▶│  3. Open each email           │
-   │     (weekly)                      │  4. Download attachment       │
-   │                                   │  5. Manually copy data ──────▶│  6. Another Excel
-   │                                   │  6. Repeat for all sites      │  7. Manual analysis
-   │                                   │  (HOURS of work!)             │
-   │                                   │                               │
-
-Problems:
-• Hours wasted on manual data entry
-• Human errors in transcription
-• No real-time visibility
-• Data scattered across emails
-• Hard to track what's processed
-• Reports often late or missing
-```
-
-### 7.2 New Automated Workflow
+### Connection Path
 
 ```
-NEW STATE (Automated):
+asyncpg pool (2-10 connections)
+    → Supavisor (port 6543, transaction-mode pooler)
+    → PostgreSQL (Supabase-hosted, EU West)
 
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         DATA INGESTION OPTIONS                               │
-│                                                                              │
-│  OPTION 1: Upload Portal (PRIMARY)                                          │
-│  ─────────────────────────────────                                          │
-│  Site Officer ──▶ upload.yourcompany.com ──▶ Drag & drop Excel             │
-│                                              ──▶ Instant validation         │
-│                                              ──▶ Confirmation message       │
-│                                                                              │
-│  OPTION 2: Email Forwarding (CONVENIENCE)                                   │
-│  ────────────────────────────────────────                                   │
-│  Site Officer ──▶ Email with attachment                                     │
-│                   CC: reports@yourcompany.com ──▶ Auto-extract attachment  │
-│                                                 ──▶ Process automatically   │
-│                                                                              │
-│  OPTION 3: WhatsApp (FUTURE - MOBILE)                                       │
-│  ────────────────────────────────────                                       │
-│  Site Officer ──▶ Send file to WhatsApp Business ──▶ Auto-acknowledge      │
-│                                                     ──▶ Process             │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         PROCESSING PIPELINE                                  │
-│                                                                              │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐  │
-│  │  RECEIVE    │───▶│   PARSE     │───▶│  VALIDATE   │───▶│    LOAD     │  │
-│  │             │    │             │    │             │    │             │  │
-│  │ • Store file│    │ • Extract   │    │ • Required  │    │ • Upsert to │  │
-│  │ • Log job   │    │   week date │    │   fields    │    │   database  │  │
-│  │ • Queue     │    │ • Detect    │    │ • Fleet #   │    │ • Update    │  │
-│  │             │    │   location  │    │   format    │    │   calendar  │  │
-│  │             │    │ • Parse     │    │ • Duplicates│    │ • Trigger   │  │
-│  │             │    │   plants    │    │ • Anomalies │    │   refresh   │  │
-│  └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘  │
-│                                                                   │         │
-│                                                                   ▼         │
-│                                                          ┌─────────────┐   │
-│                                                          │   NOTIFY    │   │
-│                                                          │             │   │
-│                                                          │ • Success   │   │
-│                                                          │   message   │   │
-│                                                          │ • Error     │   │
-│                                                          │   alerts    │   │
-│                                                          │ • Dashboard │   │
-│                                                          │   update    │   │
-│                                                          └─────────────┘   │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         CLEAN DATA AVAILABLE                                 │
-│                                                                              │
-│  • Plant Officer sees real-time dashboard (no more manual entry!)           │
-│  • Management gets weekly summaries automatically                           │
-│  • Missing reports flagged immediately                                       │
-│  • Analytics updated in real-time                                           │
-│  • AI can query the data                                                    │
-└─────────────────────────────────────────────────────────────────────────────┘
+Latency: 1-5ms per query (vs 3.5-4.5s with previous PostgREST approach)
 ```
 
-### 7.3 Weekly Report Calendar Structure
-
-```sql
--- New table to track weekly report submissions
-CREATE TABLE weekly_report_submissions (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    year INTEGER NOT NULL,
-    week_number INTEGER NOT NULL CHECK (week_number BETWEEN 1 AND 53),
-    week_ending_date DATE NOT NULL,
-    location_id UUID REFERENCES locations(id),
-
-    -- Submission tracking
-    submitted_at TIMESTAMPTZ,
-    submitted_by TEXT,  -- Email or name of submitter
-    source_type TEXT CHECK (source_type IN ('upload', 'email', 'whatsapp', 'manual')),
-    source_file_path TEXT,  -- Supabase storage path
-
-    -- Processing status
-    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
-    processed_at TIMESTAMPTZ,
-    plants_count INTEGER,
-    errors JSONB,
-
-    -- Audit
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-
-    UNIQUE(year, week_number, location_id)
-);
-
--- View: Which sites are missing reports this week?
-CREATE VIEW missing_weekly_reports AS
-SELECT
-    l.name as location,
-    EXTRACT(YEAR FROM CURRENT_DATE) as year,
-    EXTRACT(WEEK FROM CURRENT_DATE) as current_week
-FROM locations l
-WHERE NOT EXISTS (
-    SELECT 1 FROM weekly_report_submissions w
-    WHERE w.location_id = l.id
-    AND w.year = EXTRACT(YEAR FROM CURRENT_DATE)
-    AND w.week_number = EXTRACT(WEEK FROM CURRENT_DATE)
-);
-```
-
-### 7.4 Implementation: Upload Portal
+### Pool Configuration
 
 ```python
-# FastAPI endpoint for file upload
-from fastapi import FastAPI, UploadFile, HTTPException, Depends
-from supabase import create_client
-
-app = FastAPI()
-
-@app.post("/api/v1/reports/upload")
-async def upload_weekly_report(
-    file: UploadFile,
-    location_id: str,
-    week_ending_date: str,
-    current_user = Depends(get_current_user)  # From Supabase auth
-):
-    """
-    Upload a weekly report Excel file.
-
-    1. Validate file type (.xlsx, .xls)
-    2. Store in Supabase Storage
-    3. Create processing job
-    4. Return job ID for status tracking
-    """
-    # Validate file type
-    if not file.filename.endswith(('.xlsx', '.xls')):
-        raise HTTPException(400, "Only Excel files accepted")
-
-    # Store file in Supabase Storage
-    storage_path = f"weekly-reports/{location_id}/{week_ending_date}/{file.filename}"
-    supabase.storage.from_("reports").upload(storage_path, file.file.read())
-
-    # Create processing job
-    job = supabase.table("weekly_report_submissions").insert({
-        "location_id": location_id,
-        "week_ending_date": week_ending_date,
-        "year": parse_year(week_ending_date),
-        "week_number": parse_week(week_ending_date),
-        "source_type": "upload",
-        "source_file_path": storage_path,
-        "submitted_by": current_user.email,
-        "status": "pending"
-    }).execute()
-
-    # Trigger async processing
-    background_tasks.add_task(process_weekly_report, job.data[0]["id"])
-
-    return {"job_id": job.data[0]["id"], "status": "processing"}
+min_size = 2
+max_size = 10
+command_timeout = 15  # seconds
+statement_cache_size = 0  # Required for Supavisor transaction-mode
 ```
+
+### Key Tables (20+)
+
+| Table | Purpose | Key Columns |
+|-------|---------|-------------|
+| `plants_master` | Equipment registry | `fleet_number`, `condition` (active), `current_location_id` |
+| `locations` | Project sites (27) | `name`, `state_id`, `coordinates` |
+| `plant_transfers` | Equipment movements | `from_location_id`, `to_location_id`, `status` |
+| `spare_parts` | Maintenance parts | `fleet_number_raw`, `unit_cost`, `quantity` |
+| `purchase_orders` | PO tracking | `po_number`, `supplier_id`, `total_amount` |
+| `projects` | Contract/award data | `project_name`, `contract_sum`, `is_legacy` |
+| `weekly_report_submissions` | Upload tracking | `status`, `plants_processed`, `errors` |
+| `plants_history` | Condition snapshots | `plant_id`, `condition`, `recorded_at` |
+| `plant_location_history` | Location timeline | `plant_id`, `location_id`, `start_date`, `end_date` |
+| `audit_logs` | Change audit trail | `user_id`, `action`, `table_name`, `old_values`, `new_values` |
+| `users` | System users | `email`, `role`, `location_id`, `is_active` |
+| `notifications` | In-app alerts | `title`, `type`, `read_at` |
+| `fleet_number_prefixes` | Fleet type lookup (78) | `prefix`, `fleet_type`, `description` |
+| `states` | Nigerian states | `name`, `code` |
+| `suppliers` | Vendor registry | `name`, `contact_info` |
+
+### Key Views
+
+| View | Purpose |
+|------|---------|
+| `v_plants_summary` | 27+ field denormalized plant view (joins location, fleet type, costs) |
+| `v_location_stats` | Per-site plant counts by condition |
+| `v_supplier_stats` | Supplier spend, item count, PO count |
+| `v_purchase_orders_summary` | PO aggregation with location data |
+
+### Key RPC Functions (10+)
+
+| Function | Returns |
+|----------|---------|
+| `get_plant_maintenance_history(plant_id)` | Parts replaced with costs |
+| `get_plant_movements(plant_id)` | Location history |
+| `transfer_plant(plant_id, to, reason, user)` | Transfer result (JSON) |
+| `get_transfer_stats_summary(since)` | Aggregated transfer stats (JSON) |
+| `get_location_statistics(location_id)` | Condition breakdown |
+| `calculate_maintenance_costs(...)` | Cost by period/location |
+
+### Critical Column Note
+
+On `plants_master`:
+- **`condition`** — ACTIVE column, updated by weekly report ETL. Use this for queries.
+- **`status`** — STALE/LEGACY. Do NOT use for counting or filtering.
 
 ---
 
-## 8. ETL & Data Pipeline
+## 7. Authentication & Authorization
 
-### 7.1 Current Pipeline (Preserved & Enhanced)
-
-The existing Python ETL pipeline is well-designed and will be kept with enhancements:
+### Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        ETL PIPELINE ARCHITECTURE                         │
-│                                                                          │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐                 │
-│  │   SOURCE    │    │   STAGING   │    │   TARGET    │                 │
-│  │   FILES     │───▶│   (Clean)   │───▶│  (Supabase) │                 │
-│  └─────────────┘    └─────────────┘    └─────────────┘                 │
-│        │                  │                   │                         │
-│        ▼                  ▼                   ▼                         │
-│  ┌──────────┐      ┌──────────┐       ┌──────────┐                     │
-│  │ Extractors│     │ Cleaners │       │ Loaders  │                     │
-│  │ - Weekly │      │ - Fleet# │       │ - Plants │                     │
-│  │ - Legacy │      │ - Dates  │       │ - Parts  │                     │
-│  │ - Parts  │      │ - Costs  │       │ - History│                     │
-│  └──────────┘      └──────────┘       └──────────┘                     │
-│        │                  │                   │                         │
-│        └──────────────────┼───────────────────┘                         │
-│                           ▼                                             │
-│                    ┌──────────────┐                                     │
-│                    │  Validators  │                                     │
-│                    │  - Required  │                                     │
-│                    │  - Ranges    │                                     │
-│                    │  - Duplicates│                                     │
-│                    └──────────────┘                                     │
-│                           │                                             │
-│                           ▼                                             │
-│                    ┌──────────────┐                                     │
-│                    │   Pipeline   │                                     │
-│                    │ Orchestrator │                                     │
-│                    └──────────────┘                                     │
-└─────────────────────────────────────────────────────────────────────────┘
+Login → Supabase Auth API → JWT (ES256) + Refresh Token
+                                    |
+                              sessionStorage
+                                    |
+                  Axios interceptor attaches to all requests
+                                    |
+                  FastAPI HTTPBearer → _verify_token()
+                                    |
+                         Local JWKS verification (no network call)
+                                    |
+                         _get_user_data() → asyncpg (cached 5min)
 ```
 
-### 7.2 Enhanced Pipeline Features
+### Token Lifecycle
 
-| Feature | Current | Enhanced |
-|---------|---------|----------|
-| Execution | Manual CLI | Scheduled (pg_cron) + Manual + API trigger |
-| Monitoring | Basic logging | Structured logs + metrics + alerts |
-| Error Handling | Log and continue | Retry with backoff + dead letter queue |
-| Idempotency | Partial | Full idempotency with checksums |
-| Incremental | No | Delta detection, only process changes |
-| Lineage | No | Track source → target mappings |
+1. **Login** — Supabase Auth returns `access_token` (1hr), `refresh_token`
+2. **Storage** — Both stored in `sessionStorage` (per-tab isolation)
+3. **Proactive refresh** — `AuthProvider` schedules refresh 5 min before expiry
+4. **Reactive refresh** — 401 response triggers `tryRefreshToken()` in Axios interceptor
+5. **Wake recovery** — `visibilitychange` + `online` events trigger immediate refresh + React Query invalidation
+6. **Failure** — Hard logout → redirect to `/login`
 
-### 7.3 OLTP → OLAP ETL
-
-Separate pipeline to populate data warehouse:
+### Role Guards (Backend)
 
 ```python
-# Scheduled nightly via pg_cron
-# 1. Extract changes from OLTP since last run
-# 2. Transform to star schema format
-# 3. Load to analytics schema
-# 4. Refresh materialized views
+# Any authenticated user
+current_user: Annotated[CurrentUser, Depends(get_current_user)]
+
+# Management or admin
+current_user: Annotated[CurrentUser, Depends(require_management_or_admin)]
+
+# Admin only
+current_user: Annotated[CurrentUser, Depends(require_admin)]
+```
+
+### User Cache
+
+In-memory TTL cache (5 min) in `security.py` eliminates repeated DB lookups for the same JWT. Thread-safe with `threading.Lock`.
+
+---
+
+## 8. Real-Time Data Sync (SSE)
+
+### Why SSE (not WebSocket)
+
+| Factor | SSE | WebSocket |
+|--------|-----|-----------|
+| Direction | Server → Client (one-way) | Bidirectional |
+| Complexity | Simple, uses HTTP | Requires upgrade protocol |
+| Reconnect | Built-in (EventSource auto-reconnects) | Manual |
+| Our use case | Cache invalidation (one-way push) | Overkill |
+| Proxy support | Works through standard HTTP proxies | May need special config |
+
+We only need to tell clients "data changed, refetch" — SSE is the right tool.
+
+### Backend Implementation
+
+**Event bus** (`app/core/events.py`):
+```python
+# In-memory pub/sub — no Redis needed for single-process
+_subscribers: set[asyncio.Queue] = set()
+
+def broadcast(entity: str, action: str, summary: str | None = None):
+    """Push event to all connected SSE clients."""
+    event = {"entity": entity, "action": action, "ts": time.time()}
+    for q in _subscribers:
+        q.put_nowait(json.dumps(event))
+```
+
+**SSE endpoint** (`app/api/v1/events.py`):
+```
+GET /api/v1/events/stream?token=JWT
+
+Returns: text/event-stream
+Keepalive: every 25 seconds (": keepalive\n\n")
+Auth: JWT via query param (EventSource can't set headers)
+Queue: 64 events max per client; slow clients evicted
+```
+
+**Broadcast points** — Every mutation endpoint calls `broadcast()`:
+
+| Module | Events |
+|--------|--------|
+| `plants.py` | create, update, transfer, delete |
+| `transfers.py` | create, confirm, cancel, reject |
+| `projects.py` | import, create, update, delete |
+| `etl_worker.py` | plants.import, spare_parts.import, uploads.complete |
+
+### Frontend Implementation
+
+**Hook** (`hooks/use-event-stream.ts`):
+```typescript
+// Connects EventSource when authenticated
+// Maps entity names to React Query keys for targeted invalidation:
+//   "plants" → invalidate ["plants"], ["locations"], ["reports"]
+//   "transfers" → invalidate ["transfers"]
+//   "uploads" → invalidate ["uploads"]
+// Auto-reconnects on error (3s delay)
+```
+
+**Integration** — `useEventStream(!!user)` called in `AuthProvider`.
+
+### Scaling Note
+
+Current implementation is in-memory (single-process). If scaling to multiple workers:
+- Swap `_subscribers` for **Redis Pub/Sub**
+- Each worker subscribes to Redis channel
+- `broadcast()` publishes to Redis instead of local queues
+- SSE endpoints consume from Redis subscription
+
+---
+
+## 9. ETL & Data Pipeline
+
+### Overview
+
+The ETL system processes uploaded Excel files in the background. It's the core data ingestion mechanism.
+
+```
+User uploads Excel → FastAPI validates & stores in Supabase Storage
+                  → BackgroundTask: etl_worker processes file
+                  → Parse Excel with pandas + openpyxl
+                  → Validate, clean, transform data
+                  → INSERT/UPDATE via asyncpg
+                  → broadcast() SSE event
+                  → Create notification
+```
+
+### Pipeline Types
+
+#### 1. Weekly Report Processing (`process_weekly_report`)
+- **Input:** Excel file with plant conditions per location
+- **Processing:** Parse fleet numbers, normalize conditions, detect transfers, run AI remarks parser
+- **Output:** Updated `plants_master.condition`, `plants_history`, new `plant_transfers`
+- **Error handling:** Row-by-row savepoints — one bad row doesn't kill the batch
+
+#### 2. Purchase Order Processing (`process_purchase_order`)
+- **Input:** Excel with PO data (part numbers, costs, suppliers)
+- **Output:** `spare_parts`, `purchase_orders` records
+- **Dedup:** Matches existing POs by number
+
+#### 3. Award Letters Import (`projects.py` import endpoint)
+- **Input:** Multi-sheet Excel (17 sheets, 15 columns, 218+ rows)
+- **Parser:** `award_letters_parser.py` — handles extreme data quality issues:
+  - Free-text dates ("Applied 9th October, 2014", "8TH MARCH, 2018")
+  - Narrative contract sums ("Revised from X to Y", "NGN & USD amounts")
+  - Shorthand amounts ("18.5 million", "74m")
+  - Month typos ("Novemebr", "Septmber")
+  - Noise detection (50+ patterns)
+- **Transaction:** Batch attempt in savepoint → fallback to row-by-row savepoints
+
+#### 4. Site Engineer Submission (`save_confirmed_weekly_report`, `process_direct_submission`)
+- **Input:** Confirmed weekly data from site engineer UI
+- **Processing:** Similar to weekly report but from structured form data
+
+### Data Quality Pipeline
+
+```
+Raw Excel cell
+  → Strip whitespace, normalize case
+  → Detect noise values (50+ patterns: "N/A", "Nil", "Nill", "work on going", etc.)
+  → Parse dates (handles ordinals, typos, narrative text, multiple formats)
+  → Parse amounts (handles "million", "m", currency prefixes, dual-currency)
+  → Truncate overlong fields
+  → Validate against DB constraints
+  → INSERT with savepoint (row-by-row fallback on batch failure)
 ```
 
 ---
 
-## 8. Security Architecture
+## 10. AI Integration
 
-### 8.1 Authentication & Authorization
+### Remarks Parser (`services/remarks_parser.py`)
+
+Uses GPT-4 (OpenAI) to parse free-text plant remarks into structured data:
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         SECURITY LAYERS                                  │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│  Layer 1: Network Security                                              │
-│  ─────────────────────────                                              │
-│  • HTTPS/TLS 1.3 only                                                   │
-│  • Supabase network firewall                                            │
-│  • API rate limiting (100 req/min per user)                             │
-│                                                                          │
-│  Layer 2: Authentication                                                │
-│  ───────────────────────                                                │
-│  • Supabase Auth (JWT-based)                                            │
-│  • Email/password with email verification                               │
-│  • Password requirements: min 12 chars, complexity                      │
-│  • Session management: 1 hour access token, 7 day refresh               │
-│  • Invite-only registration (no public signup)                          │
-│                                                                          │
-│  Layer 3: Authorization (RBAC)                                          │
-│  ─────────────────────────────                                          │
-│  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │  Role        │ Plants │ Parts │ Users │ Reports │ Settings      │  │
-│  ├──────────────┼────────┼───────┼───────┼─────────┼───────────────┤  │
-│  │  admin       │ CRUD   │ CRUD  │ CRUD  │ CRUD    │ CRUD          │  │
-│  │  management  │ R      │ R     │ -     │ R       │ R             │  │
-│  │  operator*   │ RU     │ CRU   │ -     │ R       │ -             │  │
-│  └──────────────────────────────────────────────────────────────────┘  │
-│  * Future role                                                          │
-│                                                                          │
-│  Layer 4: Row-Level Security (RLS)                                      │
-│  ─────────────────────────────────                                      │
-│  • All tables have RLS enabled                                          │
-│  • Policies based on auth.uid() and user role                          │
-│  • Example: Management can only see active plants                       │
-│                                                                          │
-│  Layer 5: Data Protection                                               │
-│  ────────────────────────                                               │
-│  • Encryption at rest (Supabase default)                                │
-│  • Encryption in transit (TLS)                                          │
-│  • No PII stored (equipment data only)                                  │
-│  • Audit logging for all changes                                        │
-│                                                                          │
-└─────────────────────────────────────────────────────────────────────────┘
+Input:  "Compressor faulty. Sent to Sapele for repairs. Missing alternator belt."
+Output: {
+  condition: "under_repair",
+  transfer_detected: true,
+  transfer_destination: "Sapele",
+  anomalies: ["faulty compressor", "missing alternator belt"],
+  maintenance_needed: true
+}
 ```
 
-### 8.2 RLS Policy Examples
+**Fallback:** Google Gemini if OpenAI unavailable.
 
-```sql
--- Enable RLS on plants table
-ALTER TABLE plants ENABLE ROW LEVEL SECURITY;
+### Fleet Intelligence (`services/insights_service.py`)
 
--- Admin: full access
-CREATE POLICY "admin_all_plants" ON plants
-  FOR ALL
-  TO authenticated
-  USING (
-    EXISTS (
-      SELECT 1 FROM users
-      WHERE users.id = auth.uid()
-      AND users.role = 'admin'
-    )
-  );
+AI-powered analytics engine generating operational insights:
+- Plant utilization patterns
+- Maintenance cost trends
+- Transfer frequency analysis
+- Site performance comparisons
 
--- Management: read active plants only
-CREATE POLICY "management_read_active_plants" ON plants
-  FOR SELECT
-  TO authenticated
-  USING (
-    status = 'active'
-    AND EXISTS (
-      SELECT 1 FROM users
-      WHERE users.id = auth.uid()
-      AND users.role = 'management'
-    )
-  );
+---
+
+## 11. File Storage
+
+### Architecture
+
+```
+Upload → FastAPI → Supabase Storage (S3-compatible bucket: "reports")
+                                          |
+                                    Public bucket
+                                    (signed URLs for downloads)
 ```
 
-### 8.3 Audit Trail
+### Storage Pattern
 
-```sql
--- Automatic audit logging via trigger
-CREATE OR REPLACE FUNCTION audit_trigger()
-RETURNS TRIGGER AS $$
-BEGIN
-  INSERT INTO audit.logs (
-    table_name,
-    record_id,
-    action,
-    old_values,
-    new_values,
-    user_id,
-    ip_address
-  ) VALUES (
-    TG_TABLE_NAME,
-    COALESCE(NEW.id, OLD.id),
-    TG_OP,
-    CASE WHEN TG_OP IN ('UPDATE', 'DELETE') THEN to_jsonb(OLD) END,
-    CASE WHEN TG_OP IN ('INSERT', 'UPDATE') THEN to_jsonb(NEW) END,
-    auth.uid(),
-    current_setting('request.headers', true)::json->>'x-forwarded-for'
-  );
-  RETURN COALESCE(NEW, OLD);
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+```python
+# Upload
+supabase.storage.from_("reports").upload(path, file_bytes)
+
+# Download (in ETL worker)
+response = supabase.storage.from_("reports").download(path)
+
+# Signed URL (for frontend downloads)
+url = supabase.storage.from_("reports").create_signed_url(path, expires_in=3600)
 ```
 
 ---
 
-## 9. Observability & Monitoring
+## 12. Observability & Monitoring
 
-### 9.1 Three Pillars of Observability
+### Structured Logging
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        OBSERVABILITY STACK                               │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│  ┌─────────────────────┐  ┌─────────────────────┐  ┌─────────────────┐ │
-│  │       LOGS          │  │       METRICS       │  │      TRACES     │ │
-│  ├─────────────────────┤  ├─────────────────────┤  ├─────────────────┤ │
-│  │                     │  │                     │  │                 │ │
-│  │ • Application logs  │  │ • Request latency   │  │ • Request flow  │ │
-│  │ • ETL pipeline logs │  │ • Error rates       │  │ • DB queries    │ │
-│  │ • Database logs     │  │ • DB connections    │  │ • External APIs │ │
-│  │ • Auth events       │  │ • Cache hit ratio   │  │                 │ │
-│  │                     │  │ • ETL run stats     │  │                 │ │
-│  │                     │  │                     │  │                 │ │
-│  │ Storage:            │  │ Storage:            │  │ Storage:        │ │
-│  │ Supabase Logs +     │  │ PostgreSQL +        │  │ (Future)        │ │
-│  │ structured JSON     │  │ monitoring schema   │  │                 │ │
-│  │                     │  │                     │  │                 │ │
-│  └─────────────────────┘  └─────────────────────┘  └─────────────────┘ │
-│           │                        │                        │           │
-│           └────────────────────────┼────────────────────────┘           │
-│                                    ▼                                    │
-│                         ┌─────────────────────┐                         │
-│                         │    DASHBOARDS       │                         │
-│                         │  • Health overview  │                         │
-│                         │  • ETL status       │                         │
-│                         │  • Error tracking   │                         │
-│                         │  • Performance      │                         │
-│                         └─────────────────────┘                         │
-│                                    │                                    │
-│                                    ▼                                    │
-│                         ┌─────────────────────┐                         │
-│                         │      ALERTS         │                         │
-│                         │  • Error spike      │                         │
-│                         │  • ETL failure      │                         │
-│                         │  • High latency     │                         │
-│                         │  • Low disk space   │                         │
-│                         └─────────────────────┘                         │
-│                                                                          │
-└─────────────────────────────────────────────────────────────────────────┘
+```python
+import structlog
+logger = structlog.get_logger(__name__)
+
+logger.info("Plant updated", plant_id=plant_id, fleet_number=fn, user_id=user_id)
+# Output: {"event": "Plant updated", "plant_id": "...", "fleet_number": "...", "timestamp": "..."}
 ```
 
-### 9.2 Key Metrics to Monitor
+### Health Endpoints
 
-| Category | Metric | Warning | Critical |
-|----------|--------|---------|----------|
-| **Database** | Connection count | > 80% max | > 95% max |
-| | Cache hit ratio | < 95% | < 90% |
-| | Dead tuples % | > 10% | > 20% |
-| | Query latency (p95) | > 500ms | > 2000ms |
-| **API** | Error rate | > 1% | > 5% |
-| | Latency (p95) | > 500ms | > 2000ms |
-| | 5xx responses | Any | Sustained |
-| **ETL** | Run duration | > 10 min | > 30 min |
-| | Records failed | > 1% | > 5% |
-| | Run status | Warning | Failed |
-| **Storage** | Database size | > 80% quota | > 95% quota |
-| | File storage | > 80% quota | > 95% quota |
+| Endpoint | Purpose | Response |
+|----------|---------|----------|
+| `GET /api/v1/health` | Basic alive check | `{"status": "ok"}` |
+| `GET /api/v1/health/detailed` | Pool stats, DB latency, components | Full JSON |
+| `GET /api/v1/health/ready` | Readiness probe (DB connectivity) | 200/503 |
+| `GET /api/v1/health/live` | Liveness probe | 200 |
 
-### 9.3 Alerting Strategy
+### Middleware
 
-```yaml
-alerts:
-  - name: database_connection_high
-    condition: connections > 0.8 * max_connections
-    severity: warning
-    channels: [slack, email]
+- **RequestLoggingMiddleware** — Logs every request with duration, status, user
+- **AlertingMiddleware** — Tracks error rates; alerts if threshold exceeded (10 errors/60s)
 
-  - name: etl_pipeline_failed
-    condition: etl_status = 'failed'
-    severity: critical
-    channels: [slack, email, pagerduty]
+### Audit Trail
 
-  - name: error_rate_spike
-    condition: error_rate > 0.05 for 5 minutes
-    severity: critical
-    channels: [slack, email]
+Every admin action logged to `audit_logs`:
+```python
+await audit_service.log(
+    user_id, user_email, action="update",
+    table_name="plants_master", record_id=plant_id,
+    old_values={...}, new_values={...},
+    ip_address=ip, description="Updated plant XYZ-001"
+)
 ```
 
 ---
 
-## 10. Scalability Strategy
+## 13. Deployment & Infrastructure
 
-### 10.1 Current Scale & Growth Projections
-
-| Metric | Current | Year 1 | Year 3 | Year 5 |
-|--------|---------|--------|--------|--------|
-| Plants | 2,007 | 5,000 | 15,000 | 50,000 |
-| Spare Parts | 458 | 10,000 | 100,000 | 500,000 |
-| Users | 0 | 20 | 50 | 200 |
-| Locations | 23 | 50 | 100 | 250 |
-| API Requests/day | - | 10K | 100K | 1M |
-| Database Size | ~50MB | 500MB | 5GB | 50GB |
-
-### 10.2 Scaling Strategy by Phase
+### Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         SCALING PHASES                                   │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│  PHASE 1: Vertical Scaling (Current → Year 1)                           │
-│  ────────────────────────────────────────────                           │
-│  • Supabase Pro plan (8GB RAM, 2 CPU)                                   │
-│  • Connection pooling (PgBouncer built-in)                              │
-│  • Query optimization with indexes                                       │
-│  • Materialized views for dashboards                                    │
-│  ✓ Handles: 5K plants, 20 users, 10K req/day                           │
-│                                                                          │
-│  PHASE 2: Optimization (Year 1 → Year 3)                                │
-│  ────────────────────────────────────────                               │
-│  • Table partitioning (spare_parts by date)                             │
-│  • Read replicas for analytics queries                                  │
-│  • CDN for static assets                                                │
-│  • Client-side caching (TanStack Query)                                 │
-│  • API response caching                                                 │
-│  ✓ Handles: 15K plants, 50 users, 100K req/day                         │
-│                                                                          │
-│  PHASE 3: Horizontal Scaling (Year 3+)                                  │
-│  ─────────────────────────────────────                                  │
-│  • Dedicated PostgreSQL cluster (if needed)                             │
-│  • Separate OLTP and OLAP databases                                     │
-│  • Redis for session/query caching                                      │
-│  • Multiple Edge Function instances                                     │
-│  ✓ Handles: 50K+ plants, 200+ users, 1M+ req/day                       │
-│                                                                          │
-└─────────────────────────────────────────────────────────────────────────┘
+GitHub (Astrochuks/PW_plant_management_system)
+    |
+    +--- Render (backend)
+    |      Docker (Python 3.11-slim)
+    |      Frankfurt, EU (close to Supabase DB)
+    |      Free plan
+    |      Health check: /api/v1/health
+    |
+    +--- Vercel (frontend)
+    |      Next.js 16 (zero-config)
+    |      Edge network (global CDN)
+    |      Free plan
+    |
+    +--- Supabase (database + auth + storage)
+           PostgreSQL (EU West)
+           Supavisor pooler (port 6543)
+           Auth API (JWT issuance)
+           Storage (S3-compatible, "reports" bucket)
 ```
 
-### 10.3 Database Optimization Techniques
+### Environment Variables
 
-```sql
--- 1. Indexes (already partially implemented)
-CREATE INDEX CONCURRENTLY idx_plants_fleet_number ON plants(fleet_number);
-CREATE INDEX CONCURRENTLY idx_plants_location ON plants(current_location_id);
-CREATE INDEX CONCURRENTLY idx_spare_parts_plant ON spare_parts(plant_id);
-CREATE INDEX CONCURRENTLY idx_spare_parts_date ON spare_parts(replaced_date);
+#### Backend (Render)
+```env
+DATABASE_URL=postgresql://postgres.[ref]:[pass]@pooler.supabase.com:6543/postgres
+SUPABASE_URL=https://[ref].supabase.co
+SUPABASE_SERVICE_ROLE_KEY=eyJ...
+SUPABASE_JWT_SECRET=...
+OPENAI_API_KEY=sk-...
+GEMINI_API_KEY=...              # Optional fallback
+CORS_ORIGINS=["https://your-app.vercel.app"]
+ENVIRONMENT=production
+LOG_LEVEL=INFO
+```
 
--- 2. Partial indexes for common queries
-CREATE INDEX CONCURRENTLY idx_active_plants
-  ON plants(fleet_number) WHERE status = 'active';
+#### Frontend (Vercel)
+```env
+NEXT_PUBLIC_API_URL=https://pw-plant-api.onrender.com
+```
 
--- 3. Table partitioning for spare_parts (when needed)
--- Partition by year for historical data
-CREATE TABLE spare_parts_y2026 PARTITION OF spare_parts
-  FOR VALUES FROM ('2026-01-01') TO ('2027-01-01');
+### Docker Build
 
--- 4. Materialized views for dashboards
-CREATE MATERIALIZED VIEW mv_dashboard_stats AS
-SELECT
-  COUNT(*) FILTER (WHERE status = 'active') as active_plants,
-  COUNT(*) FILTER (WHERE physical_verification) as verified_plants,
-  (SELECT COUNT(*) FROM spare_parts) as total_parts,
-  (SELECT COALESCE(SUM(total_cost), 0) FROM spare_parts) as total_maintenance_cost
-FROM plants;
+```dockerfile
+# Multi-stage build
+FROM python:3.11-slim AS builder
+# Install deps into virtualenv
 
--- Refresh nightly via pg_cron
-SELECT cron.schedule('refresh-dashboard', '0 3 * * *',
-  'REFRESH MATERIALIZED VIEW CONCURRENTLY mv_dashboard_stats');
+FROM python:3.11-slim AS production
+# Copy virtualenv, run as non-root (appuser)
+# Health check: curl /api/v1/health
+EXPOSE 8000
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
 ---
 
-## 11. Failure Handling & Resilience
+## 14. API Reference
 
-### 11.1 Failure Modes & Mitigations
+### Route Prefix: `/api/v1`
 
-| Failure Mode | Impact | Detection | Mitigation | Recovery |
-|--------------|--------|-----------|------------|----------|
-| Database down | Complete outage | Health check fails | Supabase auto-recovery | Wait for Supabase |
-| API errors | Partial outage | Error rate spike | Retry with backoff | Circuit breaker |
-| ETL failure | Stale data | Pipeline status | Alert, manual retry | Idempotent re-run |
-| Auth service down | No login | Auth health check | Cached sessions | Wait for recovery |
-| Network timeout | Slow/failed requests | Latency metrics | Timeout + retry | Exponential backoff |
-| Data corruption | Incorrect data | Validation failures | Backup restore | Point-in-time recovery |
+| Prefix | Tag | Key Endpoints |
+|--------|-----|---------------|
+| `/health` | Health | GET `/`, `/detailed`, `/ready`, `/live` |
+| `/auth` | Authentication | POST `/login`, `/logout`, `/refresh`, `/users` |
+| `/plants` | Plants | GET `/`, `/{id}`, POST `/`, PATCH `/{id}`, DELETE `/{id}`, POST `/{id}/transfer` |
+| `/uploads` | Uploads | POST `/weekly-report`, `/purchase-order`, GET `/`, `/{id}/status` |
+| `/locations` | Sites | GET `/`, `/{id}`, `/{id}/plants`, `/{id}/stats` |
+| `/transfers` | Transfers | GET `/`, `/pending`, POST `/`, `/{id}/confirm`, `/{id}/cancel`, `/{id}/reject` |
+| `/projects` | Projects | GET `/`, POST `/`, POST `/import`, PATCH `/{id}`, DELETE `/{id}` |
+| `/spare-parts` | Spare Parts | GET `/`, POST `/`, analytics endpoints, cost endpoints |
+| `/fleet-types` | Fleet Types | GET `/` |
+| `/suppliers` | Suppliers | GET `/`, `/{id}` |
+| `/reports` | Reports | GET endpoints for various report types |
+| `/insights` | Insights | GET `/`, `/{id}` |
+| `/notifications` | Notifications | GET `/`, PATCH `/{id}/read` |
+| `/audit` | Audit | GET `/` |
+| `/events` | Events | GET `/stream` (SSE) |
+| `/site` | Site Engineer | Site-scoped endpoints for field officers |
+| `/states` | States | GET `/` (reference data) |
 
-### 11.2 Resilience Patterns
+### Authentication
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                      RESILIENCE PATTERNS                                 │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│  1. RETRY WITH EXPONENTIAL BACKOFF                                      │
-│  ─────────────────────────────────                                      │
-│  Attempt 1: Immediate                                                   │
-│  Attempt 2: Wait 1s                                                     │
-│  Attempt 3: Wait 2s                                                     │
-│  Attempt 4: Wait 4s                                                     │
-│  Attempt 5: Wait 8s → Give up, alert                                    │
-│                                                                          │
-│  2. CIRCUIT BREAKER                                                     │
-│  ───────────────────                                                    │
-│  ┌────────┐     5 failures     ┌────────┐     30s timeout   ┌────────┐ │
-│  │ CLOSED │ ─────────────────▶ │  OPEN  │ ─────────────────▶│  HALF  │ │
-│  │        │                    │        │                    │  OPEN  │ │
-│  └────────┘ ◀───────────────── └────────┘ ◀───────────────── └────────┘ │
-│              success                         failure                     │
-│                                                                          │
-│  3. GRACEFUL DEGRADATION                                                │
-│  ───────────────────────                                                │
-│  • Analytics down → Show cached data with "stale" indicator             │
-│  • AI service down → Disable AI features, show basic search             │
-│  • Real-time down → Fall back to polling                                │
-│                                                                          │
-│  4. IDEMPOTENCY                                                         │
-│  ─────────────                                                          │
-│  • All mutations have idempotency keys                                  │
-│  • ETL pipeline can be safely re-run                                    │
-│  • Duplicate requests return same result                                │
-│                                                                          │
-│  5. BULKHEAD PATTERN                                                    │
-│  ───────────────────                                                    │
-│  • Separate connection pools for OLTP vs OLAP                           │
-│  • Analytics queries can't starve operational queries                   │
-│                                                                          │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-### 11.3 Backup & Disaster Recovery
-
-| Component | Backup Frequency | Retention | RPO | RTO |
-|-----------|------------------|-----------|-----|-----|
-| Database | Daily (Supabase) | 7 days | 24 hours | 1 hour |
-| Point-in-time | Continuous (WAL) | 7 days | Minutes | 1 hour |
-| File storage | Daily snapshot | 30 days | 24 hours | 4 hours |
-| Configuration | Git (real-time) | Forever | 0 | 15 min |
-| Secrets | Vault backup | Daily | 24 hours | 1 hour |
-
-### 11.4 Incident Response
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                    INCIDENT RESPONSE RUNBOOK                             │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│  SEVERITY LEVELS                                                        │
-│  ───────────────                                                        │
-│  P1 (Critical): System down, data loss risk    → Response: 15 min      │
-│  P2 (High):     Major feature broken           → Response: 1 hour      │
-│  P3 (Medium):   Minor feature broken           → Response: 4 hours     │
-│  P4 (Low):      Cosmetic/non-urgent            → Response: Next day    │
-│                                                                          │
-│  INCIDENT PROCESS                                                       │
-│  ────────────────                                                       │
-│  1. DETECT    → Automated alert or user report                         │
-│  2. TRIAGE    → Assign severity, notify team                           │
-│  3. DIAGNOSE  → Check logs, metrics, recent changes                    │
-│  4. MITIGATE  → Apply quick fix or rollback                            │
-│  5. RESOLVE   → Permanent fix                                          │
-│  6. REVIEW    → Post-mortem, update runbooks                           │
-│                                                                          │
-└─────────────────────────────────────────────────────────────────────────┘
-```
+All endpoints (except `/health` and `/auth/login`) require a valid JWT:
+- **Header:** `Authorization: Bearer <token>`
+- **SSE:** `?token=<token>` query parameter (EventSource limitation)
 
 ---
 
-## 12. AI Integration Strategy
+## 15. Scaling Strategy
 
-### 12.1 AI Use Cases (Prioritized for Your Workflow)
+### Current Capacity
 
-| Use Case | Priority | Complexity | Business Value |
-|----------|----------|------------|----------------|
-| **Natural Language Queries** | 🔴 High | Medium | Management asks questions in plain English |
-| **Intelligent Data Extraction** | 🔴 High | Medium | Handle messy Excel files automatically |
-| **Automated Weekly Insights** | 🔴 High | Low | AI-generated summary for management |
-| **Anomaly Detection** | 🟡 Medium | Medium | Flag unusual costs, patterns, missing reports |
-| **Predictive Maintenance** | 🟡 Medium | High | Predict when parts will need replacement |
-| **Report Summarization** | 🟢 Low | Low | Natural language report narratives |
+| Component | Limit | Notes |
+|-----------|-------|-------|
+| asyncpg pool | 10 connections | Handles ~100 concurrent requests |
+| SSE event bus | In-memory | Single-process only |
+| ETL worker | Single-threaded | One file at a time |
+| Render free plan | 512MB RAM, shared CPU | Sufficient for current load |
 
-### 12.2 AI Architecture
+### Scaling Path
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         AI INTEGRATION                                   │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │                    Vector Store (pgvector)                       │   │
-│  │  ┌──────────────────────────────────────────────────────────┐   │   │
-│  │  │  ai.document_embeddings                                   │   │   │
-│  │  │  - id, content_type, content_id                          │   │   │
-│  │  │  - content_text, embedding (vector 1536)                 │   │   │
-│  │  │  - metadata (JSONB)                                      │   │   │
-│  │  └──────────────────────────────────────────────────────────┘   │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
-│                                    │                                    │
-│                                    ▼                                    │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │                    AI Pipeline                                   │   │
-│  │                                                                  │   │
-│  │  1. Data Ingestion                                              │   │
-│  │     Plant/Part created → Generate embedding → Store in pgvector │   │
-│  │                                                                  │   │
-│  │  2. Semantic Search                                             │   │
-│  │     User query → Embed query → Cosine similarity search         │   │
-│  │                                                                  │   │
-│  │  3. RAG (Retrieval Augmented Generation)                        │   │
-│  │     Query → Retrieve relevant docs → Generate response (LLM)    │   │
-│  │                                                                  │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
-│                                    │                                    │
-│                                    ▼                                    │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │                    LLM Integration (Claude)                      │   │
-│  │                                                                  │   │
-│  │  Edge Function: /functions/v1/ai-query                          │   │
-│  │  ┌──────────────────────────────────────────────────────────┐   │   │
-│  │  │  1. Parse user query                                      │   │   │
-│  │  │  2. Retrieve relevant context from pgvector               │   │   │
-│  │  │  3. Build prompt with context                             │   │   │
-│  │  │  4. Call Claude API                                       │   │   │
-│  │  │  5. Parse response, execute actions                       │   │   │
-│  │  │  6. Return results to user                                │   │   │
-│  │  └──────────────────────────────────────────────────────────┘   │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
-│                                                                          │
-└─────────────────────────────────────────────────────────────────────────┘
-```
+#### Phase 1: Vertical (Current Load x5)
+- Increase asyncpg `max_size` to 20-30
+- Upgrade Render to paid plan (more RAM/CPU)
+- Add Redis for SSE event bus (multi-worker support)
 
-### 12.3 Example AI Queries
+#### Phase 2: Horizontal (Current Load x20)
+- Multiple Uvicorn workers behind load balancer
+- Redis Pub/Sub for SSE across workers
+- Celery/ARQ task queue for ETL (replaces BackgroundTasks)
+- Read replicas for report queries
 
-```
-User: "Show me all compressors that haven't been serviced in 6 months"
+#### Phase 3: Enterprise (Current Load x100+)
+- Kubernetes orchestration
+- Dedicated ETL service
+- Event streaming (Kafka/NATS)
+- Database sharding by location
+- CDN for static assets and file downloads
 
-AI Processing:
-1. Parse intent: filter plants, type=compressor, maintenance_date < 6 months ago
-2. Generate SQL or use semantic search
-3. Return results with explanation
+### What to Swap When
 
-User: "Which plants are likely to need maintenance soon?"
-
-AI Processing:
-1. Retrieve maintenance history patterns
-2. Apply predictive model (parts lifecycle, usage patterns)
-3. Rank by probability
-4. Return predictions with confidence scores
-```
+| Current | Replace With | When |
+|---------|-------------|------|
+| In-memory SSE bus | Redis Pub/Sub | Multiple workers |
+| BackgroundTasks (ETL) | Celery + Redis | ETL queue > 10 files |
+| Single Uvicorn | Gunicorn + workers | > 100 concurrent users |
+| Supabase free | Supabase Pro / self-hosted PG | > 500MB DB or connection limits |
+| Render free | Render paid / AWS ECS | Need guaranteed uptime |
+| Vercel free | Vercel Pro | Custom domains, analytics |
 
 ---
 
-## 13. Technology Stack
+## 16. Key Design Decisions
 
-### 13.1 Complete Technology Stack
+### 1. asyncpg over Supabase PostgREST
+**Decision:** Direct PostgreSQL via asyncpg instead of Supabase REST API.
+**Reason:** PostgREST added 3-4s overhead per request. asyncpg gives 1-5ms queries.
+**Trade-off:** More SQL to write, but full control over queries and transactions.
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        TECHNOLOGY STACK                                  │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│  FRONTEND                                                               │
-│  ─────────                                                              │
-│  Framework:     Next.js 14 (App Router)                                 │
-│  Language:      TypeScript 5.x                                          │
-│  Styling:       Tailwind CSS + shadcn/ui                                │
-│  State:         TanStack Query + Zustand (minimal)                      │
-│  Forms:         React Hook Form + Zod                                   │
-│  Charts:        Recharts or Tremor                                      │
-│  Tables:        TanStack Table                                          │
-│                                                                          │
-│  BACKEND                                                                │
-│  ───────                                                                │
-│  Platform:      Supabase                                                │
-│  Database:      PostgreSQL 15                                           │
-│  REST API:      PostgREST (auto-generated)                              │
-│  GraphQL:       pg_graphql                                              │
-│  Functions:     Supabase Edge Functions (Deno)                          │
-│  Auth:          Supabase Auth (GoTrue)                                  │
-│  Storage:       Supabase Storage (S3-compatible)                        │
-│  Realtime:      Supabase Realtime (WebSockets)                          │
-│                                                                          │
-│  DATA PIPELINE                                                          │
-│  ─────────────                                                          │
-│  Language:      Python 3.11+                                            │
-│  Framework:     Custom (existing ETL)                                   │
-│  Data:          pandas, openpyxl                                        │
-│  Scheduling:    pg_cron                                                 │
-│                                                                          │
-│  AI/ML                                                                  │
-│  ─────                                                                  │
-│  Vector DB:     pgvector                                                │
-│  LLM:           Claude (Anthropic API)                                  │
-│  Embeddings:    OpenAI or Voyage AI                                     │
-│                                                                          │
-│  INFRASTRUCTURE                                                         │
-│  ──────────────                                                         │
-│  Hosting:       Vercel (frontend) + Supabase (backend)                  │
-│  CDN:           Vercel Edge Network                                     │
-│  DNS:           Cloudflare (optional)                                   │
-│  CI/CD:         GitHub Actions                                          │
-│  Version Control: Git + GitHub                                          │
-│                                                                          │
-│  OBSERVABILITY                                                          │
-│  ─────────────                                                          │
-│  Logging:       Supabase Logs + structured JSON                         │
-│  Metrics:       pg_stat_statements + custom monitoring schema           │
-│  Dashboards:    Custom dashboard (existing) + Supabase Dashboard        │
-│  Alerts:        Email + Slack (via Edge Functions)                      │
-│                                                                          │
-│  DEVELOPMENT                                                            │
-│  ───────────                                                            │
-│  IDE:           VS Code + Cursor                                        │
-│  Linting:       ESLint, Prettier, ruff (Python)                         │
-│  Testing:       Vitest (frontend), pytest (Python)                      │
-│  API Testing:   Thunder Client / Postman                                │
-│                                                                          │
-└─────────────────────────────────────────────────────────────────────────┘
-```
+### 2. SSE over WebSocket
+**Decision:** Server-Sent Events for real-time cache invalidation.
+**Reason:** We only push one-way (server → client). SSE is simpler, auto-reconnects, works through proxies. WebSocket is bidirectional — overkill for "please refetch."
 
-### 13.2 Why This Stack?
+### 3. React Query over Redux/Context for Server State
+**Decision:** TanStack React Query for all API data.
+**Reason:** Built-in caching, background refetch, deduplication, optimistic updates. Eliminates manual state management for server data.
 
-| Choice | Alternatives Considered | Why We Chose This |
-|--------|------------------------|-------------------|
-| **Supabase** | Firebase, AWS, self-hosted PG | PostgreSQL flexibility, RLS, real-time, generous free tier |
-| **Next.js** | Remix, SvelteKit, Vue/Nuxt | Best React ecosystem, Vercel integration, Server Components |
-| **TypeScript** | JavaScript | Type safety, better DX, catch errors early |
-| **Tailwind** | CSS-in-JS, plain CSS | Utility-first, fast development, consistent design |
-| **shadcn/ui** | Material UI, Chakra | Customizable, accessible, copy-paste components |
-| **TanStack Query** | SWR, Apollo | Best-in-class caching, devtools, optimistic updates |
-| **pgvector** | Pinecone, Weaviate | Same database, no extra service, cost-effective |
+### 4. Background Tasks over Task Queue
+**Decision:** FastAPI `BackgroundTasks` instead of Celery/ARQ.
+**Reason:** Single-process deployment on free tier. No Redis needed. ETL throughput is adequate (one file at a time). Easy to migrate to Celery later.
+
+### 5. Local JWT Verification
+**Decision:** Verify JWTs locally using JWKS (ES256) instead of calling Supabase Auth API.
+**Reason:** Eliminates a network round-trip per request. JWKS public key cached on startup.
+
+### 6. In-Memory User Cache
+**Decision:** 5-minute TTL cache in `security.py` for user data.
+**Reason:** Same user hits many endpoints per session. Cache hit = 0 DB queries for auth.
+
+### 7. Pandas for Excel Parsing
+**Decision:** Pandas + openpyxl for all Excel imports.
+**Reason:** Handles messy real-world data (merged cells, missing headers, type coercion). Award letters parser needs heavy data cleaning that Pandas makes tractable.
+
+### 8. Session Storage over Local Storage
+**Decision:** JWT tokens stored in `sessionStorage` (not `localStorage`).
+**Reason:** Per-tab isolation, cleared on tab close. Prevents stale tokens across tabs.
+
+### 9. Currency: Nigerian Naira (NGN)
+All monetary values are in Naira (₦). Frontend uses `en-NG` locale for formatting.
 
 ---
 
-## 14. Trade-offs & Alternatives
+## Appendix: File Size Reference
 
-### 14.1 Architecture Trade-offs
+The largest backend files indicate system complexity concentration:
 
-| Decision | Trade-off | Why We Accept It |
-|----------|-----------|------------------|
-| **Modular monolith** | Less isolation than microservices | Simpler ops, can extract later |
-| **Supabase** | Vendor lock-in | Postgres is portable, saves ops effort |
-| **Same DB for OLTP/OLAP** | Potential resource contention | Scale is small, separate schemas help |
-| **Edge Functions** | Cold starts, limited runtime | Good enough for our scale, simple deployment |
-| **JWT auth** | Token revocation complexity | Supabase handles refresh, short expiry mitigates |
-
-### 14.2 Alternatives for Future Consideration
-
-```
-IF we outgrow current architecture:
-
-Database:
-  Current: Single Supabase instance
-  Future:  Read replicas → Separate OLAP cluster → Timescale for time-series
-
-Backend:
-  Current: Supabase Edge Functions
-  Future:  Dedicated Node.js/Go service on Fly.io/Railway
-
-Caching:
-  Current: PostgreSQL materialized views
-  Future:  Redis/Upstash for session and query caching
-
-Search:
-  Current: PostgreSQL full-text + pgvector
-  Future:  Typesense/Meilisearch for advanced search
-
-Monitoring:
-  Current: Custom dashboard + Supabase
-  Future:  Grafana + Prometheus + Loki stack
-```
-
----
-
-## 15. Risks & Mitigations
-
-### 15.1 Technical Risks
-
-| Risk | Likelihood | Impact | Mitigation |
-|------|------------|--------|------------|
-| Supabase outage | Low | High | Accept (SLA 99.9%), have manual backup procedure |
-| Data loss | Very Low | Critical | Point-in-time recovery, daily backups, audit trail |
-| Security breach | Low | Critical | RLS, encryption, audit logs, penetration testing |
-| Performance degradation | Medium | Medium | Monitoring, query optimization, scaling plan |
-| AI hallucinations | Medium | Low | Human review, confidence scores, guardrails |
-
-### 15.2 Operational Risks
-
-| Risk | Likelihood | Impact | Mitigation |
-|------|------------|--------|------------|
-| Key person dependency | High | High | Documentation, runbooks, knowledge sharing |
-| Scope creep | Medium | Medium | Clear requirements, phased approach |
-| Technical debt | Medium | Medium | Regular refactoring, code reviews |
-| Cost overrun | Low | Medium | Monitor usage, optimize queries, set budgets |
-
-### 15.3 Risk Response Matrix
-
-```
-┌───────────────┬────────────────────────────────────────────────────────┐
-│   Risk Level  │                    Response Strategy                    │
-├───────────────┼────────────────────────────────────────────────────────┤
-│   CRITICAL    │  Immediate action, escalate, consider rollback         │
-│   HIGH        │  Address within 24 hours, notify stakeholders          │
-│   MEDIUM      │  Plan mitigation, address in next sprint               │
-│   LOW         │  Monitor, add to backlog                               │
-└───────────────┴────────────────────────────────────────────────────────┘
-```
-
----
-
-## 16. Implementation Roadmap
-
-### 16.1 Phased Approach
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                      IMPLEMENTATION ROADMAP                              │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│  PHASE 1: FOUNDATION (Weeks 1-2)                                        │
-│  ───────────────────────────────                                        │
-│  □ Enable RLS on all tables                                             │
-│  □ Create audit logging infrastructure                                  │
-│  □ Set up analytics schema (OLAP)                                       │
-│  □ Configure proper indexes                                             │
-│  □ Set up CI/CD pipeline                                                │
-│  □ Create development branch workflow                                   │
-│  Deliverable: Secure, optimized database                                │
-│                                                                          │
-│  PHASE 2: BACKEND APIs (Weeks 3-4)                                      │
-│  ─────────────────────────────────                                      │
-│  □ Define RPC functions for complex operations                          │
-│  □ Create Edge Functions for business logic                             │
-│  □ Set up authentication flow                                           │
-│  □ Implement API documentation                                          │
-│  □ Add API rate limiting                                                │
-│  Deliverable: Working API layer                                         │
-│                                                                          │
-│  PHASE 3: FRONTEND MVP (Weeks 5-8)                                      │
-│  ─────────────────────────────────                                      │
-│  □ Set up Next.js project structure                                     │
-│  □ Implement authentication UI                                          │
-│  □ Build dashboard with key metrics                                     │
-│  □ Create plants CRUD interface                                         │
-│  □ Create spare parts management                                        │
-│  □ Build location tracking views                                        │
-│  □ Implement search and filtering                                       │
-│  Deliverable: Usable web application                                    │
-│                                                                          │
-│  PHASE 4: DATA WAREHOUSE (Weeks 9-10)                                   │
-│  ─────────────────────────────────────                                  │
-│  □ Create star schema tables                                            │
-│  □ Build OLTP → OLAP ETL pipeline                                       │
-│  □ Create materialized views                                            │
-│  □ Schedule automated refreshes                                         │
-│  Deliverable: Analytics-ready data warehouse                            │
-│                                                                          │
-│  PHASE 5: REPORTING & ANALYTICS (Weeks 11-12)                           │
-│  ─────────────────────────────────────────────                          │
-│  □ Build analytics dashboard                                            │
-│  □ Create report generation (PDF/Excel)                                 │
-│  □ Implement scheduled reports                                          │
-│  □ Add export functionality                                             │
-│  Deliverable: Business intelligence capabilities                        │
-│                                                                          │
-│  PHASE 6: AI INTEGRATION (Weeks 13-16)                                  │
-│  ─────────────────────────────────────                                  │
-│  □ Enable pgvector extension                                            │
-│  □ Build embedding pipeline                                             │
-│  □ Implement semantic search                                            │
-│  □ Create AI query interface                                            │
-│  □ Add predictive maintenance (v1)                                      │
-│  Deliverable: AI-powered features                                       │
-│                                                                          │
-│  PHASE 7: HARDENING (Weeks 17-18)                                       │
-│  ─────────────────────────────────                                      │
-│  □ Performance optimization                                             │
-│  □ Security audit                                                       │
-│  □ Load testing                                                         │
-│  □ Documentation completion                                             │
-│  □ Runbook creation                                                     │
-│  Deliverable: Production-ready system                                   │
-│                                                                          │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-### 16.2 Success Criteria
-
-| Phase | Success Criteria |
-|-------|------------------|
-| Phase 1 | All tables have RLS, audit logs capture all changes |
-| Phase 2 | API response time < 200ms p95, auth working |
-| Phase 3 | Users can perform all CRUD operations via UI |
-| Phase 4 | Analytics queries run < 5s, data fresh within 24h |
-| Phase 5 | Reports generate correctly, scheduled delivery works |
-| Phase 6 | AI search returns relevant results, predictions > 70% accurate |
-| Phase 7 | Pass security audit, handle 50 concurrent users |
-
----
-
-## Appendix A: Decision Log
-
-| Date | Decision | Rationale | Alternatives Rejected |
-|------|----------|-----------|----------------------|
-| 2026-02-02 | Hybrid backend (FastAPI + Supabase) | Single language (Python) for ETL, API, AI | Supabase-only (TypeScript for Edge Functions) |
-| 2026-02-02 | Supabase for DB/Auth/Storage | Postgres + managed services | Self-hosted (ops overhead) |
-| 2026-02-02 | Next.js | React ecosystem, SSR, Vercel | Remix, SvelteKit |
-| 2026-02-02 | Same DB for OLTP/OLAP | Scale is small, simpler | Separate DW (premature) |
-| 2026-02-02 | Upload portal with passcode | Simple for site officers, no accounts needed | Full user accounts (over-engineered) |
-| 2026-02-02 | In-app notifications | Plant officer workflow, always in dashboard | Email (may miss), SMS (cost) |
-| 2026-02-02 | Keep historical report files | Audit trail, reprocessing capability | Discard after extraction |
-| 2026-02-02 | Railway for deployment | Simple, good free tier, Python support | Render, Fly.io, self-hosted |
-
----
-
-## Appendix B: Glossary
-
-| Term | Definition |
-|------|------------|
-| OLTP | Online Transaction Processing - optimized for writes |
-| OLAP | Online Analytical Processing - optimized for reads |
-| RLS | Row-Level Security - database access control |
-| CDC | Change Data Capture - tracking data changes |
-| SCD | Slowly Changing Dimension - dimension versioning |
-| RPO | Recovery Point Objective - max acceptable data loss |
-| RTO | Recovery Time Objective - max acceptable downtime |
-| ETL | Extract, Transform, Load - data pipeline pattern |
-| RAG | Retrieval Augmented Generation - AI pattern |
-
----
-
-## Document History
-
-| Version | Date | Author | Changes |
-|---------|------|--------|---------|
-| 1.0 | 2026-02-02 | Claude + Ram | Initial draft |
-
----
-
-**Next Steps:**
-1. Review this architecture with stakeholders
-2. Validate assumptions and requirements
-3. Prioritize features for Phase 1
-4. Begin implementation
-
+| File | Size | What It Does |
+|------|------|--------------|
+| `etl_worker.py` | 128KB | Complete ETL pipeline (4 processing paths) |
+| `spare_parts.py` | 83KB | 22+ endpoints for PO and cost management |
+| `uploads.py` | 59KB | File upload with metadata extraction |
+| `site_report.py` | 38KB | Site engineer endpoints |
+| `insights_service.py` | 28KB | Fleet Intelligence AI engine |
+| `award_letters_parser.py` | 25KB | Excel project import with data cleaning |
+| `remarks_parser.py` | 21KB | AI-powered condition parsing |
+| `plants.py` | 48KB | Plant CRUD, search, transfer |

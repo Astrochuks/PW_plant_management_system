@@ -28,6 +28,7 @@ from app.core.security import (
     require_admin,
 )
 from app.models.project import ProjectCreate, ProjectUpdate
+from app.core.events import broadcast
 from app.monitoring.logging import get_logger
 from app.services.audit_service import audit_service
 
@@ -210,20 +211,24 @@ async def import_award_letters(
             ]
 
             try:
-                await conn.executemany(sql, args_list)
+                # Wrap executemany in its own savepoint so that if it fails,
+                # the outer transaction is NOT aborted and we can fall back
+                # to row-by-row inserts.
+                async with conn.transaction():
+                    await conn.executemany(sql, args_list)
                 created_count = len(args_list)
             except Exception:
-                # Batch failed — fall back to row-by-row with savepoints so
-                # individual row failures don't abort the outer transaction.
+                # Savepoint rolled back, outer tx still valid.
+                # Fall back to row-by-row with individual savepoints.
                 created_count = 0
                 for proj_args, proj in zip(args_list, parsed["projects"]):
                     try:
-                        async with conn.transaction():  # SAVEPOINT inside outer tx
+                        async with conn.transaction():  # SAVEPOINT
                             await conn.execute(sql, *proj_args)
                         created_count += 1
                     except Exception as row_err:
                         insert_errors.append({
-                            "project_name": proj.get("project_name"),
+                            "project_name": proj.get("project_name", "")[:80],
                             "sheet": proj.get("source_sheet"),
                             "error": str(row_err),
                         })
@@ -246,6 +251,9 @@ async def import_award_letters(
         ip_address=get_client_ip(request),
         description=f"Reimported {created_count} legacy projects (deleted {deleted_count} old)",
     )
+
+    if created_count > 0:
+        broadcast("projects", "import", f"{created_count} projects imported")
 
     return {
         "success": True,
@@ -463,6 +471,7 @@ async def create_project(
         description=f"Created project: {project.project_name}",
     )
 
+    broadcast("projects", "create")
     return {"success": True, "data": created}
 
 
@@ -517,6 +526,7 @@ async def update_project(
         description=f"Updated project: {existing.get('project_name')}",
     )
 
+    broadcast("projects", "update")
     return {"success": True, "data": updated}
 
 
@@ -549,4 +559,5 @@ async def delete_project(
         description=f"Deleted project: {existing.get('project_name')}",
     )
 
+    broadcast("projects", "delete")
     return {"success": True, "message": "Project deleted successfully"}

@@ -21,6 +21,7 @@ from app.models.plant import (
     PlantListResponse,
     PlantTransferRequest,
 )
+from app.core.events import broadcast
 from app.monitoring.logging import get_logger
 from app.services.audit_service import audit_service
 
@@ -963,6 +964,7 @@ async def create_plant(
         description=f"Created plant {plant.fleet_number}",
     )
 
+    broadcast("plants", "create")
     return {
         "success": True,
         "data": created,
@@ -1091,6 +1093,8 @@ async def update_plant(
         str(plant_id),
     )
 
+    broadcast("plants", "update")
+
     return {
         "success": True,
         "data": updated,
@@ -1156,6 +1160,8 @@ async def transfer_plant(
         description=f"Transferred plant from {from_loc} to {to_loc}",
     )
 
+    broadcast("plants", "transfer")
+
     return {
         "success": True,
         "data": result,
@@ -1213,6 +1219,8 @@ async def delete_plant(
         ip_address=get_client_ip(request),
         description=f"Deleted plant {fleet_number}",
     )
+
+    broadcast("plants", "delete")
 
     return {
         "success": True,

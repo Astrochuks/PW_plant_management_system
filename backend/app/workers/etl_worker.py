@@ -22,6 +22,7 @@ import pandas as pd
 from app.config import get_settings
 from app.core.database import get_supabase_admin_client  # Only for Storage downloads
 from app.core.pool import fetch, fetchrow, fetchval, execute, executemany
+from app.core.events import broadcast
 from app.monitoring.logging import get_logger
 from app.services.remarks_parser import (
     parse_remarks_batch,
@@ -977,6 +978,9 @@ async def process_weekly_report(
             json.dumps(result["warnings"]) if result["warnings"] else None,
         )
 
+        broadcast("plants", "import", f"{result['plants_processed']} plants processed")
+        broadcast("uploads", "complete")
+
         # Create notification for plant officer
         await _create_notification(
             title=f"Weekly report processed",
@@ -1194,6 +1198,9 @@ async def process_purchase_order(
             json.dumps(result["errors"]) if result["errors"] else None,
             json.dumps(result["warnings"]) if result["warnings"] else None,
         )
+
+        broadcast("spare_parts", "import", f"{result['parts_processed']} parts processed")
+        broadcast("uploads", "complete")
 
         # Create notification
         await _create_notification(
@@ -2577,6 +2584,8 @@ async def save_confirmed_weekly_report(
         )
 
         result["success"] = True
+        broadcast("plants", "import", f"{result['plants_processed']} plants saved")
+        broadcast("uploads", "complete")
         logger.info(
             "Confirmed weekly report saved",
             submission_id=submission_id,
@@ -2859,6 +2868,9 @@ async def process_direct_submission(
             "transfers_pending": transfers_pending,
             "errors": errors,
         })
+
+        broadcast("plants", "import", f"{plants_processed} plants processed")
+        broadcast("uploads", "complete")
 
         logger.info(
             "Direct submission processed",
