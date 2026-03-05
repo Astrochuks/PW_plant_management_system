@@ -177,9 +177,9 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const { data: transferStats } = useTransferStats(lastSeenAt);
   const newTransfers = transferStats?.data?.new_since ?? 0;
 
-  // Admin-only: pending site transfer requests badge
-  const { data: siteRequestsData } = useAdminSiteTransferRequests('pending');
-  const pendingSiteRequests = isAdmin ? (siteRequestsData?.count ?? 0) : 0;
+  // Admin-only: pending site transfer requests badge (skip API call for non-admins)
+  const { data: siteRequestsData } = useAdminSiteTransferRequests('pending', isAdmin);
+  const pendingSiteRequests = siteRequestsData?.count ?? 0;
 
   const badgeCounts: Record<string, number> = {
     transfers: newTransfers,

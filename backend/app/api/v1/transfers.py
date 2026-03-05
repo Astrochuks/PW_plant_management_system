@@ -250,8 +250,8 @@ async def list_site_transfer_requests(
                 "id": r["id"],
                 "status": r["status"],
                 "type": "pull_request" if r["is_pull_request"] else "submission_transfer",
-                "created_at": r["created_at"].isoformat() if r["created_at"] else None,
-                "transfer_date": r["transfer_date"].isoformat() if r["transfer_date"] else None,
+                "created_at": r["created_at"],
+                "transfer_date": r["transfer_date"],
                 "notes": r["notes"],
                 "plant": {
                     "fleet_number": r["fleet_number"],

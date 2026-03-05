@@ -98,13 +98,14 @@ export function useCancelTransfer() {
 // Admin — site transfer request management
 // ============================================================================
 
-export function useAdminSiteTransferRequests(status = 'pending') {
+export function useAdminSiteTransferRequests(status = 'pending', enabled = true) {
   return useQuery({
     queryKey: transfersKeys.siteRequests(status),
     queryFn: () => getSiteTransferRequests(status),
     staleTime: 30 * 1000,
     refetchInterval: 60 * 1000,
     refetchIntervalInBackground: false,
+    enabled,
   });
 }
 
