@@ -7,6 +7,7 @@
 
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   User,
   LoginCredentials,
@@ -45,7 +46,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
+  const queryClient = useQueryClient();
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Guards against overlapping wake-up refreshes
+  const isWakeRefreshingRef = useRef(false);
 
   // Schedule a proactive token refresh before the access token expires.
   // Uses silentRefreshToken() which bypasses the apiClient interceptors
@@ -100,26 +104,62 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setIsLoading(false);
   }, [scheduleRefresh]);
 
-  // When the tab becomes visible again, check if the token needs refreshing.
-  // This handles cases where the laptop was asleep or tab was backgrounded
-  // and the scheduled timer didn't fire.
+  // Immediately refresh the token and invalidate all queries so they
+  // refetch with the new token. Called on wake / tab-focus / reconnect.
+  const refreshAndInvalidate = useCallback(async () => {
+    if (!checkIsAuthenticated()) return;
+    if (isWakeRefreshingRef.current) return;
+
+    const expiresAt = getTokenExpiresAt();
+    // Only refresh if token is expired or within the buffer window
+    if (expiresAt && expiresAt - Date.now() > REFRESH_BUFFER_MS) return;
+
+    isWakeRefreshingRef.current = true;
+    try {
+      const response = await silentRefreshToken();
+      if (response) {
+        saveAuthData(response);
+        if (response.user) setUser(response.user);
+      }
+      // Reschedule the proactive timer based on the (now fresh) token
+      scheduleRefresh();
+      // Invalidate all cached queries so they refetch with the new token
+      queryClient.invalidateQueries();
+    } catch {
+      // Network may still be reconnecting — retry once after a short delay
+      setTimeout(() => {
+        isWakeRefreshingRef.current = false;
+        refreshAndInvalidate();
+      }, 2000);
+      return;
+    } finally {
+      isWakeRefreshingRef.current = false;
+    }
+  }, [scheduleRefresh, queryClient]);
+
+  // When the tab becomes visible again (laptop wake / tab switch), immediately
+  // refresh the token and invalidate stale queries.
   useEffect(() => {
     function handleVisibilityChange() {
-      if (document.visibilityState === 'visible' && checkIsAuthenticated()) {
-        const expiresAt = getTokenExpiresAt();
-        if (expiresAt) {
-          const msUntilExpiry = expiresAt - Date.now();
-          if (msUntilExpiry < REFRESH_BUFFER_MS) {
-            // Token is expired or about to expire — refresh now
-            scheduleRefresh();
-          }
-        }
+      if (document.visibilityState === 'visible') {
+        refreshAndInvalidate();
       }
     }
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [scheduleRefresh]);
+  }, [refreshAndInvalidate]);
+
+  // When the browser regains network connectivity (fires after sleep / WiFi reconnect),
+  // refresh the token so queued React Query refetches use a valid token.
+  useEffect(() => {
+    function handleOnline() {
+      refreshAndInvalidate();
+    }
+
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
+  }, [refreshAndInvalidate]);
 
   // Cleanup timer on unmount
   useEffect(() => {
@@ -136,7 +176,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
       saveAuthData(response);
       setUser(response.user);
       scheduleRefresh();
-      router.replace('/');
+      // Site engineers get their own dedicated UI
+      if (response.user.role === 'site_engineer') {
+        router.replace('/site/dashboard');
+      } else {
+        router.replace('/');
+      }
     } catch (error) {
       throw new Error(getErrorMessage(error));
     }

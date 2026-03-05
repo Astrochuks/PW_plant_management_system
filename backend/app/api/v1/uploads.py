@@ -556,20 +556,15 @@ async def download_weekly_submission_file(
     submission_id: UUID,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
 ):
-    """Download the uploaded file for a weekly report submission.
+    """Download the file for a weekly report submission.
 
-    Args:
-        submission_id: The submission ID.
-        current_user: The authenticated user (admin or management).
-
-    Returns:
-        Redirect to signed download URL.
+    For Excel-uploaded submissions: redirects to the original file in Storage.
+    For form-submitted reports: generates and returns a styled Excel file.
     """
     from fastapi.responses import RedirectResponse
 
-    # Get submission to find file path
     row = await fetchrow(
-        "SELECT source_file_path, source_file_name FROM weekly_report_submissions WHERE id = $1::uuid",
+        "SELECT * FROM weekly_report_submissions WHERE id = $1::uuid",
         str(submission_id),
     )
 
@@ -577,24 +572,77 @@ async def download_weekly_submission_file(
         raise NotFoundError("Weekly report submission", str(submission_id))
 
     file_path = row.get("source_file_path")
-    if not file_path:
-        raise NotFoundError("File for submission", str(submission_id))
 
-    # Create signed URL for download (Storage SDK)
-    try:
-        storage_client = get_supabase_admin_client()
-        signed_url = storage_client.storage.from_("reports").create_signed_url(
-            file_path,
-            expires_in=300,  # 5 minutes
-        )
-        download_url = signed_url.get("signedURL")
-        if not download_url:
-            raise ValidationError("Could not generate download URL")
+    if file_path:
+        # Original Excel file — redirect to Supabase Storage signed URL
+        try:
+            storage_client = get_supabase_admin_client()
+            signed_url = storage_client.storage.from_("reports").create_signed_url(
+                file_path,
+                expires_in=300,
+            )
+            download_url = signed_url.get("signedURL")
+            if not download_url:
+                raise ValidationError("Could not generate download URL")
+            return RedirectResponse(url=download_url)
+        except Exception as e:
+            logger.error("Failed to generate download URL", error=str(e))
+            raise ValidationError(f"Could not download file: {str(e)}")
+    else:
+        # Form-submitted report — generate styled Excel on the fly
+        from app.api.v1.site_report import _build_submission_excel
+        return await _build_submission_excel(dict(row))
 
-        return RedirectResponse(url=download_url)
-    except Exception as e:
-        logger.error("Failed to generate download URL", error=str(e))
-        raise ValidationError(f"Could not download file: {str(e)}")
+
+@router.delete("/submissions/weekly/{submission_id}")
+async def delete_weekly_submission(
+    submission_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+) -> dict:
+    """Delete a weekly report submission and its plant records (admin only).
+
+    Also attempts to remove the source file from Storage if present.
+    Note: plant conditions already applied to plants_master are NOT reversed.
+    """
+    row = await fetchrow(
+        "SELECT id, source_file_path, source_file_name FROM weekly_report_submissions WHERE id = $1::uuid",
+        str(submission_id),
+    )
+    if not row:
+        raise NotFoundError("Weekly report submission", str(submission_id))
+
+    # Delete plant_weekly_records first (no CASCADE)
+    deleted_records = await fetchval(
+        "WITH d AS (DELETE FROM plant_weekly_records WHERE submission_id = $1::uuid RETURNING id) SELECT count(*) FROM d",
+        str(submission_id),
+    )
+
+    # Delete the submission
+    await execute(
+        "DELETE FROM weekly_report_submissions WHERE id = $1::uuid",
+        str(submission_id),
+    )
+
+    # Best-effort: remove source file from Storage
+    file_path = row.get("source_file_path")
+    if file_path:
+        try:
+            storage_client = get_supabase_admin_client()
+            storage_client.storage.from_("reports").remove([file_path])
+        except Exception as e:
+            logger.warning("Could not delete submission file from Storage", path=file_path, error=str(e))
+
+    logger.info(
+        "Admin deleted weekly submission",
+        submission_id=str(submission_id),
+        deleted_records=deleted_records,
+        admin_id=current_user.id,
+    )
+
+    return {
+        "success": True,
+        "message": f"Submission deleted ({deleted_records} plant records removed)",
+    }
 
 
 @router.post("/tokens/generate")

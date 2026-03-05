@@ -21,7 +21,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
  */
 export async function silentRefreshToken(): Promise<LoginResponse | null> {
   const refreshToken = typeof window !== 'undefined'
-    ? localStorage.getItem('refresh_token')
+    ? sessionStorage.getItem('refresh_token')
     : null;
 
   if (!refreshToken) return null;

@@ -2604,3 +2604,276 @@ async def save_confirmed_weekly_report(
             pass
 
     return result
+
+
+async def process_direct_submission(
+    draft_id: str,
+    submission_id: str,
+    location_id: str,
+    week_ending_date: date,
+    year: int,
+    week_number: int,
+    submitted_by: str,
+) -> dict[str, Any]:
+    """Process a site engineer's direct form submission into the DB.
+
+    Bypasses Excel parsing — data is already clean and structured.
+    Mirrors the logic of save_confirmed_weekly_report but reads from
+    weekly_report_draft_rows instead of an admin-validated payload.
+
+    Steps:
+    1. Load all draft rows for this draft
+    2. For is_new_plant rows: INSERT into plants_master
+    3. UPDATE plants_master condition + physical_verification
+    4. INSERT/UPSERT into plant_weekly_records (ON CONFLICT plant_id, year, week_number)
+    5. For rows with transfer_to_location_id: create plant_transfers (pending)
+    6. Update plant_location_history (set current location)
+    7. Mark submission completed, mark draft submitted
+    """
+    result: dict[str, Any] = {
+        "success": False,
+        "plants_processed": 0,
+        "plants_created": 0,
+        "plants_updated": 0,
+        "transfers_pending": 0,
+        "errors": [],
+    }
+
+    try:
+        await execute(
+            "UPDATE weekly_report_submissions SET status = 'processing', processing_started_at = $2 WHERE id = $1::uuid",
+            submission_id, datetime.utcnow(),
+        )
+
+        # Load draft rows
+        rows = await fetch(
+            """SELECT r.*, pm.id AS resolved_plant_id
+               FROM weekly_report_draft_rows r
+               LEFT JOIN plants_master pm ON pm.id = r.plant_id
+               WHERE r.draft_id = $1::uuid
+               ORDER BY r.fleet_number""",
+            draft_id,
+        )
+
+        plants_processed = 0
+        plants_created = 0
+        plants_updated = 0
+        transfers_pending = 0
+        errors: list[dict] = []
+
+        for row in rows:
+            fleet_number = row["fleet_number"]
+            try:
+                plant_id: str | None = None
+
+                if row["is_new_plant"]:
+                    # Create new plant in plants_master
+                    existing = await fetchrow(
+                        "SELECT id FROM plants_master WHERE fleet_number = $1", fleet_number
+                    )
+                    if existing:
+                        plant_id = str(existing["id"])
+                    else:
+                        new_plant = await fetchrow(
+                            """INSERT INTO plants_master
+                                   (fleet_number, description, current_location_id, condition,
+                                    physical_verification, last_verified_date, last_verified_year, last_verified_week)
+                               VALUES ($1, $2, $3::uuid, $4, $5, $6, $7, $8)
+                               RETURNING id""",
+                            fleet_number,
+                            row.get("fleet_number"),  # description fallback to fleet_number
+                            location_id,
+                            row["condition"] or "unverified",
+                            row["physical_verification"] or False,
+                            week_ending_date if row["physical_verification"] else None,
+                            year if row["physical_verification"] else None,
+                            week_number if row["physical_verification"] else None,
+                        )
+                        plant_id = str(new_plant["id"])
+                        plants_created += 1
+                else:
+                    plant_id = str(row["plant_id"]) if row["plant_id"] else None
+                    if not plant_id:
+                        # Try to resolve by fleet number
+                        found = await fetchrow(
+                            "SELECT id FROM plants_master WHERE fleet_number = $1", fleet_number
+                        )
+                        if found:
+                            plant_id = str(found["id"])
+
+                if not plant_id:
+                    errors.append({"fleet_number": fleet_number, "error": "Plant not found"})
+                    continue
+
+                # Update plants_master condition + location + verification
+                update_fields: list[str] = ["updated_at = now()"]
+                update_params: list[Any] = []
+
+                if row.get("condition"):
+                    update_params.append(row["condition"])
+                    update_fields.append(f"condition = ${len(update_params)}")
+
+                if row.get("physical_verification") is not None:
+                    update_params.append(row["physical_verification"])
+                    update_fields.append(f"physical_verification = ${len(update_params)}")
+                    if row["physical_verification"]:
+                        update_params.extend([week_ending_date, year, week_number])
+                        update_fields.append(f"last_verified_date = ${len(update_params) - 2}")
+                        update_fields.append(f"last_verified_year = ${len(update_params) - 1}")
+                        update_fields.append(f"last_verified_week = ${len(update_params)}")
+
+                # Always update current location
+                update_params.append(location_id)
+                update_fields.append(f"current_location_id = ${len(update_params)}::uuid")
+                update_params.append(plant_id)
+
+                await execute(
+                    f"UPDATE plants_master SET {', '.join(update_fields)} WHERE id = ${len(update_params)}::uuid",
+                    *update_params,
+                )
+                plants_updated += 1
+
+                # Upsert plant_weekly_record
+                transfer_to_name: str | None = None
+                if row.get("transfer_to_location_id"):
+                    transfer_to_name = await fetchval(
+                        "SELECT name FROM locations WHERE id = $1::uuid",
+                        str(row["transfer_to_location_id"]),
+                    )
+
+                await execute(
+                    """INSERT INTO plant_weekly_records
+                           (plant_id, location_id, submission_id, year, week_number, week_ending_date,
+                            physical_verification, condition, hours_worked, standby_hours,
+                            breakdown_hours, off_hire, transfer_to, remarks)
+                       VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                       ON CONFLICT (plant_id, year, week_number)
+                       DO UPDATE SET
+                           location_id           = EXCLUDED.location_id,
+                           submission_id         = EXCLUDED.submission_id,
+                           physical_verification = EXCLUDED.physical_verification,
+                           condition             = EXCLUDED.condition,
+                           hours_worked          = EXCLUDED.hours_worked,
+                           standby_hours         = EXCLUDED.standby_hours,
+                           breakdown_hours       = EXCLUDED.breakdown_hours,
+                           off_hire              = EXCLUDED.off_hire,
+                           transfer_to           = EXCLUDED.transfer_to,
+                           remarks               = EXCLUDED.remarks""",
+                    plant_id, location_id, submission_id, year, week_number, week_ending_date,
+                    row.get("physical_verification"), row.get("condition"),
+                    row.get("hours_worked"), row.get("standby_hours"),
+                    row.get("breakdown_hours"), row.get("off_hire") or False,
+                    transfer_to_name, row.get("remarks"),
+                )
+
+                # Update location history (ensure open record for current location)
+                existing_history = await fetchrow(
+                    """SELECT id FROM plant_location_history
+                       WHERE plant_id = $1::uuid AND end_date IS NULL""",
+                    plant_id,
+                )
+                if existing_history is None:
+                    await execute(
+                        """INSERT INTO plant_location_history (plant_id, location_id, start_date)
+                           VALUES ($1::uuid, $2::uuid, $3)
+                           ON CONFLICT DO NOTHING""",
+                        plant_id, location_id, week_ending_date,
+                    )
+                elif await fetchval(
+                    "SELECT location_id FROM plant_location_history WHERE plant_id = $1::uuid AND end_date IS NULL",
+                    plant_id,
+                ) != location_id:
+                    # Plant is at a different location — close old, open new
+                    await execute(
+                        "UPDATE plant_location_history SET end_date = $1 WHERE plant_id = $2::uuid AND end_date IS NULL",
+                        week_ending_date, plant_id,
+                    )
+                    await execute(
+                        "INSERT INTO plant_location_history (plant_id, location_id, start_date) VALUES ($1::uuid, $2::uuid, $3)",
+                        plant_id, location_id, week_ending_date,
+                    )
+
+                # Create pending transfer if engineer marked this plant as transferring out
+                if row.get("transfer_to_location_id"):
+                    to_loc_id = str(row["transfer_to_location_id"])
+                    existing_transfer = await fetchrow(
+                        """SELECT id FROM plant_transfers
+                           WHERE plant_id = $1::uuid AND to_location_id = $2::uuid
+                             AND status = 'pending'""",
+                        plant_id, to_loc_id,
+                    )
+                    if not existing_transfer:
+                        await execute(
+                            """INSERT INTO plant_transfers
+                                   (plant_id, from_location_id, to_location_id,
+                                    direction, status, transfer_date,
+                                    source_submission_id, parsed_confidence)
+                               VALUES ($1::uuid, $2::uuid, $3::uuid,
+                                       'outbound', 'pending', $4,
+                                       $5::uuid, 1.0)""",
+                            plant_id, location_id, to_loc_id,
+                            week_ending_date, submission_id,
+                        )
+                        transfers_pending += 1
+
+                plants_processed += 1
+
+            except Exception as row_err:
+                logger.error(
+                    "Error processing draft row",
+                    fleet_number=fleet_number, error=str(row_err),
+                )
+                errors.append({"fleet_number": fleet_number, "error": str(row_err)})
+
+        # Mark submission completed
+        await execute(
+            """UPDATE weekly_report_submissions SET
+                   status = 'completed',
+                   plants_processed = $2,
+                   plants_created = $3,
+                   plants_updated = $4,
+                   processing_completed_at = $5,
+                   errors = $6::jsonb
+               WHERE id = $1::uuid""",
+            submission_id,
+            plants_processed,
+            plants_created,
+            plants_updated,
+            datetime.utcnow(),
+            json.dumps(errors) if errors else None,
+        )
+
+        # Mark draft as submitted
+        await execute(
+            """UPDATE weekly_report_drafts
+               SET status = 'submitted', submitted_at = now(), submission_id = $1::uuid
+               WHERE id = $2::uuid""",
+            submission_id, draft_id,
+        )
+
+        result.update({
+            "success": True,
+            "plants_processed": plants_processed,
+            "plants_created": plants_created,
+            "plants_updated": plants_updated,
+            "transfers_pending": transfers_pending,
+            "errors": errors,
+        })
+
+        logger.info(
+            "Direct submission processed",
+            submission_id=submission_id,
+            plants_processed=plants_processed,
+            plants_created=plants_created,
+            transfers_pending=transfers_pending,
+        )
+
+    except Exception as e:
+        logger.error("process_direct_submission failed", submission_id=submission_id, error=str(e))
+        await execute(
+            "UPDATE weekly_report_submissions SET status = 'failed', errors = $2::jsonb WHERE id = $1::uuid",
+            submission_id, json.dumps([{"error": str(e)}]),
+        )
+        raise
+
+    return result

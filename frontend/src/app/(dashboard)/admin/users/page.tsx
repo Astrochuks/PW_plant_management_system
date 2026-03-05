@@ -10,7 +10,7 @@ import { useUsers } from '@/hooks/use-users'
 import { Plus } from 'lucide-react'
 
 function UsersPageContent() {
-  const [filters, setFilters] = useState<{ role?: 'admin' | 'management'; is_active?: boolean }>({})
+  const [filters, setFilters] = useState<{ role?: 'admin' | 'management' | 'site_engineer'; is_active?: boolean }>({})
   const { data: users, isLoading } = useUsers(filters)
 
   return (
@@ -34,7 +34,7 @@ function UsersPageContent() {
         <UsersFilters
           role={filters.role}
           isActive={filters.is_active}
-          onRoleChange={(role) => setFilters((prev) => ({ ...prev, role }))}
+          onRoleChange={(role) => setFilters((prev) => ({ ...prev, role: role as typeof prev.role }))}
           onStatusChange={(is_active) => setFilters((prev) => ({ ...prev, is_active }))}
         />
       </div>

@@ -213,8 +213,10 @@ export function useCreatePlant() {
   return useMutation({
     mutationFn: createPlant,
     onSuccess: () => {
-      // Invalidate plants list to refetch
       queryClient.invalidateQueries({ queryKey: plantsKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: plantsKeys.filteredStats({}) });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['locations'] });
     },
   });
 }
@@ -228,10 +230,11 @@ export function useUpdatePlant(plantId: string) {
   return useMutation({
     mutationFn: (data: UpdatePlantRequest) => updatePlant(plantId, data),
     onSuccess: (data) => {
-      // Update the specific plant detail
       queryClient.setQueryData(plantsKeys.detail(plantId), data);
-      // Invalidate plants list
       queryClient.invalidateQueries({ queryKey: plantsKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: plantsKeys.filteredStats({}) });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['locations'] });
     },
   });
 }
@@ -245,8 +248,10 @@ export function useDeletePlant() {
   return useMutation({
     mutationFn: deletePlant,
     onSuccess: () => {
-      // Invalidate plants list
       queryClient.invalidateQueries({ queryKey: plantsKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: plantsKeys.filteredStats({}) });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['locations'] });
     },
   });
 }

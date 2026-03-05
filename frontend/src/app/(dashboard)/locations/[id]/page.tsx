@@ -70,7 +70,9 @@ import { useLocationCosts } from '@/hooks/use-spare-parts'
 import { getErrorMessage } from '@/lib/api/client'
 import type { PlantCondition } from '@/lib/api/plants'
 import type { LocationSubmission } from '@/lib/api/locations'
-import { downloadSubmissionFile } from '@/lib/api/uploads'
+import { downloadSubmissionFile, deleteWeeklySubmission } from '@/lib/api/uploads'
+import { useQueryClient } from '@tanstack/react-query'
+import { locationsKeys } from '@/hooks/use-locations'
 
 const CONDITION_STYLES: Record<string, { label: string; className: string }> = {
   working: { label: 'Working', className: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200' },
@@ -361,9 +363,9 @@ export default function LocationDetailPage() {
                     <TableHead>Year</TableHead>
                     <TableHead>Week Ending</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Plants Processed</TableHead>
+                    <TableHead className="text-right">Plants</TableHead>
                     <TableHead>Submitted</TableHead>
-                    <TableHead className="w-[40px]" />
+                    <TableHead className="w-[80px] text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -375,8 +377,12 @@ export default function LocationDetailPage() {
                         sub={sub}
                         isExpanded={isExpanded}
                         locationId={id}
+                        isAdmin={isAdmin}
                         onToggle={() => {
                           setExpandedSub(isExpanded ? null : { year: sub.year, week: sub.week_number })
+                        }}
+                        onDeleted={() => {
+                          setExpandedSub(null)
                         }}
                       />
                     )
@@ -638,15 +644,21 @@ function SubmissionRow({
   sub,
   isExpanded,
   locationId,
+  isAdmin,
   onToggle,
+  onDeleted,
 }: {
   sub: LocationSubmission
   isExpanded: boolean
   locationId: string
+  isAdmin: boolean
   onToggle: () => void
+  onDeleted: () => void
 }) {
   const [recordsPage, setRecordsPage] = useState(1)
+  const [isDeleting, setIsDeleting] = useState(false)
   const PAGE_SIZE = 50
+  const queryClient = useQueryClient()
 
   const { data: weeklyData, isLoading } = useLocationWeeklyRecords(
     isExpanded ? locationId : null,
@@ -655,6 +667,21 @@ function SubmissionRow({
 
   const records = weeklyData?.data ?? []
   const meta = weeklyData?.meta
+
+  const handleDelete = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setIsDeleting(true)
+    try {
+      await deleteWeeklySubmission(sub.id)
+      toast.success('Submission deleted')
+      queryClient.invalidateQueries({ queryKey: locationsKeys.detail(locationId) })
+      onDeleted()
+    } catch {
+      toast.error('Failed to delete submission')
+    } finally {
+      setIsDeleting(false)
+    }
+  }
 
   return (
     <>
@@ -688,15 +715,15 @@ function SubmissionRow({
             year: 'numeric',
           })}
         </TableCell>
-        <TableCell>
-          {sub.source_file_name && (
+        <TableCell onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center justify-end gap-1">
+            {/* Download — works for both upload (original file) and form (generated Excel) */}
             <Button
               variant="ghost"
               size="sm"
               className="h-7 w-7 p-0"
-              title={`Download ${sub.source_file_name}`}
-              onClick={(e) => {
-                e.stopPropagation()
+              title={sub.source_file_name ? `Download ${sub.source_file_name}` : 'Download Excel report'}
+              onClick={() => {
                 downloadSubmissionFile(sub.id, sub.source_file_name || undefined).catch(() => {
                   toast.error('Failed to download file')
                 })
@@ -704,7 +731,43 @@ function SubmissionRow({
             >
               <Download className="h-3.5 w-3.5" />
             </Button>
-          )}
+
+            {/* Delete — admin only */}
+            {isAdmin && (
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                    title="Delete submission"
+                    disabled={isDeleting}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete Submission</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Permanently delete the Week {sub.week_number} / {sub.year} submission and
+                      all its plant records? This cannot be undone. Plant conditions already
+                      applied to the database will remain unchanged.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      onClick={handleDelete}
+                    >
+                      Delete
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            )}
+          </div>
         </TableCell>
       </TableRow>
 

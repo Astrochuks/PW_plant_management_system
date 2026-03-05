@@ -91,6 +91,9 @@ export function useConfirmWeeklyReport() {
       confirmWeeklyReport(locationId, year, weekNumber, weekEndingDate, plants, missingPlantActions, file),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: submissionsKeys.all });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['plants'] });
+      queryClient.invalidateQueries({ queryKey: ['locations'] });
     },
   });
 }

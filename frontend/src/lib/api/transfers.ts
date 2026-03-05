@@ -40,6 +40,18 @@ export interface TransferStats {
   new_since: number;
 }
 
+export interface SiteTransferRequest {
+  id: string;
+  status: 'pending' | 'confirmed' | 'rejected' | 'cancelled';
+  type: 'pull_request' | 'submission_transfer';
+  created_at: string;
+  transfer_date: string | null;
+  notes: string | null;
+  plant: { fleet_number: string; description: string | null; fleet_type: string | null };
+  from_site: { id: string; name: string };
+  to_site: { id: string; name: string };
+}
+
 export interface CreateTransferPayload {
   plant_id: string;
   to_location_id: string;
@@ -110,6 +122,22 @@ export async function createTransfer(payload: CreateTransferPayload) {
     data: Transfer;
     message: string;
   }>('/transfers', payload);
+  return response.data;
+}
+
+export async function getSiteTransferRequests(status = 'pending') {
+  const response = await apiClient.get<{
+    success: boolean;
+    data: SiteTransferRequest[];
+    count: number;
+  }>(`/transfers/site-requests?status=${status}`);
+  return response.data;
+}
+
+export async function adminRejectTransfer(transferId: string) {
+  const response = await apiClient.post<{ success: boolean; message: string }>(
+    `/transfers/${transferId}/reject`,
+  );
   return response.data;
 }
 

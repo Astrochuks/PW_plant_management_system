@@ -7,14 +7,16 @@ import {
   getTransfers,
   getPendingTransfers,
   getTransferStats,
+  getSiteTransferRequests,
   createTransfer,
   confirmTransfer,
   cancelTransfer,
+  adminRejectTransfer,
   type TransfersParams,
   type CreateTransferPayload,
 } from '@/lib/api/transfers';
 
-export type { Transfer, TransferStats, TransfersParams, CreateTransferPayload } from '@/lib/api/transfers';
+export type { Transfer, TransferStats, TransfersParams, CreateTransferPayload, SiteTransferRequest } from '@/lib/api/transfers';
 
 // ============================================================================
 // Query Keys
@@ -26,6 +28,7 @@ export const transfersKeys = {
   list: (params?: TransfersParams) => [...transfersKeys.lists(), params] as const,
   pending: (locationId?: string) => [...transfersKeys.all, 'pending', locationId] as const,
   stats: () => [...transfersKeys.all, 'stats'] as const,
+  siteRequests: (status?: string) => [...transfersKeys.all, 'site-requests', status] as const,
 };
 
 // ============================================================================
@@ -85,6 +88,40 @@ export function useCancelTransfer() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (transferId: string) => cancelTransfer(transferId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: transfersKeys.all });
+    },
+  });
+}
+
+// ============================================================================
+// Admin — site transfer request management
+// ============================================================================
+
+export function useAdminSiteTransferRequests(status = 'pending') {
+  return useQuery({
+    queryKey: transfersKeys.siteRequests(status),
+    queryFn: () => getSiteTransferRequests(status),
+    staleTime: 30 * 1000,
+    refetchInterval: 60 * 1000,
+    refetchIntervalInBackground: false,
+  });
+}
+
+export function useAdminConfirmSiteTransfer() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (transferId: string) => confirmTransfer(transferId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: transfersKeys.all });
+    },
+  });
+}
+
+export function useAdminRejectSiteTransfer() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (transferId: string) => adminRejectTransfer(transferId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: transfersKeys.all });
     },

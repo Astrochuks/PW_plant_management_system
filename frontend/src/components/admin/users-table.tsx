@@ -112,6 +112,7 @@ export function UsersTable({ users, isLoading }: UsersTableProps) {
               <TableHead>Email</TableHead>
               <TableHead>Full Name</TableHead>
               <TableHead>Role</TableHead>
+              <TableHead>Site</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Last Login</TableHead>
               <TableHead>Created</TableHead>
@@ -124,9 +125,21 @@ export function UsersTable({ users, isLoading }: UsersTableProps) {
                 <TableCell className="font-medium">{user.email}</TableCell>
                 <TableCell>{user.full_name}</TableCell>
                 <TableCell>
-                  <Badge variant={user.role === 'admin' ? 'default' : 'secondary'}>
-                    {user.role}
+                  <Badge
+                    variant={
+                      user.role === 'admin' ? 'default'
+                      : user.role === 'site_engineer' ? 'outline'
+                      : 'secondary'
+                    }
+                    className={user.role === 'site_engineer' ? 'bg-blue-50 text-blue-700 border-blue-200' : ''}
+                  >
+                    {user.role === 'site_engineer' ? 'Site Engineer' : user.role}
                   </Badge>
+                </TableCell>
+                <TableCell className="text-sm text-muted-foreground">
+                  {user.role === 'site_engineer'
+                    ? (user.location_name ?? <span className="italic">Not assigned</span>)
+                    : <span className="text-muted-foreground/40">—</span>}
                 </TableCell>
                 <TableCell>
                   {user.is_active ? (

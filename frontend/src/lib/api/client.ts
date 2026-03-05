@@ -27,7 +27,7 @@ let refreshPromise: Promise<string | null> | null = null;
 apiClient.interceptors.request.use(
   (config) => {
     if (typeof window !== 'undefined') {
-      const token = localStorage.getItem('access_token');
+      const token = sessionStorage.getItem('access_token');
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
       }
@@ -44,7 +44,7 @@ apiClient.interceptors.request.use(
  * Returns the new access token on success, or null on failure.
  *
  * If the refresh fails (e.g., token already rotated by the proactive refresh
- * in AuthProvider), check whether localStorage already has a newer token
+ * in AuthProvider), check whether sessionStorage already has a newer token
  * before returning null — avoids unnecessary hard-logouts.
  */
 async function tryRefreshToken(): Promise<string | null> {
@@ -53,11 +53,11 @@ async function tryRefreshToken(): Promise<string | null> {
     return refreshPromise;
   }
 
-  const storedRefreshToken = localStorage.getItem('refresh_token');
+  const storedRefreshToken = sessionStorage.getItem('refresh_token');
   if (!storedRefreshToken) return null;
 
   // Remember the access token we had when we started
-  const tokenBefore = localStorage.getItem('access_token');
+  const tokenBefore = sessionStorage.getItem('access_token');
 
   isRefreshing = true;
   refreshPromise = (async () => {
@@ -72,25 +72,25 @@ async function tryRefreshToken(): Promise<string | null> {
       const data = response.data;
       const newToken = data.access_token;
       if (newToken) {
-        localStorage.setItem('access_token', newToken);
+        sessionStorage.setItem('access_token', newToken);
         if (data.refresh_token) {
-          localStorage.setItem('refresh_token', data.refresh_token);
+          sessionStorage.setItem('refresh_token', data.refresh_token);
         }
         if (data.expires_in) {
           const expiresAt = Date.now() + data.expires_in * 1000;
-          localStorage.setItem('token_expires_at', String(expiresAt));
+          sessionStorage.setItem('token_expires_at', String(expiresAt));
         }
         if (data.user) {
-          localStorage.setItem('user', JSON.stringify(data.user));
+          sessionStorage.setItem('user', JSON.stringify(data.user));
         }
         return newToken;
       }
       return null;
     } catch {
       // Refresh failed — but another refresh (proactive timer) may have
-      // already rotated the token and saved new ones to localStorage.
+      // already rotated the token and saved new ones to sessionStorage.
       // If the stored token changed, use the new one instead of logging out.
-      const tokenNow = localStorage.getItem('access_token');
+      const tokenNow = sessionStorage.getItem('access_token');
       if (tokenNow && tokenNow !== tokenBefore) {
         return tokenNow;
       }
@@ -106,10 +106,10 @@ async function tryRefreshToken(): Promise<string | null> {
 
 function hardLogout(): void {
   if (typeof window !== 'undefined') {
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
-    localStorage.removeItem('user');
-    localStorage.removeItem('token_expires_at');
+    sessionStorage.removeItem('access_token');
+    sessionStorage.removeItem('refresh_token');
+    sessionStorage.removeItem('user');
+    sessionStorage.removeItem('token_expires_at');
     if (!isRedirecting && !window.location.pathname.includes('/login')) {
       isRedirecting = true;
       window.location.href = '/login';

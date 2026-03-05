@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Proposal — PW Plant Management System</title>
+<style>
+  @page {
+    size: A4;
+    margin: 20mm 18mm 20mm 18mm;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+    font-size: 11pt;
+    line-height: 1.55;
+    color: #1a1a1a;
+    background: #fff;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* ---- Cover Page ---- */
+  .cover {
+    page-break-after: always;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    text-align: center;
+    padding: 60px 40px;
+  }
+  .cover .line { width: 80px; height: 3px; background: #0f4c81; margin: 30px auto; }
+  .cover h1 {
+    font-size: 28pt;
+    font-weight: 700;
+    color: #0f4c81;
+    letter-spacing: -0.5px;
+    margin-bottom: 6px;
+  }
+  .cover h2 {
+    font-size: 16pt;
+    font-weight: 400;
+    color: #444;
+  }
+  .cover .meta {
+    margin-top: 50px;
+    font-size: 10.5pt;
+    color: #555;
+    line-height: 1.8;
+  }
+  .cover .meta strong { color: #1a1a1a; }
+  .cover .confidential {
+    margin-top: 60px;
+    font-size: 9pt;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: #999;
+    border: 1px solid #ccc;
+    padding: 6px 18px;
+    display: inline-block;
+  }
+
+  /* ---- Content ---- */
+  .content { padding: 0 10px; }
+
+  h2 {
+    font-size: 15pt;
+    font-weight: 700;
+    color: #0f4c81;
+    margin-top: 36px;
+    margin-bottom: 14px;
+    padding-bottom: 6px;
+    border-bottom: 2px solid #0f4c81;
+    page-break-after: avoid;
+  }
+  h3 {
+    font-size: 12pt;
+    font-weight: 600;
+    color: #1a1a1a;
+    margin-top: 22px;
+    margin-bottom: 8px;
+    page-break-after: avoid;
+  }
+  p { margin-bottom: 10px; }
+  strong { font-weight: 600; }
+
+  ul, ol {
+    margin: 8px 0 12px 22px;
+  }
+  li { margin-bottom: 4px; }
+
+  /* ---- Tables ---- */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0 18px 0;
+    font-size: 10.5pt;
+    page-break-inside: avoid;
+  }
+  th, td {
+    border: 1px solid #d0d0d0;
+    padding: 8px 10px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th {
+    background: #0f4c81;
+    color: #fff;
+    font-weight: 600;
+    font-size: 10pt;
+  }
+  tr:nth-child(even) { background: #f7f9fb; }
+  td strong { color: #0f4c81; }
+
+  /* ---- Blockquote (callouts) ---- */
+  blockquote {
+    border-left: 4px solid #0f4c81;
+    background: #f0f5fa;
+    padding: 12px 16px;
+    margin: 14px 0;
+    font-style: italic;
+    color: #333;
+    page-break-inside: avoid;
+  }
+  blockquote strong { font-style: normal; color: #0f4c81; }
+
+  /* ---- Section numbering visual ---- */
+  .section-num {
+    display: inline-block;
+    background: #0f4c81;
+    color: #fff;
+    font-weight: 700;
+    width: 28px;
+    height: 28px;
+    text-align: center;
+    line-height: 28px;
+    border-radius: 50%;
+    font-size: 13pt;
+    margin-right: 8px;
+    vertical-align: middle;
+  }
+
+  /* ---- Page breaks ---- */
+  .page-break { page-break-before: always; }
+
+  /* ---- Footer ---- */
+  .footer {
+    margin-top: 40px;
+    padding-top: 16px;
+    border-top: 1px solid #ddd;
+    text-align: center;
+    font-size: 9pt;
+    color: #999;
+  }
+
+  /* ---- Highlight box ---- */
+  .highlight-box {
+    background: #0f4c81;
+    color: #fff;
+    padding: 18px 22px;
+    border-radius: 6px;
+    margin: 16px 0;
+    page-break-inside: avoid;
+  }
+  .highlight-box strong { color: #fff; }
+  .highlight-box .big-number {
+    font-size: 22pt;
+    font-weight: 700;
+    display: block;
+    margin-bottom: 4px;
+  }
+
+  /* ---- Summary cards row ---- */
+  .cards {
+    display: flex;
+    gap: 12px;
+    margin: 16px 0;
+  }
+  .card {
+    flex: 1;
+    border: 1px solid #d0d0d0;
+    border-radius: 6px;
+    padding: 14px;
+    text-align: center;
+    page-break-inside: avoid;
+  }
+  .card .label { font-size: 9pt; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
+  .card .value { font-size: 16pt; font-weight: 700; color: #0f4c81; margin-top: 4px; }
+
+  @media print {
+    body { font-size: 10.5pt; }
+    .cover { min-height: auto; padding: 120px 40px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ============================================================ -->
+<!-- COVER PAGE -->
+<!-- ============================================================ -->
+<div class="cover">
+  <h1>Plant &amp; Equipment<br>Digital Management System</h1>
+  <div class="line"></div>
+  <h2>Technical &amp; Business Proposal<br>for P.W. Nigeria Limited</h2>
+
+  <div class="meta">
+    <strong>Prepared by:</strong> [Your Full Name]<br>
+    <strong>Date:</strong> [Presentation Date]<br>
+    <strong>Document Version:</strong> 1.0
+  </div>
+
+  <div class="confidential">Confidential</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- SECTION 1: EXECUTIVE SUMMARY -->
+<!-- ============================================================ -->
+<div class="content">
+
+<h2><span class="section-num">1</span> Executive Summary</h2>
+
+<p>P.W. Nigeria Limited manages over <strong>2,000 pieces of heavy equipment</strong> and plant machinery across <strong>30+ construction sites</strong> nationwide. Currently, tracking plant locations, maintenance expenditure, weekly operational reports, and spare parts procurement relies on manual processes&nbsp;&mdash; Excel spreadsheets, phone calls, and paper-based reporting.</p>
+
+<p>I have developed a <strong>purpose-built digital management system</strong> that gives P.W. Nigeria management <strong>instant, real-time visibility</strong> into every piece of equipment the company owns&nbsp;&mdash; where it is, what condition it&rsquo;s in, how much it costs to maintain, and who is supplying parts.</p>
+
+<p>This proposal outlines the system&rsquo;s capabilities, the business value it delivers, and a recommended engagement structure.</p>
+
+<!-- ============================================================ -->
+<!-- SECTION 2: THE PROBLEM -->
+<!-- ============================================================ -->
+<h2><span class="section-num">2</span> The Problem</h2>
+
+<h3>2.1 What management needs but currently cannot get quickly</h3>
+
+<table>
+  <tr>
+    <th style="width:35%">Question</th>
+    <th style="width:40%">Current Process</th>
+    <th>Time to Answer</th>
+  </tr>
+  <tr>
+    <td>&ldquo;Where is excavator PW-1234?&rdquo;</td>
+    <td>Phone calls to multiple sites</td>
+    <td>Hours to days</td>
+  </tr>
+  <tr>
+    <td>&ldquo;How much did we spend on spare parts this quarter?&rdquo;</td>
+    <td>Manually compile Excel files from 30+ sites</td>
+    <td>Days to weeks</td>
+  </tr>
+  <tr>
+    <td>&ldquo;Which plants cost the most to maintain?&rdquo;</td>
+    <td>Not tracked systematically</td>
+    <td>Unknown</td>
+  </tr>
+  <tr>
+    <td>&ldquo;How many plants are operational at a specific site?&rdquo;</td>
+    <td>Call the site officer</td>
+    <td>Hours</td>
+  </tr>
+  <tr>
+    <td>&ldquo;Which supplier gives us the best pricing?&rdquo;</td>
+    <td>No comparison data available</td>
+    <td>Not possible</td>
+  </tr>
+  <tr>
+    <td>&ldquo;Show me the fleet summary for all locations&rdquo;</td>
+    <td>Compile 30+ weekly reports manually</td>
+    <td>Days</td>
+  </tr>
+</table>
+
+<h3>2.2 The cost of not knowing</h3>
+
+<p>For a company managing 2,000+ heavy equipment assets worth billions of naira:</p>
+
+<ul>
+  <li><strong>Equipment downtime</strong> due to delayed maintenance decisions costs an estimated 2&ndash;5% of fleet value annually</li>
+  <li><strong>Spare parts overspend</strong> from duplicate purchases and no supplier comparison&nbsp;&mdash; estimated 10&ndash;20% waste</li>
+  <li><strong>Lost or misallocated equipment</strong> between 30+ sites with no digital trail</li>
+  <li><strong>Management decisions delayed</strong> because data takes days or weeks to compile</li>
+  <li><strong>Weekly reports</strong> from 30+ sites arrive in different formats, contain errors, require manual reconciliation</li>
+</ul>
+
+<blockquote>
+  <strong>Conservative estimate:</strong> Even a 3% improvement in equipment utilization and maintenance efficiency across 2,000+ plants translates to <strong>tens of millions of naira in annual savings.</strong>
+</blockquote>
+
+<!-- ============================================================ -->
+<!-- SECTION 3: THE SOLUTION -->
+<!-- ============================================================ -->
+<div class="page-break"></div>
+<h2><span class="section-num">3</span> The Solution: PW Plant Management System</h2>
+
+<p>I have built a <strong>complete, production-ready</strong> digital management system specifically designed around P.W. Nigeria&rsquo;s actual workflows, report formats, and operational needs.</p>
+
+<h3>3.1 System Modules</h3>
+
+<table>
+  <tr><th style="width:30%">Module</th><th>What It Does</th></tr>
+  <tr><td><strong>Dashboard</strong></td><td>Real-time overview: total plants, conditions, locations, recent activity</td></tr>
+  <tr><td><strong>Plant Registry</strong></td><td>Complete profile for every plant&nbsp;&mdash; fleet number, type, condition, location, full history</td></tr>
+  <tr><td><strong>Movement Tracking</strong></td><td>Every transfer from Site&nbsp;A to Site&nbsp;B is logged with dates, approvals, and audit trail</td></tr>
+  <tr><td><strong>Weekly Report Upload</strong></td><td>Site officers&rsquo; weekly Excel reports are automatically processed and loaded into the system</td></tr>
+  <tr><td><strong>Spare Parts &amp; POs</strong></td><td>Every part purchased, which plant it went to, which supplier, at what cost</td></tr>
+  <tr><td><strong>Supplier Management</strong></td><td>All vendors tracked&nbsp;&mdash; contact details, purchase history, total spend ranking</td></tr>
+  <tr><td><strong>Cost Analytics</strong></td><td>Monthly trends, year-over-year comparison, top suppliers by spend, highest-cost plants</td></tr>
+  <tr><td><strong>Reports Suite</strong></td><td>Fleet summary, verification status, compliance rates, maintenance costs, weekly trends</td></tr>
+  <tr><td><strong>User Management</strong></td><td>Role-based access&nbsp;&mdash; Admin (full control) and Management (view + reports)</td></tr>
+  <tr><td><strong>Audit Log</strong></td><td>Every action in the system is logged for accountability</td></tr>
+</table>
+
+<h3>3.2 Key Capabilities</h3>
+
+<p><strong>Instant Answers:</strong></p>
+<ul>
+  <li>Search any plant by fleet number&nbsp;&rarr; see current location, condition, full movement history, maintenance costs</li>
+  <li>Filter by location, fleet type, condition, date range&nbsp;&mdash; in seconds</li>
+  <li>Click on any site&nbsp;&rarr; see every plant there, their status, and costs</li>
+</ul>
+
+<p><strong>Automated Data Processing:</strong></p>
+<ul>
+  <li>Upload weekly Excel reports&nbsp;&rarr; system automatically extracts and processes plant data</li>
+  <li>Validation rules catch errors before data enters the system</li>
+  <li>No more manual data entry from 30+ weekly spreadsheets</li>
+</ul>
+
+<p><strong>Cost Intelligence:</strong></p>
+<ul>
+  <li>Total spare parts spend by month, quarter, year</li>
+  <li>Compare current year vs.&nbsp;previous year&nbsp;&mdash; are costs trending up or down?</li>
+  <li>Top&nbsp;10 highest-cost plants and top&nbsp;10 suppliers by spend</li>
+  <li>Track every purchase order with itemized costs</li>
+</ul>
+
+<p><strong>Management Reports (One Click):</strong></p>
+<ul>
+  <li>Fleet summary by location and condition</li>
+  <li>Plant verification and compliance rates</li>
+  <li>Maintenance cost analysis with flexible grouping</li>
+  <li>Export data for further analysis</li>
+</ul>
+
+<h3>3.3 Technology</h3>
+
+<table>
+  <tr><th>Component</th><th>Technology</th><th>Why</th></tr>
+  <tr><td>User Interface</td><td>Next.js, React, TypeScript</td><td>Modern, fast, works on any device</td></tr>
+  <tr><td>Backend API</td><td>Python, FastAPI</td><td>High performance, handles concurrent users</td></tr>
+  <tr><td>Database</td><td>PostgreSQL (Supabase)</td><td>Enterprise-grade, handles millions of records</td></tr>
+  <tr><td>Hosting</td><td>Cloud (Vercel + Render)</td><td>99.9% uptime, accessible from anywhere</td></tr>
+  <tr><td>Security</td><td>JWT auth, role-based access, encryption</td><td>Industry standard</td></tr>
+</table>
+
+<p>The system is <strong>cloud-based</strong>&nbsp;&mdash; accessible from any computer or phone with an internet connection. No software installation required.</p>
+
+<!-- ============================================================ -->
+<!-- SECTION 4: WHAT HAS BEEN BUILT -->
+<!-- ============================================================ -->
+<h2><span class="section-num">4</span> What Has Been Built</h2>
+
+<p>This is not a concept or prototype. The system is <strong>fully built and functional</strong>:</p>
+
+<div class="cards">
+  <div class="card">
+    <div class="label">Frontend Pages</div>
+    <div class="value">62+</div>
+  </div>
+  <div class="card">
+    <div class="label">API Endpoints</div>
+    <div class="value">40+</div>
+  </div>
+  <div class="card">
+    <div class="label">DB Functions</div>
+    <div class="value">15+</div>
+  </div>
+  <div class="card">
+    <div class="label">Dev Effort</div>
+    <div class="value">5+ months</div>
+  </div>
+</div>
+
+<ul>
+  <li><strong>Automated ETL pipeline</strong> for weekly report processing</li>
+  <li><strong>Complete user authentication</strong> with secure token management</li>
+  <li><strong>Mobile-responsive design</strong>&nbsp;&mdash; works on laptops, tablets, and phones</li>
+</ul>
+
+<p><strong>Development Timeline:</strong></p>
+<ul>
+  <li><strong>September&nbsp;2024 &mdash; January&nbsp;2025:</strong> Research, initial prototyping, understanding P.W. workflows</li>
+  <li><strong>January &mdash; February&nbsp;2025:</strong> Full system development using actual P.W. reports and purchase orders</li>
+</ul>
+
+<!-- ============================================================ -->
+<!-- SECTION 5: BUSINESS VALUE -->
+<!-- ============================================================ -->
+<div class="page-break"></div>
+<h2><span class="section-num">5</span> Business Value</h2>
+
+<h3>5.1 Immediate Value (Month 1&ndash;3)</h3>
+<table>
+  <tr><th>Benefit</th><th>Impact</th></tr>
+  <tr><td>Instant fleet visibility for management</td><td>No more waiting days for compiled reports</td></tr>
+  <tr><td>Weekly reports processed automatically</td><td>Save 10&ndash;20 hours/week of manual data entry</td></tr>
+  <tr><td>All equipment locations tracked</td><td>Reduce &ldquo;lost&rdquo; or unaccounted equipment</td></tr>
+  <tr><td>Spare parts spending visible</td><td>Identify overspend and duplicates immediately</td></tr>
+</table>
+
+<h3>5.2 Medium-term Value (Month 3&ndash;12)</h3>
+<table>
+  <tr><th>Benefit</th><th>Impact</th></tr>
+  <tr><td>Historical trend analysis</td><td>Data-driven maintenance decisions</td></tr>
+  <tr><td>Supplier comparison data</td><td>Negotiate better rates with evidence</td></tr>
+  <tr><td>Per-plant maintenance cost</td><td>Repair vs.&nbsp;replace decisions backed by numbers</td></tr>
+  <tr><td>Compliance monitoring</td><td>Ensure all sites submit weekly reports on time</td></tr>
+  <tr><td>Audit trail</td><td>Full accountability for equipment movements</td></tr>
+</table>
+
+<h3>5.3 Long-term Value (Year 2+)</h3>
+<table>
+  <tr><th>Benefit</th><th>Impact</th></tr>
+  <tr><td>Predictive maintenance (AI)</td><td>Predict breakdowns before they happen</td></tr>
+  <tr><td>Project management integration</td><td>Track equipment allocation across projects</td></tr>
+  <tr><td>Mobile app for site officers</td><td>Real-time reporting from the field</td></tr>
+  <tr><td>Multi-project cost allocation</td><td>Know exact equipment cost per project for bidding</td></tr>
+</table>
+
+<h3>5.4 Comparable Software Costs</h3>
+
+<p>If P.W. Nigeria were to purchase off-the-shelf enterprise asset management software:</p>
+
+<table>
+  <tr><th>Solution</th><th>Estimated Annual Cost</th></tr>
+  <tr><td>SAP Plant Maintenance</td><td>&#8358;50,000,000 &mdash; &#8358;150,000,000/year</td></tr>
+  <tr><td>IBM Maximo</td><td>&#8358;30,000,000 &mdash; &#8358;100,000,000/year</td></tr>
+  <tr><td>Custom dev (Nigerian agency)</td><td>&#8358;15,000,000 &mdash; &#8358;40,000,000 one-time + maintenance</td></tr>
+  <tr><td><strong>This proposal</strong></td><td><strong>See Section 6</strong></td></tr>
+</table>
+
+<!-- ============================================================ -->
+<!-- SECTION 6: PROPOSED ENGAGEMENT -->
+<!-- ============================================================ -->
+<div class="page-break"></div>
+<h2><span class="section-num">6</span> Proposed Engagement</h2>
+
+<h3>6.1 My Role: Digital Solutions &amp; Automation Engineer</h3>
+
+<p>I propose joining P.W. Nigeria in a formal capacity as <strong>Digital Solutions &amp; Automation Engineer</strong>, responsible for:</p>
+
+<p><strong>Immediate responsibilities:</strong></p>
+<ul>
+  <li>System administration and daily operations</li>
+  <li>Processing weekly reports from all 30+ sites into the system</li>
+  <li>Entering and managing purchase order data</li>
+  <li>Generating management reports on demand</li>
+  <li>Training designated staff at HQ on system usage</li>
+  <li>System maintenance, updates, and improvements</li>
+</ul>
+
+<p><strong>Expanded responsibilities (Month 3+):</strong></p>
+<ul>
+  <li>Visit project sites to train site engineers on report submission standards</li>
+  <li>Develop standardized digital reporting formats for site operations</li>
+  <li>Begin <strong>Phase&nbsp;2: Project Management</strong> digitization</li>
+  <li>Implement mobile-friendly reporting for field staff</li>
+</ul>
+
+<p><strong>Phase 2 &mdash; Project Management Automation:</strong></p>
+<ul>
+  <li>Digitize project timelines, milestones, and progress tracking</li>
+  <li>Equipment allocation and utilization per project</li>
+  <li>Project cost tracking and reporting</li>
+  <li>Site visit reporting and documentation</li>
+</ul>
+
+<h3>6.2 Compensation Structure</h3>
+
+<h3>A. System Setup Fee (One-Time)</h3>
+
+<p>This covers the 5+ months of development work already completed:</p>
+
+<table>
+  <tr><th style="width:70%">Item</th><th style="text-align:right">Amount</th></tr>
+  <tr><td>System design, development, and testing (5&nbsp;months)</td><td style="text-align:right">&#8358;2,000,000</td></tr>
+  <tr><td>AI/Cloud tools and development infrastructure</td><td style="text-align:right">&#8358;600,000</td></tr>
+  <tr><td>Data analysis, workflow mapping, and domain research</td><td style="text-align:right">&#8358;400,000</td></tr>
+  <tr><td><strong>Total Setup Fee</strong></td><td style="text-align:right"><strong>&#8358;3,000,000</strong></td></tr>
+</table>
+
+<blockquote>
+  <strong>Context:</strong> A Nigerian software agency would charge &#8358;15&ndash;40&nbsp;million for equivalent custom development. This setup fee reflects a <strong>significant discount</strong> in exchange for an ongoing employment relationship.
+</blockquote>
+
+<p><strong>Payment:</strong> Payable in 2&ndash;3 installments over the first 3 months of engagement.</p>
+
+<h3>B. Monthly Compensation</h3>
+
+<table>
+  <tr><th>Item</th><th style="text-align:right">Amount</th><th>Notes</th></tr>
+  <tr><td>Monthly salary</td><td style="text-align:right">&#8358;400,000</td><td>Comparable to IT/Systems roles at this scale</td></tr>
+  <tr><td>Infrastructure costs (hosting, database, cloud)</td><td style="text-align:right">&#8358;85,000</td><td>Passed through at cost, verifiable</td></tr>
+  <tr><td><strong>Total Monthly</strong></td><td style="text-align:right"><strong>&#8358;485,000</strong></td><td></td></tr>
+</table>
+
+<h3>C. Equipment &amp; Workspace</h3>
+
+<table>
+  <tr><th>Item</th><th>Justification</th></tr>
+  <tr><td><strong>Dedicated workspace / office</strong></td><td>System administration, data processing, and report generation require a focused environment</td></tr>
+  <tr><td><strong>Laptop</strong></td><td>A company-provided machine ensures business continuity and data security. Recommended: MacBook Air M2/M3 or equivalent (approx.&nbsp;&#8358;800,000&ndash;&#8358;1,200,000)</td></tr>
+  <tr><td><strong>Internet allowance</strong></td><td>Reliable connectivity is essential for cloud system management</td></tr>
+</table>
+
+<h3>6.3 What P.W. Nigeria Gets</h3>
+
+<table>
+  <tr><th>What You Get</th><th>Value</th></tr>
+  <tr><td>Fully built, production-ready plant management system</td><td>Worth &#8358;15&ndash;40M if built by an agency</td></tr>
+  <tr><td>A dedicated engineer who built and knows every line of the system</td><td>Irreplaceable domain knowledge</td></tr>
+  <tr><td>Daily system operations and data management</td><td>Save 60+ hours/month of manual work</td></tr>
+  <tr><td>On-demand management reports</td><td>Information in seconds, not days</td></tr>
+  <tr><td>Continuous system improvement and new features</td><td>System grows with the business</td></tr>
+  <tr><td>Phase 2: Project management automation</td><td>Additional high-value system at no extra development cost</td></tr>
+  <tr><td>Training for staff across HQ and sites</td><td>Organizational capability building</td></tr>
+</table>
+
+<h3>6.4 Intellectual Property</h3>
+
+<ul>
+  <li>The system source code and design remain my intellectual property</li>
+  <li>P.W. Nigeria receives an <strong>exclusive, perpetual license</strong> to use the system for its operations</li>
+  <li>The license is tied to the ongoing employment/engagement relationship</li>
+  <li>This protects both parties: P.W. gets uninterrupted access; I maintain ownership of my work</li>
+</ul>
+
+<!-- ============================================================ -->
+<!-- SECTION 7: INFRASTRUCTURE & SECURITY -->
+<!-- ============================================================ -->
+<div class="page-break"></div>
+<h2><span class="section-num">7</span> Infrastructure &amp; Security</h2>
+
+<h3>7.1 Where the system runs</h3>
+
+<table>
+  <tr><th>Component</th><th>Provider</th><th>Location</th><th style="text-align:right">Cost/month</th></tr>
+  <tr><td>Database</td><td>Supabase (PostgreSQL)</td><td>Cloud (AWS)</td><td style="text-align:right">&#8358;40,000</td></tr>
+  <tr><td>Backend API</td><td>Render</td><td>Cloud</td><td style="text-align:right">&#8358;11,000</td></tr>
+  <tr><td>Frontend</td><td>Vercel</td><td>Cloud (Global CDN)</td><td style="text-align:right">&#8358;32,000</td></tr>
+  <tr><td>Domain &amp; SSL</td><td>Cloudflare</td><td>Global</td><td style="text-align:right">&#8358;2,000</td></tr>
+  <tr><td><strong>Total</strong></td><td></td><td></td><td style="text-align:right"><strong>~&#8358;85,000/month</strong></td></tr>
+</table>
+
+<h3>7.2 Security measures</h3>
+
+<ul>
+  <li>All data encrypted in transit (HTTPS/TLS)</li>
+  <li>Password hashing with industry-standard algorithms</li>
+  <li>JWT-based authentication with automatic token refresh</li>
+  <li>Role-based access control (Admin vs.&nbsp;Management)</li>
+  <li>Complete audit logging of all actions</li>
+  <li>Enterprise-grade cloud infrastructure with automatic backups</li>
+</ul>
+
+<h3>7.3 Data ownership</h3>
+
+<p>All plant data, reports, and business information entered into the system <strong>belongs entirely to P.W. Nigeria</strong>. I manage the system infrastructure, but the data is the company&rsquo;s property.</p>
+
+<!-- ============================================================ -->
+<!-- SECTION 8: NEXT STEPS -->
+<!-- ============================================================ -->
+<h2><span class="section-num">8</span> Next Steps</h2>
+
+<p>If this proposal is acceptable:</p>
+
+<table>
+  <tr><th style="width:25%">Timeline</th><th>Action</th></tr>
+  <tr><td><strong>Week 1</strong></td><td>Sign engagement agreement (MOU or contract)</td></tr>
+  <tr><td><strong>Week 1&ndash;2</strong></td><td>System deployment to production, initial data loading</td></tr>
+  <tr><td><strong>Week 2&ndash;3</strong></td><td>Begin processing current weekly reports into the system</td></tr>
+  <tr><td><strong>Week 3&ndash;4</strong></td><td>First management demo with live, current data</td></tr>
+  <tr><td><strong>Month 2</strong></td><td>Staff training at HQ, standardize report formats across sites</td></tr>
+  <tr><td><strong>Month 3+</strong></td><td>Site visits for training, begin Phase&nbsp;2 scoping</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<!-- SECTION 9: ABOUT ME -->
+<!-- ============================================================ -->
+<h2><span class="section-num">9</span> About Me</h2>
+
+<p><strong>[Your Full Name]</strong><br>
+B.Eng. Electrical Engineering</p>
+
+<p>I combine engineering discipline with software development and AI expertise. Over the past year, I have focused on building practical business automation solutions using modern technologies including Python, JavaScript/TypeScript, React, and AI-assisted development.</p>
+
+<p>I built the PW Plant Management System from the ground up&nbsp;&mdash; from database design to API development to the complete user interface&nbsp;&mdash; specifically tailored to P.W. Nigeria&rsquo;s operational needs.</p>
+
+<p><strong>Core skills:</strong></p>
+<ul>
+  <li>Full-stack software development (Python, TypeScript, React, PostgreSQL)</li>
+  <li>Data analysis and visualization</li>
+  <li>AI and automation</li>
+  <li>Systems design and architecture</li>
+  <li>Engineering problem-solving</li>
+</ul>
+
+<br>
+<hr style="border: none; border-top: 1px solid #ddd; margin: 30px 0;">
+
+<p style="text-align: center;">
+  <strong>[Your Full Name]</strong><br>
+  [Your Phone Number]&nbsp;&nbsp;&bull;&nbsp;&nbsp;[Your Email Address]
+</p>
+
+<div class="footer">
+  <em>This document is confidential and intended solely for P.W. Nigeria Limited management.</em>
+</div>
+
+</div><!-- /content -->
+
+</body>
+</html>

@@ -127,7 +127,7 @@ async def login(
 
     async def _fetch_user():
         return await fetchrow(
-            "SELECT id, email, role, full_name, is_active, must_change_password FROM users WHERE email = $1",
+            "SELECT id, email, role, full_name, is_active, must_change_password, location_id FROM users WHERE email = $1",
             credentials.email,
         )
 
@@ -172,7 +172,7 @@ async def login(
         if isinstance(user_fetch_result, Exception):
             # Fallback: fetch by ID if email fetch failed
             user_data = await fetchrow(
-                "SELECT id, email, role, full_name, is_active, must_change_password FROM users WHERE id = $1::uuid",
+                "SELECT id, email, role, full_name, is_active, must_change_password, location_id FROM users WHERE id = $1::uuid",
                 str(user.id),
             )
         else:
@@ -212,6 +212,7 @@ async def login(
             str(user.id), credentials.email, ip_address, user_agent, user_data["role"]
         )
 
+        loc_id = user_data.get("location_id")
         return LoginResponse(
             access_token=session.access_token,
             refresh_token=session.refresh_token,
@@ -222,6 +223,7 @@ async def login(
                 "role": user_data["role"],
                 "full_name": user_data.get("full_name"),
                 "must_change_password": user_data.get("must_change_password", False),
+                "location_id": str(loc_id) if loc_id else None,
             },
         )
 
@@ -271,7 +273,7 @@ async def refresh_token(
 
         # Get user details via asyncpg
         user_data = await fetchrow(
-            "SELECT id, email, role, full_name, is_active FROM users WHERE id = $1::uuid",
+            "SELECT id, email, role, full_name, is_active, location_id FROM users WHERE id = $1::uuid",
             str(user.id),
         )
 
@@ -285,6 +287,7 @@ async def refresh_token(
             ip_address, user_agent
         )
 
+        ref_loc_id = user_data.get("location_id")
         return LoginResponse(
             access_token=session.access_token,
             refresh_token=session.refresh_token,
@@ -294,6 +297,7 @@ async def refresh_token(
                 "email": user_data["email"],
                 "role": user_data["role"],
                 "full_name": user_data.get("full_name"),
+                "location_id": str(ref_loc_id) if ref_loc_id else None,
             },
         )
 
@@ -726,7 +730,8 @@ class CreateUserRequest(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=6, description="Temporary password")
     full_name: str = Field(..., min_length=2, max_length=255)
-    role: Literal["admin", "management"] = "management"
+    role: Literal["admin", "management", "site_engineer"] = "management"
+    location_id: UUID | None = None  # Required when role = site_engineer
 
     @field_validator("password")
     @classmethod
@@ -738,8 +743,10 @@ class UpdateUserRequest(BaseModel):
     """Request body for updating a user."""
 
     full_name: str | None = None
-    role: Literal["admin", "management"] | None = None
+    role: Literal["admin", "management", "site_engineer"] | None = None
     is_active: bool | None = None
+    location_id: UUID | None = None  # For assigning/changing site engineer location
+    clear_location: bool = False  # Set True to explicitly unlink location
 
 
 class ResetPasswordRequest(BaseModel):
@@ -785,6 +792,29 @@ async def create_user(
             details=[{"field": "email", "message": "Already exists", "code": "DUPLICATE"}],
         )
 
+    # Validate location_id requirement for site_engineer role
+    if request_body.role == "site_engineer":
+        if not request_body.location_id:
+            raise ValidationError("location_id is required for site_engineer role")
+        # Check location exists
+        loc = await fetchrow(
+            "SELECT id, name FROM locations WHERE id = $1::uuid",
+            str(request_body.location_id),
+        )
+        if not loc:
+            raise ValidationError("Location not found")
+        # Check no other active site_engineer is already assigned to this location
+        existing_engineer = await fetchrow(
+            "SELECT id, email FROM users WHERE location_id = $1::uuid AND role = 'site_engineer' AND is_active = true",
+            str(request_body.location_id),
+        )
+        if existing_engineer:
+            raise ValidationError(
+                f"Location '{loc['name']}' already has an active site engineer assigned ({existing_engineer['email']})"
+            )
+    elif request_body.location_id is not None:
+        raise ValidationError("location_id can only be set for site_engineer role")
+
     try:
         # Create user in Supabase Auth (stays as SDK)
         admin_client = get_supabase_admin_client()
@@ -801,8 +831,8 @@ async def create_user(
 
         # Create user record in our users table via asyncpg
         created = await fetchrow(
-            """INSERT INTO users (id, email, full_name, role, is_active, must_change_password)
-               VALUES ($1::uuid, $2, $3, $4, $5, $6)
+            """INSERT INTO users (id, email, full_name, role, is_active, must_change_password, location_id)
+               VALUES ($1::uuid, $2, $3, $4, $5, $6, $7::uuid)
                RETURNING *""",
             str(user_id),
             request_body.email,
@@ -810,6 +840,7 @@ async def create_user(
             request_body.role,
             True,
             False,  # Password set by admin is ready to use
+            str(request_body.location_id) if request_body.location_id else None,
         )
 
         # Log user creation
@@ -839,6 +870,7 @@ async def create_user(
                 "full_name": request_body.full_name,
                 "role": request_body.role,
                 "is_active": True,
+                "location_id": str(request_body.location_id) if request_body.location_id else None,
             },
             "message": "User created successfully.",
         }
@@ -853,37 +885,31 @@ async def create_user(
 @router.get("/users")
 async def list_users(
     current_user: Annotated[CurrentUser, Depends(require_admin)],
-    role: str | None = Query(None, pattern="^(admin|management)$"),
+    role: str | None = Query(None, pattern="^(admin|management|site_engineer)$"),
     is_active: bool | None = None,
 ) -> dict[str, Any]:
-    """List all users (Admin only).
-
-    Args:
-        current_user: The authenticated admin user.
-        role: Filter by role.
-        is_active: Filter by active status.
-
-    Returns:
-        List of users.
-    """
+    """List all users (Admin only)."""
     conditions: list[str] = []
     params: list[Any] = []
 
     if role:
         params.append(role)
-        conditions.append(f"role = ${len(params)}")
+        conditions.append(f"u.role = ${len(params)}")
 
     if is_active is not None:
         params.append(is_active)
-        conditions.append(f"is_active = ${len(params)}")
+        conditions.append(f"u.is_active = ${len(params)}")
 
     where = " AND ".join(conditions) if conditions else "TRUE"
 
     data = await fetch(
-        f"""SELECT id, email, full_name, role, is_active, must_change_password, last_login_at, created_at
-            FROM users
+        f"""SELECT u.id, u.email, u.full_name, u.role, u.is_active,
+                   u.must_change_password, u.last_login_at, u.created_at,
+                   u.location_id, l.name AS location_name
+            FROM users u
+            LEFT JOIN locations l ON l.id = u.location_id
             WHERE {where}
-            ORDER BY created_at DESC""",
+            ORDER BY u.created_at DESC""",
         *params,
     )
 
@@ -908,7 +934,12 @@ async def get_user(
         User details.
     """
     row = await fetchrow(
-        "SELECT id, email, full_name, role, is_active, must_change_password, last_login_at, created_at, updated_at FROM users WHERE id = $1::uuid",
+        """SELECT u.id, u.email, u.full_name, u.role, u.is_active, u.must_change_password,
+                  u.last_login_at, u.created_at, u.updated_at,
+                  u.location_id, l.name AS location_name
+           FROM users u
+           LEFT JOIN locations l ON l.id = u.location_id
+           WHERE u.id = $1::uuid""",
         str(user_id),
     )
 
@@ -943,7 +974,7 @@ async def update_user(
 
     # Check user exists and get current values
     existing = await fetchrow(
-        "SELECT id, email, full_name, role, is_active FROM users WHERE id = $1::uuid",
+        "SELECT id, email, full_name, role, is_active, location_id FROM users WHERE id = $1::uuid",
         str(user_id),
     )
 
@@ -968,15 +999,37 @@ async def update_user(
         update_data["is_active"] = request_body.is_active
         changes["is_active"] = {"old": existing["is_active"], "new": request_body.is_active}
 
+    # Handle location_id update for site_engineer
+    new_role = request_body.role or existing.get("role")
+    if request_body.clear_location:
+        update_data["location_id"] = None
+        changes["location_id"] = {"old": str(existing.get("location_id") or ""), "new": None}
+    elif request_body.location_id is not None:
+        if new_role != "site_engineer":
+            raise ValidationError("location_id can only be set for site_engineer role")
+        # Check no other active site_engineer already has this location
+        conflict = await fetchrow(
+            "SELECT id, email FROM users WHERE location_id = $1::uuid AND role = 'site_engineer' AND is_active = true AND id != $2::uuid",
+            str(request_body.location_id), str(user_id),
+        )
+        if conflict:
+            raise ValidationError(f"Location already assigned to another site engineer ({conflict['email']})")
+        update_data["location_id"] = str(request_body.location_id)
+        changes["location_id"] = {"old": str(existing.get("location_id") or ""), "new": str(request_body.location_id)}
+
     if not update_data:
         raise ValidationError("No fields to update")
 
     # Build SET clause
+    _UUID_UPDATE_FIELDS = {"location_id"}
     set_parts: list[str] = []
     params: list[Any] = []
     for key, val in update_data.items():
         params.append(val)
-        set_parts.append(f"{key} = ${len(params)}")
+        if key in _UUID_UPDATE_FIELDS:
+            set_parts.append(f"{key} = ${len(params)}::uuid")
+        else:
+            set_parts.append(f"{key} = ${len(params)}")
     set_parts.append("updated_at = now()")
 
     params.append(str(user_id))

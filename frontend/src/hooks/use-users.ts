@@ -11,7 +11,7 @@ const USER_KEY = (id: string) => ['users', id]
 /**
  * Fetch all users with optional filters
  */
-export function useUsers(filters?: { role?: 'admin' | 'management'; is_active?: boolean }) {
+export function useUsers(filters?: { role?: 'admin' | 'management' | 'site_engineer'; is_active?: boolean }) {
   return useQuery({
     queryKey: [USERS_QUERY_KEY, filters],
     queryFn: () => adminApi.listUsers(filters),

@@ -300,7 +300,9 @@ export async function getWeeklySubmission(id: string): Promise<{
 }
 
 /**
- * Download submission source file via authenticated fetch
+ * Download submission file via authenticated fetch.
+ * For uploaded submissions: returns the original Excel file.
+ * For form-submitted reports: generates and returns a styled Excel.
  */
 export async function downloadSubmissionFile(id: string, fileName?: string): Promise<void> {
   const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
@@ -320,11 +322,19 @@ export async function downloadSubmissionFile(id: string, fileName?: string): Pro
   const blobUrl = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = blobUrl;
-  link.download = fileName || 'download';
+  // Use the provided name for originals; for generated Excel the backend sets Content-Disposition
+  link.download = fileName || 'weekly-report.xlsx';
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(blobUrl);
+}
+
+/**
+ * Delete a weekly report submission and its plant records (admin only).
+ */
+export async function deleteWeeklySubmission(id: string): Promise<void> {
+  await apiClient.delete(`/uploads/submissions/weekly/${id}`);
 }
 
 // ============================================================================

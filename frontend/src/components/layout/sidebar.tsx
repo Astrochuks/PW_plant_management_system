@@ -38,7 +38,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { useAuth } from '@/providers/auth-provider';
-import { useTransferStats } from '@/hooks/use-transfers';
+import { useTransferStats, useAdminSiteTransferRequests } from '@/hooks/use-transfers';
 
 interface SidebarProps {
   collapsed: boolean;
@@ -127,6 +127,12 @@ const adminNavItems = [
     icon: Upload,
   },
   {
+    title: 'Transfer Requests',
+    href: '/admin/transfers',
+    icon: ArrowRightLeft,
+    badgeKey: 'adminTransfers' as const,
+  },
+  {
     title: 'Users & Roles',
     href: '/admin/users',
     icon: Users,
@@ -171,8 +177,13 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const { data: transferStats } = useTransferStats(lastSeenAt);
   const newTransfers = transferStats?.data?.new_since ?? 0;
 
+  // Admin-only: pending site transfer requests badge
+  const { data: siteRequestsData } = useAdminSiteTransferRequests('pending');
+  const pendingSiteRequests = isAdmin ? (siteRequestsData?.count ?? 0) : 0;
+
   const badgeCounts: Record<string, number> = {
     transfers: newTransfers,
+    adminTransfers: pendingSiteRequests,
   };
 
   // Prefetch all nav routes for instant transitions

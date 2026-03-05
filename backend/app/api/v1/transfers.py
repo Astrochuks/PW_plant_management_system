@@ -214,6 +214,59 @@ async def list_pending_transfers(
     }
 
 
+@router.get("/site-requests")
+async def list_site_transfer_requests(
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+    status: str = Query("pending"),
+) -> dict[str, Any]:
+    """List all site-to-site transfer requests visible to admin.
+
+    Returns both types:
+    - pull_request (is_pull_request=TRUE): Site B asked Site A to release a plant.
+      The site that currently *holds* the plant must approve.
+    - submission_transfer (is_pull_request=FALSE): Site A's weekly report flagged
+      a plant as moving to Site B; awaiting confirmation from Site B.
+    """
+    rows = await fetch(
+        """SELECT
+               t.id::text, t.status, t.is_pull_request, t.created_at, t.transfer_date,
+               t.source_remarks AS notes,
+               pm.fleet_number, pm.description, pm.fleet_type,
+               fl.id::text AS from_location_id, fl.name AS from_location_name,
+               tl.id::text AS to_location_id, tl.name AS to_location_name
+           FROM plant_transfers t
+           JOIN plants_master pm ON pm.id = t.plant_id
+           JOIN locations fl ON fl.id = t.from_location_id
+           JOIN locations tl ON tl.id = t.to_location_id
+           WHERE t.status = $1
+             AND (t.is_pull_request = TRUE OR t.source_submission_id IS NOT NULL)
+           ORDER BY t.created_at DESC""",
+        status,
+    )
+    return {
+        "success": True,
+        "data": [
+            {
+                "id": r["id"],
+                "status": r["status"],
+                "type": "pull_request" if r["is_pull_request"] else "submission_transfer",
+                "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+                "transfer_date": r["transfer_date"].isoformat() if r["transfer_date"] else None,
+                "notes": r["notes"],
+                "plant": {
+                    "fleet_number": r["fleet_number"],
+                    "description": r["description"],
+                    "fleet_type": r["fleet_type"],
+                },
+                "from_site": {"id": r["from_location_id"], "name": r["from_location_name"]},
+                "to_site": {"id": r["to_location_id"], "name": r["to_location_name"]},
+            }
+            for r in rows
+        ],
+        "count": len(rows),
+    }
+
+
 @router.get("/plant/{plant_id}")
 async def get_plant_transfers(
     plant_id: UUID,
@@ -306,13 +359,9 @@ async def confirm_transfer(
         str(transfer_id),
     )
 
-    # Update plant location and clear pending transfer
+    # Update plant's current location (preserve condition/status — don't overwrite)
     await execute(
-        """UPDATE plants_master
-           SET current_location_id = $1::uuid,
-               pending_transfer_id = NULL,
-               status = 'working'
-           WHERE id = $2::uuid""",
+        "UPDATE plants_master SET current_location_id = $1::uuid WHERE id = $2::uuid",
         str(transfer["to_location_id"]),
         str(transfer["plant_id"]),
     )
@@ -366,6 +415,30 @@ async def cancel_transfer(
         "data": result,
         "message": "Transfer cancelled successfully",
     }
+
+
+@router.post("/{transfer_id}/reject")
+async def reject_transfer(
+    transfer_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+) -> dict[str, Any]:
+    """Reject a pending site transfer request (admin only).
+
+    Works for both pull requests and submission-initiated transfers.
+    The plant stays at its current location.
+    """
+    transfer = await fetchrow(
+        "SELECT id FROM plant_transfers WHERE id = $1::uuid AND status = 'pending'",
+        str(transfer_id),
+    )
+    if not transfer:
+        raise HTTPException(status_code=404, detail="Pending transfer not found")
+
+    await execute(
+        "UPDATE plant_transfers SET status = 'rejected' WHERE id = $1::uuid",
+        str(transfer_id),
+    )
+    return {"success": True, "message": "Transfer request rejected"}
 
 
 @router.get("/stats/summary")

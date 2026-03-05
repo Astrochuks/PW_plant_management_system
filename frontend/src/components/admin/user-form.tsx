@@ -25,6 +25,7 @@ import {
 import { toast } from 'sonner'
 import type { User } from '@/lib/api/admin'
 import { useCreateUser, useUpdateUser } from '@/hooks/use-users'
+import { useLocationsWithStats } from '@/hooks/use-locations'
 import { Loader2 } from 'lucide-react'
 
 const userFormSchema = z.object({
@@ -38,8 +39,12 @@ const userFormSchema = z.object({
     .optional()
     .or(z.literal('')),
   full_name: z.string().min(2, 'Full name must be at least 2 characters'),
-  role: z.enum(['admin', 'management']),
-})
+  role: z.enum(['admin', 'management', 'site_engineer']),
+  location_id: z.string().optional(),
+}).refine(
+  (data) => data.role !== 'site_engineer' || !!data.location_id,
+  { message: 'Site assignment is required for site engineers', path: ['location_id'] }
+)
 
 type UserFormValues = z.infer<typeof userFormSchema>
 
@@ -49,11 +54,20 @@ interface UserFormProps {
   onCancel?: () => void
 }
 
+const ROLE_DESCRIPTIONS: Record<string, string> = {
+  admin: 'Full access to all features and user management',
+  management: 'Read access to plants, reports, and analytics',
+  site_engineer: 'Can fill and submit weekly reports for their assigned site',
+}
+
 export function UserForm({ user, onSuccess, onCancel }: UserFormProps) {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const createMutation = useCreateUser()
   const updateMutation = useUpdateUser(user?.id || '')
   const isEditing = !!user
+
+  const { data: locationsData } = useLocationsWithStats()
+  const locations = locationsData ?? []
 
   const form = useForm<UserFormValues>({
     resolver: zodResolver(userFormSchema),
@@ -61,34 +75,44 @@ export function UserForm({ user, onSuccess, onCancel }: UserFormProps) {
       email: user?.email || '',
       password: '',
       full_name: user?.full_name || '',
-      role: user?.role || 'management',
+      role: (user?.role as UserFormValues['role']) || 'management',
+      location_id: user?.location_id || '',
     },
   })
+
+  const watchedRole = form.watch('role')
 
   async function onSubmit(values: UserFormValues) {
     try {
       setIsSubmitting(true)
 
       if (isEditing) {
-        // Update existing user
-        await updateMutation.mutateAsync({
+        const patch: Parameters<typeof updateMutation.mutateAsync>[0] = {
           full_name: values.full_name,
           role: values.role,
-        })
+        }
+        if (values.role === 'site_engineer') {
+          patch.location_id = values.location_id || null
+        } else {
+          // If changing away from site_engineer, clear location
+          if (user?.role === 'site_engineer') {
+            patch.clear_location = true
+          }
+        }
+        await updateMutation.mutateAsync(patch)
         toast.success('User updated successfully')
       } else {
-        // Create new user
         if (!values.password) {
           toast.error('Password is required for new users')
           setIsSubmitting(false)
           return
         }
-
         await createMutation.mutateAsync({
           email: values.email,
           password: values.password,
           full_name: values.full_name,
           role: values.role,
+          location_id: values.role === 'site_engineer' ? (values.location_id || null) : null,
         })
         toast.success('User created successfully')
       }
@@ -136,12 +160,12 @@ export function UserForm({ user, onSuccess, onCancel }: UserFormProps) {
                   <Input
                     {...field}
                     type="password"
-                    placeholder="Min 12 chars, 1 uppercase, 1 lowercase, 1 number"
+                    placeholder="Min 6 chars, 1 uppercase, 1 lowercase, 1 number"
                     autoComplete="new-password"
                   />
                 </FormControl>
                 <FormDescription>
-                  User will need to change this on first login. Must meet complexity requirements.
+                  User will need to change this on first login.
                 </FormDescription>
                 <FormMessage />
               </FormItem>
@@ -178,17 +202,47 @@ export function UserForm({ user, onSuccess, onCancel }: UserFormProps) {
                 <SelectContent>
                   <SelectItem value="admin">Admin</SelectItem>
                   <SelectItem value="management">Management</SelectItem>
+                  <SelectItem value="site_engineer">Site Engineer</SelectItem>
                 </SelectContent>
               </Select>
               <FormDescription>
-                {field.value === 'admin'
-                  ? 'Full access to all features and user management'
-                  : 'Read-only access to plants, reports, and analytics'}
+                {ROLE_DESCRIPTIONS[field.value] ?? ''}
               </FormDescription>
               <FormMessage />
             </FormItem>
           )}
         />
+
+        {watchedRole === 'site_engineer' && (
+          <FormField
+            control={form.control}
+            name="location_id"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Assigned Site</FormLabel>
+                <Select value={field.value || ''} onValueChange={field.onChange}>
+                  <FormControl>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select a site…" />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    {locations.map((loc) => (
+                      <SelectItem key={loc.id} value={loc.id}>
+                        {loc.location_name}
+                        {loc.state_name ? ` — ${loc.state_name}` : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <FormDescription>
+                  Each site can only have one active site engineer.
+                </FormDescription>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        )}
 
         <div className="flex gap-3">
           <Button

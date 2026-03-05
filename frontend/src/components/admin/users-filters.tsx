@@ -11,9 +11,9 @@ import {
 import { X } from 'lucide-react'
 
 interface UsersFiltersProps {
-  role?: 'admin' | 'management'
+  role?: 'admin' | 'management' | 'site_engineer'
   isActive?: boolean
-  onRoleChange: (role: 'admin' | 'management' | undefined) => void
+  onRoleChange: (role: 'admin' | 'management' | 'site_engineer' | undefined) => void
   onStatusChange: (status: boolean | undefined) => void
 }
 
@@ -27,14 +27,15 @@ export function UsersFilters({
 
   return (
     <div className="flex gap-2 flex-wrap items-center">
-      <Select value={role || 'all'} onValueChange={(v) => onRoleChange(v === 'all' ? undefined : (v as 'admin' | 'management'))}>
-        <SelectTrigger className="w-40">
+      <Select value={role || 'all'} onValueChange={(v) => onRoleChange(v === 'all' ? undefined : (v as 'admin' | 'management' | 'site_engineer'))}>
+        <SelectTrigger className="w-44">
           <SelectValue placeholder="Filter by role" />
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="all">All Roles</SelectItem>
           <SelectItem value="admin">Admin</SelectItem>
           <SelectItem value="management">Management</SelectItem>
+          <SelectItem value="site_engineer">Site Engineer</SelectItem>
         </SelectContent>
       </Select>
 

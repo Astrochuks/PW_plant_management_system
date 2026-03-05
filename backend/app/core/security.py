@@ -181,7 +181,7 @@ async def _get_user_data(user_id: str) -> dict:
 
     # Cache miss — fetch from database via asyncpg
     row = await fetchrow(
-        "SELECT id, email, role, full_name, is_active FROM users WHERE id = $1::uuid",
+        "SELECT id, email, role, full_name, is_active, location_id FROM users WHERE id = $1::uuid",
         user_id,
     )
 
@@ -202,9 +202,10 @@ class CurrentUser(BaseModel):
 
     id: str
     email: str
-    role: str  # 'admin' or 'management'
+    role: str  # 'admin', 'management', or 'site_engineer'
     full_name: str | None = None
     is_active: bool = True
+    location_id: str | None = None  # Only set for site_engineer role
 
     @property
     def is_admin(self) -> bool:
@@ -215,6 +216,11 @@ class CurrentUser(BaseModel):
     def is_management(self) -> bool:
         """Check if user has management role."""
         return self.role == "management"
+
+    @property
+    def is_site_engineer(self) -> bool:
+        """Check if user has site_engineer role."""
+        return self.role == "site_engineer"
 
 
 async def get_current_user(
@@ -249,12 +255,14 @@ async def get_current_user(
         request.state.user_email = user["email"]
         request.state.user_role = user["role"]
 
+        location_id = user.get("location_id")
         return CurrentUser(
             id=user["id"],
             email=user["email"],
             role=user["role"],
             full_name=user.get("full_name"),
             is_active=user.get("is_active", True),
+            location_id=str(location_id) if location_id else None,
         )
 
     except AuthenticationError:
@@ -288,6 +296,17 @@ def require_management_or_admin(
     """Require management or admin role for access."""
     if not (current_user.is_admin or current_user.is_management):
         raise AuthorizationError("Management or admin access required")
+    return current_user
+
+
+async def require_site_engineer(
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> CurrentUser:
+    """Require site_engineer role with an assigned location."""
+    if not current_user.is_site_engineer:
+        raise AuthorizationError("Site engineer access required")
+    if not current_user.location_id:
+        raise AuthorizationError("No site assigned to this engineer account")
     return current_user
 
 

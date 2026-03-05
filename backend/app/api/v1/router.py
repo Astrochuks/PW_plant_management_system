@@ -18,6 +18,7 @@ from app.api.v1 import (
     transfers,
     projects,
     insights,
+    site_report,
 )
 
 api_router = APIRouter()
@@ -38,3 +39,4 @@ api_router.include_router(audit.router, prefix="/audit", tags=["Audit"])
 api_router.include_router(transfers.router)
 api_router.include_router(projects.router, prefix="/projects", tags=["Projects"])
 api_router.include_router(insights.router, prefix="/insights", tags=["Insights"])
+api_router.include_router(site_report.router, prefix="/site", tags=["Site Engineer"])

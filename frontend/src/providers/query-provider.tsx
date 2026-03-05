@@ -27,8 +27,9 @@ export function QueryProvider({ children }: QueryProviderProps) {
             retry: 1,
             // Don't auto-refetch on window focus - reduces API calls
             refetchOnWindowFocus: false,
-            // Don't refetch on reconnect
-            refetchOnReconnect: false,
+            // Refetch stale queries when the browser regains connectivity
+            // (e.g. after laptop sleep / WiFi reconnect)
+            refetchOnReconnect: 'always',
           },
           mutations: {
             // Retry mutations once
