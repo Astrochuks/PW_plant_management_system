@@ -207,13 +207,13 @@ export default function PODetailPage() {
     <div className="space-y-6">
       {/* Back Link + Header */}
       <div>
-        <Link
-          href="/spare-parts/pos"
+        <button
+          onClick={() => router.back()}
           className="text-sm text-muted-foreground hover:text-foreground inline-flex items-center gap-1 mb-4"
         >
           <ArrowLeft className="h-4 w-4" />
           Back to Purchase Orders
-        </Link>
+        </button>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-lg bg-primary/10">

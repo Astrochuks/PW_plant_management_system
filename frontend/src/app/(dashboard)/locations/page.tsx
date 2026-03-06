@@ -1,13 +1,12 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { Suspense, useMemo } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
   MapPin,
   Plus,
   Search,
-  Truck,
   AlertTriangle,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -24,15 +23,22 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { useLocationsWithStats, type LocationStats } from '@/hooks/use-locations'
 import { useAuth } from '@/providers/auth-provider'
+import { useUrlFilters } from '@/hooks/use-url-filters'
 
-export default function LocationsPage() {
+const FILTER_DEFAULTS = {
+  search: '',
+  state: 'all',
+}
+
+function LocationsPageInner() {
   const router = useRouter()
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
   const { data: locations = [], isLoading } = useLocationsWithStats()
 
-  const [search, setSearch] = useState('')
-  const [stateFilter, setStateFilter] = useState<string>('all')
+  const [filters, setFilters] = useUrlFilters(FILTER_DEFAULTS)
+  const search = filters.search
+  const stateFilter = filters.state
 
   // Extract unique states for filter dropdown
   const states = useMemo(() => {
@@ -85,11 +91,11 @@ export default function LocationsPage() {
           <Input
             placeholder="Search sites..."
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => setFilters({ search: e.target.value })}
             className="pl-9"
           />
         </div>
-        <Select value={stateFilter} onValueChange={setStateFilter}>
+        <Select value={stateFilter} onValueChange={(v) => setFilters({ state: v })}>
           <SelectTrigger className="w-[200px]">
             <SelectValue placeholder="All States" />
           </SelectTrigger>
@@ -133,6 +139,14 @@ export default function LocationsPage() {
         </div>
       )}
     </div>
+  )
+}
+
+export default function LocationsPage() {
+  return (
+    <Suspense>
+      <LocationsPageInner />
+    </Suspense>
   )
 }
 

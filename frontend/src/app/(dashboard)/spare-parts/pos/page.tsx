@@ -5,7 +5,7 @@
  * Shows all POs with filters, stats, and navigation to detail/create
  */
 
-import { useState, useMemo, useCallback } from 'react';
+import { Suspense, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   FileText,
@@ -40,20 +40,30 @@ import { Pagination } from '@/components/plants/pagination';
 import { usePurchaseOrders } from '@/hooks/use-spare-parts';
 import { useDebounce } from '@/hooks/use-debounce';
 import { useAuth } from '@/providers/auth-provider';
+import { useUrlFilters } from '@/hooks/use-url-filters';
 import type { POSummary } from '@/lib/api/spare-parts';
 
-export default function PurchaseOrdersPage() {
+const FILTER_DEFAULTS = {
+  search: '',
+  costType: '',
+  year: '',
+  dateFrom: '',
+  dateTo: '',
+  page: '1',
+};
+
+function PurchaseOrdersPageInner() {
   const router = useRouter();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
 
-  // Filter state
-  const [page, setPage] = useState(1);
-  const [search, setSearch] = useState('');
-  const [costType, setCostType] = useState('');
-  const [year, setYear] = useState('');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
+  const [filters, setFilters, clearFilters] = useUrlFilters(FILTER_DEFAULTS);
+  const page = Number(filters.page) || 1;
+  const search = filters.search;
+  const costType = filters.costType;
+  const year = filters.year;
+  const dateFrom = filters.dateFrom;
+  const dateTo = filters.dateTo;
 
   const debouncedSearch = useDebounce(search, 300);
 
@@ -75,15 +85,6 @@ export default function PurchaseOrdersPage() {
   const { data, isLoading } = usePurchaseOrders(queryParams);
 
   const hasActiveFilters = search || costType || year || dateFrom || dateTo;
-
-  const clearFilters = useCallback(() => {
-    setSearch('');
-    setCostType('');
-    setYear('');
-    setDateFrom('');
-    setDateTo('');
-    setPage(1);
-  }, []);
 
   const handleRowClick = useCallback(
     (po: POSummary) => {
@@ -168,7 +169,7 @@ export default function PurchaseOrdersPage() {
             <Input
               placeholder="Search PO number or vendor..."
               value={search}
-              onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+              onChange={(e) => setFilters({ search: e.target.value, page: '1' })}
               className="pl-9"
             />
           </div>
@@ -180,7 +181,7 @@ export default function PurchaseOrdersPage() {
           )}
         </div>
         <div className="flex flex-wrap gap-3">
-          <Select value={costType} onValueChange={(v) => { setCostType(v === 'all' ? '' : v); setPage(1); }}>
+          <Select value={costType || 'all'} onValueChange={(v) => setFilters({ costType: v === 'all' ? '' : v, page: '1' })}>
             <SelectTrigger className="w-[150px]">
               <SelectValue placeholder="Cost type" />
             </SelectTrigger>
@@ -194,7 +195,7 @@ export default function PurchaseOrdersPage() {
             placeholder="Year"
             type="number"
             value={year}
-            onChange={(e) => { setYear(e.target.value); setPage(1); }}
+            onChange={(e) => setFilters({ year: e.target.value, page: '1' })}
             className="w-[100px]"
           />
           <div className="flex items-center gap-2">
@@ -203,7 +204,7 @@ export default function PurchaseOrdersPage() {
               <Input
                 type="date"
                 value={dateFrom}
-                onChange={(e) => { setDateFrom(e.target.value); setPage(1); }}
+                onChange={(e) => setFilters({ dateFrom: e.target.value, page: '1' })}
                 className="w-[160px] pl-9"
               />
             </div>
@@ -211,7 +212,7 @@ export default function PurchaseOrdersPage() {
             <Input
               type="date"
               value={dateTo}
-              onChange={(e) => { setDateTo(e.target.value); setPage(1); }}
+              onChange={(e) => setFilters({ dateTo: e.target.value, page: '1' })}
               className="w-[140px]"
             />
           </div>
@@ -280,11 +281,19 @@ export default function PurchaseOrdersPage() {
       {data?.meta && (
         <Pagination
           meta={data.meta}
-          onPageChange={setPage}
+          onPageChange={(p) => setFilters({ page: String(p) })}
           itemLabel="purchase orders"
         />
       )}
     </div>
+  );
+}
+
+export default function PurchaseOrdersPage() {
+  return (
+    <Suspense>
+      <PurchaseOrdersPageInner />
+    </Suspense>
   );
 }
 

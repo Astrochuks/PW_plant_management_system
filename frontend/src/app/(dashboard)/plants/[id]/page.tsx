@@ -181,11 +181,9 @@ function PlantDetailContent({ plantId }: { plantId: string }) {
     <div className="space-y-6">
       {/* ── Header ─────────────────────────────────────────────── */}
       <div className="flex items-center justify-between">
-        <Button variant="ghost" size="sm" asChild>
-          <Link href="/plants">
-            <ArrowLeft className="mr-1 h-4 w-4" />
-            Back to Plants
-          </Link>
+        <Button variant="ghost" size="sm" onClick={() => router.back()}>
+          <ArrowLeft className="mr-1 h-4 w-4" />
+          Back to Plants
         </Button>
 
         {isAdmin && (

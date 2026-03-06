@@ -415,11 +415,25 @@ async def get_project_milestones(
         if val is None:
             milestones.append({"key": field, "label": label, "date": None, "status": "not_set"})
         else:
-            status = "completed" if val <= today else "upcoming"
-            milestones.append({
-                "key": field, "label": label,
-                "date": val.isoformat(), "status": status,
-            })
+            # _record_to_dict may return date as ISO string — parse if needed
+            if isinstance(val, str):
+                try:
+                    val_date = date.fromisoformat(val)
+                except ValueError:
+                    val_date = None
+            elif isinstance(val, date):
+                val_date = val
+            else:
+                val_date = None
+
+            if val_date:
+                status = "completed" if val_date <= today else "upcoming"
+                milestones.append({
+                    "key": field, "label": label,
+                    "date": val_date.isoformat(), "status": status,
+                })
+            else:
+                milestones.append({"key": field, "label": label, "date": str(val), "status": "unknown"})
 
     orig = row.get("original_duration_months")
     ext = row.get("extension_of_time_months")

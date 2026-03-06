@@ -14,6 +14,7 @@ import json
 import time
 from typing import AsyncGenerator
 
+from app.core import cache
 from app.monitoring.logging import get_logger
 
 logger = get_logger(__name__)
@@ -44,6 +45,10 @@ def broadcast(entity: str, action: str, summary: str | None = None) -> None:
         action: What happened (e.g. "import", "create", "update", "delete").
         summary: Optional human-readable description.
     """
+    # Invalidate backend caches that depend on this entity
+    if entity in ("plants", "transfers", "uploads"):
+        cache.invalidate("locations:list")
+
     event = {
         "entity": entity,
         "action": action,

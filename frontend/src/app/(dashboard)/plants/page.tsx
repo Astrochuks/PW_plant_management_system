@@ -5,7 +5,7 @@
  * Main page for viewing and managing plant/equipment assets
  */
 
-import { useState, useMemo, useCallback } from 'react';
+import { Suspense, useState, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Truck } from 'lucide-react';
 import { usePlants, useLocations, useFleetTypes, usePlantFilteredStats, usePrefetchPlantDetail } from '@/hooks/use-plants';
@@ -14,29 +14,40 @@ import { PlantsFilters, type FiltersState } from '@/components/plants/plants-fil
 import { PlantsStatsCards } from '@/components/plants/plants-stats-cards';
 import { Pagination } from '@/components/plants/pagination';
 import { useDebounce } from '@/hooks/use-debounce';
+import { useUrlFilters } from '@/hooks/use-url-filters';
 import type { ColumnKey } from '@/components/plants/plants-table';
 
-const DEFAULT_FILTERS: FiltersState = {
+const FILTER_DEFAULTS = {
   search: '',
-  condition: [],
+  condition: '',
   location_id: '',
-  fleet_type: [],
-  verified_only: false,
+  fleet_type: '',
+  verified_only: '',
+  page: '1',
 };
 
-export default function PlantsPage() {
+function PlantsPageInner() {
   const router = useRouter();
   const prefetchPlant = usePrefetchPlantDetail();
 
-  // State
-  const [page, setPage] = useState(1);
-  const [filters, setFilters] = useState<FiltersState>(DEFAULT_FILTERS);
+  const [urlFilters, setUrlFilters] = useUrlFilters(FILTER_DEFAULTS);
   const [visibleColumns, setVisibleColumns] = useState<ColumnKey[]>(DEFAULT_VISIBLE_COLUMNS);
+
+  // Parse URL params into FiltersState
+  const filters: FiltersState = useMemo(() => ({
+    search: urlFilters.search,
+    condition: urlFilters.condition ? urlFilters.condition.split(',') : [],
+    location_id: urlFilters.location_id,
+    fleet_type: urlFilters.fleet_type ? urlFilters.fleet_type.split(',') : [],
+    verified_only: urlFilters.verified_only === 'true',
+  }), [urlFilters]);
+
+  const page = Number(urlFilters.page) || 1;
 
   // Debounce search to avoid too many API calls
   const debouncedSearch = useDebounce(filters.search, 300);
 
-  // Build query params — join arrays into comma-separated strings for the API
+  // Build query params
   const queryParams = useMemo(
     () => ({
       page,
@@ -50,7 +61,6 @@ export default function PlantsPage() {
     [page, debouncedSearch, filters.condition, filters.location_id, filters.fleet_type, filters.verified_only]
   );
 
-  // Stats params (same filters, no pagination)
   const statsParams = useMemo(
     () => ({
       search: debouncedSearch || undefined,
@@ -68,21 +78,26 @@ export default function PlantsPage() {
   const { data: locations = [], isLoading: locationsLoading } = useLocations();
   const { data: fleetTypes = [], isLoading: fleetTypesLoading } = useFleetTypes();
 
-  // Handlers
+  // Handlers — serialize back to URL params
   const handleFiltersChange = useCallback((newFilters: FiltersState) => {
-    setFilters(newFilters);
-    setPage(1);
-  }, []);
+    setUrlFilters({
+      search: newFilters.search,
+      condition: newFilters.condition.join(','),
+      location_id: newFilters.location_id,
+      fleet_type: newFilters.fleet_type.join(','),
+      verified_only: newFilters.verified_only ? 'true' : '',
+      page: '1',
+    });
+  }, [setUrlFilters]);
 
   const handlePageChange = useCallback((newPage: number) => {
-    setPage(newPage);
-  }, []);
+    setUrlFilters({ page: String(newPage) });
+  }, [setUrlFilters]);
 
   const handleRowClick = useCallback((plant: { id: string }) => {
     router.push(`/plants/${plant.id}`);
   }, [router]);
 
-  // Prefetch plant detail data when user hovers a row
   const handleRowHover = useCallback((plantId: string) => {
     prefetchPlant(plantId);
   }, [prefetchPlant]);
@@ -91,19 +106,15 @@ export default function PlantsPage() {
     setVisibleColumns(columns);
   }, []);
 
-  // Condition pill toggle — syncs with filter state
+  // Condition pill toggle
   const handleConditionToggle = useCallback((condition: string) => {
-    setFilters((prev) => {
-      const current = prev.condition;
-      const next = current.includes(condition)
-        ? current.filter((c) => c !== condition)
-        : [...current, condition];
-      return { ...prev, condition: next };
-    });
-    setPage(1);
-  }, []);
+    const current = filters.condition;
+    const next = current.includes(condition)
+      ? current.filter((c) => c !== condition)
+      : [...current, condition];
+    setUrlFilters({ condition: next.join(','), page: '1' });
+  }, [filters.condition, setUrlFilters]);
 
-  // Export params matching current filters (for the table toolbar)
   const exportParams = useMemo(
     () => ({
       condition: filters.condition.length > 0 ? filters.condition.join(',') : undefined,
@@ -168,7 +179,14 @@ export default function PlantsPage() {
           itemLabel="plants"
         />
       )}
-
     </div>
+  );
+}
+
+export default function PlantsPage() {
+  return (
+    <Suspense>
+      <PlantsPageInner />
+    </Suspense>
   );
 }

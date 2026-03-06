@@ -167,10 +167,8 @@ export default function LocationDetailPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon" asChild>
-            <Link href="/locations">
-              <ArrowLeft className="h-5 w-5" />
-            </Link>
+          <Button variant="ghost" size="icon" onClick={() => router.back()}>
+            <ArrowLeft className="h-5 w-5" />
           </Button>
           <div className="flex items-center gap-3">
             <div className="p-2.5 rounded-lg bg-primary/10">

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { Suspense, useCallback } from 'react'
 import Link from 'next/link'
 import { FolderKanban, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -13,33 +13,43 @@ import {
 } from '@/hooks/use-projects'
 import { useStates } from '@/hooks/use-locations'
 import { useDebounce } from '@/hooks/use-debounce'
+import { useUrlFilters } from '@/hooks/use-url-filters'
 import { ProjectsStatsCards } from '@/components/projects/projects-stats-cards'
 import { ProjectsFilters } from '@/components/projects/projects-filters'
 import { ProjectsTable, DEFAULT_VISIBLE_COLUMNS } from '@/components/projects/projects-table'
 import type { ColumnKey } from '@/components/projects/projects-table'
 import { ImportAwardLettersDialog } from '@/components/projects/import-award-letters-dialog'
+import { useState } from 'react'
 
 type ViewMode = 'active' | 'legacy' | 'all'
 
-export default function ProjectsPage() {
+const FILTER_DEFAULTS = {
+  search: '',
+  client: 'all',
+  status: 'all',
+  stateId: 'all',
+  page: '1',
+  viewMode: 'legacy',
+}
+
+function ProjectsPageInner() {
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
 
-  // View mode
-  const [viewMode, setViewMode] = useState<ViewMode>('legacy')
-
-  // Filter state
-  const [search, setSearch] = useState('')
-  const [client, setClient] = useState('all')
-  const [status, setStatus] = useState('all')
-  const [stateId, setStateId] = useState('all')
-  const [page, setPage] = useState(1)
+  const [filters, setFilters] = useUrlFilters(FILTER_DEFAULTS)
   const [visibleColumns, setVisibleColumns] = useState<ColumnKey[]>(DEFAULT_VISIBLE_COLUMNS)
+
+  const search = filters.search
+  const client = filters.client
+  const status = filters.status
+  const stateId = filters.stateId
+  const page = Number(filters.page) || 1
+  const viewMode = (filters.viewMode || 'legacy') as ViewMode
 
   const debouncedSearch = useDebounce(search, 300)
   const isLegacyParam = viewMode === 'all' ? undefined : viewMode === 'legacy'
 
-  // Data — global stats for tab counts, filtered stats for cards
+  // Data
   const { data: globalStats } = useProjectStats()
   const { data: statsData, isLoading: statsLoading } = useProjectStats(isLegacyParam)
   const { data: clientsData } = useProjectClients()
@@ -60,20 +70,18 @@ export default function ProjectsPage() {
   const meta = data?.meta
   const clients = clientsData ?? []
   const states = Array.isArray(statesData) ? statesData : (statesData as any)?.data ?? []
-
   const globalTotals = globalStats?.totals
 
-  // Reset page on filter change
-  const handleSearchChange = (v: string) => { setSearch(v); setPage(1) }
-  const handleClientChange = (v: string) => { setClient(v); setPage(1) }
-  const handleStatusChange = (v: string) => { setStatus(v); setPage(1) }
-  const handleStateIdChange = (v: string) => { setStateId(v); setPage(1) }
-  const handleViewModeChange = (mode: ViewMode) => { setViewMode(mode); setPage(1) }
+  // Handlers — update URL params
+  const handleSearchChange = (v: string) => setFilters({ search: v, page: '1' })
+  const handleClientChange = (v: string) => setFilters({ client: v, page: '1' })
+  const handleStatusChange = (v: string) => setFilters({ status: v, page: '1' })
+  const handleStateIdChange = (v: string) => setFilters({ stateId: v, page: '1' })
+  const handleViewModeChange = (mode: ViewMode) => setFilters({ viewMode: mode, page: '1' })
   const handleVisibleColumnsChange = useCallback((columns: ColumnKey[]) => {
     setVisibleColumns(columns)
   }, [])
 
-  // Result count text
   const resultText = meta
     ? `Showing ${((meta.page - 1) * meta.limit) + 1}–${Math.min(meta.page * meta.limit, meta.total)} of ${meta.total.toLocaleString()} projects`
     : ''
@@ -171,7 +179,7 @@ export default function ProjectsPage() {
               variant="outline"
               size="sm"
               disabled={page <= 1}
-              onClick={() => setPage(page - 1)}
+              onClick={() => setFilters({ page: String(page - 1) })}
             >
               Previous
             </Button>
@@ -179,7 +187,7 @@ export default function ProjectsPage() {
               variant="outline"
               size="sm"
               disabled={!meta.has_more}
-              onClick={() => setPage(page + 1)}
+              onClick={() => setFilters({ page: String(page + 1) })}
             >
               Next
             </Button>
@@ -187,5 +195,13 @@ export default function ProjectsPage() {
         </div>
       )}
     </div>
+  )
+}
+
+export default function ProjectsPage() {
+  return (
+    <Suspense>
+      <ProjectsPageInner />
+    </Suspense>
   )
 }

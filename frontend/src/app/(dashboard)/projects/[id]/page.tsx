@@ -124,7 +124,7 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <Button variant="ghost" size="sm" onClick={() => router.push('/projects')}>
+        <Button variant="ghost" size="sm" onClick={() => router.back()}>
           <ArrowLeft className="h-4 w-4 mr-2" />
           Projects
         </Button>
