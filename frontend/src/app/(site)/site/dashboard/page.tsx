@@ -1,24 +1,24 @@
 'use client'
 
+import { useState } from 'react'
 import Link from 'next/link'
-import { format, parseISO } from 'date-fns'
 import {
   Wrench,
   Zap,
   AlertTriangle,
   HelpCircle,
   ClipboardList,
-  ArrowRight,
   ArrowLeftRight,
-  History,
-  CheckCircle2,
   Clock,
-  XCircle,
+  Search,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Input } from '@/components/ui/input'
 import {
   Table,
   TableBody,
@@ -27,7 +27,15 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { useSiteStats, useSiteSubmissions, useIncomingTransfers } from '@/hooks/use-site-report'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { useSiteStats, useSitePlants, useIncomingTransfers } from '@/hooks/use-site-report'
+import { useDebounce } from '@/hooks/use-debounce'
 
 function getCurrentWeekSunday(): string {
   const d = new Date()
@@ -37,18 +45,46 @@ function getCurrentWeekSunday(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-const SUBMISSION_STATUS: Record<string, { label: string; className: string; icon: React.ElementType }> = {
-  completed: { label: 'Completed', className: 'bg-emerald-100 text-emerald-800', icon: CheckCircle2 },
-  processing: { label: 'Processing', className: 'bg-blue-100 text-blue-800', icon: Clock },
-  failed: { label: 'Failed', className: 'bg-red-100 text-red-800', icon: XCircle },
+const CONDITION_STYLES: Record<string, { label: string; className: string }> = {
+  working: { label: 'Working', className: 'bg-emerald-100 text-emerald-800' },
+  standby: { label: 'Standby', className: 'bg-amber-100 text-amber-800' },
+  breakdown: { label: 'Breakdown', className: 'bg-red-100 text-red-800' },
+  missing: { label: 'Missing', className: 'bg-purple-100 text-purple-800' },
+  faulty: { label: 'Faulty', className: 'bg-orange-100 text-orange-800' },
+  scrap: { label: 'Scrap', className: 'bg-gray-100 text-gray-800' },
+  off_hire: { label: 'Off Hire', className: 'bg-gray-100 text-gray-600' },
+  unverified: { label: 'Unverified', className: 'bg-blue-100 text-blue-800' },
 }
+
+const CONDITION_OPTIONS = [
+  { value: 'all', label: 'All Conditions' },
+  { value: 'working', label: 'Working' },
+  { value: 'standby', label: 'Standby' },
+  { value: 'breakdown', label: 'Breakdown' },
+  { value: 'faulty', label: 'Faulty' },
+  { value: 'missing', label: 'Missing' },
+  { value: 'off_hire', label: 'Off Hire' },
+  { value: 'unverified', label: 'Unverified' },
+]
 
 export default function SiteDashboardPage() {
   const { data: stats, isLoading: statsLoading } = useSiteStats()
-  const { data: submissionsData, isLoading: subLoading } = useSiteSubmissions({ limit: 5 })
   const { data: incoming = [] } = useIncomingTransfers()
 
-  const submissions = submissionsData?.data ?? []
+  const [search, setSearch] = useState('')
+  const [condition, setCondition] = useState('all')
+  const [page, setPage] = useState(1)
+  const debouncedSearch = useDebounce(search, 300)
+
+  const { data: plantsData, isLoading: plantsLoading } = useSitePlants({
+    page,
+    limit: 20,
+    search: debouncedSearch || undefined,
+    condition: condition !== 'all' ? condition : undefined,
+  })
+
+  const plants = plantsData?.data ?? []
+  const meta = plantsData?.meta
   const thisWeek = getCurrentWeekSunday()
 
   return (
@@ -115,73 +151,114 @@ export default function SiteDashboardPage() {
         )}
       </div>
 
-      {/* Recent submissions */}
+      {/* Plant List */}
       <Card>
         <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-base">Recent Submissions</CardTitle>
-            <Button variant="ghost" size="sm" asChild className="text-xs">
-              <Link href="/site/submissions">
-                View all <ArrowRight className="h-3 w-3 ml-1" />
-              </Link>
-            </Button>
+          <CardTitle className="text-base">Plants at this Site</CardTitle>
+          <div className="flex flex-col sm:flex-row gap-2 pt-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search by fleet number..."
+                value={search}
+                onChange={(e) => { setSearch(e.target.value); setPage(1) }}
+                className="pl-9 h-9"
+              />
+            </div>
+            <Select value={condition} onValueChange={(v) => { setCondition(v); setPage(1) }}>
+              <SelectTrigger className="w-full sm:w-[180px] h-9">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {CONDITION_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </CardHeader>
         <CardContent className="pt-0">
-          {subLoading ? (
+          {plantsLoading ? (
             <div className="space-y-2">
-              {Array.from({ length: 3 }).map((_, i) => (
+              {Array.from({ length: 5 }).map((_, i) => (
                 <Skeleton key={i} className="h-10 w-full" />
               ))}
             </div>
-          ) : submissions.length === 0 ? (
+          ) : plants.length === 0 ? (
             <div className="text-center py-8">
-              <History className="h-10 w-10 mx-auto mb-2 text-muted-foreground opacity-40" />
-              <p className="text-sm text-muted-foreground">No submissions yet</p>
-              <p className="text-xs text-muted-foreground mt-1">
-                Submit your first weekly report to see it here
+              <Wrench className="h-10 w-10 mx-auto mb-2 text-muted-foreground opacity-40" />
+              <p className="text-sm text-muted-foreground">
+                {debouncedSearch || condition !== 'all'
+                  ? 'No plants match your filters'
+                  : 'No plants assigned to this site'}
               </p>
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Week Ending</TableHead>
-                  <TableHead className="text-center">Week No.</TableHead>
-                  <TableHead className="text-center">Plants</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Submitted</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {submissions.map((s) => {
-                  const style = SUBMISSION_STATUS[s.status] ?? SUBMISSION_STATUS.completed
-                  const StatusIcon = style.icon
-                  return (
-                    <TableRow key={s.id}>
-                      <TableCell className="font-medium text-sm">
-                        {format(parseISO(s.week_ending_date + 'T00:00:00'), 'dd MMM yyyy')}
-                      </TableCell>
-                      <TableCell className="text-center text-sm text-muted-foreground">
-                        Wk {s.week_number}
-                      </TableCell>
-                      <TableCell className="text-center text-sm">
-                        {s.plants_processed ?? '—'}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className={`text-xs ${style.className}`}>
-                          <StatusIcon className="h-3 w-3 mr-1" />
-                          {style.label}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {format(parseISO(s.created_at), 'dd MMM yyyy, HH:mm')}
-                      </TableCell>
-                    </TableRow>
-                  )
-                })}
-              </TableBody>
-            </Table>
+            <>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Fleet No.</TableHead>
+                    <TableHead>Description</TableHead>
+                    <TableHead className="hidden sm:table-cell">Type</TableHead>
+                    <TableHead>Condition</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {plants.map((p) => {
+                    const style = CONDITION_STYLES[p.condition ?? ''] ?? { label: p.condition ?? '—', className: 'bg-gray-100 text-gray-600' }
+                    return (
+                      <TableRow key={p.id}>
+                        <TableCell className="font-medium text-sm">{p.fleet_number}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground max-w-[200px] truncate">
+                          {p.description ?? '—'}
+                        </TableCell>
+                        <TableCell className="hidden sm:table-cell text-sm text-muted-foreground">
+                          {p.fleet_type ?? '—'}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className={`text-xs ${style.className}`}>
+                            {style.label}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+
+              {/* Pagination */}
+              {meta && meta.total_pages > 1 && (
+                <div className="flex items-center justify-between pt-4">
+                  <p className="text-xs text-muted-foreground">
+                    {meta.total} plant{meta.total !== 1 ? 's' : ''} total
+                  </p>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-7 w-7"
+                      disabled={page <= 1}
+                      onClick={() => setPage((p) => p - 1)}
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    <span className="text-xs px-2">
+                      {page} / {meta.total_pages}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-7 w-7"
+                      disabled={page >= meta.total_pages}
+                      onClick={() => setPage((p) => p + 1)}
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </CardContent>
       </Card>

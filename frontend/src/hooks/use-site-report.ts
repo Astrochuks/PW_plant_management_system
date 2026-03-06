@@ -2,6 +2,7 @@
  * Site Engineer hooks using React Query
  */
 
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
@@ -9,6 +10,7 @@ import {
   getSitePlants,
   getDraft,
   upsertDraftRow,
+  batchUpsertDraftRows,
   removeDraftRow,
   submitDraft,
   getSiteSubmissions,
@@ -129,10 +131,13 @@ export function useSiteLocations() {
 // Mutations
 // ============================================================================
 
-export function useUpsertDraftRow(weekEndingDate: string) {
+/**
+ * Simple single-row upsert (for AddPlantDialog where we need onSuccess/onError callbacks).
+ */
+export function useUpsertDraftRowSingle(weekEndingDate: string, draftId?: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (row: DraftRowUpsert) => upsertDraftRow(weekEndingDate, row),
+    mutationFn: (row: DraftRowUpsert) => upsertDraftRow(weekEndingDate, row, draftId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: siteKeys.draft(weekEndingDate) })
     },
@@ -141,6 +146,70 @@ export function useUpsertDraftRow(weekEndingDate: string) {
       toast.error(`Save failed: ${msg}`)
     },
   })
+}
+
+/**
+ * Batched draft row upsert hook.
+ *
+ * Instead of firing a separate API call per field change, this hook queues
+ * changes and flushes them in a single batch request every 600ms.  If only
+ * one row changed it falls back to the single-row endpoint. This cuts
+ * network round-trips dramatically when editing quickly across rows.
+ *
+ * Does NOT invalidate the draft query on success — the local state in
+ * ReportRow already reflects the change. The draft is only re-fetched on
+ * week change, add/remove, or submit.
+ */
+export function useUpsertDraftRow(weekEndingDate: string, draftId?: string) {
+  const pendingRef = useRef<Map<string, DraftRowUpsert>>(new Map())
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [isPending, setIsPending] = useState(false)
+  const [isError, setIsError] = useState(false)
+
+  const flush = useCallback(async () => {
+    const pending = pendingRef.current
+    if (pending.size === 0) return
+    const rows = Array.from(pending.values())
+    pending.clear()
+    setIsPending(true)
+    setIsError(false)
+    try {
+      if (rows.length === 1) {
+        await upsertDraftRow(weekEndingDate, rows[0], draftId)
+      } else {
+        await batchUpsertDraftRows(weekEndingDate, rows, draftId)
+      }
+    } catch (err) {
+      setIsError(true)
+      const msg = err instanceof Error ? err.message : 'Failed to save — check your connection'
+      toast.error(`Save failed: ${msg}`)
+    } finally {
+      setIsPending(false)
+    }
+  }, [weekEndingDate, draftId])
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current)
+    }
+  }, [])
+
+  const mutate = useCallback((row: DraftRowUpsert) => {
+    // Queue by fleet_number — latest values win
+    pendingRef.current.set(row.fleet_number, row)
+    // Reset the flush timer
+    if (timerRef.current) clearTimeout(timerRef.current)
+    timerRef.current = setTimeout(flush, 600)
+  }, [flush])
+
+  // Expose a flushNow for pre-submit
+  const flushNow = useCallback(async () => {
+    if (timerRef.current) clearTimeout(timerRef.current)
+    await flush()
+  }, [flush])
+
+  return { mutate, flushNow, isPending, isError }
 }
 
 export function useRemoveDraftRow(weekEndingDate: string) {

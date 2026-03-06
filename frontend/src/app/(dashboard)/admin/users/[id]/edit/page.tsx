@@ -1,7 +1,6 @@
 'use client'
 
 import { useRouter, useParams } from 'next/navigation'
-import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ProtectedRoute } from '@/components/protected-route'
@@ -32,8 +31,8 @@ function EditUserContent({ userId }: { userId: string }) {
     return (
       <div className="space-y-6 text-center">
         <h1 className="text-3xl font-bold">User not found</h1>
-        <Button asChild>
-          <Link href="/admin/users">Back to Users</Link>
+        <Button onClick={() => router.push('/admin/users')}>
+          Back to Users
         </Button>
       </div>
     )
@@ -43,11 +42,9 @@ function EditUserContent({ userId }: { userId: string }) {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center gap-2">
-        <Button variant="ghost" size="sm" asChild>
-          <Link href="/admin/users">
-            <ArrowLeft className="mr-1 h-4 w-4" />
-            Back
-          </Link>
+        <Button variant="ghost" size="sm" onClick={() => router.back()}>
+          <ArrowLeft className="mr-1 h-4 w-4" />
+          Back
         </Button>
       </div>
 
@@ -60,8 +57,8 @@ function EditUserContent({ userId }: { userId: string }) {
       <div className="max-w-3xl bg-white dark:bg-slate-950 border border-border rounded-lg p-6">
         <UserForm
           user={user}
-          onSuccess={() => router.push('/admin/users')}
-          onCancel={() => router.push('/admin/users')}
+          onSuccess={() => router.replace(`/admin/users`)}
+          onCancel={() => router.back()}
         />
       </div>
     </div>

@@ -157,7 +157,7 @@ export function ProjectForm({ project, mode }: ProjectFormProps) {
       } else {
         await updateMutation.mutateAsync(payload)
         toast.success('Project updated successfully')
-        router.push(`/projects/${project!.id}`)
+        router.replace(`/projects/${project!.id}`)
       }
     } catch {
       toast.error(mode === 'create' ? 'Failed to create project' : 'Failed to update project')

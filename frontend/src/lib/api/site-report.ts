@@ -170,11 +170,28 @@ export async function getDraft(weekEndingDate: string): Promise<Draft> {
 
 export async function upsertDraftRow(
   weekEndingDate: string,
-  row: DraftRowUpsert
+  row: DraftRowUpsert,
+  draftId?: string,
 ): Promise<{ draft_id: string }> {
+  const params: Record<string, string> = { week_ending_date: weekEndingDate }
+  if (draftId) params.draft_id = draftId
   const res = await apiClient.put('/site/draft/rows', row, {
-    params: { week_ending_date: weekEndingDate },
-    timeout: 60000,
+    params,
+    timeout: 30000,
+  })
+  return res.data
+}
+
+export async function batchUpsertDraftRows(
+  weekEndingDate: string,
+  rows: DraftRowUpsert[],
+  draftId?: string,
+): Promise<{ draft_id: string; saved: number }> {
+  const params: Record<string, string> = { week_ending_date: weekEndingDate }
+  if (draftId) params.draft_id = draftId
+  const res = await apiClient.put('/site/draft/rows/batch', { rows }, {
+    params,
+    timeout: 30000,
   })
   return res.data
 }

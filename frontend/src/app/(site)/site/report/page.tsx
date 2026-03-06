@@ -47,6 +47,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import {
   useDraft,
   useUpsertDraftRow,
+  useUpsertDraftRowSingle,
   useRemoveDraftRow,
   useSubmitDraft,
   useSiteLocations,
@@ -140,8 +141,8 @@ function WeeklyReportContent() {
   const { data: draft, isLoading: draftLoading } = useDraft(weekEnding)
   const { data: locations = [] } = useSiteLocations()
 
-  // Single shared mutation so parent tracks isPending for SaveIndicator + Submit button
-  const upsertMutation = useUpsertDraftRow(weekEnding)
+  // Batched mutation — queues changes and flushes every 600ms in a single request
+  const upsertMutation = useUpsertDraftRow(weekEnding, draft?.id)
   const removeMutation = useRemoveDraftRow(weekEnding)
   const submitMutation = useSubmitDraft()
 
@@ -166,7 +167,9 @@ function WeeklyReportContent() {
 
   const transferRows = rows.filter((r) => r.transfer_to_location_id)
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
+    // Flush any queued saves before submitting
+    await upsertMutation.flushNow()
     submitMutation.mutate(weekEnding, {
       onSuccess: (res) => {
         toast.success(
@@ -632,7 +635,7 @@ function AddPlantDialog({
   const [checkResult, setCheckResult] = useState<{ available: boolean; message?: string; current_location?: string } | null>(null)
   const [transferRequested, setTransferRequested] = useState(false)
   const checkMutation = useCheckNewPlant()
-  const upsertMutation = useUpsertDraftRow(weekEnding)
+  const upsertMutation = useUpsertDraftRowSingle(weekEnding)
   const requestTransferMutation = useRequestPlantTransfer()
 
   const debouncedFleet = useDebounce(fleetNumber.trim().toUpperCase(), 600)

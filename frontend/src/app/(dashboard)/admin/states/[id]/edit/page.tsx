@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter, useParams } from 'next/navigation'
-import Link from 'next/link'
 import { ArrowLeft, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -54,7 +53,7 @@ function EditStateContent() {
         is_active: isActive,
       })
       toast.success(`State "${name.trim()}" updated`)
-      router.push('/admin/states')
+      router.replace('/admin/states')
     } catch (error) {
       toast.error(getErrorMessage(error))
     }
@@ -81,12 +80,12 @@ function EditStateContent() {
     <div className="space-y-6 max-w-2xl">
       {/* Header */}
       <div className="flex items-center gap-3">
-        <Link
-          href="/admin/states"
+        <button
+          onClick={() => router.back()}
           className="p-2 rounded-lg hover:bg-muted transition-colors"
         >
           <ArrowLeft className="h-4 w-4" />
-        </Link>
+        </button>
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Edit State</h1>
           <p className="text-sm text-muted-foreground mt-0.5">

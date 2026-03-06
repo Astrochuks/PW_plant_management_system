@@ -252,63 +252,67 @@ async def upsert_draft_row(
     current_user: Annotated[CurrentUser, Depends(require_site_engineer)],
     body: DraftRowUpsert,
     week_ending_date: date = Query(default=None),
+    draft_id: str | None = Query(default=None),
 ) -> dict[str, Any]:
     """Upsert a single plant row in the engineer's current draft.
 
+    Accepts an optional draft_id to skip the draft lookup query.
     Creates the draft if it doesn't exist. Safe to call on every keystroke
     (after debounce on the frontend).
     """
     if week_ending_date is None:
         week_ending_date = _current_week_ending()
 
-    # Validate new plant request
     if body.is_new_plant and not body.plant_description:
         raise ValidationError("plant_description is required when adding a new plant")
 
-    # Ensure draft exists
-    draft = await fetchrow(
-        "SELECT id, status FROM weekly_report_drafts WHERE user_id = $1::uuid AND week_ending_date = $2",
-        current_user.id, week_ending_date,
-    )
-    if not draft:
-        draft = await _get_or_create_draft(current_user.id, current_user.location_id, week_ending_date)
-        draft_id = draft["id"]
-    else:
-        draft_id = str(draft["id"])
-
-    if draft.get("status") == "submitted":
-        raise ValidationError("This draft has already been submitted")
-
-    # Resolve plant_id if not new
-    plant_id: str | None = None
-    if not body.is_new_plant:
-        p = await fetchrow(
-            "SELECT id FROM plants_master WHERE fleet_number = $1",
-            body.fleet_number.strip().upper(),
+    # Resolve draft_id — skip lookup if provided by frontend
+    if not draft_id:
+        draft = await fetchrow(
+            "SELECT id, status FROM weekly_report_drafts WHERE user_id = $1::uuid AND week_ending_date = $2",
+            current_user.id, week_ending_date,
         )
-        if p:
-            plant_id = str(p["id"])
+        if not draft:
+            draft = await _get_or_create_draft(current_user.id, current_user.location_id, week_ending_date)
+            draft_id = draft["id"]
+        else:
+            if draft.get("status") == "submitted":
+                raise ValidationError("This draft has already been submitted")
+            draft_id = str(draft["id"])
 
-    await execute(
-        """INSERT INTO weekly_report_draft_rows
-               (draft_id, plant_id, fleet_number, condition, physical_verification,
-                hours_worked, standby_hours, breakdown_hours, off_hire,
-                transfer_to_location_id, remarks, is_new_plant)
-           VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10::uuid, $11, $12)
-           ON CONFLICT (draft_id, fleet_number)
-           DO UPDATE SET
-               condition               = EXCLUDED.condition,
-               physical_verification   = EXCLUDED.physical_verification,
-               hours_worked            = EXCLUDED.hours_worked,
-               standby_hours           = EXCLUDED.standby_hours,
-               breakdown_hours         = EXCLUDED.breakdown_hours,
-               off_hire                = EXCLUDED.off_hire,
-               transfer_to_location_id = EXCLUDED.transfer_to_location_id,
-               remarks                 = EXCLUDED.remarks,
-               is_new_plant            = EXCLUDED.is_new_plant,
-               updated_at              = now()""",
-        draft_id, plant_id,
-        body.fleet_number.strip().upper(),
+    # Single CTE: resolve plant_id + upsert row + bump draft timestamp (1 round-trip)
+    fleet = body.fleet_number.strip().upper()
+    result = await fetchval(
+        """
+        WITH plant_lookup AS (
+            SELECT id FROM plants_master WHERE fleet_number = $2
+        ),
+        upserted AS (
+            INSERT INTO weekly_report_draft_rows
+                (draft_id, plant_id, fleet_number, condition, physical_verification,
+                 hours_worked, standby_hours, breakdown_hours, off_hire,
+                 transfer_to_location_id, remarks, is_new_plant)
+            VALUES ($1::uuid, (SELECT id FROM plant_lookup), $2, $3, $4, $5, $6, $7, $8, $9::uuid, $10, $11)
+            ON CONFLICT (draft_id, fleet_number)
+            DO UPDATE SET
+                plant_id                = COALESCE((SELECT id FROM plant_lookup), weekly_report_draft_rows.plant_id),
+                condition               = EXCLUDED.condition,
+                physical_verification   = EXCLUDED.physical_verification,
+                hours_worked            = EXCLUDED.hours_worked,
+                standby_hours           = EXCLUDED.standby_hours,
+                breakdown_hours         = EXCLUDED.breakdown_hours,
+                off_hire                = EXCLUDED.off_hire,
+                transfer_to_location_id = EXCLUDED.transfer_to_location_id,
+                remarks                 = EXCLUDED.remarks,
+                is_new_plant            = EXCLUDED.is_new_plant,
+                updated_at              = now()
+            RETURNING draft_id
+        )
+        UPDATE weekly_report_drafts SET updated_at = now()
+        WHERE id = (SELECT draft_id FROM upserted LIMIT 1)
+        RETURNING id::text
+        """,
+        draft_id, fleet,
         body.condition, body.physical_verification,
         body.hours_worked, body.standby_hours, body.breakdown_hours,
         body.off_hire,
@@ -316,13 +320,88 @@ async def upsert_draft_row(
         body.remarks, body.is_new_plant,
     )
 
-    # Bump draft updated_at
-    await execute(
-        "UPDATE weekly_report_drafts SET updated_at = now() WHERE id = $1::uuid",
-        draft_id,
-    )
+    return {"success": True, "draft_id": result or draft_id}
 
-    return {"success": True, "draft_id": draft_id}
+
+class BatchDraftRowUpsert(BaseModel):
+    rows: list[DraftRowUpsert]
+
+
+@router.put("/draft/rows/batch")
+async def batch_upsert_draft_rows(
+    current_user: Annotated[CurrentUser, Depends(require_site_engineer)],
+    body: BatchDraftRowUpsert,
+    week_ending_date: date = Query(default=None),
+    draft_id: str | None = Query(default=None),
+) -> dict[str, Any]:
+    """Batch upsert multiple rows in a single request/transaction.
+
+    Significantly faster than individual PUT calls when saving many rows.
+    """
+    if week_ending_date is None:
+        week_ending_date = _current_week_ending()
+
+    if not body.rows:
+        return {"success": True, "draft_id": draft_id, "saved": 0}
+
+    # Resolve draft_id
+    if not draft_id:
+        draft = await fetchrow(
+            "SELECT id, status FROM weekly_report_drafts WHERE user_id = $1::uuid AND week_ending_date = $2",
+            current_user.id, week_ending_date,
+        )
+        if not draft:
+            draft = await _get_or_create_draft(current_user.id, current_user.location_id, week_ending_date)
+            draft_id = draft["id"]
+        else:
+            if draft.get("status") == "submitted":
+                raise ValidationError("This draft has already been submitted")
+            draft_id = str(draft["id"])
+
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            for row in body.rows:
+                fleet = row.fleet_number.strip().upper()
+                await conn.execute(
+                    """
+                    WITH plant_lookup AS (
+                        SELECT id FROM plants_master WHERE fleet_number = $2
+                    )
+                    INSERT INTO weekly_report_draft_rows
+                        (draft_id, plant_id, fleet_number, condition, physical_verification,
+                         hours_worked, standby_hours, breakdown_hours, off_hire,
+                         transfer_to_location_id, remarks, is_new_plant)
+                    VALUES ($1::uuid, (SELECT id FROM plant_lookup), $2, $3, $4, $5, $6, $7, $8, $9::uuid, $10, $11)
+                    ON CONFLICT (draft_id, fleet_number)
+                    DO UPDATE SET
+                        plant_id                = COALESCE((SELECT id FROM plant_lookup), weekly_report_draft_rows.plant_id),
+                        condition               = EXCLUDED.condition,
+                        physical_verification   = EXCLUDED.physical_verification,
+                        hours_worked            = EXCLUDED.hours_worked,
+                        standby_hours           = EXCLUDED.standby_hours,
+                        breakdown_hours         = EXCLUDED.breakdown_hours,
+                        off_hire                = EXCLUDED.off_hire,
+                        transfer_to_location_id = EXCLUDED.transfer_to_location_id,
+                        remarks                 = EXCLUDED.remarks,
+                        is_new_plant            = EXCLUDED.is_new_plant,
+                        updated_at              = now()
+                    """,
+                    draft_id, fleet,
+                    row.condition, row.physical_verification,
+                    row.hours_worked, row.standby_hours, row.breakdown_hours,
+                    row.off_hire,
+                    str(row.transfer_to_location_id) if row.transfer_to_location_id else None,
+                    row.remarks, row.is_new_plant,
+                )
+
+            # Bump draft timestamp once
+            await conn.execute(
+                "UPDATE weekly_report_drafts SET updated_at = now() WHERE id = $1::uuid",
+                draft_id,
+            )
+
+    return {"success": True, "draft_id": draft_id, "saved": len(body.rows)}
 
 
 @router.delete("/draft/rows/{fleet_number}")
