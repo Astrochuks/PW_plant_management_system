@@ -133,8 +133,11 @@ export function useEventStream(isAuthenticated: boolean) {
         es.close();
         sourceRef.current = null;
 
-        // Exponential backoff: 1s, 2s, 4s, 8s, max 30s
-        const delay = Math.min(1000 * Math.pow(2, retryCountRef.current), 30000);
+        // Stop retrying after 10 consecutive failures (likely auth is dead)
+        if (retryCountRef.current >= 10) return;
+
+        // Exponential backoff: 2s, 4s, 8s, 16s, max 30s
+        const delay = Math.min(2000 * Math.pow(2, retryCountRef.current), 30000);
         retryCountRef.current++;
         retryRef.current = setTimeout(connect, delay);
       };
@@ -146,11 +149,11 @@ export function useEventStream(isAuthenticated: boolean) {
     // The auth provider refreshes the token; we reconnect to use it
     function handleVisibilityChange() {
       if (document.visibilityState === 'visible' && isAuthenticated) {
-        // Small delay to let auth provider refresh the token first
+        // Wait for auth provider to refresh the token first (it runs on visibilitychange too)
         setTimeout(() => {
           retryCountRef.current = 0;
           connect();
-        }, 500);
+        }, 3000);
       }
     }
 

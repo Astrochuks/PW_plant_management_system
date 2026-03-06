@@ -4,6 +4,7 @@
  */
 
 import axios, { AxiosError, AxiosInstance, AxiosRequestConfig } from 'axios';
+import { refreshTokenGlobal } from './silent-refresh';
 
 // API base URL - defaults to localhost for development
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -19,9 +20,6 @@ const apiClient: AxiosInstance = axios.create({
 
 // Guard against multiple 401 redirects firing simultaneously
 let isRedirecting = false;
-// Guard against multiple concurrent refresh attempts
-let isRefreshing = false;
-let refreshPromise: Promise<string | null> | null = null;
 
 // Request interceptor - adds auth token to requests
 apiClient.interceptors.request.use(
@@ -40,68 +38,37 @@ apiClient.interceptors.request.use(
 );
 
 /**
- * Attempt to refresh the access token using the stored refresh token.
+ * Attempt to refresh the access token using the global mutex.
  * Returns the new access token on success, or null on failure.
- *
- * If the refresh fails (e.g., token already rotated by the proactive refresh
- * in AuthProvider), check whether sessionStorage already has a newer token
- * before returning null — avoids unnecessary hard-logouts.
  */
 async function tryRefreshToken(): Promise<string | null> {
-  // Coalesce concurrent refresh attempts into one
-  if (isRefreshing && refreshPromise) {
-    return refreshPromise;
-  }
-
-  const storedRefreshToken = sessionStorage.getItem('refresh_token');
-  if (!storedRefreshToken) return null;
-
-  // Remember the access token we had when we started
   const tokenBefore = sessionStorage.getItem('access_token');
 
-  isRefreshing = true;
-  refreshPromise = (async () => {
-    try {
-      // Use raw axios to avoid interceptors triggering recursion
-      const response = await axios.post(
-        `${API_BASE_URL}/api/v1/auth/refresh`,
-        { refresh_token: storedRefreshToken },
-        { timeout: 15000 }
-      );
-
-      const data = response.data;
-      const newToken = data.access_token;
-      if (newToken) {
-        sessionStorage.setItem('access_token', newToken);
-        if (data.refresh_token) {
-          sessionStorage.setItem('refresh_token', data.refresh_token);
-        }
-        if (data.expires_in) {
-          const expiresAt = Date.now() + data.expires_in * 1000;
-          sessionStorage.setItem('token_expires_at', String(expiresAt));
-        }
-        if (data.user) {
-          sessionStorage.setItem('user', JSON.stringify(data.user));
-        }
-        return newToken;
-      }
-      return null;
-    } catch {
-      // Refresh failed — but another refresh (proactive timer) may have
-      // already rotated the token and saved new ones to sessionStorage.
-      // If the stored token changed, use the new one instead of logging out.
-      const tokenNow = sessionStorage.getItem('access_token');
-      if (tokenNow && tokenNow !== tokenBefore) {
-        return tokenNow;
-      }
-      return null;
-    } finally {
-      isRefreshing = false;
-      refreshPromise = null;
+  try {
+    const response = await refreshTokenGlobal();
+    if (response) {
+      // Save tokens directly (can't import saveAuthData — circular dep)
+      sessionStorage.setItem('access_token', response.access_token);
+      sessionStorage.setItem('refresh_token', response.refresh_token);
+      if (response.user) sessionStorage.setItem('user', JSON.stringify(response.user));
+      const expiresAt = Date.now() + (response.expires_in || 3600) * 1000;
+      sessionStorage.setItem('token_expires_at', String(expiresAt));
+      return response.access_token;
     }
-  })();
-
-  return refreshPromise;
+    // Refresh returned null — check if another caller already saved new tokens
+    const tokenNow = sessionStorage.getItem('access_token');
+    if (tokenNow && tokenNow !== tokenBefore) {
+      return tokenNow;
+    }
+    return null;
+  } catch {
+    // Network error — check if another caller saved tokens while we waited
+    const tokenNow = sessionStorage.getItem('access_token');
+    if (tokenNow && tokenNow !== tokenBefore) {
+      return tokenNow;
+    }
+    return null;
+  }
 }
 
 function hardLogout(): void {

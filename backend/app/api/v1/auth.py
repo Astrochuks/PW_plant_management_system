@@ -263,7 +263,14 @@ async def refresh_token(
         # Fresh client per refresh - prevents session race conditions
         auth_client = create_auth_client()
 
-        response = auth_client.auth.refresh_session(request_body.refresh_token)
+        # Supabase SDK is synchronous — run in thread to avoid blocking event loop
+        def _refresh():
+            return auth_client.auth.refresh_session(request_body.refresh_token)
+
+        try:
+            response = await asyncio.wait_for(asyncio.to_thread(_refresh), timeout=10.0)
+        except asyncio.TimeoutError:
+            raise AuthenticationError("Token refresh timed out")
 
         if not response.session:
             raise AuthenticationError("Invalid refresh token")
