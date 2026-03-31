@@ -68,10 +68,10 @@ async def list_transfers(
         f"""SELECT t.*,
                    json_build_object('id', pm.id, 'fleet_number', pm.fleet_number, 'description', pm.description) AS plant,
                    CASE WHEN fl.id IS NOT NULL
-                        THEN json_build_object('id', fl.id, 'name', fl.name)
+                        THEN json_build_object('id', fl.id, 'name', fl.name, 'is_bua', COALESCE(fl.is_bua, false))
                         ELSE NULL END AS from_location,
                    CASE WHEN tl.id IS NOT NULL
-                        THEN json_build_object('id', tl.id, 'name', tl.name)
+                        THEN json_build_object('id', tl.id, 'name', tl.name, 'is_bua', COALESCE(tl.is_bua, false))
                         ELSE NULL END AS to_location,
                    ws.week_number AS source_week,
                    ws.year AS source_year,
@@ -235,8 +235,8 @@ async def list_site_transfer_requests(
                t.id::text, t.status, t.is_pull_request, t.created_at, t.transfer_date,
                t.source_remarks AS notes,
                pm.fleet_number, pm.description, pm.fleet_type,
-               fl.id::text AS from_location_id, fl.name AS from_location_name,
-               tl.id::text AS to_location_id, tl.name AS to_location_name
+               fl.id::text AS from_location_id, fl.name AS from_location_name, COALESCE(fl.is_bua, false) AS from_is_bua,
+               tl.id::text AS to_location_id, tl.name AS to_location_name, COALESCE(tl.is_bua, false) AS to_is_bua
            FROM plant_transfers t
            JOIN plants_master pm ON pm.id = t.plant_id
            JOIN locations fl ON fl.id = t.from_location_id
@@ -261,8 +261,8 @@ async def list_site_transfer_requests(
                     "description": r["description"],
                     "fleet_type": r["fleet_type"],
                 },
-                "from_site": {"id": r["from_location_id"], "name": r["from_location_name"]},
-                "to_site": {"id": r["to_location_id"], "name": r["to_location_name"]},
+                "from_site": {"id": r["from_location_id"], "name": r["from_location_name"], "is_bua": r["from_is_bua"]},
+                "to_site": {"id": r["to_location_id"], "name": r["to_location_name"], "is_bua": r["to_is_bua"]},
             }
             for r in rows
         ],
@@ -370,12 +370,17 @@ async def confirm_transfer(
     )
 
     # Close current location history and create new one
-    today = datetime.utcnow().date()
+    # Use the actual transfer date (or arrival date), not today's date
+    effective_date = (
+        transfer.get("actual_arrival_date")
+        or transfer.get("transfer_date")
+        or datetime.utcnow().date()
+    )
     await execute(
         """UPDATE plant_location_history
            SET end_date = $1::date
            WHERE plant_id = $2::uuid AND end_date IS NULL""",
-        today,
+        effective_date,
         str(transfer["plant_id"]),
     )
     await execute(
@@ -383,7 +388,7 @@ async def confirm_transfer(
            VALUES ($1::uuid, $2::uuid, $3::date, 'Manual transfer confirmation')""",
         str(transfer["plant_id"]),
         str(transfer["to_location_id"]),
-        today,
+        effective_date,
     )
 
     broadcast("transfers", "confirm")

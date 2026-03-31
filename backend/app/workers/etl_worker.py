@@ -1811,6 +1811,17 @@ async def _record_plant_locations(
         except Exception as e:
             logger.warning("Failed to detect missing plants", error=str(e))
 
+        # === POST-PROCESSING: Rebuild location history & events from weekly records ===
+        # This ensures correct timeline even when uploading reports out of order.
+        # The rebuild uses plant_weekly_records as the source of truth.
+        # Single function, 6 DB queries total regardless of plant count.
+        try:
+            timeline = await rebuild_location_timeline(plant_ids)
+            tracking_result["location_history_rebuilt"] = timeline["history"]
+            tracking_result["movement_events_rebuilt"] = timeline["events"]
+        except Exception as e:
+            logger.warning("Failed to rebuild location timeline", error=str(e))
+
         logger.info(
             "Plant tracking recorded",
             submission_id=submission_id,
@@ -1820,12 +1831,157 @@ async def _record_plant_locations(
             transfers_detected=tracking_result["transfers_detected"],
             transfers_confirmed=tracking_result["transfers_confirmed"],
             plants_missing=tracking_result.get("plants_missing", 0),
+            location_history_rebuilt=tracking_result.get("location_history_rebuilt", 0),
+            movement_events_rebuilt=tracking_result.get("movement_events_rebuilt", 0),
         )
 
     except Exception as e:
         logger.warning("Failed to record plant locations", error=str(e))
 
     return tracking_result
+
+
+async def rebuild_location_timeline(plant_ids: list) -> dict[str, int]:
+    """Rebuild location history AND movement events from plant_weekly_records.
+
+    Single function that does both in one pass with minimal DB queries:
+      1 SELECT weekly_records (shared for both)
+      1 SELECT plants_master (current_location + fleet_number)
+      1 SELECT existing events (dedup check)
+      1 DELETE old history
+      1 INSERT new history (executemany, batched)
+      1 INSERT new events (executemany, batched)
+    = 6 queries total, regardless of plant count.
+
+    All Python processing is in-memory (O(n) where n = weekly records).
+    """
+    if not plant_ids:
+        return {"history": 0, "events": 0}
+
+    from itertools import groupby
+    from operator import itemgetter
+
+    # === 1 query: all weekly records for these plants ===
+    records = await fetch(
+        """SELECT plant_id, location_id, week_ending_date, year, week_number
+           FROM plant_weekly_records
+           WHERE plant_id = ANY($1::uuid[])
+           ORDER BY plant_id, year ASC, week_number ASC""",
+        plant_ids,
+    )
+
+    if not records:
+        return {"history": 0, "events": 0}
+
+    # === 1 query: current location + fleet number for all plants ===
+    plant_info = await fetch(
+        "SELECT id, current_location_id, fleet_number FROM plants_master WHERE id = ANY($1::uuid[])",
+        plant_ids,
+    )
+    current_location_map = {r["id"]: r["current_location_id"] for r in plant_info}
+    fleet_map = {r["id"]: r["fleet_number"] for r in plant_info}
+
+    # === 1 query: existing movement events for dedup ===
+    existing_events = await fetch(
+        """SELECT plant_id, event_date, from_location_id, to_location_id
+           FROM plant_events
+           WHERE plant_id = ANY($1::uuid[]) AND event_type = 'movement'""",
+        plant_ids,
+    )
+    existing_keys = {
+        (str(e["plant_id"]), str(e["event_date"]), str(e["from_location_id"]), str(e["to_location_id"]))
+        for e in existing_events
+    }
+
+    # Group records by plant_id (already sorted by year, week)
+    plant_records = {}
+    for pid, group in groupby(records, key=itemgetter("plant_id")):
+        plant_records[pid] = list(group)
+
+    # === In-memory: build history spans + detect movements ===
+    history_inserts = []
+    events_to_create = []
+
+    for pid, weekly_rows in plant_records.items():
+        if not weekly_rows:
+            continue
+
+        fn = fleet_map.get(pid, "unknown")
+
+        # Merge consecutive weeks at same location into spans
+        spans = []
+        current_span = {
+            "location_id": weekly_rows[0]["location_id"],
+            "start_date": weekly_rows[0]["week_ending_date"],
+            "end_date": weekly_rows[0]["week_ending_date"],
+        }
+
+        for row in weekly_rows[1:]:
+            if row["location_id"] == current_span["location_id"]:
+                current_span["end_date"] = row["week_ending_date"]
+            else:
+                # Location changed = movement event
+                key = (str(pid), str(row["week_ending_date"]), str(current_span["location_id"]), str(row["location_id"]))
+                if key not in existing_keys:
+                    events_to_create.append((
+                        pid, "movement", row["week_ending_date"],
+                        row["year"], row["week_number"],
+                        current_span["location_id"], row["location_id"],
+                        json.dumps({"fleet_number": fn}),
+                        f"Plant {fn} moved from previous location",
+                    ))
+                    existing_keys.add(key)
+
+                spans.append(current_span)
+                current_span = {
+                    "location_id": row["location_id"],
+                    "start_date": row["week_ending_date"],
+                    "end_date": row["week_ending_date"],
+                }
+
+        spans.append(current_span)
+
+        # Convert spans to history records
+        for i, span in enumerate(spans):
+            is_last = (i == len(spans) - 1)
+            is_current = (span["location_id"] == current_location_map.get(pid))
+            end_date = None if (is_last and is_current) else span["end_date"]
+
+            history_inserts.append((
+                pid, span["location_id"], span["start_date"], end_date, "Weekly report",
+            ))
+
+    # === 1 query: delete old history ===
+    await execute(
+        "DELETE FROM plant_location_history WHERE plant_id = ANY($1::uuid[])",
+        plant_ids,
+    )
+
+    # === 1 query: batch insert history ===
+    if history_inserts:
+        await executemany(
+            """INSERT INTO plant_location_history (plant_id, location_id, start_date, end_date, transfer_reason)
+               VALUES ($1::uuid, $2::uuid, $3, $4, $5)""",
+            history_inserts,
+        )
+
+    # === 1 query: batch insert events ===
+    if events_to_create:
+        await executemany(
+            """INSERT INTO plant_events (plant_id, event_type, event_date, year, week_number,
+                from_location_id, to_location_id, details, remarks)
+            VALUES ($1::uuid, $2, $3, $4, $5, $6::uuid, $7::uuid, $8::jsonb, $9)""",
+            events_to_create,
+        )
+
+    logger.info(
+        "Rebuilt location timeline",
+        plants=len(plant_records),
+        history_records=len(history_inserts),
+        new_events=len(events_to_create),
+    )
+
+    return {"history": len(history_inserts), "events": len(events_to_create)}
 
 
 async def _create_notification(
@@ -2053,6 +2209,50 @@ async def save_confirmed_weekly_report(
         fleet_to_condition = {p["fleet_number"]: p.get("condition") for p in relevant_plants}
         fleet_to_location = {p["fleet_number"]: p.get("current_location_id") for p in relevant_plants}
 
+        # Check which plants were at THIS location in the previous week.
+        # If a plant is new here (wasn't here last week), it's a real movement
+        # and should take precedence over a "continuing" report from another location.
+        prev_week = week_number - 1
+        prev_year = year
+        if prev_week < 1:
+            prev_week = 52
+            prev_year = year - 1
+
+        plants_here_prev_week_rows = await fetch(
+            """SELECT pm.fleet_number
+               FROM plant_weekly_records pwr
+               JOIN plants_master pm ON pm.id = pwr.plant_id
+               WHERE pwr.location_id = $1::uuid
+                 AND pwr.year = $2 AND pwr.week_number = $3""",
+            str(location_id), prev_year, prev_week,
+        )
+        plants_here_prev_week = {r["fleet_number"] for r in plants_here_prev_week_rows}
+
+        # Also check which plants already have a weekly record at a DIFFERENT
+        # location for the SAME week (uploaded by another report first).
+        # If that other report was a "new arrival", we should not overwrite it.
+        plants_elsewhere_same_week_rows = await fetch(
+            """SELECT pm.fleet_number, pwr.location_id,
+                      EXISTS(
+                          SELECT 1 FROM plant_weekly_records pwr2
+                          JOIN plants_master pm2 ON pm2.id = pwr2.plant_id
+                          WHERE pm2.fleet_number = pm.fleet_number
+                            AND pwr2.location_id = pwr.location_id
+                            AND pwr2.year = $3 AND pwr2.week_number = $4
+                      ) AS was_there_prev_week
+               FROM plant_weekly_records pwr
+               JOIN plants_master pm ON pm.id = pwr.plant_id
+               WHERE pm.fleet_number = ANY($1::text[])
+                 AND pwr.year = $2 AND pwr.week_number = $5
+                 AND pwr.location_id != $6::uuid""",
+            upload_fleet_numbers, year, prev_year, prev_week, week_number, str(location_id),
+        )
+        # Fleet numbers that are new arrivals at another location this same week
+        new_arrivals_elsewhere = {
+            r["fleet_number"] for r in plants_elsewhere_same_week_rows
+            if not r["was_there_prev_week"]
+        }
+
         # Prepare plants for upsert
         plants_to_upsert = []
         new_fleet_numbers: set[str] = set()
@@ -2079,11 +2279,29 @@ async def save_confirmed_weekly_report(
             existing_verification = fleet_to_verification.get(fleet_num, (0, 0))
             is_newer_or_same = (year, week_number) >= existing_verification
 
+            # For same-week conflicts: a "new arrival" at a location takes
+            # precedence over a "continuing" plant at another location.
+            # - This plant is NEW here if it wasn't at this location last week
+            # - If another location already claimed it as a new arrival this week,
+            #   we should NOT overwrite (this report is the stale/continuing one)
+            is_new_here = fleet_num not in plants_here_prev_week
+            is_new_arrival_elsewhere = fleet_num in new_arrivals_elsewhere
+
             if is_newer_or_same:
-                plant_upsert["current_location_id"] = location_id
-                plant_upsert["last_verified_date"] = week_ending_date
-                plant_upsert["last_verified_year"] = year
-                plant_upsert["last_verified_week"] = week_number
+                if (year, week_number) == existing_verification and is_new_arrival_elsewhere and not is_new_here:
+                    # Same week, but another location has a new arrival for this plant
+                    # and we're just continuing — don't overwrite location
+                    logger.info(
+                        "Skipping location overwrite: plant is a new arrival at another location this week",
+                        fleet_number=fleet_num,
+                        this_location=str(location_id),
+                        week=f"{year}-W{week_number}",
+                    )
+                else:
+                    plant_upsert["current_location_id"] = location_id
+                    plant_upsert["last_verified_date"] = week_ending_date
+                    plant_upsert["last_verified_year"] = year
+                    plant_upsert["last_verified_week"] = week_number
             else:
                 logger.info(
                     "Skipping location overwrite for older upload",
@@ -2582,6 +2800,15 @@ async def save_confirmed_weekly_report(
             submission_id, datetime.utcnow(),
             result["plants_processed"], result["plants_created"], result["plants_updated"],
         )
+
+        # Rebuild location history and events from weekly records
+        # Single function, 6 DB queries total regardless of plant count.
+        all_plant_ids = list(fleet_to_id.values())
+        if all_plant_ids:
+            try:
+                await rebuild_location_timeline(all_plant_ids)
+            except Exception as e:
+                logger.warning("Failed to rebuild location timeline in confirmed save", error=str(e))
 
         result["success"] = True
         broadcast("plants", "import", f"{result['plants_processed']} plants saved")

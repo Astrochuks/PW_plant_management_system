@@ -8,7 +8,7 @@
 import { Suspense, useState, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Truck } from 'lucide-react';
-import { usePlants, useLocations, useFleetTypes, usePlantFilteredStats, usePrefetchPlantDetail } from '@/hooks/use-plants';
+import { usePlants, useLocations, useFleetTypes, usePurchaseYears, usePlantFilteredStats, usePrefetchPlantDetail } from '@/hooks/use-plants';
 import { PlantsTable, DEFAULT_VISIBLE_COLUMNS } from '@/components/plants/plants-table';
 import { PlantsFilters, type FiltersState } from '@/components/plants/plants-filters';
 import { PlantsStatsCards } from '@/components/plants/plants-stats-cards';
@@ -22,7 +22,13 @@ const FILTER_DEFAULTS = {
   condition: '',
   location_id: '',
   fleet_type: '',
+  purchase_year: '',
+  division: '',
+  exclude_locations: '',
+  has_maintenance: '',
   verified_only: '',
+  sort_by: '',
+  sort_order: '',
   page: '1',
 };
 
@@ -39,6 +45,10 @@ function PlantsPageInner() {
     condition: urlFilters.condition ? urlFilters.condition.split(',') : [],
     location_id: urlFilters.location_id,
     fleet_type: urlFilters.fleet_type ? urlFilters.fleet_type.split(',') : [],
+    purchase_year: urlFilters.purchase_year ? urlFilters.purchase_year.split(',').map(Number).filter(Boolean) : [],
+    division: urlFilters.division || '',
+    exclude_locations: urlFilters.exclude_locations ? urlFilters.exclude_locations.split(',').filter(Boolean) : [],
+    has_maintenance: urlFilters.has_maintenance === 'true',
     verified_only: urlFilters.verified_only === 'true',
   }), [urlFilters]);
 
@@ -56,9 +66,15 @@ function PlantsPageInner() {
       condition: filters.condition.length > 0 ? filters.condition.join(',') : undefined,
       location_id: filters.location_id || undefined,
       fleet_type: filters.fleet_type.length > 0 ? filters.fleet_type.join(',') : undefined,
+      purchase_year: filters.purchase_year.length > 0 ? filters.purchase_year.join(',') : undefined,
+      division: filters.division || undefined,
+      exclude_location_ids: filters.exclude_locations.length > 0 ? filters.exclude_locations.join(',') : undefined,
+      has_maintenance: filters.has_maintenance || undefined,
       verified_only: filters.verified_only || undefined,
+      sort_by: urlFilters.sort_by || undefined,
+      sort_order: (urlFilters.sort_order as 'asc' | 'desc') || undefined,
     }),
-    [page, debouncedSearch, filters.condition, filters.location_id, filters.fleet_type, filters.verified_only]
+    [page, debouncedSearch, filters.condition, filters.location_id, filters.fleet_type, filters.purchase_year, filters.division, filters.exclude_locations, filters.has_maintenance, filters.verified_only, urlFilters.sort_by, urlFilters.sort_order]
   );
 
   const statsParams = useMemo(
@@ -67,9 +83,13 @@ function PlantsPageInner() {
       condition: filters.condition.length > 0 ? filters.condition.join(',') : undefined,
       location_id: filters.location_id || undefined,
       fleet_type: filters.fleet_type.length > 0 ? filters.fleet_type.join(',') : undefined,
+      purchase_year: filters.purchase_year.length > 0 ? filters.purchase_year.join(',') : undefined,
+      division: filters.division || undefined,
+      exclude_location_ids: filters.exclude_locations.length > 0 ? filters.exclude_locations.join(',') : undefined,
+      has_maintenance: filters.has_maintenance || undefined,
       verified_only: filters.verified_only || undefined,
     }),
-    [debouncedSearch, filters.condition, filters.location_id, filters.fleet_type, filters.verified_only]
+    [debouncedSearch, filters.condition, filters.location_id, filters.fleet_type, filters.purchase_year, filters.division, filters.exclude_locations, filters.has_maintenance, filters.verified_only]
   );
 
   // Data fetching
@@ -77,6 +97,7 @@ function PlantsPageInner() {
   const { data: statsData, isLoading: statsLoading } = usePlantFilteredStats(statsParams);
   const { data: locations = [], isLoading: locationsLoading } = useLocations();
   const { data: fleetTypes = [], isLoading: fleetTypesLoading } = useFleetTypes();
+  const { data: purchaseYears = [], isLoading: purchaseYearsLoading } = usePurchaseYears();
 
   // Handlers — serialize back to URL params
   const handleFiltersChange = useCallback((newFilters: FiltersState) => {
@@ -85,6 +106,10 @@ function PlantsPageInner() {
       condition: newFilters.condition.join(','),
       location_id: newFilters.location_id,
       fleet_type: newFilters.fleet_type.join(','),
+      purchase_year: newFilters.purchase_year.join(','),
+      division: newFilters.division,
+      exclude_locations: newFilters.exclude_locations.join(','),
+      has_maintenance: newFilters.has_maintenance ? 'true' : '',
       verified_only: newFilters.verified_only ? 'true' : '',
       page: '1',
     });
@@ -121,9 +146,13 @@ function PlantsPageInner() {
       location_id: filters.location_id || undefined,
       fleet_type: filters.fleet_type.length > 0 ? filters.fleet_type.join(',') : undefined,
       search: debouncedSearch || undefined,
+      purchase_year: filters.purchase_year.length > 0 ? filters.purchase_year.join(',') : undefined,
+      division: filters.division || undefined,
+      exclude_location_ids: filters.exclude_locations.length > 0 ? filters.exclude_locations.join(',') : undefined,
+      has_maintenance: filters.has_maintenance ? 'true' : undefined,
       verified_only: filters.verified_only ? 'true' : undefined,
     }),
-    [filters.condition, filters.location_id, filters.fleet_type, debouncedSearch, filters.verified_only]
+    [filters.condition, filters.location_id, filters.fleet_type, debouncedSearch, filters.purchase_year, filters.division, filters.exclude_locations, filters.has_maintenance, filters.verified_only]
   );
 
   return (
@@ -155,8 +184,10 @@ function PlantsPageInner() {
         onFiltersChange={handleFiltersChange}
         locations={locations}
         fleetTypes={fleetTypes}
+        purchaseYears={purchaseYears}
         locationsLoading={locationsLoading}
         fleetTypesLoading={fleetTypesLoading}
+        purchaseYearsLoading={purchaseYearsLoading}
       />
 
       {/* Table */}

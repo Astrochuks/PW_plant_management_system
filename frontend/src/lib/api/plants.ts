@@ -40,12 +40,24 @@ export interface PlantSummary {
   chassis_number: string | null;
   year_of_manufacture: number | null;
   purchase_year: number | null;
+  purchase_month: number | null;
+  purchase_day: number | null;
+  purchase_site: string | null;
   purchase_cost: number | null;
+  purchase_currency: string;
+  components: { name: string; model: string }[];
+  capacity: string | null;
+  manufacture_month: number | null;
+  manufacture_day: number | null;
+  engine_number: string | null;
   serial_m: string | null;
   serial_e: string | null;
   remarks: string | null;
   pending_transfer_to_id: string | null;
   pending_transfer_to_location: string | null;
+  division: string | null;
+  is_bua: boolean;
+  pending_transfer_to_is_bua: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -87,6 +99,10 @@ export interface PlantsListParams {
   verified_only?: boolean;
   unknown_location?: boolean;
   pending_transfer?: boolean;
+  purchase_year?: string;  // comma-separated: 2020,2025
+  division?: string;       // 'mining' or 'civil'
+  exclude_location_ids?: string; // comma-separated location UUIDs to exclude
+  has_maintenance?: boolean;
   sort_by?: string;
   sort_order?: 'asc' | 'desc';
 }
@@ -134,6 +150,10 @@ export async function getPlants(params: PlantsListParams = {}): Promise<{
   if (params.verified_only) queryParams.verified_only = 'true';
   if (params.unknown_location) queryParams.unknown_location = 'true';
   if (params.pending_transfer) queryParams.pending_transfer = 'true';
+  if (params.purchase_year) queryParams.purchase_year = params.purchase_year;
+  if (params.division) queryParams.division = params.division;
+  if (params.exclude_location_ids) queryParams.exclude_location_ids = params.exclude_location_ids;
+  if (params.has_maintenance) queryParams.has_maintenance = 'true';
   if (params.sort_by) queryParams.sort_by = params.sort_by;
   if (params.sort_order) queryParams.sort_order = params.sort_order;
 
@@ -194,6 +214,14 @@ export async function getFleetTypes(): Promise<FleetType[]> {
 }
 
 /**
+ * Get all distinct purchase years from the database
+ */
+export async function getPurchaseYears(): Promise<number[]> {
+  const response = await apiClient.get<ApiResponse<number[]>>('/plants/purchase-years');
+  return response.data.data;
+}
+
+/**
  * Export plants to Excel with current filters
  */
 export interface ExportParams {
@@ -202,6 +230,10 @@ export interface ExportParams {
   fleet_type?: string;
   state?: string;
   search?: string;
+  purchase_year?: string;
+  division?: string;
+  exclude_location_ids?: string;
+  has_maintenance?: boolean;
   verified_only?: boolean;
   exclude_not_seen?: boolean;
   columns?: string;
@@ -214,6 +246,10 @@ export async function exportPlantsExcel(params: ExportParams = {}): Promise<Blob
   if (params.fleet_type) queryParams.fleet_type = params.fleet_type;
   if (params.state) queryParams.state = params.state;
   if (params.search) queryParams.search = params.search;
+  if (params.purchase_year) queryParams.purchase_year = params.purchase_year;
+  if (params.division) queryParams.division = params.division;
+  if (params.exclude_location_ids) queryParams.exclude_location_ids = params.exclude_location_ids;
+  if (params.has_maintenance) queryParams.has_maintenance = 'true';
   if (params.verified_only) queryParams.verified_only = 'true';
   if (params.exclude_not_seen !== undefined) queryParams.exclude_not_seen = String(params.exclude_not_seen);
   if (params.columns) queryParams.columns = params.columns;
@@ -332,8 +368,17 @@ export interface CreatePlantRequest {
   model?: string
   chassis_number?: string
   year_of_manufacture?: number
+  manufacture_month?: number
+  manufacture_day?: number
   purchase_year?: number
+  purchase_month?: number
+  purchase_day?: number
+  purchase_site?: string
   purchase_cost?: number
+  purchase_currency?: string
+  components?: { name: string; model: string }[]
+  capacity?: string
+  engine_number?: string
   serial_m?: string
   serial_e?: string
   remarks?: string
@@ -355,14 +400,24 @@ export interface UpdatePlantRequest {
   model?: string
   chassis_number?: string
   year_of_manufacture?: number
+  manufacture_month?: number
+  manufacture_day?: number
   purchase_year?: number
+  purchase_month?: number
+  purchase_day?: number
+  purchase_site?: string
   purchase_cost?: number
+  purchase_currency?: string
+  components?: { name: string; model: string }[]
+  capacity?: string
+  engine_number?: string
   serial_m?: string
   serial_e?: string
   remarks?: string
   current_location_id?: string
   condition?: string
   physical_verification?: boolean
+  division?: string
 }
 
 export async function updatePlant(plantId: string, data: UpdatePlantRequest): Promise<PlantSummary> {
@@ -370,7 +425,12 @@ export async function updatePlant(plantId: string, data: UpdatePlantRequest): Pr
   const params: Record<string, string | number | boolean> = {};
   for (const [key, value] of Object.entries(data)) {
     if (value !== undefined && value !== null && value !== '') {
-      params[key] = value;
+      // components is JSON — stringify for query param
+      if (key === 'components' && Array.isArray(value)) {
+        params[key] = JSON.stringify(value);
+      } else {
+        params[key] = value as string | number | boolean;
+      }
     }
   }
   const response = await apiClient.patch<ApiResponse<PlantSummary>>(`/plants/${plantId}`, null, { params });
@@ -412,6 +472,10 @@ export async function getFilteredPlantStats(
   if (params.verified_only) queryParams.verified_only = 'true';
   if (params.unknown_location) queryParams.unknown_location = 'true';
   if (params.pending_transfer) queryParams.pending_transfer = 'true';
+  if (params.purchase_year) queryParams.purchase_year = params.purchase_year;
+  if (params.division) queryParams.division = params.division;
+  if (params.exclude_location_ids) queryParams.exclude_location_ids = params.exclude_location_ids;
+  if (params.has_maintenance) queryParams.has_maintenance = 'true';
 
   const response = await apiClient.get<ApiResponse<PlantFilteredStats>>(
     '/plants/filtered-stats',

@@ -28,6 +28,7 @@ from app.monitoring.logging import get_logger
 logger = get_logger(__name__)
 
 _pool: asyncpg.Pool | None = None
+_pool_recovering = False
 
 
 async def init_pool() -> None:
@@ -100,6 +101,22 @@ async def close_pool() -> None:
         logger.info("asyncpg pool closed")
 
 
+async def _try_recover_pool() -> None:
+    """Attempt to reinitialize the pool in background (called on pool death)."""
+    global _pool_recovering
+    if _pool_recovering:
+        return
+    _pool_recovering = True
+    try:
+        logger.warning("Pool is dead — attempting auto-recovery")
+        await init_pool()
+        logger.info("Pool auto-recovery succeeded")
+    except Exception as e:
+        logger.error("Pool auto-recovery failed", error=str(e))
+    finally:
+        _pool_recovering = False
+
+
 def get_pool() -> asyncpg.Pool:
     """Return the singleton pool. Raises if not initialized."""
     if _pool is None:
@@ -122,6 +139,31 @@ def _record_to_dict(record: asyncpg.Record) -> dict[str, Any]:
     return result
 
 
+class DatabaseUnavailableError(Exception):
+    """Raised when the database pool is down. Maps to HTTP 503."""
+    pass
+
+
+async def _exec_with_recovery(fn_name: str, coro_factory):
+    """Execute a pool operation, triggering recovery on pool death."""
+    import asyncio
+
+    try:
+        pool = get_pool()
+    except RuntimeError:
+        # Pool is None — trigger recovery and fail fast
+        asyncio.create_task(_try_recover_pool())
+        raise DatabaseUnavailableError("Database temporarily unavailable — reconnecting")
+
+    try:
+        return await coro_factory(pool)
+    except (OSError, asyncpg.InterfaceError, asyncpg.ConnectionDoesNotExistError) as e:
+        # Connection-level failure — pool may be dead
+        logger.warning(f"Connection error in {fn_name}, triggering pool recovery", error=str(e))
+        asyncio.create_task(_try_recover_pool())
+        raise DatabaseUnavailableError("Database temporarily unavailable — reconnecting") from e
+
+
 async def fetch(sql: str, *args: Any) -> list[dict[str, Any]]:
     """Execute a SELECT and return all rows as list of dicts.
 
@@ -132,8 +174,7 @@ async def fetch(sql: str, *args: Any) -> list[dict[str, Any]]:
     Returns:
         List of row dicts. Empty list if no rows.
     """
-    pool = get_pool()
-    rows = await pool.fetch(sql, *args)
+    rows = await _exec_with_recovery("fetch", lambda pool: pool.fetch(sql, *args))
     return [_record_to_dict(r) for r in rows]
 
 
@@ -147,8 +188,7 @@ async def fetchrow(sql: str, *args: Any) -> dict[str, Any] | None:
     Returns:
         Row dict, or None if no rows.
     """
-    pool = get_pool()
-    row = await pool.fetchrow(sql, *args)
+    row = await _exec_with_recovery("fetchrow", lambda pool: pool.fetchrow(sql, *args))
     if row is None:
         return None
     return _record_to_dict(row)
@@ -164,8 +204,7 @@ async def fetchval(sql: str, *args: Any) -> Any:
     Returns:
         The first column of the first row, or None.
     """
-    pool = get_pool()
-    return await pool.fetchval(sql, *args)
+    return await _exec_with_recovery("fetchval", lambda pool: pool.fetchval(sql, *args))
 
 
 async def execute(sql: str, *args: Any) -> str:
@@ -178,8 +217,7 @@ async def execute(sql: str, *args: Any) -> str:
     Returns:
         PostgreSQL status string (e.g. "UPDATE 1", "INSERT 0 1").
     """
-    pool = get_pool()
-    return await pool.execute(sql, *args)
+    return await _exec_with_recovery("execute", lambda pool: pool.execute(sql, *args))
 
 
 async def fetch_insert(sql: str, *args: Any) -> dict[str, Any] | None:
@@ -217,8 +255,7 @@ async def executemany(sql: str, args_list: list[tuple]) -> None:
         sql: Parameterized SQL statement.
         args_list: List of parameter tuples.
     """
-    pool = get_pool()
-    await pool.executemany(sql, args_list)
+    await _exec_with_recovery("executemany", lambda pool: pool.executemany(sql, args_list))
 
 
 async def fetch_json_rpc(func_name: str, *args: Any) -> Any:
@@ -237,8 +274,7 @@ async def fetch_json_rpc(func_name: str, *args: Any) -> Any:
     placeholders = ", ".join(f"${i+1}" for i in range(len(args)))
     sql = f"SELECT * FROM {func_name}({placeholders})"
 
-    pool = get_pool()
-    row = await pool.fetchrow(sql, *args)
+    row = await _exec_with_recovery("fetch_json_rpc", lambda pool: pool.fetchrow(sql, *args))
     if row is None:
         return None
 

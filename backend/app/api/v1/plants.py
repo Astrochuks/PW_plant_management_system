@@ -35,7 +35,7 @@ _ALLOWED_SORT_COLUMNS = {
     "year_of_manufacture", "purchase_year", "purchase_cost",
     "total_maintenance_cost", "parts_replaced_count", "last_maintenance_date",
     "created_at", "updated_at", "physical_verification", "remarks",
-    "shared_po_count", "last_verified_date",
+    "shared_po_count", "last_verified_date", "capacity", "division",
 }
 
 
@@ -389,6 +389,35 @@ async def get_fleet_utilization(
     }
 
 
+@router.get("/purchase-years")
+async def get_purchase_years(
+    _user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+) -> dict:
+    """Get all distinct purchase years from the database, sorted descending."""
+    rows = await fetch(
+        "SELECT DISTINCT purchase_year FROM plants_master "
+        "WHERE purchase_year IS NOT NULL ORDER BY purchase_year DESC"
+    )
+    return {"success": True, "data": [r["purchase_year"] for r in rows]}
+
+
+_CURRENCY_SYMBOLS = {"NGN": "₦", "USD": "$", "EUR": "€", "GBP": "£"}
+
+_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+
+def _format_date_parts(year: int | None, month: int | None, day: int | None) -> str | None:
+    """Format year/month/day into a readable date string with available precision."""
+    if not year:
+        return None
+    if month and 1 <= month <= 12:
+        month_name = _MONTHS[month - 1]
+        if day:
+            return f"{day} {month_name} {year}"
+        return f"{month_name} {year}"
+    return str(year)
+
+
 @router.get("/export/excel")
 async def export_plants_excel(
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
@@ -398,6 +427,10 @@ async def export_plants_excel(
     fleet_type: str | None = Query(None, description="Filter by fleet type(s), comma-separated"),
     condition: str | None = Query(None, description="Filter by condition(s), comma-separated: working,standby,breakdown"),
     search: str | None = Query(None, description="Search in fleet_number or description"),
+    purchase_year: str | None = Query(None, description="Filter by purchase year(s), comma-separated"),
+    division: str | None = Query(None, pattern="^(mining|civil)$", description="Filter by division: mining or civil"),
+    exclude_location_ids: str | None = Query(None, description="Comma-separated location UUIDs to exclude"),
+    has_maintenance: bool = Query(False, description="Only plants with maintenance cost > 0"),
     verified_only: bool = Query(False, description="Only include physically verified plants"),
     columns: str | None = Query(None, description="Comma-separated columns to export. Default: all standard columns"),
 ) -> Any:
@@ -424,9 +457,11 @@ async def export_plants_excel(
     from openpyxl.utils import get_column_letter
 
     select_fields = (
-        "fleet_number, description, fleet_type, make, model, "
+        "fleet_number, description, fleet_type, division, make, model, "
         "current_location, state, condition, physical_verification, "
-        "chassis_number, year_of_manufacture, purchase_year, purchase_cost, "
+        "chassis_number, engine_number, serial_m, serial_e, capacity, "
+        "year_of_manufacture, manufacture_month, manufacture_day, "
+        "purchase_year, purchase_month, purchase_day, purchase_site, purchase_cost, purchase_currency, "
         "total_maintenance_cost, parts_replaced_count, last_maintenance_date, remarks"
     )
 
@@ -471,6 +506,30 @@ async def export_plants_excel(
     if verified_only:
         conds.append("physical_verification = true")
 
+    if purchase_year:
+        purchase_year_list = [int(y.strip()) for y in purchase_year.split(",") if y.strip().isdigit()]
+        if purchase_year_list:
+            placeholders = ", ".join(f"${len(params) + i + 1}" for i in range(len(purchase_year_list)))
+            params.extend(purchase_year_list)
+            conds.append(f"purchase_year IN ({placeholders})")
+
+    if division:
+        if division == "mining":
+            params.append("mining")
+            conds.append(f"division = ${len(params)}")
+        else:
+            conds.append("(division IS NULL OR division = 'civil')")
+
+    if exclude_location_ids:
+        exc_ids = [eid.strip() for eid in exclude_location_ids.split(",") if eid.strip()]
+        if exc_ids:
+            placeholders = ", ".join(f"${len(params) + i + 1}::uuid" for i in range(len(exc_ids)))
+            params.extend(exc_ids)
+            conds.append(f"(current_location_id IS NULL OR current_location_id NOT IN ({placeholders}))")
+
+    if has_maintenance:
+        conds.append("total_maintenance_cost > 0")
+
     where = " AND ".join(conds) if conds else "TRUE"
 
     plants = await fetch(
@@ -487,15 +546,27 @@ async def export_plants_excel(
         {"key": "fleet_type", "header": "Fleet Type", "width": 25, "getter": lambda p: p.get("fleet_type")},
         {"key": "make", "header": "Make", "width": 15, "getter": lambda p: p.get("make")},
         {"key": "model", "header": "Model", "width": 15, "getter": lambda p: p.get("model")},
-        {"key": "current_location", "header": "Location", "width": 20, "getter": lambda p: p.get("current_location")},
+        {"key": "division", "header": "Division", "width": 12, "getter": lambda p: (p.get("division") or "civil").title()},
+        {"key": "current_location", "header": "Site", "width": 20, "getter": lambda p: p.get("current_location")},
         {"key": "state", "header": "State", "width": 12, "getter": lambda p: p.get("state")},
         {"key": "condition", "header": "Condition", "width": 15, "getter": lambda p: (p.get("condition") or "").replace("_", " ").title()},
         {"key": "physical_verification", "header": "Physical Verification", "width": 18, "getter": lambda p: "Yes" if p.get("physical_verification") else "No"},
         {"key": "chassis_number", "header": "Chassis Number", "width": 20, "getter": lambda p: p.get("chassis_number")},
-        {"key": "year_of_manufacture", "header": "Year of Manufacture", "width": 18, "getter": lambda p: p.get("year_of_manufacture")},
-        {"key": "purchase_year", "header": "Purchase Year", "width": 14, "getter": lambda p: p.get("purchase_year")},
-        {"key": "purchase_cost", "header": "Purchase Cost", "width": 15, "getter": lambda p: p.get("purchase_cost")},
-        {"key": "total_maintenance_cost", "header": "Maintenance Cost", "width": 16, "getter": lambda p: p.get("total_maintenance_cost")},
+        {"key": "engine_number", "header": "Engine Number", "width": 20, "getter": lambda p: p.get("engine_number")},
+        {"key": "serial_m", "header": "Serial M", "width": 20, "getter": lambda p: p.get("serial_m")},
+        {"key": "serial_e", "header": "Serial E", "width": 20, "getter": lambda p: p.get("serial_e")},
+        {"key": "capacity", "header": "Capacity", "width": 15, "getter": lambda p: p.get("capacity")},
+        {"key": "year_of_manufacture", "header": "Manufacture Date", "width": 18, "getter": lambda p: _format_date_parts(p.get("year_of_manufacture"), p.get("manufacture_month"), p.get("manufacture_day"))},
+        {"key": "purchase_year", "header": "Purchase Date", "width": 16, "getter": lambda p: _format_date_parts(p.get("purchase_year"), p.get("purchase_month"), p.get("purchase_day"))},
+        {"key": "purchase_site", "header": "Purchase Site", "width": 20, "getter": lambda p: p.get("purchase_site")},
+        {"key": "purchase_cost", "header": "Purchase Cost", "width": 20, "getter": lambda p: (
+            f"{_CURRENCY_SYMBOLS.get(p.get('purchase_currency', 'NGN'), '₦')}{p.get('purchase_cost'):,.0f}"
+            if p.get("purchase_cost") is not None else None
+        )},
+        {"key": "total_maintenance_cost", "header": "Maintenance Cost", "width": 20, "getter": lambda p: (
+            f"₦{p.get('total_maintenance_cost'):,.0f}"
+            if p.get("total_maintenance_cost") else None
+        )},
         {"key": "parts_replaced_count", "header": "Parts Replaced", "width": 14, "getter": lambda p: p.get("parts_replaced_count")},
         {"key": "last_maintenance_date", "header": "Last Maintenance", "width": 16, "getter": lambda p: p.get("last_maintenance_date")},
         {"key": "remarks", "header": "Remarks", "width": 40, "getter": lambda p: p.get("remarks")},
@@ -639,6 +710,10 @@ async def get_filtered_plant_stats(
     state: str | None = Query(None, description="Filter by state"),
     fleet_type: str | None = Query(None, description="Filter by fleet type(s), comma-separated"),
     search: str | None = None,
+    purchase_year: str | None = Query(None, description="Filter by purchase year(s), comma-separated"),
+    division: str | None = Query(None, pattern="^(mining|civil)$", description="Filter by division: mining or civil"),
+    exclude_location_ids: str | None = Query(None, description="Comma-separated location UUIDs to exclude"),
+    has_maintenance: bool = Query(False, description="Only plants with maintenance cost > 0"),
     verified_only: bool = False,
     unknown_location: bool = Query(False),
     pending_transfer: bool = Query(False),
@@ -651,9 +726,11 @@ async def get_filtered_plant_stats(
     # Parse multi-value filters
     condition_list = [c.strip() for c in condition.split(",")] if condition else None
     fleet_type_list = [f.strip() for f in fleet_type.split(",")] if fleet_type else None
+    purchase_year_list = [int(y.strip()) for y in purchase_year.split(",") if y.strip().isdigit()] if purchase_year else None
+    exc_loc_list = [eid.strip() for eid in exclude_location_ids.split(",") if eid.strip()] if exclude_location_ids else None
 
     raw = await fetchval(
-        "SELECT get_filtered_plant_stats($1, $2, $3, $4, $5, $6, $7, $8)",
+        "SELECT get_filtered_plant_stats($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
         condition_list,
         str(location_id) if location_id else None,
         fleet_type_list,
@@ -662,6 +739,10 @@ async def get_filtered_plant_stats(
         verified_only,
         unknown_location,
         pending_transfer,
+        purchase_year_list,
+        division,
+        exc_loc_list,
+        has_maintenance,
     )
 
     stats = (json.loads(raw) if isinstance(raw, str) else raw) if raw else {}
@@ -688,6 +769,10 @@ async def list_plants(
     state: str | None = Query(None, description="Filter by state (e.g., 'Kaduna', 'FCT', 'Ogun')"),
     fleet_type: str | None = Query(None, description="Filter by fleet type(s). Comma-separated: TRUCKS,EXCAVATOR"),
     search: str | None = None,
+    purchase_year: str | None = Query(None, description="Filter by purchase year(s). Comma-separated: 2020,2025"),
+    division: str | None = Query(None, pattern="^(mining|civil)$", description="Filter by division: mining or civil"),
+    exclude_location_ids: str | None = Query(None, description="Comma-separated location UUIDs to exclude"),
+    has_maintenance: bool = Query(False, description="Only plants with maintenance cost > 0"),
     verified_only: bool = False,
     unknown_location: bool = Query(False, description="Filter for plants with unknown/NULL location"),
     pending_transfer: bool = Query(False, description="Filter for plants with pending transfers"),
@@ -713,6 +798,7 @@ async def list_plants(
     # Parse multi-value filters
     condition_list = [c.strip() for c in condition.split(",")] if condition else None
     fleet_type_list = [f.strip() for f in fleet_type.split(",")] if fleet_type else None
+    purchase_year_list = [int(y.strip()) for y in purchase_year.split(",") if y.strip().isdigit()] if purchase_year else None
 
     # Build select clause based on columns parameter
     if columns:
@@ -784,6 +870,29 @@ async def list_plants(
     if verified_only:
         conds.append("physical_verification = true")
 
+    if purchase_year_list:
+        placeholders = ", ".join(f"${len(params) + i + 1}" for i in range(len(purchase_year_list)))
+        params.extend(purchase_year_list)
+        conds.append(f"purchase_year IN ({placeholders})")
+
+    if division:
+        if division == "mining":
+            params.append("mining")
+            conds.append(f"division = ${len(params)}")
+        else:
+            # civil = division IS NULL or division = 'civil'
+            conds.append("(division IS NULL OR division = 'civil')")
+
+    if exclude_location_ids:
+        exc_ids = [eid.strip() for eid in exclude_location_ids.split(",") if eid.strip()]
+        if exc_ids:
+            placeholders = ", ".join(f"${len(params) + i + 1}::uuid" for i in range(len(exc_ids)))
+            params.extend(exc_ids)
+            conds.append(f"(current_location_id IS NULL OR current_location_id NOT IN ({placeholders}))")
+
+    if has_maintenance:
+        conds.append("total_maintenance_cost > 0")
+
     where = " AND ".join(conds) if conds else "TRUE"
 
     # Validate sort column
@@ -798,7 +907,7 @@ async def list_plants(
         f"""SELECT {select_clause}, count(*) OVER() AS _total_count
             FROM v_plants_summary
             WHERE {where}
-            ORDER BY {safe_sort} {safe_order}
+            ORDER BY {safe_sort} {safe_order} NULLS LAST
             LIMIT ${len(params) - 1} OFFSET ${len(params)}""",
         *params,
     )
@@ -983,14 +1092,24 @@ async def update_plant(
     model: str | None = Query(None, description="Model name/number"),
     chassis_number: str | None = Query(None, description="Chassis/VIN number"),
     year_of_manufacture: int | None = Query(None, ge=1900, le=2100, description="Year manufactured"),
+    manufacture_month: int | None = Query(None, ge=1, le=12, description="Month manufactured (1-12)"),
+    manufacture_day: int | None = Query(None, ge=1, le=31, description="Day manufactured (1-31)"),
     purchase_year: int | None = Query(None, ge=1900, le=2100, description="Year purchased"),
+    purchase_month: int | None = Query(None, ge=1, le=12, description="Month purchased (1-12)"),
+    purchase_day: int | None = Query(None, ge=1, le=31, description="Day purchased (1-31)"),
     purchase_cost: float | None = Query(None, ge=0, description="Purchase cost"),
+    purchase_currency: str | None = Query(None, pattern="^(NGN|USD|EUR|GBP)$", description="Currency for purchase cost"),
+    capacity: str | None = Query(None, description="Capacity/rating (e.g., 10 tons, 500 litres)"),
+    engine_number: str | None = Query(None, description="Engine number"),
     serial_m: str | None = Query(None, description="Mechanical serial number"),
     serial_e: str | None = Query(None, description="Electrical serial number"),
     remarks: str | None = Query(None, description="Additional remarks"),
+    purchase_site: str | None = Query(None, description="Site/location where the plant was purchased"),
+    components: str | None = Query(None, description="JSON array of components, e.g. [{\"name\":\"Mixer\",\"model\":\"XY1\"}]"),
     current_location_id: UUID | None = Query(None, description="Current location UUID"),
     condition: str | None = Query(None, pattern="^(working|standby|under_repair|breakdown|faulty|scrap|missing|off_hire|gpm_assessment|unverified)$", description="Plant condition"),
     physical_verification: bool | None = Query(None, description="Has been physically verified"),
+    division: str | None = Query(None, pattern="^(mining|civil)$", description="Division: mining or civil"),
 ) -> dict[str, Any]:
     """Update an existing plant - only provide the fields you want to change.
 
@@ -1013,22 +1132,42 @@ async def update_plant(
         update_data["chassis_number"] = chassis_number
     if year_of_manufacture is not None:
         update_data["year_of_manufacture"] = year_of_manufacture
+    if manufacture_month is not None:
+        update_data["manufacture_month"] = manufacture_month
+    if manufacture_day is not None:
+        update_data["manufacture_day"] = manufacture_day
     if purchase_year is not None:
         update_data["purchase_year"] = purchase_year
+    if purchase_month is not None:
+        update_data["purchase_month"] = purchase_month
+    if purchase_day is not None:
+        update_data["purchase_day"] = purchase_day
+    if purchase_currency is not None:
+        update_data["purchase_currency"] = purchase_currency
     if purchase_cost is not None:
         update_data["purchase_cost"] = purchase_cost
+    if capacity is not None:
+        update_data["capacity"] = capacity
+    if engine_number is not None:
+        update_data["engine_number"] = engine_number
     if serial_m is not None:
         update_data["serial_m"] = serial_m
     if serial_e is not None:
         update_data["serial_e"] = serial_e
     if remarks is not None:
         update_data["remarks"] = remarks
+    if purchase_site is not None:
+        update_data["purchase_site"] = purchase_site
+    if components is not None:
+        update_data["components"] = json.loads(components)
     if current_location_id is not None:
         update_data["current_location_id"] = str(current_location_id)
     if condition is not None:
         update_data["condition"] = condition
     if physical_verification is not None:
         update_data["physical_verification"] = physical_verification
+    if division is not None:
+        update_data["division"] = division
 
     if not update_data:
         raise ValidationError("No fields to update. Provide at least one field.")

@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 
 from app.config import get_settings
 from app.core.exceptions import AppException
-from app.core.pool import init_pool, close_pool
+from app.core.pool import init_pool, close_pool, DatabaseUnavailableError
 from app.monitoring.logging import setup_logging, get_logger
 from app.monitoring.metrics import get_metrics_collector, start_metrics_flush_task
 from app.monitoring.middleware import RequestLoggingMiddleware, AlertingMiddleware
@@ -59,9 +59,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
 
     # Initialize asyncpg connection pool (direct PostgreSQL)
-    # Use a background task so the app starts even if DB is slow to connect.
-    # The pool will retry and be ready by the time the first request arrives.
-    pool_task = asyncio.create_task(_init_pool_with_retry())
+    # Await pool init so the app doesn't serve requests before DB is ready.
+    # Retries internally — if all fail, auto-recovery handles reconnection later.
+    await _init_pool_with_retry()
 
     # Start background tasks
     metrics_task = asyncio.create_task(start_metrics_flush_task())
@@ -72,12 +72,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Application shutting down")
 
     # Cancel background tasks
-    for task in (pool_task, metrics_task):
-        task.cancel()
-        try:
-            await task
-        except (asyncio.CancelledError, Exception):
-            pass
+    metrics_task.cancel()
+    try:
+        await metrics_task
+    except (asyncio.CancelledError, Exception):
+        pass
 
     # Flush remaining metrics
     await get_metrics_collector().flush()
@@ -139,6 +138,27 @@ def create_application() -> FastAPI:
                     "request_id": getattr(request.state, "request_id", None),
                 },
             },
+        )
+
+    @app.exception_handler(DatabaseUnavailableError)
+    async def db_unavailable_handler(request: Request, exc: DatabaseUnavailableError) -> JSONResponse:
+        """Handle database pool outages — return 503, NOT 401."""
+        logger.warning(
+            "Database unavailable",
+            path=request.url.path,
+            error=str(exc),
+        )
+        return JSONResponse(
+            status_code=503,
+            content={
+                "success": False,
+                "error": {
+                    "code": "SERVICE_UNAVAILABLE",
+                    "message": "Database temporarily unavailable — please retry",
+                    "request_id": getattr(request.state, "request_id", None),
+                },
+            },
+            headers={"Retry-After": "3"},
         )
 
     @app.exception_handler(Exception)

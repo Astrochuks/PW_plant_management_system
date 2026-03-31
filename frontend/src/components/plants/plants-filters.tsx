@@ -32,6 +32,10 @@ export interface FiltersState {
   condition: string[];
   location_id: string;
   fleet_type: string[];
+  purchase_year: number[];
+  division: string;
+  exclude_locations: string[];
+  has_maintenance: boolean;
   verified_only: boolean;
 }
 
@@ -56,8 +60,10 @@ interface PlantsFiltersProps {
   onFiltersChange: (filters: FiltersState) => void;
   locations: Location[];
   fleetTypes: FleetType[];
+  purchaseYears: number[];
   locationsLoading: boolean;
   fleetTypesLoading: boolean;
+  purchaseYearsLoading: boolean;
 }
 
 export function PlantsFilters({
@@ -65,8 +71,10 @@ export function PlantsFilters({
   onFiltersChange,
   locations,
   fleetTypes,
+  purchaseYears,
   locationsLoading,
   fleetTypesLoading,
+  purchaseYearsLoading,
 }: PlantsFiltersProps) {
   const updateFilter = <K extends keyof FiltersState>(key: K, value: FiltersState[K]) => {
     onFiltersChange({ ...filters, [key]: value });
@@ -78,6 +86,10 @@ export function PlantsFilters({
       condition: [],
       location_id: '',
       fleet_type: [],
+      purchase_year: [],
+      division: '',
+      exclude_locations: [],
+      has_maintenance: false,
       verified_only: false,
     });
   };
@@ -98,11 +110,31 @@ export function PlantsFilters({
     updateFilter('fleet_type', next);
   };
 
+  const togglePurchaseYear = (year: number) => {
+    const current = filters.purchase_year;
+    const next = current.includes(year)
+      ? current.filter((y) => y !== year)
+      : [...current, year];
+    updateFilter('purchase_year', next);
+  };
+
+  const toggleExcludeLocation = (locId: string) => {
+    const current = filters.exclude_locations;
+    const next = current.includes(locId)
+      ? current.filter((id) => id !== locId)
+      : [...current, locId];
+    updateFilter('exclude_locations', next);
+  };
+
   const hasActiveFilters =
     filters.search ||
     filters.condition.length > 0 ||
     filters.location_id ||
     filters.fleet_type.length > 0 ||
+    filters.purchase_year.length > 0 ||
+    filters.division ||
+    filters.exclude_locations.length > 0 ||
+    filters.has_maintenance ||
     filters.verified_only;
 
   // Find the selected location name for the chip
@@ -246,6 +278,123 @@ export function PlantsFilters({
           </DropdownMenu>
         )}
 
+        {/* Purchase Year Multi-Select */}
+        {purchaseYearsLoading ? (
+          <Skeleton className="h-9 w-[150px]" />
+        ) : (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="h-9">
+                Purchase Year
+                {filters.purchase_year.length > 0 && (
+                  <Badge variant="secondary" className="ml-1.5 px-1.5 py-0 text-xs font-normal">
+                    {filters.purchase_year.length}
+                  </Badge>
+                )}
+                <ChevronDown className="h-3.5 w-3.5 ml-1.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-[200px] max-h-[300px] overflow-y-auto">
+              <DropdownMenuLabel>Filter by purchase year</DropdownMenuLabel>
+              <p className="px-2 pb-2 text-xs text-muted-foreground">
+                Select one or more years
+              </p>
+              <DropdownMenuSeparator />
+              {purchaseYears.map((year) => (
+                <DropdownMenuCheckboxItem
+                  key={year}
+                  checked={filters.purchase_year.includes(year)}
+                  onCheckedChange={() => togglePurchaseYear(year)}
+                >
+                  {year}
+                </DropdownMenuCheckboxItem>
+              ))}
+              {filters.purchase_year.length > 0 && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuCheckboxItem
+                    checked={false}
+                    onCheckedChange={() => updateFilter('purchase_year', [])}
+                  >
+                    Clear all
+                  </DropdownMenuCheckboxItem>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+
+        {/* Division Filter */}
+        <Select
+          value={filters.division || 'all'}
+          onValueChange={(value) => updateFilter('division', value === 'all' ? '' : value)}
+        >
+          <SelectTrigger className="w-[140px] h-9">
+            <SelectValue placeholder="Division" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Divisions</SelectItem>
+            <SelectItem value="mining">Mining</SelectItem>
+            <SelectItem value="civil">Civil</SelectItem>
+          </SelectContent>
+        </Select>
+
+        {/* Exclude Sites Multi-Select */}
+        {locationsLoading ? (
+          <Skeleton className="h-9 w-[160px]" />
+        ) : (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="h-9">
+                Exclude Sites
+                {filters.exclude_locations.length > 0 && (
+                  <Badge variant="secondary" className="ml-1.5 px-1.5 py-0 text-xs font-normal">
+                    {filters.exclude_locations.length}
+                  </Badge>
+                )}
+                <ChevronDown className="h-3.5 w-3.5 ml-1.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-[240px] max-h-[300px] overflow-y-auto">
+              <DropdownMenuLabel>Exclude sites from results</DropdownMenuLabel>
+              <p className="px-2 pb-2 text-xs text-muted-foreground">
+                Selected sites will be hidden
+              </p>
+              <DropdownMenuSeparator />
+              {locations.map((loc) => (
+                <DropdownMenuCheckboxItem
+                  key={loc.id}
+                  checked={filters.exclude_locations.includes(loc.id)}
+                  onCheckedChange={() => toggleExcludeLocation(loc.id)}
+                >
+                  {loc.location_name}
+                </DropdownMenuCheckboxItem>
+              ))}
+              {filters.exclude_locations.length > 0 && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuCheckboxItem
+                    checked={false}
+                    onCheckedChange={() => updateFilter('exclude_locations', [])}
+                  >
+                    Clear all
+                  </DropdownMenuCheckboxItem>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+
+        {/* Has Maintenance Toggle */}
+        <Button
+          variant={filters.has_maintenance ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => updateFilter('has_maintenance', !filters.has_maintenance)}
+          className="h-9"
+        >
+          {filters.has_maintenance ? 'With Maintenance' : 'Any Maintenance'}
+        </Button>
+
         {/* Verified Only Toggle */}
         <Button
           variant={filters.verified_only ? 'default' : 'outline'}
@@ -299,6 +448,59 @@ export function PlantsFilters({
               <X className="h-3 w-3" />
             </Badge>
           ))}
+
+          {/* Purchase year chips */}
+          {filters.purchase_year.map((yr) => (
+            <Badge
+              key={yr}
+              variant="secondary"
+              className="gap-1 pr-1 cursor-pointer hover:bg-secondary/80"
+              onClick={() => togglePurchaseYear(yr)}
+            >
+              {yr}
+              <X className="h-3 w-3" />
+            </Badge>
+          ))}
+
+          {/* Exclude location chips */}
+          {filters.exclude_locations.map((locId) => {
+            const name = locations.find((l) => l.id === locId)?.location_name || locId;
+            return (
+              <Badge
+                key={`exc-${locId}`}
+                variant="destructive"
+                className="gap-1 pr-1 cursor-pointer hover:bg-destructive/80"
+                onClick={() => toggleExcludeLocation(locId)}
+              >
+                Excl: {name}
+                <X className="h-3 w-3" />
+              </Badge>
+            );
+          })}
+
+          {/* Division chip */}
+          {filters.division && (
+            <Badge
+              variant="secondary"
+              className="gap-1 pr-1 cursor-pointer hover:bg-secondary/80"
+              onClick={() => updateFilter('division', '')}
+            >
+              {filters.division === 'mining' ? 'Mining' : 'Civil'}
+              <X className="h-3 w-3" />
+            </Badge>
+          )}
+
+          {/* Has maintenance chip */}
+          {filters.has_maintenance && (
+            <Badge
+              variant="secondary"
+              className="gap-1 pr-1 cursor-pointer hover:bg-secondary/80"
+              onClick={() => updateFilter('has_maintenance', false)}
+            >
+              With Maintenance
+              <X className="h-3 w-3" />
+            </Badge>
+          )}
 
           {/* Verified chip */}
           {filters.verified_only && (

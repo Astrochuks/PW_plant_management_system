@@ -21,22 +21,6 @@ const apiClient: AxiosInstance = axios.create({
 // Guard against multiple 401 redirects firing simultaneously
 let isRedirecting = false;
 
-// Request interceptor - adds auth token to requests
-apiClient.interceptors.request.use(
-  (config) => {
-    if (typeof window !== 'undefined') {
-      const token = sessionStorage.getItem('access_token');
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
-      }
-    }
-    return config;
-  },
-  (error) => {
-    return Promise.reject(error);
-  }
-);
-
 /**
  * Attempt to refresh the access token using the global mutex.
  * Returns the new access token on success, or null on failure.
@@ -71,13 +55,54 @@ async function tryRefreshToken(): Promise<string | null> {
   }
 }
 
+// Pre-flight refresh: if token expires within 2 minutes, refresh before sending
+const PREFLIGHT_BUFFER_MS = 2 * 60 * 1000;
+let preflightRefreshPromise: Promise<void> | null = null;
+
+async function ensureFreshToken(): Promise<void> {
+  if (typeof window === 'undefined') return;
+  const expiresAt = Number(sessionStorage.getItem('token_expires_at') || '0');
+  if (!expiresAt || expiresAt - Date.now() > PREFLIGHT_BUFFER_MS) return;
+
+  // Token is about to expire — refresh before sending the request
+  if (preflightRefreshPromise) return preflightRefreshPromise;
+  preflightRefreshPromise = (async () => {
+    try {
+      await tryRefreshToken();
+    } catch { /* interceptor will handle 401 as fallback */ }
+    finally { preflightRefreshPromise = null; }
+  })();
+  return preflightRefreshPromise;
+}
+
+// Request interceptor - refreshes token if needed, then adds auth header
+apiClient.interceptors.request.use(
+  async (config) => {
+    if (typeof window !== 'undefined') {
+      // Proactively refresh if token is about to expire
+      await ensureFreshToken();
+      const token = sessionStorage.getItem('access_token');
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+      }
+    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+
 function hardLogout(): void {
   if (typeof window !== 'undefined') {
     sessionStorage.removeItem('access_token');
     sessionStorage.removeItem('refresh_token');
     sessionStorage.removeItem('user');
     sessionStorage.removeItem('token_expires_at');
-    if (!isRedirecting && !window.location.pathname.includes('/login')) {
+    // Don't redirect while user is editing uploads — they'll see an error toast
+    // and can re-login in a new tab without losing progress
+    const isOnUploads = window.location.pathname.startsWith('/uploads');
+    if (!isRedirecting && !isOnUploads && !window.location.pathname.includes('/login')) {
       isRedirecting = true;
       window.location.href = '/login';
     }
@@ -90,7 +115,20 @@ apiClient.interceptors.response.use(
   async (error: AxiosError) => {
     if (error.response) {
       const status = error.response.status;
-      const originalRequest = error.config as AxiosRequestConfig & { _retry?: boolean };
+      const originalRequest = error.config as AxiosRequestConfig & { _retry?: boolean; _retryCount?: number };
+
+      // 503 Service Unavailable — DB is down, retry after delay (DON'T logout)
+      if (status === 503 && typeof window !== 'undefined') {
+        const retryCount = originalRequest._retryCount || 0;
+        if (retryCount < 3) {
+          originalRequest._retryCount = retryCount + 1;
+          const retryAfter = Number(error.response.headers?.['retry-after'] || 3) * 1000;
+          await new Promise(resolve => setTimeout(resolve, retryAfter));
+          return apiClient(originalRequest);
+        }
+        // Exhausted retries — let the error propagate (toast, not logout)
+        return Promise.reject(error);
+      }
 
       // Unauthorized - try refresh before logging out
       if (status === 401 && typeof window !== 'undefined') {
@@ -172,7 +210,7 @@ export function getErrorMessage(error: unknown): string {
 
     // Friendly fallbacks
     const status = error.response?.status;
-    if (status === 401) return 'Invalid email or password';
+    if (status === 401) return 'Session expired. Please log in again.';
     if (status === 403) return 'You do not have permission to do this';
     if (status === 404) return 'Resource not found';
     if (status === 429) return 'Too many attempts. Please wait and try again';

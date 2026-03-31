@@ -21,7 +21,7 @@ from pydantic import BaseModel
 from app.config import get_settings
 from app.core.database import get_supabase_client
 from app.core.exceptions import AuthenticationError, AuthorizationError
-from app.core.pool import fetchrow
+from app.core.pool import fetchrow, DatabaseUnavailableError
 from app.monitoring.logging import get_logger
 
 logger = get_logger(__name__)
@@ -49,8 +49,15 @@ class UserCache:
             entry = self._cache.get(user_id)
             if entry and (time.time() - entry["ts"]) < self.ttl:
                 return entry["data"]
+            # Don't delete expired entries — keep them for get_expired() fallback
+            return None
+
+    def get_expired(self, user_id: str) -> dict | None:
+        """Get cached user data even if expired (fallback when DB is down)."""
+        with self._lock:
+            entry = self._cache.get(user_id)
             if entry:
-                del self._cache[user_id]
+                return entry["data"]
             return None
 
     def set(self, user_id: str, data: dict) -> None:
@@ -171,6 +178,7 @@ async def _get_user_data(user_id: str) -> dict:
 
     Cache hit: 0 DB calls.
     Cache miss: 1 DB call, then cached for TTL.
+    If DB is unavailable: returns expired cache entry if available (graceful degradation).
     """
     cache = _get_user_cache()
 
@@ -180,10 +188,19 @@ async def _get_user_data(user_id: str) -> dict:
         return cached
 
     # Cache miss — fetch from database via asyncpg
-    row = await fetchrow(
-        "SELECT id, email, role, full_name, is_active, location_id FROM users WHERE id = $1::uuid",
-        user_id,
-    )
+    try:
+        row = await fetchrow(
+            "SELECT id, email, role, full_name, is_active, location_id FROM users WHERE id = $1::uuid",
+            user_id,
+        )
+    except DatabaseUnavailableError:
+        # DB is down — try expired cache as fallback (better than logging user out)
+        expired = cache.get_expired(user_id)
+        if expired is not None:
+            logger.warning("DB unavailable, using expired cache for user", user_id=user_id)
+            return expired
+        # No cache at all — can't authenticate
+        raise
 
     if not row:
         raise AuthenticationError("User not found in system")
@@ -266,6 +283,9 @@ async def get_current_user(
         )
 
     except AuthenticationError:
+        raise
+    except DatabaseUnavailableError:
+        # DB is down — this is a 503, NOT a 401. Don't log user out.
         raise
     except Exception as e:
         logger.error("Authentication failed", error=str(e))
