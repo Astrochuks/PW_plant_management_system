@@ -1,4 +1,4 @@
-"""AI-powered remarks parser using Google Gemini.
+"""Keyword-based remarks parser for plant weekly reports.
 
 Extracts structured information from free-text plant remarks including:
 - Plant condition (operational, standby, breakdown, etc.)
@@ -6,74 +6,13 @@ Extracts structured information from free-text plant remarks including:
 - Condition notes
 """
 
-import json
 import re
 from dataclasses import dataclass
 from typing import Any
 
-from app.config import get_settings
 from app.monitoring.logging import get_logger
 
 logger = get_logger(__name__)
-
-# Lazy imports to avoid startup errors if API keys not configured
-_openai_client = None
-_gemini_model = None
-
-# Commented out Gemini - kept for future fallback if needed
-# _genai = None
-# _model = None
-
-
-def _get_openai_client():
-    """Get or initialize the OpenAI client."""
-    global _openai_client
-
-    if _openai_client is not None:
-        return _openai_client
-
-    settings = get_settings()
-    if not settings.openai_api_key:
-        logger.warning("OpenAI API key not configured")
-        return None
-
-    try:
-        from openai import OpenAI
-        _openai_client = OpenAI(api_key=settings.openai_api_key)
-        logger.info("OpenAI client initialized successfully")
-        return _openai_client
-    except Exception as e:
-        logger.error("Failed to initialize OpenAI client", error=str(e))
-        return None
-
-
-def _get_gemini_model():
-    """Get or initialize the Gemini model (fallback, commented out).
-
-    Kept for future use if OpenAI quota is exceeded.
-    """
-    global _gemini_model
-
-    if _gemini_model is not None:
-        return _gemini_model
-
-    settings = get_settings()
-    if not settings.gemini_api_key:
-        logger.debug("Gemini API key not configured")
-        return None
-
-    try:
-        # Commented out Gemini initialization
-        # import google.generativeai as genai
-        # genai.configure(api_key=settings.gemini_api_key)
-        # _gemini_model = genai.GenerativeModel("gemini-2.0-flash")
-        # logger.info("Gemini model initialized successfully")
-        # return _gemini_model
-        logger.info("Gemini is disabled (kept for future fallback)")
-        return None
-    except Exception as e:
-        logger.error("Failed to initialize Gemini model", error=str(e))
-        return None
 
 
 # Valid condition values
@@ -249,7 +188,7 @@ def fallback_parse(
 ) -> ParsedRemarks:
     """Smart fallback parser using pattern detection.
 
-    Used when Gemini API is unavailable or fails.
+    Primary parsing method using keyword pattern matching.
     Patterns based on actual plant management terminology.
     """
     remarks_upper = (remarks or "").upper().strip()
@@ -313,7 +252,7 @@ def fallback_parse(
         condition_notes = "Plant scrapped/decommissioned"
 
     # MISSING / not seen
-    elif any(kw in remarks_normalized for kw in ["MISSING", "NOT SEEN", "NOT FOUND", "CANNOT LOCATE"]):
+    elif any(kw in remarks_normalized for kw in ["MISSING", "NOT SEEN", "NOTSEEN", "NOT FOUND", "CANNOT LOCATE", "NOT AVAILABLE"]):
         condition = "missing"
         condition_notes = "Plant not found/verified"
 
@@ -329,18 +268,27 @@ def fallback_parse(
         "BURNED", "FIRE", "BURNT", "GUTTED",
         "ENGINE BLOCK", "CRACKED", "SEIZED",
         "NO TYRE", "NO TRACK", "NO BUCKET",
+        "BREAK DOWN", "BROKE DOWN", "BROKEN DOWN",
     ]):
         condition = "breakdown"
         condition_notes = "Missing parts or fire damage"
 
     # WORKING / operational patterns - explicitly operating
-    elif (
+    # Guard against "NOT WORKING ..." false positives
+    # Repair-specific "WORKING ON ..." patterns that should NOT match as working
+    elif "NOT WORKING" not in remarks_normalized and (
         remarks_normalized == "WORKING"
         or any(kw in remarks_normalized for kw in [
-            "WORKING ON THE SITE", "WORKING ON SITE", "WORKING IN THE YARD",
-            "WORKING IN YARD", "WORKING ON THE PROJECT", "WORKING ON PROJECT",
-            "IN OPERATION", "OPERATIONAL", "IN USE",
+            "WORKING ON THE SITE", "WORKING ON SITE", "WORKING ON THE PROJECT",
+            "WORKING ON PROJECT", "WORKING IN THE YARD", "WORKING IN YARD",
+            "WORKING AT", "WORKING IN", "WORKING WITH",
+            "IN OPERATION", "OPERATIONAL", "IN USE", "RUNNING", "OPERATING", "ACTIVE",
         ])
+        # Catch-all: "WORKING <anything>" unless it's a repair pattern
+        or (remarks_normalized.startswith("WORKING") and not any(kw in remarks_normalized for kw in [
+            "WORKING ON IT", "WORKING ON THE ENGINE", "WORKING ON THE PUMP",
+            "WORKING ON ENGINE", "WORKING ON PUMP",
+        ]))
     ):
         condition = "working"
         condition_notes = "Plant operational"
@@ -358,7 +306,7 @@ def fallback_parse(
 
     # STANDBY patterns - in workshop/location without issues
     elif any(kw in remarks_normalized for kw in [
-        "PLANT WORKSHOP", "BEHIND WORKSHOP", "IN WORKSHOP", "AT WORKSHOP",
+        "PLANT WORKSHOP", "BEHIND WORKSHOP", "IN WORKSHOP", "AT WORKSHOP", "WORKSHOP",
         "BEHIND PLANT", "STAND BY", "STANDBY", "ON STANDBY",
         "IDLE", "AVAILABLE", "PARKED",
     ]):

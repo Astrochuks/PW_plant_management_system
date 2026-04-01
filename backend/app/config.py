@@ -71,11 +71,8 @@ class Settings(BaseSettings):
     metrics_enabled: bool = True
     metrics_flush_interval_seconds: int = 60
 
-    # AI - Google Gemini (deprecated but kept for fallback)
-    gemini_api_key: str | None = Field(default=None, description="Google Gemini API key for remarks parsing (fallback)")
-
-    # AI - OpenAI ChatGPT
-    openai_api_key: str | None = Field(default=None, description="OpenAI API key for remarks parsing (primary)")
+    # OpenAI (unused — remarks parsing is keyword-based, but kept for future AI features)
+    openai_api_key: str | None = Field(default=None, description="OpenAI API key (optional, for future AI features)")
 
     @property
     def cors_origins_list(self) -> list[str]:

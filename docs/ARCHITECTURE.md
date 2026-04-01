@@ -46,7 +46,8 @@ A **Central Reporting System** built for **P.W Nigeria Limited** — a construct
 
 | Role | Access | Description |
 |------|--------|-------------|
-| `admin` | Full system | Manage users, upload reports, approve transfers, view all data |
+| `admin` | Full system | Manage users, upload re
+ports, approve transfers, view all data |
 | `management` | Read + limited write | View dashboards, reports, analytics across all sites |
 | `site_engineer` | Site-scoped | Upload weekly reports, request transfers, view own site data |
 
@@ -69,8 +70,7 @@ A **Central Reporting System** built for **P.W Nigeria Limited** — a construct
 | **structlog** | >= 24.1 | Structured JSON logging |
 | **httpx** | >= 0.26 | Async HTTP client |
 | **tenacity** | >= 8.2 | Retry logic with exponential backoff |
-| **OpenAI SDK** | >= 1.3 | GPT-4 for remarks parsing and insights |
-| **Google GenAI** | >= 0.8 | Gemini fallback for AI features |
+| **OpenAI SDK** | >= 1.3 | Optional — for future AI features (remarks parsing is keyword-based) |
 | **Supabase SDK** | >= 2.3 | Auth API + Storage API only (NOT for DB queries) |
 | **Pillow** | >= 10.0 | Image processing |
 
@@ -628,7 +628,7 @@ Output: {
 }
 ```
 
-**Fallback:** Google Gemini if OpenAI unavailable.
+**Note:** Remarks parsing currently uses keyword pattern matching, not AI.
 
 ### Fleet Intelligence (`services/insights_service.py`)
 
@@ -739,8 +739,7 @@ DATABASE_URL=postgresql://postgres.[ref]:[pass]@pooler.supabase.com:6543/postgre
 SUPABASE_URL=https://[ref].supabase.co
 SUPABASE_SERVICE_ROLE_KEY=eyJ...
 SUPABASE_JWT_SECRET=...
-OPENAI_API_KEY=sk-...
-GEMINI_API_KEY=...              # Optional fallback
+OPENAI_API_KEY=sk-...            # Optional — for future AI features
 CORS_ORIGINS=["https://your-app.vercel.app"]
 ENVIRONMENT=production
 LOG_LEVEL=INFO
