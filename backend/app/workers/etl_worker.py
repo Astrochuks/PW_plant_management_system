@@ -377,6 +377,45 @@ def map_columns(df: pd.DataFrame, column_map: dict[str, str]) -> pd.DataFrame:
     return df.rename(columns=rename_map)
 
 
+def expand_merged_cells(file_content: bytes) -> bytes:
+    """Read an Excel file, unmerge all merged cells, and propagate the values.
+
+    Excel files often have merged cells where text spans multiple columns
+    (e.g., "January 2023 physical verification - Missing" centered across
+    HOURS WORKED → REMARK columns). When pandas/openpyxl reads merged cells,
+    only the top-left cell has the value — others are None.
+
+    This helper unmerges every merged range and copies the top-left value
+    into every cell of the range, so subsequent reads see the data in
+    every column the merge spanned.
+
+    Returns the modified file as bytes.
+    """
+    from openpyxl import load_workbook
+
+    try:
+        wb = load_workbook(io.BytesIO(file_content))
+        for ws in wb.worksheets:
+            # Snapshot the merged ranges (we'll mutate the collection)
+            merged_ranges = list(ws.merged_cells.ranges)
+            for merged_range in merged_ranges:
+                min_col, min_row, max_col, max_row = merged_range.bounds
+                top_left_value = ws.cell(row=min_row, column=min_col).value
+                # Unmerge first
+                ws.unmerge_cells(str(merged_range))
+                # Then propagate the value to every cell in the previously-merged range
+                for r in range(min_row, max_row + 1):
+                    for c in range(min_col, max_col + 1):
+                        ws.cell(row=r, column=c).value = top_left_value
+
+        out = io.BytesIO()
+        wb.save(out)
+        return out.getvalue()
+    except Exception as e:
+        logger.warning("Failed to expand merged cells, using original file", error=str(e))
+        return file_content
+
+
 def find_header_row(file_content: bytes | io.BytesIO, max_rows: int = 10) -> int:
     """Auto-detect the header row by scanning for fleet number column keywords.
 
@@ -525,6 +564,11 @@ async def process_weekly_report(
         # Download file from storage (stays on Supabase SDK)
         storage_client = get_supabase_admin_client()
         file_data = storage_client.storage.from_("reports").download(storage_path)
+
+        # Expand merged cells so text spanning multiple columns (e.g., the
+        # "January 2023 physical verification - Missing" rows) is visible
+        # in the REMARK column when we read it.
+        file_data = expand_merged_cells(file_data)
 
         # Parse Excel file
         df_raw = pd.read_excel(io.BytesIO(file_data), sheet_name=0, header=None)
@@ -1871,18 +1915,23 @@ async def rebuild_location_timeline(plant_ids: list) -> dict[str, int]:
     logger.info("rebuild_location_timeline START", plant_count=len(plant_ids))
 
     # === 1 query: all weekly records for these plants ===
+    # IMPORTANT: We filter out condition='missing' records because a missing
+    # plant is NOT actually at that location — it's a placeholder saying
+    # "we expected this plant here but couldn't find it". Including such
+    # records would create spurious movements/transfers.
     records = await fetch(
-        """SELECT plant_id, location_id, week_ending_date, year, week_number
+        """SELECT plant_id, location_id, week_ending_date, year, week_number, condition
            FROM plant_weekly_records
            WHERE plant_id = ANY($1::uuid[])
+             AND (condition IS NULL OR condition != 'missing')
            ORDER BY plant_id, year ASC, week_number ASC""",
         plant_ids,
     )
 
-    logger.info("rebuild: fetched weekly records", count=len(records))
+    logger.info("rebuild: fetched weekly records (excluding missing)", count=len(records))
 
     if not records:
-        logger.info("Rebuild: no weekly records found", plant_count=len(plant_ids))
+        logger.info("Rebuild: no non-missing weekly records found", plant_count=len(plant_ids))
         return {"history": 0, "events": 0, "transfers_inserted": 0, "transfers_confirmed": 0}
 
     # Convert string dates back to date objects (asyncpg is strict on date binding)
@@ -2480,7 +2529,19 @@ async def save_confirmed_weekly_report(
             is_new_here = fleet_num not in plants_here_prev_week
             is_new_arrival_elsewhere = fleet_num in new_arrivals_elsewhere
 
-            if is_newer_or_same:
+            # IMPORTANT: a plant marked 'missing' is NOT actually at this location.
+            # Don't update its current_location_id (and don't bump last_verified_*).
+            # The weekly_record is still saved (audit trail) but the plant master is left alone.
+            is_missing_here = condition == "missing"
+
+            if is_missing_here:
+                logger.info(
+                    "Plant marked missing — NOT updating current_location",
+                    fleet_number=fleet_num,
+                    this_location=str(location_id),
+                    week=f"{year}-W{week_number}",
+                )
+            elif is_newer_or_same:
                 if (year, week_number) == existing_verification and is_new_arrival_elsewhere and not is_new_here:
                     # Same week, but another location has a new arrival for this plant
                     # and we're just continuing — don't overwrite location
@@ -2503,14 +2564,18 @@ async def save_confirmed_weekly_report(
                     existing_week=f"{existing_verification[0]}-W{existing_verification[1]}",
                 )
 
-            # If new plant, set creation time and location
+            # If new plant, set creation time and location (unless marked missing)
             is_new = fleet_num not in fleet_to_id
-            if is_new:
+            if is_new and not is_missing_here:
                 plant_upsert["created_at"] = datetime.utcnow()
                 plant_upsert["current_location_id"] = location_id
                 plant_upsert["last_verified_date"] = week_ending_date
                 plant_upsert["last_verified_year"] = year
                 plant_upsert["last_verified_week"] = week_number
+                new_fleet_numbers.add(fleet_num)
+            elif is_new and is_missing_here:
+                # Brand new plant that's already missing — create with NULL location
+                plant_upsert["created_at"] = datetime.utcnow()
                 new_fleet_numbers.add(fleet_num)
 
             plants_to_upsert.append(plant_upsert)

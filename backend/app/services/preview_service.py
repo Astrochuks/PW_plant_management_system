@@ -141,7 +141,20 @@ def detect_condition_from_keywords(
             )
 
         # MISSING - very clear
-        if any(kw in r for kw in ["MISSING", "NOT SEEN", "NOTSEEN", "NOT FOUND", "STOLEN", "CANNOT LOCATE", "NOT AVAILABLE", "NOT ON SITE"]):
+        missing_keywords = [
+            "MISSING", "NOT SEEN", "NOTSEEN", "NOT FOUND", "STOLEN",
+            "CANNOT LOCATE", "NOT AVAILABLE", "NOT ON SITE",
+            # "Did not receive" patterns — sender site says it never arrived
+            "DID NOT RECEIVE", "DIDNT RECEIVE", "DID'NT RECEIVE",
+            "NOT RECEIVED", "NEVER RECEIVED", "NOT YET RECEIVED",
+            "HAVE NOT RECEIVED", "HAVENT RECEIVED", "HAVN'T RECEIVED",
+            "YET TO RECEIVE", "AWAITING ARRIVAL",
+            # "Reported transferred but not received" patterns
+            "BUT NOT RECEIVED", "NOT RECEIVED IN", "NOT YET ARRIVED",
+            # Physical verification placeholders
+            "PHYSICAL VERIFICATION - MISSING", "PHYSICAL VERIFICATION-MISSING",
+        ]
+        if any(kw in r for kw in missing_keywords):
             return DetectedCondition(
                 condition="missing",
                 confidence="high",

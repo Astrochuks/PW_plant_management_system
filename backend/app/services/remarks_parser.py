@@ -251,8 +251,16 @@ def fallback_parse(
         condition = "scrap"
         condition_notes = "Plant scrapped/decommissioned"
 
-    # MISSING / not seen
-    elif any(kw in remarks_normalized for kw in ["MISSING", "NOT SEEN", "NOTSEEN", "NOT FOUND", "CANNOT LOCATE", "NOT AVAILABLE"]):
+    # MISSING / not seen / not received (sender said it never arrived)
+    elif any(kw in remarks_normalized for kw in [
+        "MISSING", "NOT SEEN", "NOTSEEN", "NOT FOUND", "CANNOT LOCATE", "NOT AVAILABLE",
+        "DID NOT RECEIVE", "DIDNT RECEIVE", "DID'NT RECEIVE",
+        "NOT RECEIVED", "NEVER RECEIVED", "NOT YET RECEIVED",
+        "HAVE NOT RECEIVED", "HAVENT RECEIVED", "HAVN'T RECEIVED",
+        "YET TO RECEIVE", "AWAITING ARRIVAL",
+        "BUT NOT RECEIVED", "NOT RECEIVED IN", "NOT YET ARRIVED",
+        "PHYSICAL VERIFICATION - MISSING", "PHYSICAL VERIFICATION-MISSING",
+    ]):
         condition = "missing"
         condition_notes = "Plant not found/verified"
 

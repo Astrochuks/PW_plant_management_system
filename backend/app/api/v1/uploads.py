@@ -1172,6 +1172,7 @@ async def preview_weekly_report(
         find_header_row,
         WEEKLY_COLUMN_MAP,
         map_columns,
+        expand_merged_cells,
     )
 
     settings = get_settings()
@@ -1194,6 +1195,10 @@ async def preview_weekly_report(
         year=year,
         user_id=current_user.id,
     )
+
+    # Expand merged cells (e.g., "January 2023 physical verification - Missing"
+    # rows that span multiple columns) so the REMARK column gets the value.
+    file_content = expand_merged_cells(file_content)
 
     # Parse Excel file
     df_raw = pd.read_excel(io.BytesIO(file_content), sheet_name=0, header=None)

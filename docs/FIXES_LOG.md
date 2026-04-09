@@ -508,3 +508,99 @@ For the 7 Jebbu Bassa plants whose data was lost in the latest re-upload:
 5. Check plant detail Events tab → should be ordered by week (most recent first), not by upload time
 6. Check Transfers page → Week column should show "Wk 13" for auto-detected transfers; rows sorted by date desc
 7. Check site detail Transfers tab → same ordering and week column
+
+---
+
+## Fix #14: Merged cell parsing + missing-condition handling
+
+**Date:** 2026-04-09
+**Files:**
+- `backend/app/workers/etl_worker.py` (`expand_merged_cells`, `rebuild_location_timeline`, `save_confirmed_weekly_report`)
+- `backend/app/api/v1/uploads.py` (preview endpoint uses `expand_merged_cells`)
+**Status:** Done + 41 records backfilled
+
+### Symptoms (reported by user)
+1. Abuja weekly reports have rows like AC111, AC119 with the remark "January 2023 physical verification - Missing" centered across multiple columns. The parser saw the remark as empty for these rows, then defaulted them to standby.
+2. WP251 was at KWOI KADUNA every week, then suddenly appeared at ABUJA in W13 (the legacy missing entry) and the rebuild created a spurious movement KWOI KADUNA → ABUJA.
+3. RD61 has been ping-ponging between VOM QUARRY and ABEOKUTA-SHAGAMU QUARRY in alternating weeks (W4 Abeokuta, W6 Abeokuta, W10 Vom, W11 Abeokuta, W12 Vom). Both sites reporting the same plant.
+
+### Root causes
+
+**A. Merged cells.** Excel files often use merged cells where a long text spans multiple columns (HOURS WORKED → REMARK). When pandas/openpyxl reads merged cells, only the top-left cell has the value — all other cells are `None`. So when the parser read the REMARK column for these rows, it got `None`.
+
+**B. Missing-condition placeholder treated as a real location.** When a plant is marked "missing" at a site, that's a placeholder saying "we expected this plant here but couldn't find it" — NOT "this plant is at this location". But the rebuild was treating these records as real locations, generating spurious movements/transfers.
+
+**C. Ping-pong (RD61).** Genuine data conflict — two sites reporting the same plant in alternating weeks. Cannot be auto-resolved.
+
+### Fixes
+
+**A. New `expand_merged_cells()` helper** (`etl_worker.py`):
+- Reads the workbook with openpyxl
+- For each merged range, takes the top-left value, unmerges, and propagates the value to every cell in the range
+- Returns the modified file as bytes
+- Called from both `process_weekly_report` (background ETL) and the preview endpoint
+- Falls back to original file on error
+- Result: when a merged "January 2023 physical verification - Missing" cell spans HOURS through REMARK, the REMARK column now sees the text. The keyword detector picks up "MISSING" and sets condition='missing'.
+
+**B. Filter missing records from rebuild** (`rebuild_location_timeline`):
+- Added `AND (condition IS NULL OR condition != 'missing')` to the weekly_records SELECT
+- Missing records are NOT considered when computing location spans, movement events, or transfers
+- They still exist in `plant_weekly_records` for audit trail
+
+**C. Don't update current_location for missing plants** (`save_confirmed_weekly_report`):
+- New `is_missing_here = condition == "missing"` check at top of plant loop
+- If true: log it, save the weekly_record (audit) but DON'T touch `plants_master.current_location_id`
+- Brand-new plants that arrive already-missing get a NULL location
+
+### Backfill (system-wide cleanup)
+1. Updated 41 Abuja Week 13 records (NULL remarks + standby) to `condition='missing'`
+2. Restored `plants_master.current_location_id` for 4 plants that were wrongly moved to Abuja (WP251 → KWOI KADUNA, W114 → ABEOKUTA-SHAGAMU QUARRY, etc.)
+3. Cleared and rebuilt `plant_location_history` / movement events / auto-rebuild transfers for all 41 affected plants
+4. Plants that have ONLY missing records (legacy "lost" plants) now have empty Sites tab — which is correct (we don't know where they actually are)
+
+### Diagnostic SQL: find ping-pong plants
+```sql
+-- Plants whose location changes more than 2 times across non-missing records
+WITH plant_movements AS (
+  SELECT pwr.plant_id, pwr.year, pwr.week_number, pwr.location_id,
+    LAG(pwr.location_id) OVER (PARTITION BY pwr.plant_id ORDER BY pwr.year, pwr.week_number) as prev_loc
+  FROM plant_weekly_records pwr
+  WHERE pwr.condition IS NULL OR pwr.condition != 'missing'
+),
+movement_count AS (
+  SELECT plant_id, count(*) as movements
+  FROM plant_movements
+  WHERE prev_loc IS NOT NULL AND prev_loc != location_id
+  GROUP BY plant_id
+)
+SELECT pm.fleet_number, mc.movements,
+  (SELECT count(DISTINCT location_id) FROM plant_weekly_records WHERE plant_id = mc.plant_id AND (condition IS NULL OR condition != 'missing')) as distinct_locations
+FROM movement_count mc
+JOIN plants_master pm ON pm.id = mc.plant_id
+WHERE mc.movements >= 3
+ORDER BY mc.movements DESC, pm.fleet_number;
+```
+
+Currently flags:
+- **G37**: 3 distinct locations (legitimate Zamfara movement)
+- **RD61**: 2 distinct locations, 3 movements (ping-pong — admin must investigate)
+
+### Scenario 3 answer (user question)
+> "When we upload a site week report and a plant doesn't show there, we can either keep the location as is, or flag it as missing. What if after we upload other sites, and the plant now appears there?"
+
+**Answer:** Yes, this works correctly with the new architecture:
+1. Site A's report is missing plant X. Admin clicks "Keep as is" → no record created at Site A for that week, plant X stays at its previous location
+2. Later, Site B's report includes plant X
+3. `save_confirmed_weekly_report` creates a weekly record for plant X at Site B
+4. `rebuild_location_timeline` runs after the upload — sees plant X was at Site A in earlier weeks, now at Site B → detects movement → creates confirmed transfer + movement event + closes the Site A span and opens a new Site B span
+5. Sites tab updates, Events tab gets a new movement event, Transfers page shows the new confirmed transfer
+
+If admin had instead clicked "Mark as missing":
+1. A weekly record IS created for plant X at Site A with `condition='missing'`
+2. Plant X's `current_location_id` stays at Site A (NOT updated, per Fix C above)
+3. Later, Site B's report includes plant X
+4. The rebuild filters out the missing record at Site A → sees plant X at Site B
+5. Same outcome — movement detected, transfer created
+6. The audit trail is preserved (the missing record exists in plant_weekly_records)
+
+**Both flows work.** "Keep as is" leaves no audit trail; "Mark as missing" creates one. Either way, when the plant reappears at another site, the rebuild correctly recognizes it as a transfer.
