@@ -96,7 +96,8 @@ async def list_plant_events(
             FROM plant_events pe
             LEFT JOIN plants_master pm ON pm.id = pe.plant_id
             WHERE {where}
-            ORDER BY pe.created_at DESC
+            ORDER BY pe.year DESC NULLS LAST, pe.week_number DESC NULLS LAST,
+                     pe.event_date DESC NULLS LAST, pe.created_at DESC
             LIMIT ${len(params) - 1} OFFSET ${len(params)}""",
         *params,
     )
@@ -1506,7 +1507,8 @@ async def get_plant_events(
            LEFT JOIN locations fl ON fl.id = pe.from_location_id
            LEFT JOIN locations tl ON tl.id = pe.to_location_id
            WHERE pe.plant_id = $1::uuid
-           ORDER BY pe.created_at DESC
+           ORDER BY pe.year DESC NULLS LAST, pe.week_number DESC NULLS LAST,
+                    pe.event_date DESC NULLS LAST, pe.created_at DESC
            LIMIT $2""",
         str(plant_id),
         limit,

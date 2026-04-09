@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useMemo, useCallback } from 'react';
+import { useState, useRef, useMemo, useCallback, useEffect } from 'react';
 import { ProtectedRoute } from '@/components/protected-route';
 import { useLocationsWithStats } from '@/hooks/use-locations';
 import {
@@ -104,6 +104,7 @@ function UploadPageContent() {
   const [previewData, setPreviewData] = useState<PreviewResponse | null>(null);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [editedConditions, setEditedConditions] = useState<Record<string, string>>({});
+  const [editedVerification, setEditedVerification] = useState<Record<string, boolean>>({});
   const [editedTransferTo, setEditedTransferTo] = useState<Record<string, string>>({});
   const [editedTransferFrom, setEditedTransferFrom] = useState<Record<string, string>>({});
   const [missingActions, setMissingActions] = useState<Record<string, MissingPlantAction>>({});
@@ -113,6 +114,7 @@ function UploadPageContent() {
     setPreviewData(data);
     setUploadedFile(file);
     setEditedConditions({});
+    setEditedVerification({});
     setEditedTransferTo({});
     setEditedTransferFrom({});
     setMissingActions({});
@@ -129,6 +131,7 @@ function UploadPageContent() {
     setPreviewData(null);
     setUploadedFile(null);
     setEditedConditions({});
+    setEditedVerification({});
     setEditedTransferTo({});
     setEditedTransferFrom({});
     setMissingActions({});
@@ -168,6 +171,8 @@ function UploadPageContent() {
           file={uploadedFile}
           editedConditions={editedConditions}
           setEditedConditions={setEditedConditions}
+          editedVerification={editedVerification}
+          setEditedVerification={setEditedVerification}
           editedTransferTo={editedTransferTo}
           setEditedTransferTo={setEditedTransferTo}
           editedTransferFrom={editedTransferFrom}
@@ -409,6 +414,8 @@ interface ReviewStepProps {
   file: File | null;
   editedConditions: Record<string, string>;
   setEditedConditions: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  editedVerification: Record<string, boolean>;
+  setEditedVerification: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   editedTransferTo: Record<string, string>;
   setEditedTransferTo: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   editedTransferFrom: Record<string, string>;
@@ -424,6 +431,8 @@ function ReviewStep({
   file,
   editedConditions,
   setEditedConditions,
+  editedVerification,
+  setEditedVerification,
   editedTransferTo,
   setEditedTransferTo,
   editedTransferFrom,
@@ -436,14 +445,71 @@ function ReviewStep({
   const [searchQuery, setSearchQuery] = useState('');
   const [confidenceFilter, setConfidenceFilter] = useState<string>('all');
   const [conditionFilter, setConditionFilter] = useState<string>('all');
+  const [compareFilter, setCompareFilter] = useState<string>('all');
   const [page, setPage] = useState(1);
   const [showMissing, setShowMissing] = useState(false);
 
+  const storageKey = `upload_edits_${data.location.id}_${data.week.year}_${data.week.week_number}`;
+  const hasRestoredRef = useRef(false);
+
+  // Restore saved edits on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        let restoredCount = 0;
+        if (parsed.conditions && Object.keys(parsed.conditions).length > 0) { setEditedConditions(parsed.conditions); restoredCount += Object.keys(parsed.conditions).length; }
+        if (parsed.verification && Object.keys(parsed.verification).length > 0) { setEditedVerification(parsed.verification); restoredCount += Object.keys(parsed.verification).length; }
+        if (parsed.transferTo && Object.keys(parsed.transferTo).length > 0) { setEditedTransferTo(parsed.transferTo); restoredCount += Object.keys(parsed.transferTo).length; }
+        if (parsed.transferFrom && Object.keys(parsed.transferFrom).length > 0) { setEditedTransferFrom(parsed.transferFrom); restoredCount += Object.keys(parsed.transferFrom).length; }
+        if (restoredCount > 0) {
+          toast.success(`Restored ${restoredCount} saved edit(s) from your previous session`);
+        }
+      }
+    } catch { /* ignore storage errors */ }
+    hasRestoredRef.current = true;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // only on mount
+
+  // Auto-save edits whenever they change (skip initial render before restore completes)
+  useEffect(() => {
+    if (!hasRestoredRef.current) return;
+
+    const hasEdits =
+      Object.keys(editedConditions).length > 0 ||
+      Object.keys(editedVerification).length > 0 ||
+      Object.keys(editedTransferTo).length > 0 ||
+      Object.keys(editedTransferFrom).length > 0;
+
+    try {
+      if (hasEdits) {
+        localStorage.setItem(
+          storageKey,
+          JSON.stringify({
+            conditions: editedConditions,
+            verification: editedVerification,
+            transferTo: editedTransferTo,
+            transferFrom: editedTransferFrom,
+          })
+        );
+      } else {
+        localStorage.removeItem(storageKey);
+      }
+    } catch { /* ignore storage errors */ }
+  }, [storageKey, editedConditions, editedVerification, editedTransferTo, editedTransferFrom]);
+
   const confirmMutation = useConfirmWeeklyReport();
+
+  // Tag each plant with a stable unique key (handles duplicate fleet numbers)
+  const plantsWithKeys = useMemo(() =>
+    data.plants.map((p, i) => ({ ...p, _key: `${p.fleet_number}_${i}` })),
+    [data.plants]
+  );
 
   // Apply filters
   const filteredPlants = useMemo(() => {
-    let plants = data.plants;
+    let plants = plantsWithKeys;
 
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
@@ -460,13 +526,17 @@ function ReviewStep({
 
     if (conditionFilter !== 'all') {
       plants = plants.filter((p) => {
-        const effective = editedConditions[p.fleet_number] || p.detected_condition;
+        const effective = editedConditions[p._key] || p.detected_condition;
         return effective === conditionFilter;
       });
     }
 
+    if (compareFilter !== 'all') {
+      plants = plants.filter((p) => p.compare_status === compareFilter);
+    }
+
     return plants;
-  }, [data.plants, searchQuery, confidenceFilter, conditionFilter, editedConditions]);
+  }, [plantsWithKeys, searchQuery, confidenceFilter, conditionFilter, compareFilter, editedConditions]);
 
   // Pagination
   const totalPages = Math.ceil(filteredPlants.length / PAGE_SIZE);
@@ -480,12 +550,18 @@ function ReviewStep({
     };
   }, []);
 
+  // Wrap onBack to clear saved edits
+  const handleBack = useCallback(() => {
+    try { localStorage.removeItem(storageKey); } catch { /* ignore */ }
+    onBack();
+  }, [storageKey, onBack]);
+
   // Edit counts
-  const editCount = Object.keys(editedConditions).length;
+  const editCount = Object.keys(editedConditions).length + Object.keys(editedVerification).length;
 
   // Build confirm payload
   const handleConfirm = useCallback(() => {
-    const plants: ConfirmedPlant[] = data.plants.map((p) => ({
+    const plants: ConfirmedPlant[] = plantsWithKeys.map((p) => ({
       fleet_number: p.fleet_number,
       description: p.description,
       remarks: p.remarks,
@@ -493,10 +569,10 @@ function ReviewStep({
       standby_hours: p.standby_hours,
       breakdown_hours: p.breakdown_hours,
       off_hire: p.off_hire,
-      physical_verification: p.physical_verification,
-      condition: editedConditions[p.fleet_number] || p.detected_condition,
-      transfer_to_location_id: editedTransferTo[p.fleet_number] || p.detected_transfer_to_id,
-      transfer_from_location_id: editedTransferFrom[p.fleet_number] || p.detected_transfer_from_id,
+      physical_verification: editedVerification[p._key] !== undefined ? editedVerification[p._key] : p.physical_verification,
+      condition: editedConditions[p._key] || p.detected_condition,
+      transfer_to_location_id: editedTransferTo[p._key] || p.detected_transfer_to_id,
+      transfer_from_location_id: editedTransferFrom[p._key] || p.detected_transfer_from_id,
     }));
 
     const missingPlantActions = Object.values(missingActions).filter((a) => a.action !== 'keep');
@@ -513,6 +589,7 @@ function ReviewStep({
       },
       {
         onSuccess: (result) => {
+          try { localStorage.removeItem(storageKey); } catch { /* ignore */ }
           toast.success(result.message);
           onConfirmSuccess(result.submission_id, result.plants_count);
         },
@@ -521,13 +598,13 @@ function ReviewStep({
         },
       }
     );
-  }, [data, editedConditions, editedTransferTo, editedTransferFrom, missingActions, confirmMutation, onConfirmSuccess]);
+  }, [data, plantsWithKeys, editedConditions, editedVerification, editedTransferTo, editedTransferFrom, missingActions, confirmMutation, onConfirmSuccess, storageKey]);
 
   return (
     <div className="space-y-4">
       {/* Header Bar */}
       <div className="flex items-center justify-between">
-        <Button variant="ghost" size="sm" onClick={onBack}>
+        <Button variant="ghost" size="sm" onClick={handleBack}>
           <ArrowLeft className="mr-1 h-4 w-4" />
           Back
         </Button>
@@ -541,9 +618,17 @@ function ReviewStep({
         <SummaryCard label="Total Plants" value={data.summary.total_in_file} />
         <SummaryCard label="New Plants" value={data.summary.new_this_week} color="emerald" />
         <SummaryCard label="Missing" value={data.summary.missing_from_previous} color="purple" />
-        <SummaryCard label="High Confidence" value={data.summary.high_confidence} color="green" />
-        <SummaryCard label="Medium" value={data.summary.medium_confidence} color="amber" />
-        <SummaryCard label="Low (Review)" value={data.summary.low_confidence} color="red" />
+        <SummaryCard
+          label="Carried Over"
+          value={(data.summary.compare_breakdown?.carried_over ?? 0) + (data.summary.compare_breakdown?.empty_carried ?? 0)}
+          color="green"
+        />
+        <SummaryCard
+          label="Remarks Changed"
+          value={data.summary.compare_breakdown?.remarks_changed ?? 0}
+          color="amber"
+        />
+        <SummaryCard label="Low Confidence" value={data.summary.low_confidence} color="red" />
       </div>
 
       {/* Condition Breakdown */}
@@ -600,6 +685,19 @@ function ReviewStep({
           </SelectContent>
         </Select>
 
+        <Select value={compareFilter} onValueChange={handleFilterChange(setCompareFilter)}>
+          <SelectTrigger className="w-[180px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Statuses</SelectItem>
+            <SelectItem value="remarks_changed">Remarks Changed (Review)</SelectItem>
+            <SelectItem value="carried_over">Carried Over (Same)</SelectItem>
+            <SelectItem value="empty_carried">Empty (Carried Over)</SelectItem>
+            <SelectItem value="new_plant">New Plant</SelectItem>
+          </SelectContent>
+        </Select>
+
         <span className="text-xs text-muted-foreground">
           {filteredPlants.length} of {data.plants.length} plants
         </span>
@@ -618,8 +716,10 @@ function ReviewStep({
                 <TableHead className="w-[70px] text-right">Standby</TableHead>
                 <TableHead className="w-[70px] text-right">B/Down</TableHead>
                 <TableHead className="w-[60px] text-center">Off Hire</TableHead>
+                <TableHead className="w-[40px] text-center">P.V</TableHead>
                 <TableHead className="w-[150px]">Condition</TableHead>
                 <TableHead className="w-[80px] text-center">Confidence</TableHead>
+                <TableHead className="w-[110px] text-center">Status</TableHead>
                 <TableHead className="min-w-[120px]">Transfer</TableHead>
                 <TableHead className="min-w-[150px]">Remarks</TableHead>
               </TableRow>
@@ -627,42 +727,55 @@ function ReviewStep({
             <TableBody>
               {paginatedPlants.map((plant, idx) => (
                 <PlantRow
-                  key={`${plant.fleet_number}-${idx}`}
+                  key={plant._key}
                   plant={plant}
                   index={(page - 1) * PAGE_SIZE + idx + 1}
                   conditionOptions={data.condition_options}
                   availableLocations={data.available_locations}
-                  editedCondition={editedConditions[plant.fleet_number]}
-                  editedTransferTo={editedTransferTo[plant.fleet_number]}
-                  editedTransferFrom={editedTransferFrom[plant.fleet_number]}
+                  editedCondition={editedConditions[plant._key]}
+                  editedVerification={editedVerification[plant._key]}
+                  editedTransferTo={editedTransferTo[plant._key]}
+                  editedTransferFrom={editedTransferFrom[plant._key]}
                   onConditionChange={(value) => {
                     setEditedConditions((prev) => {
                       if (value === plant.detected_condition) {
                         const next = { ...prev };
-                        delete next[plant.fleet_number];
+                        delete next[plant._key];
                         return next;
                       }
-                      return { ...prev, [plant.fleet_number]: value };
+                      return { ...prev, [plant._key]: value };
+                    });
+                  }}
+                  onVerificationToggle={() => {
+                    setEditedVerification((prev) => {
+                      const current = prev[plant._key] !== undefined ? prev[plant._key] : plant.physical_verification;
+                      const toggled = !current;
+                      if (toggled === plant.physical_verification) {
+                        const next = { ...prev };
+                        delete next[plant._key];
+                        return next;
+                      }
+                      return { ...prev, [plant._key]: toggled };
                     });
                   }}
                   onTransferToChange={(value) => {
                     setEditedTransferTo((prev) => {
                       if (!value) {
                         const next = { ...prev };
-                        delete next[plant.fleet_number];
+                        delete next[plant._key];
                         return next;
                       }
-                      return { ...prev, [plant.fleet_number]: value };
+                      return { ...prev, [plant._key]: value };
                     });
                   }}
                   onTransferFromChange={(value) => {
                     setEditedTransferFrom((prev) => {
                       if (!value) {
                         const next = { ...prev };
-                        delete next[plant.fleet_number];
+                        delete next[plant._key];
                         return next;
                       }
-                      return { ...prev, [plant.fleet_number]: value };
+                      return { ...prev, [plant._key]: value };
                     });
                   }}
                 />
@@ -820,9 +933,11 @@ interface PlantRowProps {
   conditionOptions: string[];
   availableLocations: { id: string; name: string }[];
   editedCondition?: string;
+  editedVerification?: boolean;
   editedTransferTo?: string;
   editedTransferFrom?: string;
   onConditionChange: (value: string) => void;
+  onVerificationToggle: () => void;
   onTransferToChange: (value: string | null) => void;
   onTransferFromChange: (value: string | null) => void;
 }
@@ -833,15 +948,17 @@ function PlantRow({
   conditionOptions,
   availableLocations,
   editedCondition,
+  editedVerification,
   editedTransferTo,
   editedTransferFrom,
   onConditionChange,
+  onVerificationToggle,
   onTransferToChange,
   onTransferFromChange,
 }: PlantRowProps) {
   const [showTransferEdit, setShowTransferEdit] = useState(false);
   const effectiveCondition = editedCondition || plant.detected_condition;
-  const isEdited = !!editedCondition;
+  const isEdited = !!editedCondition || editedVerification !== undefined;
 
   // Resolve effective transfer names
   const effectiveTransferToId = editedTransferTo || plant.detected_transfer_to_id;
@@ -858,7 +975,7 @@ function PlantRow({
   const isTransferEdited = !!editedTransferTo || !!editedTransferFrom;
 
   return (
-    <TableRow className={`${isEdited || isTransferEdited ? 'bg-blue-50/50' : ''} ${plant.condition_confidence === 'low' ? 'bg-amber-50/30' : ''}`}>
+    <TableRow className={`${isEdited || isTransferEdited ? 'bg-blue-50/50' : ''} ${plant.condition_confidence === 'low' && plant.compare_status !== 'carried_over' && plant.compare_status !== 'empty_carried' ? 'bg-amber-50/30' : ''} ${plant.compare_status === 'remarks_changed' ? 'bg-orange-50/40' : ''}`}>
       <TableCell className="text-xs text-muted-foreground">{index}</TableCell>
       <TableCell className="font-mono text-sm">
         <div className="flex items-center gap-1.5 flex-wrap">
@@ -888,6 +1005,22 @@ function PlantRow({
           </Badge>
         )}
       </TableCell>
+      <TableCell className="text-center">
+        <button
+          type="button"
+          onClick={onVerificationToggle}
+          className={`w-6 h-6 rounded cursor-pointer transition-colors ${
+            (editedVerification !== undefined ? editedVerification : plant.physical_verification)
+              ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+              : 'bg-gray-100 text-muted-foreground hover:bg-gray-200'
+          } ${editedVerification !== undefined ? 'ring-1 ring-blue-400' : ''}`}
+          title="Click to toggle physical verification"
+        >
+          <span className="text-xs font-bold">
+            {(editedVerification !== undefined ? editedVerification : plant.physical_verification) ? 'P' : '-'}
+          </span>
+        </button>
+      </TableCell>
       <TableCell>
         <Select value={effectiveCondition} onValueChange={onConditionChange}>
           <SelectTrigger className={`h-7 text-xs ${isEdited ? 'ring-1 ring-blue-400' : ''}`}>
@@ -904,6 +1037,9 @@ function PlantRow({
       </TableCell>
       <TableCell className="text-center">
         <ConfidenceDot confidence={plant.condition_confidence} reason={plant.condition_reason} />
+      </TableCell>
+      <TableCell className="text-center">
+        <CompareStatusBadge plant={plant} />
       </TableCell>
       <TableCell className="text-xs">
         {showTransferEdit ? (
@@ -1014,6 +1150,45 @@ function ConfidenceDot({ confidence, reason }: { confidence: string; reason: str
     <div className="flex items-center justify-center" title={reason}>
       <div className={`w-2.5 h-2.5 rounded-full ${colors[confidence] || 'bg-gray-400'}`} />
     </div>
+  );
+}
+
+// ============================================================================
+// Compare Status Badge — shows whether condition was carried over or needs review
+// ============================================================================
+
+function CompareStatusBadge({ plant }: { plant: PreviewPlant }) {
+  const status = plant.compare_status;
+
+  const config: Record<string, { label: string; className: string; tooltip: string }> = {
+    carried_over: {
+      label: 'Same',
+      className: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+      tooltip: `Same remarks as ${plant.previous_week_ending_date || 'last time'} — using your verified condition`,
+    },
+    empty_carried: {
+      label: 'Empty',
+      className: 'bg-emerald-50 text-emerald-600 border-emerald-100',
+      tooltip: `No remarks this week — keeping last verified condition (${plant.previous_week_ending_date || 'previous'})`,
+    },
+    remarks_changed: {
+      label: 'Changed',
+      className: 'bg-orange-100 text-orange-700 border-orange-300',
+      tooltip: `Remarks changed from: "${plant.previous_remarks || ''}". Please verify the parsed condition.`,
+    },
+    new_plant: {
+      label: 'New',
+      className: 'bg-blue-100 text-blue-700 border-blue-200',
+      tooltip: 'No previous record for this plant — please verify',
+    },
+  };
+
+  const c = config[status] || config.new_plant;
+
+  return (
+    <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${c.className}`} title={c.tooltip}>
+      {c.label}
+    </Badge>
   );
 }
 

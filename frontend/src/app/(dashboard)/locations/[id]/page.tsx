@@ -513,11 +513,13 @@ export default function LocationDetailPage() {
                           <TransferStatusBadge status={t.status} />
                         </TableCell>
                         <TableCell className="max-w-[200px]">
-                          {t.source_remarks ? (
+                          {t.source_remarks && t.source_remarks !== 'AUTO_REBUILD_FROM_WEEKLY_RECORDS' ? (
                             <span className="text-xs text-muted-foreground truncate block" title={t.source_remarks}>
                               {t.source_remarks}
                             </span>
-                          ) : '-'}
+                          ) : (
+                            <span className="text-xs text-muted-foreground italic">Auto-detected</span>
+                          )}
                         </TableCell>
                       </TableRow>
                     )

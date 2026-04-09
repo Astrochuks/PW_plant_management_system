@@ -1,5 +1,6 @@
 """File upload endpoints for weekly reports and purchase orders."""
 
+import asyncio
 import json
 from datetime import date, datetime
 from typing import Annotated, Any
@@ -1159,6 +1160,11 @@ async def preview_weekly_report(
         match_location_to_id,
         parse_hours,
         parse_off_hire,
+        compare_remarks_with_previous,
+        COMPARE_CARRIED_OVER,
+        COMPARE_REMARKS_CHANGED,
+        COMPARE_NEW_PLANT,
+        COMPARE_EMPTY_CARRIED,
     )
     from app.workers.etl_worker import (
         normalize_fleet_number,
@@ -1263,6 +1269,17 @@ async def preview_weekly_report(
         prev_fleet_count=len(prev_week_fleet_numbers),
     )
 
+    # Also fetch fleet numbers already saved for THIS location + THIS week
+    # (handles re-uploads — a plant should not show as "new" if it's already saved this week)
+    current_week_saved_rows = await fetch(
+        """SELECT pm.fleet_number
+           FROM plant_weekly_records pwr
+           JOIN plants_master pm ON pm.id = pwr.plant_id
+           WHERE pwr.location_id = $1::uuid AND pwr.year = $2 AND pwr.week_number = $3""",
+        str(location_id), year, week_number,
+    )
+    current_week_saved_fleet_numbers = {r["fleet_number"] for r in current_week_saved_rows}
+
     # Pre-load existing plant data for previous location lookup
     # Collect all fleet numbers first, then batch query
     all_fleet_numbers_in_file = set()
@@ -1272,10 +1289,11 @@ async def preview_weekly_report(
             all_fleet_numbers_in_file.add(fn)
 
     # Batch lookup existing plants with their current locations (single query with ANY)
-    existing_plants_map = {}  # fleet_number -> {current_location_id, current_location_name}
+    # ALSO fetch plant_id so we can look up their previous weekly records
+    existing_plants_map = {}  # fleet_number -> {current_location_id, current_location_name, plant_id}
     if all_fleet_numbers_in_file:
         existing_rows = await fetch(
-            "SELECT fleet_number, current_location_id FROM plants_master WHERE fleet_number = ANY($1::text[])",
+            "SELECT id, fleet_number, current_location_id FROM plants_master WHERE fleet_number = ANY($1::text[])",
             list(all_fleet_numbers_in_file),
         )
         for p in existing_rows:
@@ -1285,8 +1303,34 @@ async def preview_weekly_report(
                 loc = next((l for l in available_locations if str(l["id"]) == str(loc_id)), None)
                 loc_name = loc["name"] if loc else None
             existing_plants_map[p["fleet_number"]] = {
+                "plant_id": str(p["id"]),
                 "current_location_id": str(loc_id) if loc_id else None,
                 "current_location_name": loc_name,
+            }
+
+    # === SMART PREVIEW: fetch latest remarks + condition for each known plant ===
+    # If a plant's new remarks match its previous remarks, we reuse the previous
+    # condition (saves the user from re-verifying unchanged plants).
+    # ONE query with DISTINCT ON returns the most recent record per plant.
+    # Result: O(n) hashmap lookup in the per-row loop below.
+    latest_records_by_plant_id = {}  # plant_id -> {remarks, condition, week_ending_date}
+    plant_ids_to_lookup = [
+        info["plant_id"] for info in existing_plants_map.values() if info.get("plant_id")
+    ]
+    if plant_ids_to_lookup:
+        latest_rows = await fetch(
+            """SELECT DISTINCT ON (plant_id)
+                   plant_id, remarks, condition, year, week_number, week_ending_date
+               FROM plant_weekly_records
+               WHERE plant_id = ANY($1::uuid[])
+               ORDER BY plant_id, year DESC, week_number DESC""",
+            plant_ids_to_lookup,
+        )
+        for r in latest_rows:
+            latest_records_by_plant_id[r["plant_id"]] = {
+                "remarks": r.get("remarks"),
+                "condition": r.get("condition"),
+                "week_ending_date": r.get("week_ending_date"),
             }
 
     # Process each row in file
@@ -1328,15 +1372,56 @@ async def preview_weekly_report(
         if pd.notna(row.get("transfer_to")):
             transfer_to_raw = str(row.get("transfer_to")).strip() or None
 
-        # Auto-detect condition using keywords
-        detected_condition = detect_condition_from_keywords(
-            remarks=remarks,
-            hours_worked=hours_worked,
-            standby_hours=standby_hours,
-            breakdown_hours=breakdown_hours,
-            off_hire=off_hire,
-            physical_verification=physical_verification,
-        )
+        # === SMART CARRY-OVER ===
+        # Look up latest weekly record for this plant (if we know it)
+        plant_info = existing_plants_map.get(fleet_num)
+        previous_record = None
+        if plant_info and plant_info.get("plant_id"):
+            previous_record = latest_records_by_plant_id.get(plant_info["plant_id"])
+
+        # Decide compare status BEFORE running parser
+        carried_over_condition = None
+        compare_status = COMPARE_NEW_PLANT  # default
+        previous_remarks = None
+        previous_week_ending_date = None
+
+        if previous_record:
+            previous_remarks = previous_record.get("remarks")
+            previous_week_ending_date = previous_record.get("week_ending_date")
+            previous_condition = previous_record.get("condition")
+
+            should_carry_over = compare_remarks_with_previous(remarks, previous_remarks)
+            if should_carry_over and previous_condition:
+                carried_over_condition = previous_condition
+                # Distinguish "empty new remarks" from "identical remarks"
+                if not remarks or not str(remarks).strip():
+                    compare_status = COMPARE_EMPTY_CARRIED
+                else:
+                    compare_status = COMPARE_CARRIED_OVER
+            else:
+                compare_status = COMPARE_REMARKS_CHANGED
+
+        # Auto-detect condition using keywords (only if we're NOT carrying over)
+        if carried_over_condition:
+            # Trust the previous condition — skip parser entirely
+            detected_condition = type("DC", (), {
+                "condition": carried_over_condition,
+                "confidence": "high",
+                "reason": (
+                    "Same remarks as last time — reusing your verified condition"
+                    if compare_status == COMPARE_CARRIED_OVER
+                    else "Empty remarks this week — keeping last verified condition"
+                ),
+            })()
+        else:
+            detected_condition = detect_condition_from_keywords(
+                remarks=remarks,
+                hours_worked=hours_worked,
+                standby_hours=standby_hours,
+                breakdown_hours=breakdown_hours,
+                off_hire=off_hire,
+                physical_verification=physical_verification,
+            )
 
         # Auto-detect transfers from remarks
         detected_transfer = detect_transfers_from_remarks(remarks)
@@ -1367,8 +1452,13 @@ async def preview_weekly_report(
                 location_aliases,
             )
 
-        # Check if new plant (not in previous week at this location)
-        is_new = fleet_num not in prev_week_fleet_numbers
+        # Check if new plant at this location:
+        #  - Not in previous week's records here, AND
+        #  - Not already saved for this week here (re-upload case)
+        is_new = (
+            fleet_num not in prev_week_fleet_numbers
+            and fleet_num not in current_week_saved_fleet_numbers
+        )
 
         # Look up previous location for new plants
         previous_location_id = None
@@ -1410,6 +1500,11 @@ async def preview_weekly_report(
             "was_in_previous_week": not is_new,
             "previous_location_id": previous_location_id,
             "previous_location_name": previous_location_name,
+
+            # Smart carry-over status (NEW)
+            "compare_status": compare_status,  # carried_over | remarks_changed | new_plant | empty_carried
+            "previous_remarks": previous_remarks,
+            "previous_week_ending_date": str(previous_week_ending_date) if previous_week_ending_date else None,
         }
 
         preview_plants.append(plant_preview)
@@ -1438,6 +1533,12 @@ async def preview_weekly_report(
     # Calculate summary stats
     condition_counts = {}
     confidence_counts = {"high": 0, "medium": 0, "low": 0}
+    compare_counts = {
+        "carried_over": 0,
+        "remarks_changed": 0,
+        "new_plant": 0,
+        "empty_carried": 0,
+    }
 
     for plant in preview_plants:
         condition = plant["detected_condition"]
@@ -1445,6 +1546,9 @@ async def preview_weekly_report(
 
         confidence = plant["condition_confidence"]
         confidence_counts[confidence] = confidence_counts.get(confidence, 0) + 1
+
+        cs = plant.get("compare_status", "new_plant")
+        compare_counts[cs] = compare_counts.get(cs, 0) + 1
 
     logger.info(
         "Preview generated",
@@ -1490,6 +1594,7 @@ async def preview_weekly_report(
             "medium_confidence": confidence_counts["medium"],
             "low_confidence": confidence_counts["low"],
             "condition_breakdown": condition_counts,
+            "compare_breakdown": compare_counts,
         },
     }
 
@@ -1537,25 +1642,16 @@ async def confirm_weekly_report(
     if not validated_plants:
         raise ValidationError("No plants data provided")
 
-    # Upload file to storage if provided
+    # Read file content now (before response), upload in background
     source_file_path = None
     source_file_name = None
     source_file_size = None
+    file_content_for_upload = None
     if file and file.filename:
-        file_content = await file.read()
+        file_content_for_upload = await file.read()
         source_file_name = file.filename
-        source_file_size = len(file_content)
-        storage_path = f"weekly-reports/{location_id}/{week_ending_date}/{file.filename}"
-        try:
-            storage_client = get_supabase_admin_client()
-            storage_client.storage.from_("reports").upload(
-                storage_path,
-                file_content,
-                file_options={"upsert": "true"},
-            )
-            source_file_path = storage_path
-        except Exception as e:
-            logger.warning("Failed to upload file to storage", error=repr(e))
+        source_file_size = len(file_content_for_upload)
+        source_file_path = f"weekly-reports/{location_id}/{week_ending_date}/{file.filename}"
 
     logger.info(
         "Confirming weekly report",
@@ -1621,6 +1717,21 @@ async def confirm_weekly_report(
         validated_plants=validated_plants,
         missing_plants_actions=missing_plants_actions,
     )
+
+    # Upload file to storage in background (sync Supabase SDK — must not block event loop)
+    if file_content_for_upload and source_file_path:
+        def _upload_file():
+            try:
+                storage_client = get_supabase_admin_client()
+                storage_client.storage.from_("reports").upload(
+                    source_file_path,
+                    file_content_for_upload,
+                    file_options={"upsert": "true"},
+                )
+                logger.info("Uploaded report file to storage", path=source_file_path)
+            except Exception as e:
+                logger.warning("Failed to upload file to storage", error=repr(e))
+        background_tasks.add_task(asyncio.to_thread, _upload_file)
 
     # Log audit
     background_tasks.add_task(

@@ -73,9 +73,9 @@ async def list_transfers(
                    CASE WHEN tl.id IS NOT NULL
                         THEN json_build_object('id', tl.id, 'name', tl.name, 'is_bua', COALESCE(tl.is_bua, false))
                         ELSE NULL END AS to_location,
-                   ws.week_number AS source_week,
-                   ws.year AS source_year,
-                   ws.week_ending_date,
+                   COALESCE(ws.week_number, EXTRACT(week FROM t.transfer_date)::int) AS source_week,
+                   COALESCE(ws.year, EXTRACT(isoyear FROM t.transfer_date)::int) AS source_year,
+                   COALESCE(ws.week_ending_date, t.transfer_date) AS week_ending_date,
                    count(*) OVER() AS _total_count
             FROM plant_transfers t
             LEFT JOIN plants_master pm ON pm.id = t.plant_id
@@ -83,7 +83,7 @@ async def list_transfers(
             LEFT JOIN locations tl ON tl.id = t.to_location_id
             LEFT JOIN weekly_report_submissions ws ON ws.id = t.source_submission_id
             WHERE {where}
-            ORDER BY t.created_at DESC
+            ORDER BY t.transfer_date DESC NULLS LAST, t.created_at DESC
             LIMIT ${len(params) - 1} OFFSET ${len(params)}""",
         *params,
     )
@@ -243,7 +243,7 @@ async def list_site_transfer_requests(
            JOIN locations tl ON tl.id = t.to_location_id
            WHERE t.status = $1
              AND (t.is_pull_request = TRUE OR t.source_submission_id IS NOT NULL)
-           ORDER BY t.created_at DESC""",
+           ORDER BY t.transfer_date DESC NULLS LAST, t.created_at DESC""",
         status,
     )
     return {

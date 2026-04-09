@@ -9,6 +9,8 @@ import apiClient from './client';
 // Types
 // ============================================================================
 
+export type CompareStatus = 'carried_over' | 'remarks_changed' | 'new_plant' | 'empty_carried';
+
 export interface PreviewPlant {
   fleet_number: string;
   description: string | null;
@@ -31,6 +33,10 @@ export interface PreviewPlant {
   was_in_previous_week: boolean;
   previous_location_id: string | null;
   previous_location_name: string | null;
+  // Smart carry-over (NEW)
+  compare_status: CompareStatus;
+  previous_remarks: string | null;
+  previous_week_ending_date: string | null;
 }
 
 export interface MissingPlant {
@@ -60,6 +66,12 @@ export interface PreviewResponse {
     medium_confidence: number;
     low_confidence: number;
     condition_breakdown: Record<string, number>;
+    compare_breakdown: {
+      carried_over: number;
+      remarks_changed: number;
+      new_plant: number;
+      empty_carried: number;
+    };
   };
 }
 

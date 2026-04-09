@@ -39,6 +39,53 @@ class DetectedCondition:
     reason: str  # Why this was detected (for admin review)
 
 
+# =============================================================================
+# Remarks comparison — carry over previous condition if remarks unchanged
+# =============================================================================
+
+# Possible compare statuses (returned to frontend so it can show badges)
+COMPARE_CARRIED_OVER = "carried_over"     # Same remarks → reuse previous condition
+COMPARE_REMARKS_CHANGED = "remarks_changed"  # Different remarks → run parser
+COMPARE_NEW_PLANT = "new_plant"           # No previous record → run parser
+COMPARE_EMPTY_CARRIED = "empty_carried"   # New remarks empty → still trust last verified condition
+
+
+def normalize_remarks(remarks: str | None) -> str:
+    """Normalize remarks for comparison.
+
+    Strips whitespace, collapses internal whitespace, uppercases.
+    Empty string for None or whitespace-only input.
+    """
+    if not remarks:
+        return ""
+    return " ".join(str(remarks).upper().split())
+
+
+def compare_remarks_with_previous(
+    new_remarks: str | None,
+    previous_remarks: str | None,
+) -> bool:
+    """Return True if new remarks should reuse previous condition.
+
+    Rules:
+      1. Same remarks (after normalization) → carry over
+      2. New remarks empty → carry over (whether previous was empty or not)
+      3. Different non-empty remarks → do NOT carry over
+    """
+    new_norm = normalize_remarks(new_remarks)
+    prev_norm = normalize_remarks(previous_remarks)
+
+    # Empty new remarks → always carry over (user said: trust last verified)
+    if not new_norm:
+        return True
+
+    # Same remarks (both non-empty)
+    if new_norm == prev_norm:
+        return True
+
+    return False
+
+
 @dataclass
 class DetectedTransfer:
     """Auto-detected transfer from remarks."""
@@ -80,15 +127,7 @@ def detect_condition_from_keywords(
             reason="Off hire column is checked"
         )
 
-    # 2. Not physically verified
-    if not physical_verification:
-        return DetectedCondition(
-            condition="unverified",
-            confidence="high",
-            reason="Not physically verified"
-        )
-
-    # 3. Check remarks for clear keywords
+    # 2. Check remarks for clear keywords (before PV check so "not seen" → missing, not unverified)
     if remarks:
         # Normalize: uppercase, collapse whitespace
         r = " ".join(remarks.upper().split())
@@ -102,7 +141,7 @@ def detect_condition_from_keywords(
             )
 
         # MISSING - very clear
-        if any(kw in r for kw in ["MISSING", "NOT SEEN", "NOT FOUND", "STOLEN", "CANNOT LOCATE"]):
+        if any(kw in r for kw in ["MISSING", "NOT SEEN", "NOTSEEN", "NOT FOUND", "STOLEN", "CANNOT LOCATE", "NOT AVAILABLE", "NOT ON SITE"]):
             return DetectedCondition(
                 condition="missing",
                 confidence="high",
@@ -115,7 +154,8 @@ def detect_condition_from_keywords(
             "ENGINE REMOVED", "COMPRESSOR REMOVED", "REMOVED ENGINE",
             "BURNED", "FIRE", "BURNT", "GUTTED",
             "ENGINE BLOCK", "CRACKED ENGINE", "SEIZED",
-            "NO TYRE", "NO TYRES", "NO TRACK", "NO BUCKET"
+            "NO TYRE", "NO TYRES", "NO TRACK", "NO BUCKET",
+            "BREAK DOWN", "BROKE DOWN", "BROKEN DOWN",
         ]
         if any(kw in r for kw in breakdown_keywords):
             return DetectedCondition(
@@ -126,12 +166,24 @@ def detect_condition_from_keywords(
 
         # WORKING - actively in use (check BEFORE under_repair so
         # "working on the site" doesn't match "working on" in repair keywords)
+        # Guard against "NOT WORKING ..." false positives
         working_keywords = [
             "WORKING ON THE SITE", "WORKING ON SITE", "WORKING ON THE PROJECT",
             "WORKING ON PROJECT", "WORKING IN THE YARD", "WORKING IN YARD",
+            "WORKING AT", "WORKING IN", "WORKING WITH",
             "IN OPERATION", "IN USE", "RUNNING", "OPERATING", "ACTIVE",
         ]
-        if r == "WORKING" or any(kw in r for kw in working_keywords):
+        # Repair-specific "WORKING ON ..." patterns that should NOT match as working
+        _repair_working = [
+            "WORKING ON IT", "WORKING ON THE ENGINE", "WORKING ON THE PUMP",
+            "WORKING ON ENGINE", "WORKING ON PUMP",
+        ]
+        if "NOT WORKING" not in r and (
+            r == "WORKING"
+            or any(kw in r for kw in working_keywords)
+            # Catch-all: "WORKING <anything>" unless it's a repair pattern
+            or (r.startswith("WORKING") and not any(kw in r for kw in _repair_working))
+        ):
             return DetectedCondition(
                 condition="working",
                 confidence="high",
@@ -172,7 +224,7 @@ def detect_condition_from_keywords(
         standby_keywords = [
             "STANDBY", "STAND BY", "STAND-BY",
             "IDLE", "AVAILABLE", "PARKED",
-            "BEHIND PLANT", "PLANT WORKSHOP", "IN WORKSHOP", "AT WORKSHOP"
+            "BEHIND PLANT", "PLANT WORKSHOP", "IN WORKSHOP", "AT WORKSHOP", "WORKSHOP"
         ]
         if any(kw in r for kw in standby_keywords):
             # Check if there's also a problem mentioned
@@ -204,10 +256,18 @@ def detect_condition_from_keywords(
                 reason=f"Repair completed: {remarks[:50]}"
             )
 
-    # 4. Empty remarks with no usage data → missing
+    # 3. Not physically verified (after remarks so keywords like "not seen" take priority)
+    if not physical_verification:
+        return DetectedCondition(
+            condition="unverified",
+            confidence="high",
+            reason="Not physically verified"
+        )
+
+    # 4. Empty remarks with no usage data → standby
     if (not remarks or not remarks.strip()) and hours_worked == 0 and standby_hours == 0 and breakdown_hours == 0:
         return DetectedCondition(
-            condition="missing",
+            condition="standby",
             confidence="medium",
             reason="No remarks or usage data"
         )

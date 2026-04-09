@@ -1847,19 +1847,28 @@ async def rebuild_location_timeline(plant_ids: list) -> dict[str, int]:
     Single function that does both in one pass with minimal DB queries:
       1 SELECT weekly_records (shared for both)
       1 SELECT plants_master (current_location + fleet_number)
-      1 SELECT existing events (dedup check)
       1 DELETE old history
+      1 DELETE old movement events (rebuild from scratch)
       1 INSERT new history (executemany, batched)
       1 INSERT new events (executemany, batched)
     = 6 queries total, regardless of plant count.
 
     All Python processing is in-memory (O(n) where n = weekly records).
+
+    NOTE: Uses explicit ::date/::timestamptz casts in INSERT statements because
+    asyncpg's _record_to_dict converts dates to ISO strings on read, and asyncpg
+    is strict about type binding when re-inserting strings into date columns.
     """
     if not plant_ids:
-        return {"history": 0, "events": 0}
+        return {"history": 0, "events": 0, "transfers_inserted": 0, "transfers_confirmed": 0}
 
     from itertools import groupby
     from operator import itemgetter
+
+    # Normalize plant_ids to strings (asyncpg accepts strings or UUIDs for ::uuid[])
+    plant_ids = [str(pid) for pid in plant_ids]
+
+    logger.info("rebuild_location_timeline START", plant_count=len(plant_ids))
 
     # === 1 query: all weekly records for these plants ===
     records = await fetch(
@@ -1870,8 +1879,22 @@ async def rebuild_location_timeline(plant_ids: list) -> dict[str, int]:
         plant_ids,
     )
 
+    logger.info("rebuild: fetched weekly records", count=len(records))
+
     if not records:
-        return {"history": 0, "events": 0}
+        logger.info("Rebuild: no weekly records found", plant_count=len(plant_ids))
+        return {"history": 0, "events": 0, "transfers_inserted": 0, "transfers_confirmed": 0}
+
+    # Convert string dates back to date objects (asyncpg is strict on date binding)
+    def _parse_date(s):
+        if s is None:
+            return None
+        if isinstance(s, str):
+            return date.fromisoformat(s.split("T")[0])
+        return s
+
+    for r in records:
+        r["week_ending_date"] = _parse_date(r["week_ending_date"])
 
     # === 1 query: current location + fleet number for all plants ===
     plant_info = await fetch(
@@ -1881,7 +1904,20 @@ async def rebuild_location_timeline(plant_ids: list) -> dict[str, int]:
     current_location_map = {r["id"]: r["current_location_id"] for r in plant_info}
     fleet_map = {r["id"]: r["fleet_number"] for r in plant_info}
 
-    # === 1 query: existing movement events for dedup ===
+    # === 1 query: delete this rebuild's previous outputs (NULL submission_id) ===
+    # Movement events from save_confirmed_weekly_report have submission_id set;
+    # rebuild's auto-generated events have submission_id IS NULL.
+    # We only delete OUR previous outputs so we can recreate them.
+    del_events = await execute(
+        """DELETE FROM plant_events
+           WHERE plant_id = ANY($1::uuid[])
+             AND event_type = 'movement'
+             AND submission_id IS NULL""",
+        plant_ids,
+    )
+    logger.info("rebuild: deleted prior movement events", result=del_events)
+
+    # === 1 query: read remaining movement events (from save_confirmed) for dedup ===
     existing_events = await fetch(
         """SELECT plant_id, event_date, from_location_id, to_location_id
            FROM plant_events
@@ -1889,9 +1925,32 @@ async def rebuild_location_timeline(plant_ids: list) -> dict[str, int]:
         plant_ids,
     )
     existing_keys = {
-        (str(e["plant_id"]), str(e["event_date"]), str(e["from_location_id"]), str(e["to_location_id"]))
+        (str(e["plant_id"]), str(e["event_date"]), str(e["from_location_id"]) if e.get("from_location_id") else None, str(e["to_location_id"]) if e.get("to_location_id") else None)
         for e in existing_events
     }
+
+    # === 1 query: read existing transfers for dedup ===
+    existing_transfer_rows = await fetch(
+        """SELECT id, plant_id, from_location_id, to_location_id, transfer_date, status
+           FROM plant_transfers
+           WHERE plant_id = ANY($1::uuid[])""",
+        plant_ids,
+    )
+    existing_transfer_keys = {
+        (str(t["plant_id"]), str(t["from_location_id"]) if t.get("from_location_id") else None,
+         str(t["to_location_id"]) if t.get("to_location_id") else None, str(t["transfer_date"]) if t.get("transfer_date") else None)
+        for t in existing_transfer_rows
+    }
+    # STRICT match: (plant_id, from_location_id, to_location_id) → pending transfer id
+    pending_by_plant_route: dict[tuple, str] = {}
+    for t in existing_transfer_rows:
+        if t.get("status") == "pending":
+            key = (
+                str(t["plant_id"]),
+                str(t["from_location_id"]) if t.get("from_location_id") else None,
+                str(t["to_location_id"]) if t.get("to_location_id") else None,
+            )
+            pending_by_plant_route[key] = str(t["id"])
 
     # Group records by plant_id (already sorted by year, week)
     plant_records = {}
@@ -1901,6 +1960,9 @@ async def rebuild_location_timeline(plant_ids: list) -> dict[str, int]:
     # === In-memory: build history spans + detect movements ===
     history_inserts = []
     events_to_create = []
+    transfers_to_insert = []      # NEW transfer rows to create
+    transfers_to_confirm = []     # Existing pending transfer IDs to mark confirmed
+    AUTO_REBUILD_MARKER = "AUTO_REBUILD_FROM_WEEKLY_RECORDS"
 
     for pid, weekly_rows in plant_records.items():
         if not weekly_rows:
@@ -1920,17 +1982,43 @@ async def rebuild_location_timeline(plant_ids: list) -> dict[str, int]:
             if row["location_id"] == current_span["location_id"]:
                 current_span["end_date"] = row["week_ending_date"]
             else:
-                # Location changed = movement event
-                key = (str(pid), str(row["week_ending_date"]), str(current_span["location_id"]), str(row["location_id"]))
-                if key not in existing_keys:
+                # Location changed = movement event + transfer (if not duplicate)
+                from_loc = str(current_span["location_id"])
+                to_loc = str(row["location_id"])
+                # event_date is now a `date` object (parsed earlier)
+                event_date = row["week_ending_date"]
+
+                event_key = (str(pid), str(event_date), from_loc, to_loc)
+                if event_key not in existing_keys:
                     events_to_create.append((
-                        pid, "movement", row["week_ending_date"],
+                        str(pid), "movement", event_date,
                         row["year"], row["week_number"],
-                        current_span["location_id"], row["location_id"],
-                        json.dumps({"fleet_number": fn}),
+                        from_loc, to_loc,
+                        json.dumps({"fleet_number": fn, "auto_detected": True}),
                         f"Plant {fn} moved from previous location",
                     ))
-                    existing_keys.add(key)
+                    existing_keys.add(event_key)
+
+                # Transfer handling — STRICT 3-way priority:
+                #   1. Exact (plant, from, to, date) match exists → skip (true duplicate)
+                #   2. Pending transfer for this route (plant, from, to) → auto-confirm UPDATE
+                #   3. Otherwise → insert new confirmed transfer
+                exact_key = (str(pid), from_loc, to_loc, str(event_date))
+                route_key = (str(pid), from_loc, to_loc)
+
+                if exact_key in existing_transfer_keys:
+                    pass  # already have this exact transfer
+                elif route_key in pending_by_plant_route:
+                    # Auto-confirm the existing pending transfer
+                    pending_id = pending_by_plant_route.pop(route_key)
+                    transfers_to_confirm.append((pending_id, event_date))
+                    existing_transfer_keys.add(exact_key)
+                else:
+                    transfers_to_insert.append((
+                        str(pid), from_loc, to_loc, event_date, event_date,
+                        "confirmed", "inbound", AUTO_REBUILD_MARKER,
+                    ))
+                    existing_transfer_keys.add(exact_key)
 
                 spans.append(current_span)
                 current_span = {
@@ -1951,37 +2039,142 @@ async def rebuild_location_timeline(plant_ids: list) -> dict[str, int]:
                 pid, span["location_id"], span["start_date"], end_date, "Weekly report",
             ))
 
-    # === 1 query: delete old history ===
-    await execute(
+    logger.info(
+        "rebuild: built in-memory data",
+        history_inserts=len(history_inserts),
+        events_to_create=len(events_to_create),
+        transfers_to_insert=len(transfers_to_insert),
+        transfers_to_confirm=len(transfers_to_confirm),
+    )
+
+    # === 1 query: delete old history (we rebuild from scratch) ===
+    del_hist = await execute(
         "DELETE FROM plant_location_history WHERE plant_id = ANY($1::uuid[])",
         plant_ids,
     )
+    logger.info("rebuild: deleted old history", result=del_hist)
 
-    # === 1 query: batch insert history ===
+    # === Insert history in two passes to avoid `close_previous_location` trigger
+    # which auto-closes any open spans when a new row is inserted.
+    #
+    # Pass 1: insert ALL spans with explicit end_date (no NULLs).
+    # Pass 2: UPDATE the spans that should be current (matching plants_master)
+    #         to set end_date = NULL.
     if history_inserts:
-        await executemany(
-            """INSERT INTO plant_location_history (plant_id, location_id, start_date, end_date, transfer_reason)
-               VALUES ($1::uuid, $2::uuid, $3, $4, $5)""",
-            history_inserts,
-        )
+        try:
+            # Pass 1: insert with all explicit end_dates (no NULLs)
+            await executemany(
+                """INSERT INTO plant_location_history (plant_id, location_id, start_date, end_date, transfer_reason)
+                   VALUES ($1::uuid, $2::uuid, $3::timestamptz, $4::timestamptz, $5)""",
+                [
+                    (
+                        str(pid), str(location_id), start_date,
+                        # If end_date was None (current span), use start_date as placeholder
+                        end_date if end_date is not None else start_date,
+                        reason,
+                    )
+                    for (pid, location_id, start_date, end_date, reason) in history_inserts
+                ],
+            )
+            logger.info("rebuild: history Pass 1 inserted", count=len(history_inserts))
+        except Exception as e:
+            logger.error(
+                "rebuild: history Pass 1 INSERT failed",
+                error=repr(e),
+                sample_row=history_inserts[0] if history_inserts else None,
+                sample_types={
+                    "pid_type": type(history_inserts[0][0]).__name__ if history_inserts else None,
+                    "loc_type": type(history_inserts[0][1]).__name__ if history_inserts else None,
+                    "start_type": type(history_inserts[0][2]).__name__ if history_inserts else None,
+                    "end_type": type(history_inserts[0][3]).__name__ if history_inserts else None,
+                },
+                traceback=traceback.format_exc(),
+            )
+            raise
 
-    # === 1 query: batch insert events ===
+        # Pass 2: clear end_date for spans matching plant's current_location_id.
+        try:
+            await execute(
+                """UPDATE plant_location_history h
+                   SET end_date = NULL
+                   FROM (
+                     SELECT h2.plant_id, h2.location_id, MAX(h2.start_date) AS max_start
+                     FROM plant_location_history h2
+                     JOIN plants_master pm ON pm.id = h2.plant_id
+                     WHERE h2.plant_id = ANY($1::uuid[])
+                       AND h2.location_id = pm.current_location_id
+                     GROUP BY h2.plant_id, h2.location_id
+                   ) current_spans
+                   WHERE h.plant_id = current_spans.plant_id
+                     AND h.location_id = current_spans.location_id
+                     AND h.start_date = current_spans.max_start""",
+                plant_ids,
+            )
+            logger.info("rebuild: history Pass 2 (NULL out current) done")
+        except Exception as e:
+            logger.error("rebuild: history Pass 2 UPDATE failed", error=repr(e), traceback=traceback.format_exc())
+            raise
+
+    # === 1 query: batch insert events (explicit ::date cast) ===
     if events_to_create:
-        await executemany(
-            """INSERT INTO plant_events (plant_id, event_type, event_date, year, week_number,
-                from_location_id, to_location_id, details, remarks)
-            VALUES ($1::uuid, $2, $3, $4, $5, $6::uuid, $7::uuid, $8::jsonb, $9)""",
-            events_to_create,
-        )
+        try:
+            await executemany(
+                """INSERT INTO plant_events (plant_id, event_type, event_date, year, week_number,
+                    from_location_id, to_location_id, details, remarks)
+                VALUES ($1::uuid, $2, $3::date, $4, $5, $6::uuid, $7::uuid, $8::jsonb, $9)""",
+                events_to_create,
+            )
+            logger.info("rebuild: events inserted", count=len(events_to_create))
+        except Exception as e:
+            logger.error("rebuild: events INSERT failed", error=repr(e), traceback=traceback.format_exc())
+            raise
+
+    # === 1 query: batch insert NEW transfers (with AUTO_REBUILD marker) ===
+    if transfers_to_insert:
+        try:
+            await executemany(
+                """INSERT INTO plant_transfers (plant_id, from_location_id, to_location_id,
+                    transfer_date, actual_arrival_date, status, direction, source_remarks)
+                VALUES ($1::uuid, $2::uuid, $3::uuid, $4::date, $5::date, $6, $7, $8)""",
+                transfers_to_insert,
+            )
+            logger.info("rebuild: transfers inserted", count=len(transfers_to_insert))
+        except Exception as e:
+            logger.error("rebuild: transfers INSERT failed", error=repr(e), traceback=traceback.format_exc())
+            raise
+
+    # === 1 query: batch confirm pending transfers (UPDATE existing) ===
+    if transfers_to_confirm:
+        try:
+            await executemany(
+                """UPDATE plant_transfers
+                   SET status = 'confirmed',
+                       actual_arrival_date = $2::date,
+                       confirmed_at = now(),
+                       updated_at = now()
+                   WHERE id = $1::uuid""",
+                transfers_to_confirm,
+            )
+            logger.info("rebuild: pending transfers auto-confirmed", count=len(transfers_to_confirm))
+        except Exception as e:
+            logger.error("rebuild: transfers UPDATE failed", error=repr(e), traceback=traceback.format_exc())
+            raise
 
     logger.info(
-        "Rebuilt location timeline",
+        "rebuild_location_timeline DONE",
         plants=len(plant_records),
         history_records=len(history_inserts),
-        new_events=len(events_to_create),
+        movement_events=len(events_to_create),
+        transfers_inserted=len(transfers_to_insert),
+        transfers_confirmed=len(transfers_to_confirm),
     )
 
-    return {"history": len(history_inserts), "events": len(events_to_create)}
+    return {
+        "history": len(history_inserts),
+        "events": len(events_to_create),
+        "transfers_inserted": len(transfers_to_insert),
+        "transfers_confirmed": len(transfers_to_confirm),
+    }
 
 
 async def _create_notification(
@@ -2624,53 +2817,19 @@ async def save_confirmed_weekly_report(
                 })
                 notification_summaries["returned_plants"].append(fleet_num)
 
-            # Event: Movement (location changed from a different known location)
-            elif prev_location and prev_location != location_id and not is_brand_new:
-                events_to_create.append({
-                    "plant_id": plant_id,
-                    "event_type": "movement",
-                    "event_date": week_ending_date,
-                    "year": year,
-                    "week_number": week_number,
-                    "from_location_id": prev_location,
-                    "to_location_id": location_id,
-                    "submission_id": submission_id,
-                    "details": {"fleet_number": fleet_num},
-                    "remarks": f"Plant {fleet_num} moved to {location_name}",
-                })
+            # NOTE: 'movement' events are created by rebuild_location_timeline()
+            # at the end of this function, derived from plant_weekly_records.
+            # We only track outbound/inbound counts here for notifications.
 
-            # Event: Outbound transfer
+            # Track outbound transfer for notifications (the actual transfer record
+            # is created in the transfers_to_create list above)
             transfer_to_id = plant_data.get("transfer_to_location_id")
             if transfer_to_id:
-                events_to_create.append({
-                    "plant_id": plant_id,
-                    "event_type": "movement",
-                    "event_date": week_ending_date,
-                    "year": year,
-                    "week_number": week_number,
-                    "from_location_id": location_id,
-                    "to_location_id": transfer_to_id,
-                    "submission_id": submission_id,
-                    "details": {"fleet_number": fleet_num, "direction": "outbound"},
-                    "remarks": f"Plant {fleet_num} transferred out from {location_name}",
-                })
                 notification_summaries["transfers_out"].append(fleet_num)
 
-            # Event: Inbound transfer
+            # Track inbound transfer for notifications
             transfer_from_id = plant_data.get("transfer_from_location_id")
             if transfer_from_id:
-                events_to_create.append({
-                    "plant_id": plant_id,
-                    "event_type": "movement",
-                    "event_date": week_ending_date,
-                    "year": year,
-                    "week_number": week_number,
-                    "from_location_id": transfer_from_id,
-                    "to_location_id": location_id,
-                    "submission_id": submission_id,
-                    "details": {"fleet_number": fleet_num, "direction": "inbound"},
-                    "remarks": f"Plant {fleet_num} received at {location_name}",
-                })
                 notification_summaries["transfers_in"].append(fleet_num)
 
         # Events for missing plant actions
@@ -2801,14 +2960,24 @@ async def save_confirmed_weekly_report(
             result["plants_processed"], result["plants_created"], result["plants_updated"],
         )
 
-        # Rebuild location history and events from weekly records
-        # Single function, 6 DB queries total regardless of plant count.
+        # Rebuild location history and events from weekly records.
+        # Log full traceback if it fails so we can diagnose, but don't crash the upload.
         all_plant_ids = list(fleet_to_id.values())
+        logger.info(
+            "Calling rebuild_location_timeline",
+            plant_count=len(all_plant_ids),
+            sample_plant_ids=all_plant_ids[:3],
+        )
         if all_plant_ids:
             try:
-                await rebuild_location_timeline(all_plant_ids)
+                rebuild_result = await rebuild_location_timeline(all_plant_ids)
+                logger.info("rebuild_location_timeline succeeded", **rebuild_result)
             except Exception as e:
-                logger.warning("Failed to rebuild location timeline in confirmed save", error=str(e))
+                logger.error(
+                    "Failed to rebuild location timeline in confirmed save",
+                    error=repr(e),
+                    traceback=traceback.format_exc(),
+                )
 
         result["success"] = True
         broadcast("plants", "import", f"{result['plants_processed']} plants saved")
