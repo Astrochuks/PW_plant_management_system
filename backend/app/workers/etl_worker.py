@@ -377,43 +377,57 @@ def map_columns(df: pd.DataFrame, column_map: dict[str, str]) -> pd.DataFrame:
     return df.rename(columns=rename_map)
 
 
-def expand_merged_cells(file_content: bytes) -> bytes:
-    """Read an Excel file, unmerge all merged cells, and propagate the values.
+def recover_merged_remarks(df: pd.DataFrame) -> pd.DataFrame:
+    """Fix rows where merged cells put remark text in the wrong column.
 
-    Excel files often have merged cells where text spans multiple columns
-    (e.g., "January 2023 physical verification - Missing" centered across
-    HOURS WORKED → REMARK columns). When pandas/openpyxl reads merged cells,
-    only the top-left cell has the value — others are None.
+    In some Excel files (e.g., Abuja), rows like "January 2023 physical
+    verification - Missing" have a merged cell spanning from HOURS WORKED
+    through REMARK. When pandas reads this, the text lands in HOURS WORKED
+    (the leftmost cell of the merge) and REMARK is empty.
 
-    This helper unmerges every merged range and copies the top-left value
-    into every cell of the range, so subsequent reads see the data in
-    every column the merge spanned.
+    This function detects rows where numeric columns (hours_worked,
+    standby_hours, breakdown_hours) contain non-numeric text and moves
+    that text to the remarks column.
 
-    Returns the modified file as bytes.
+    Fast — operates on the DataFrame in memory, no openpyxl round-trip.
     """
-    from openpyxl import load_workbook
+    # Columns that should be numeric but might contain merged remark text
+    numeric_cols = ["hours_worked", "standby_hours", "breakdown_hours"]
+    existing_cols = [c for c in numeric_cols if c in df.columns]
 
-    try:
-        wb = load_workbook(io.BytesIO(file_content))
-        for ws in wb.worksheets:
-            # Snapshot the merged ranges (we'll mutate the collection)
-            merged_ranges = list(ws.merged_cells.ranges)
-            for merged_range in merged_ranges:
-                min_col, min_row, max_col, max_row = merged_range.bounds
-                top_left_value = ws.cell(row=min_row, column=min_col).value
-                # Unmerge first
-                ws.unmerge_cells(str(merged_range))
-                # Then propagate the value to every cell in the previously-merged range
-                for r in range(min_row, max_row + 1):
-                    for c in range(min_col, max_col + 1):
-                        ws.cell(row=r, column=c).value = top_left_value
+    if not existing_cols or "remarks" not in df.columns:
+        return df
 
-        out = io.BytesIO()
-        wb.save(out)
-        return out.getvalue()
-    except Exception as e:
-        logger.warning("Failed to expand merged cells, using original file", error=str(e))
-        return file_content
+    for idx, row in df.iterrows():
+        # Skip rows that already have remarks
+        if pd.notna(row.get("remarks")) and str(row.get("remarks", "")).strip():
+            continue
+
+        # Check each numeric column for text content
+        for col in existing_cols:
+            val = row.get(col)
+            if pd.isna(val):
+                continue
+
+            val_str = str(val).strip()
+            if not val_str:
+                continue
+
+            # Is this text, not a number?
+            try:
+                float(val_str)
+                continue  # It's a valid number, skip
+            except ValueError:
+                pass
+
+            # Found text in a numeric column — move it to remarks
+            if len(val_str) > 3:  # Ignore short garbage like "nan"
+                df.at[idx, "remarks"] = val_str
+                # Clear the numeric column so parse_hours returns 0
+                df.at[idx, col] = None
+                break  # Only take the first text found
+
+    return df
 
 
 def find_header_row(file_content: bytes | io.BytesIO, max_rows: int = 10) -> int:
@@ -565,11 +579,6 @@ async def process_weekly_report(
         storage_client = get_supabase_admin_client()
         file_data = storage_client.storage.from_("reports").download(storage_path)
 
-        # Expand merged cells so text spanning multiple columns (e.g., the
-        # "January 2023 physical verification - Missing" rows) is visible
-        # in the REMARK column when we read it.
-        file_data = expand_merged_cells(file_data)
-
         # Parse Excel file
         df_raw = pd.read_excel(io.BytesIO(file_data), sheet_name=0, header=None)
         extracted_location, week_ending = extract_metadata(df_raw)
@@ -579,6 +588,9 @@ async def process_weekly_report(
         logger.info("Detected header row", header_row=header_row, job_id=job_id)
         df = pd.read_excel(io.BytesIO(file_data), sheet_name=0, header=header_row)
         df = map_columns(df, WEEKLY_COLUMN_MAP)
+
+        # Fix merged cells: move text from numeric columns to remarks
+        df = recover_merged_remarks(df)
 
         if "fleet_number" not in df.columns:
             result["errors"].append("No fleet_number column found in file")

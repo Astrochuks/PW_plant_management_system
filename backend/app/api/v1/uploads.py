@@ -1172,7 +1172,7 @@ async def preview_weekly_report(
         find_header_row,
         WEEKLY_COLUMN_MAP,
         map_columns,
-        expand_merged_cells,
+        recover_merged_remarks,
     )
 
     settings = get_settings()
@@ -1196,10 +1196,6 @@ async def preview_weekly_report(
         user_id=current_user.id,
     )
 
-    # Expand merged cells (e.g., "January 2023 physical verification - Missing"
-    # rows that span multiple columns) so the REMARK column gets the value.
-    file_content = expand_merged_cells(file_content)
-
     # Parse Excel file
     df_raw = pd.read_excel(io.BytesIO(file_content), sheet_name=0, header=None)
 
@@ -1208,6 +1204,9 @@ async def preview_weekly_report(
     logger.info("Detected header row", header_row=header_row)
     df = pd.read_excel(io.BytesIO(file_content), sheet_name=0, header=header_row)
     df = map_columns(df, WEEKLY_COLUMN_MAP)
+
+    # Fix merged cells: move text from numeric columns to remarks
+    df = recover_merged_remarks(df)
 
     if "fleet_number" not in df.columns:
         raise ValidationError("No fleet_number column found in file")
