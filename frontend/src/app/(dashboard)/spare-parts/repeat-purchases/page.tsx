@@ -23,12 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
+// Tooltip removed — PO badges are now clickable links
 import { useRepeatPurchases, type RepeatPurchase } from '@/hooks/use-spare-parts';
 
 function formatNGN(amount: number): string {
@@ -314,7 +309,6 @@ function RepeatPurchaseRow({ item }: { item: RepeatPurchase }) {
   };
 
   return (
-    <TooltipProvider>
       <TableRow className={rowBg}>
         <TableCell>
           <SeverityBadge severity={item.severity} />
@@ -350,14 +344,11 @@ function RepeatPurchaseRow({ item }: { item: RepeatPurchase }) {
         <TableCell>
           <div className="flex flex-wrap gap-1">
             {item.po_numbers.map((po) => (
-              <Tooltip key={po}>
-                <TooltipTrigger>
-                  <Badge variant="outline" className="text-[10px] font-mono cursor-default">
-                    {po.length > 18 ? po.slice(0, 18) + '...' : po}
-                  </Badge>
-                </TooltipTrigger>
-                <TooltipContent>{po}</TooltipContent>
-              </Tooltip>
+              <Link key={po} href={`/spare-parts/po/${encodeURIComponent(po)}`}>
+                <Badge variant="outline" className="text-[10px] font-mono cursor-pointer hover:bg-primary/10 hover:border-primary transition-colors">
+                  {po.length > 20 ? po.slice(0, 20) + '...' : po}
+                </Badge>
+              </Link>
             ))}
           </div>
         </TableCell>
@@ -370,6 +361,5 @@ function RepeatPurchaseRow({ item }: { item: RepeatPurchase }) {
           {formatDate(item.first_purchase_date)} — {formatDate(item.last_purchase_date)}
         </TableCell>
       </TableRow>
-    </TooltipProvider>
   );
 }
