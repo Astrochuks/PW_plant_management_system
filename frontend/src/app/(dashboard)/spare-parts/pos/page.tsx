@@ -234,7 +234,8 @@ function PurchaseOrdersPageInner() {
             <TableHeader>
               <TableRow>
                 <TableHead className="w-[150px]">PO Number</TableHead>
-                <TableHead className="w-[100px]">Date</TableHead>
+                <TableHead className="w-[100px]">PO Date</TableHead>
+                <TableHead className="w-[100px]">Date Entered</TableHead>
                 <TableHead>Vendor</TableHead>
                 <TableHead className="w-[150px]">Location</TableHead>
                 <TableHead className="w-[80px] text-center">Items</TableHead>
@@ -253,6 +254,11 @@ function PurchaseOrdersPageInner() {
                   <TableCell className="font-mono font-medium">{po.po_number}</TableCell>
                   <TableCell className="text-sm">
                     {po.po_date ? formatDate(po.po_date) : '-'}
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {po.created_at ? new Date(po.created_at).toLocaleDateString('en-GB', {
+                      day: '2-digit', month: 'short', year: '2-digit',
+                    }) : '-'}
                   </TableCell>
                   <TableCell className="truncate max-w-[200px]" title={po.vendor}>
                     {po.vendor || '-'}

@@ -1014,6 +1014,7 @@ export interface RepeatPurchase {
   price_ratio: number;
   first_purchase_date: string | null;
   last_purchase_date: string | null;
+  last_entered_at: string | null;
   po_numbers: string[];
   suppliers: string[];
   severity: 'critical' | 'warning' | 'info' | 'normal';

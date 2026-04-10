@@ -2071,7 +2071,7 @@ async def get_repeat_purchases(
     plant_id: UUID | None = Query(None, description="Filter by specific plant"),
     location_id: UUID | None = Query(None, description="Filter by location"),
     include_consumables: bool = Query(True, description="Include consumables like oil, filters"),
-    sort_by: str = Query("price_ratio", pattern="^(price_ratio|total_spent|purchase_count|part_name|fleet_number)$"),
+    sort_by: str = Query("last_purchase_date", pattern="^(price_ratio|total_spent|purchase_count|part_name|fleet_number|last_purchase_date|first_purchase_date)$"),
     sort_order: str = Query("desc", pattern="^(asc|desc)$"),
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=200),
@@ -2103,8 +2103,8 @@ async def get_repeat_purchases(
     where = " AND ".join(conds) if conds else "TRUE"
 
     # Validate sort column (whitelist to prevent SQL injection)
-    allowed_sorts = {"price_ratio", "total_spent", "purchase_count", "part_name", "fleet_number"}
-    safe_sort = sort_by if sort_by in allowed_sorts else "price_ratio"
+    allowed_sorts = {"price_ratio", "total_spent", "purchase_count", "part_name", "fleet_number", "last_purchase_date", "first_purchase_date"}
+    safe_sort = sort_by if sort_by in allowed_sorts else "last_purchase_date"
     safe_order = "ASC" if sort_order == "asc" else "DESC"
 
     # Add fixed params: min_occurrences, min_price_ratio, limit, offset
@@ -2142,6 +2142,7 @@ async def get_repeat_purchases(
                 END AS price_ratio,
                 min(sp.po_date) AS first_purchase_date,
                 max(sp.po_date) AS last_purchase_date,
+                max(sp.created_at) AS last_entered_at,
                 array_agg(DISTINCT sp.purchase_order_number ORDER BY sp.purchase_order_number) AS po_numbers,
                 array_agg(DISTINCT COALESCE(s.name, sp.supplier) ORDER BY COALESCE(s.name, sp.supplier)) AS suppliers
               FROM spare_parts sp
@@ -2183,6 +2184,8 @@ async def get_repeat_purchases(
             row["first_purchase_date"] = str(row["first_purchase_date"])
         if row.get("last_purchase_date"):
             row["last_purchase_date"] = str(row["last_purchase_date"])
+        if row.get("last_entered_at"):
+            row["last_entered_at"] = str(row["last_entered_at"])
 
     # Summary stats
     total_items = total

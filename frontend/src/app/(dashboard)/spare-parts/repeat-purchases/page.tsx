@@ -88,7 +88,7 @@ function StatCard({ label, value, subtext, color }: { label: string; value: stri
 export default function RepeatPurchasesPage() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
-  const [sortBy, setSortBy] = useState('price_ratio');
+  const [sortBy, setSortBy] = useState('last_purchase_date');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [severityFilter, setSeverityFilter] = useState('all');
 
@@ -253,7 +253,12 @@ export default function RepeatPurchasesPage() {
                   </TableHead>
                   <TableHead className="min-w-[180px]">PO Numbers</TableHead>
                   <TableHead className="min-w-[120px]">Suppliers</TableHead>
-                  <TableHead className="w-[100px]">Date Range</TableHead>
+                  <TableHead
+                    className="w-[110px] cursor-pointer hover:text-foreground"
+                    onClick={() => handleSort('last_purchase_date')}
+                  >
+                    Latest PO {sortBy === 'last_purchase_date' && (sortOrder === 'desc' ? '↓' : '↑')}
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -357,8 +362,11 @@ function RepeatPurchaseRow({ item }: { item: RepeatPurchase }) {
             {item.suppliers.filter(Boolean).join(', ') || '-'}
           </div>
         </TableCell>
-        <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-          {formatDate(item.first_purchase_date)} — {formatDate(item.last_purchase_date)}
+        <TableCell className="whitespace-nowrap">
+          <div className="text-sm">{formatDate(item.last_purchase_date)}</div>
+          {item.first_purchase_date !== item.last_purchase_date && (
+            <div className="text-[10px] text-muted-foreground">First: {formatDate(item.first_purchase_date)}</div>
+          )}
         </TableCell>
       </TableRow>
   );
