@@ -15,6 +15,7 @@ from app.core.security import (
     require_admin,
     require_management_or_admin,
 )
+from app.core.events import broadcast
 from app.monitoring.logging import get_logger
 from app.services.audit_service import audit_service
 
@@ -96,7 +97,7 @@ async def list_spare_parts(
     search: str | None = None,
 ) -> dict[str, Any]:
     """List spare parts (PO line items) with filtering and pagination."""
-    conds: list[str] = ["COALESCE(sp.is_po_overhead, false) = false"]
+    conds: list[str] = []
     params: list[Any] = []
 
     if plant_id:
@@ -155,9 +156,11 @@ async def list_spare_parts(
         f"""SELECT sp.*,
                    pm.fleet_number, pm.description AS plant_description,
                    COALESCE(s.name, sp.supplier) AS supplier_name,
+                   COALESCE(pl.is_bua, false) AS is_bua,
                    count(*) OVER() AS _total_count
             FROM spare_parts sp
             LEFT JOIN plants_master pm ON pm.id = sp.plant_id
+            LEFT JOIN locations pl ON pl.id = pm.current_location_id
             LEFT JOIN suppliers s ON s.id = sp.supplier_id
             WHERE {where}
             ORDER BY sp.replaced_date DESC NULLS LAST
@@ -254,13 +257,23 @@ async def get_spare_parts_stats(
     quarter: int | None = Query(None, ge=1, le=4, description="Filter by quarter (1-4)"),
     location_id: UUID | None = Query(None, description="Filter by location"),
     supplier_id: UUID | None = Query(None, description="Filter by supplier"),
+    fleet_number: str | None = Query(None, description="Filter by fleet number (text search)"),
+    supplier: str | None = Query(None, description="Filter by supplier name (text search)"),
+    search: str | None = Query(None, description="Search part description or number"),
+    date_from: date | None = Query(None, description="Filter from date (YYYY-MM-DD)"),
+    date_to: date | None = Query(None, description="Filter to date (YYYY-MM-DD)"),
 ) -> dict[str, Any]:
     """Get spare parts statistics."""
     row = await fetchrow(
-        "SELECT * FROM get_spare_parts_stats($1, $2, $3, $4, $5, $6)",
+        "SELECT * FROM get_spare_parts_stats($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
         year, month, week, quarter,
         str(location_id) if location_id else None,
         str(supplier_id) if supplier_id else None,
+        fleet_number.upper() if fleet_number else None,
+        supplier or None,
+        search or None,
+        date_from,
+        date_to,
     )
 
     return {
@@ -271,9 +284,25 @@ async def get_spare_parts_stats(
                 "year": year, "month": month, "week": week, "quarter": quarter,
                 "location_id": str(location_id) if location_id else None,
                 "supplier_id": str(supplier_id) if supplier_id else None,
+                "fleet_number": fleet_number,
+                "supplier_name": supplier,
+                "search": search,
+                "date_from": date_from.isoformat() if date_from else None,
+                "date_to": date_to.isoformat() if date_to else None,
             },
         },
     }
+
+
+@router.get("/years")
+async def get_spare_parts_years(
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+) -> dict[str, Any]:
+    """Get list of years that have spare parts data."""
+    rows = await fetch(
+        "SELECT DISTINCT year FROM spare_parts WHERE year IS NOT NULL ORDER BY year DESC"
+    )
+    return {"success": True, "data": [r["year"] for r in rows]}
 
 
 @router.get("/top-suppliers")
@@ -308,6 +337,47 @@ async def get_high_cost_plants(
     )
 
     return {"success": True, "data": data}
+
+
+@router.get("/top-sites")
+async def get_top_sites(
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+    year: int | None = Query(None, description="Filter by year"),
+    month: int | None = Query(None, ge=1, le=12, description="Filter by month"),
+    quarter: int | None = Query(None, ge=1, le=4, description="Filter by quarter"),
+) -> dict[str, Any]:
+    """Get all sites/locations ranked by total maintenance spend."""
+    conds = ["sp.location_id IS NOT NULL"]
+    params: list[Any] = []
+    if year:
+        params.append(year)
+        conds.append(f"sp.year = ${len(params)}")
+    if month:
+        params.append(month)
+        conds.append(f"sp.month = ${len(params)}")
+    if quarter:
+        params.append(quarter)
+        conds.append(f"sp.quarter = ${len(params)}")
+
+    where = " AND ".join(conds)
+
+    rows = await fetch(
+        f"""SELECT
+                l.id AS location_id,
+                l.name AS location_name,
+                COALESCE(SUM(sp.total_cost), 0)::float AS total_spend,
+                COUNT(*)::int AS items_count,
+                COUNT(DISTINCT sp.purchase_order_number)::int AS po_count,
+                COUNT(DISTINCT sp.plant_id)::int AS plants_count
+            FROM spare_parts sp
+            JOIN locations l ON l.id = sp.location_id
+            WHERE {where}
+            GROUP BY l.id, l.name
+            ORDER BY total_spend DESC""",
+        *params,
+    )
+
+    return {"success": True, "data": rows}
 
 
 @router.post("", status_code=201)
@@ -426,6 +496,8 @@ async def create_spare_part(
         description=f"Created spare part for {resolved_fleet_number}: {part_description}",
     )
 
+    broadcast("spare_parts", "create")
+
     return {
         "success": True,
         "data": {**created, "fleet_number": resolved_fleet_number},
@@ -450,6 +522,7 @@ async def create_spare_parts_bulk(
     discount_percentage: float | None = Query(None, ge=0, le=100, description="Discount %"),
     discount_amount: float | None = Query(None, ge=0, description="Total discount amount"),
     other_costs: float = Query(default=0, ge=0, description="Other costs"),
+    other_costs_description: str | None = Query(None, description="Description of other costs"),
 ) -> dict[str, Any]:
     """UNIFIED PO ENTRY - Handles ALL scenarios."""
     import json
@@ -644,15 +717,10 @@ async def create_spare_parts_bulk(
 
         frac = item_subtotal / subtotal if subtotal > 0 else 0
 
-        # Multi-fleet POs: VAT/discount/other stay at PO level (overhead row)
-        if is_multi_fleet:
-            item_vat = None
-            item_discount = None
-            item_other = 0
-        else:
-            item_vat = round(total_vat * frac, 2) if total_vat * frac > 0 else None
-            item_discount = round(total_discount * frac, 2) if total_discount * frac > 0 else None
-            item_other = round(other_costs * frac, 2) if other_costs * frac > 0 else None
+        # Distribute VAT/discount/other proportionally to all line items
+        item_vat = round(total_vat * frac, 2) if total_vat * frac > 0 else None
+        item_discount = round(total_discount * frac, 2) if total_discount * frac > 0 else None
+        item_other = round(other_costs * frac, 2) if other_costs * frac > 0 else None
 
         rows.append((
             fleet.get("plant_id"),       # plant_id
@@ -678,6 +746,7 @@ async def create_spare_parts_bulk(
             calc_year, calc_month, calc_week, calc_quarter,
             current_user.id,
             False,                       # is_po_overhead
+            other_costs_description,     # other_costs_description
         ))
         direct_count += 1
 
@@ -689,10 +758,12 @@ async def create_spare_parts_bulk(
         item_unit_cost = item.get("unit_cost") or 0
 
         if is_multi_fleet:
-            # Multi-fleet: VAT/discount go to overhead row; shared item has no plant_id
-            item_vat = None
-            item_discount = None
-            item_other = 0
+            # Multi-fleet: distribute VAT/discount proportionally; shared item has no plant_id
+            item_subtotal = item_unit_cost * (item.get("quantity") or 1)
+            frac = item_subtotal / subtotal if subtotal > 0 else 0
+            item_vat = round(total_vat * frac, 2) if total_vat * frac > 0 else None
+            item_discount = round(total_discount * frac, 2) if total_discount * frac > 0 else None
+            item_other = round(other_costs * frac, 2) if other_costs * frac > 0 else None
             row_plant_id = None
             row_fleet_raw = None
             row_is_workshop = False
@@ -736,38 +807,9 @@ async def create_spare_parts_bulk(
             calc_year, calc_month, calc_week, calc_quarter,
             current_user.id,
             False,                       # is_po_overhead
+            other_costs_description,     # other_costs_description
         ))
         shared_count += 1
-
-    # Create PO overhead row for multi-fleet POs with VAT/discount/other
-    # Each submission gets its own overhead row (no merging across submissions)
-    has_overhead = is_multi_fleet and (total_vat > 0 or total_discount > 0 or other_costs > 0)
-    if has_overhead:
-        rows.append((
-            None,                            # plant_id
-            None,                            # assigned_plant_id
-            None,                            # fleet_number_raw
-            False,                           # is_workshop
-            False,                           # is_category
-            None,                            # category_name
-            "shared",                        # cost_type
-            "PO Overhead (VAT/Discount/Other)",  # part_description
-            None,                            # part_number
-            1,                               # quantity
-            0,                               # unit_cost (zero — cost from vat/discount/other)
-            po_upper,
-            date_val,
-            req_upper,
-            loc_str,
-            sup_id_str,
-            resolved_supplier_name,
-            round(total_vat, 2) if total_vat > 0 else None,
-            round(total_discount, 2) if total_discount > 0 else None,
-            round(other_costs, 2) if other_costs > 0 else None,
-            calc_year, calc_month, calc_week, calc_quarter,
-            current_user.id,
-            True,                            # is_po_overhead
-        ))
 
     # Single batch INSERT in a transaction with triggers disabled for speed.
     # Triggers skipped: audit_spare_parts (we log via background task already),
@@ -779,7 +821,8 @@ async def create_spare_parts_bulk(
          category_names, cost_types, descriptions, part_numbers, quantities,
          unit_costs, po_numbers, po_dates, req_numbers, loc_ids, sup_ids,
          sup_names, vat_amounts, disc_amounts, other_amounts,
-         years, months, weeks, quarters, created_bys, po_overheads) = zip(*rows)
+         years, months, weeks, quarters, created_bys, po_overheads,
+         other_descs) = zip(*rows)
 
         insert_args = [
             [str(v) if v else None for v in plant_ids],
@@ -809,6 +852,7 @@ async def create_spare_parts_bulk(
             [str(v) for v in created_bys],
             list(po_overheads),
             [next_sub] * len(rows),
+            list(other_descs),
         ]
 
         pool = get_pool()
@@ -826,7 +870,7 @@ async def create_spare_parts_bulk(
                             location_id, supplier_id, supplier,
                             vat_amount, discount_amount, other_costs, vat_percentage, discount_percentage,
                             year, month, week_number, quarter, created_by, is_po_overhead,
-                            submission_number)
+                            submission_number, other_costs_description)
                        SELECT
                             u.plant_id::uuid, u.assigned_id::uuid, u.fleet_raw, u.is_ws, u.is_cat,
                             u.cat_name, u.ctype, u.descr, u.part_no, u.qty, u.ucost,
@@ -834,20 +878,20 @@ async def create_spare_parts_bulk(
                             u.loc::uuid, u.sup_id::uuid, u.sup_name,
                             u.vat_amt, u.disc_amt, u.other_amt, 0, 0,
                             u.yr, u.mo, u.wk, u.qtr, u.cb::uuid, u.is_overhead,
-                            u.sub_num
+                            u.sub_num, u.other_desc
                        FROM UNNEST(
                             $1::text[], $2::text[], $3::text[], $4::bool[], $5::bool[],
                             $6::text[], $7::text[], $8::text[], $9::text[], $10::int[],
                             $11::float[], $12::text[], $13::date[], $14::text[], $15::text[],
                             $16::text[], $17::text[], $18::float[], $19::float[], $20::float[],
                             $21::int[], $22::int[], $23::int[], $24::int[], $25::text[],
-                            $26::bool[], $27::int[]
+                            $26::bool[], $27::int[], $28::text[]
                        ) AS u(plant_id, assigned_id, fleet_raw, is_ws, is_cat,
                               cat_name, ctype, descr, part_no, qty, ucost,
                               po_num, po_dt, req_num, loc, sup_id,
                               sup_name, vat_amt, disc_amt, other_amt,
                               yr, mo, wk, qtr, cb, is_overhead,
-                              sub_num)""",
+                              sub_num, other_desc)""",
                     *insert_args,
                 )
                 # result is like "INSERT 0 10" — parse the count
@@ -860,8 +904,7 @@ async def create_spare_parts_bulk(
                            SET shared_fleet_numbers = $1::text[]
                            WHERE purchase_order_number = $2
                              AND submission_number = $3
-                             AND cost_type = 'shared'
-                             AND NOT COALESCE(is_po_overhead, false)""",
+                             AND cost_type = 'shared'""",
                         shared_fleet_list, po_upper, next_sub,
                     )
 
@@ -888,6 +931,8 @@ async def create_spare_parts_bulk(
         ip_address=get_client_ip(request),
         description=f"PO {po_upper}: {len(items_list)} items for {', '.join(resolved_fleets)}",
     )
+
+    broadcast("spare_parts", "create")
 
     return {
         "success": True,
@@ -927,6 +972,7 @@ async def create_spare_parts_entry(
     discount_percentage: float | None = Query(None, ge=0, le=100),
     discount_amount: float | None = Query(None, ge=0),
     other_costs: float = Query(default=0, ge=0),
+    other_costs_description: str | None = Query(None),
 ) -> dict[str, Any]:
     """Alias for /bulk - use /bulk instead."""
     return await create_spare_parts_bulk(
@@ -934,6 +980,7 @@ async def create_spare_parts_entry(
         fleet_numbers, purchase_order_number, items, po_date,
         requisition_number, location_id, supplier,
         vat_percentage, vat_amount, discount_percentage, discount_amount, other_costs,
+        other_costs_description,
     )
 
 
@@ -955,6 +1002,7 @@ async def create_spare_parts_legacy(
     discount_percentage: float | None = Query(None, ge=0, le=100),
     discount_amount: float | None = Query(None, ge=0),
     other_costs: float = Query(default=0, ge=0),
+    other_costs_description: str | None = Query(None),
 ) -> dict[str, Any]:
     """Legacy endpoint - use /bulk with fleet_numbers instead."""
     return await create_spare_parts_bulk(
@@ -962,6 +1010,7 @@ async def create_spare_parts_legacy(
         fleet_number, purchase_order_number, items, po_date,
         requisition_number, location_id, supplier,
         vat_percentage, vat_amount, discount_percentage, discount_amount, other_costs,
+        other_costs_description,
     )
 
 
@@ -995,48 +1044,30 @@ async def get_spare_parts_by_po(
     for row in rows:
         sn = row.get("submission_number") or 1
         if sn not in sub_map:
-            sub_map[sn] = {"items": [], "overhead": None}
+            sub_map[sn] = []
         grand_total += float(row.get("total_cost") or 0)
-        if row.get("is_po_overhead"):
-            sub_map[sn]["overhead"] = row
-            combined_vat += float(row.get("vat_amount") or 0)
-            combined_discount += float(row.get("discount_amount") or 0)
-            combined_other += float(row.get("other_costs") or 0)
-        else:
-            sub_map[sn]["items"].append(row)
-            item_rows.append(row)
-            # For single-fleet POs, VAT is on the items themselves
-            if not row.get("is_po_overhead"):
-                combined_vat += float(row.get("vat_amount") or 0)
-                combined_discount += float(row.get("discount_amount") or 0)
+        sub_map[sn].append(row)
+        item_rows.append(row)
+        combined_vat += float(row.get("vat_amount") or 0)
+        combined_discount += float(row.get("discount_amount") or 0)
+        combined_other += float(row.get("other_costs") or 0)
 
     # Build per-submission breakdown
     submissions = []
     for sn in sorted(sub_map.keys()):
-        s = sub_map[sn]
-        oh = s["overhead"]
-        items = s["items"]
+        items = sub_map[sn]
         sub_subtotal = sum(
             (float(r.get("unit_cost") or 0) * (r.get("quantity") or 1))
             for r in items
         )
-        # VAT/discount: from overhead row if exists, else sum from items
-        if oh:
-            sub_vat = float(oh.get("vat_amount") or 0)
-            sub_discount = float(oh.get("discount_amount") or 0)
-            sub_other = float(oh.get("other_costs") or 0)
-        else:
-            sub_vat = sum(float(r.get("vat_amount") or 0) for r in items)
-            sub_discount = sum(float(r.get("discount_amount") or 0) for r in items)
-            sub_other = sum(float(r.get("other_costs") or 0) for r in items)
+        sub_vat = sum(float(r.get("vat_amount") or 0) for r in items)
+        sub_discount = sum(float(r.get("discount_amount") or 0) for r in items)
+        sub_other = sum(float(r.get("other_costs") or 0) for r in items)
         sub_total = sum(float(r.get("total_cost") or 0) for r in items)
-        if oh:
-            sub_total += float(oh.get("total_cost") or 0)
+        sub_other_desc = next((r.get("other_costs_description") for r in items if r.get("other_costs_description")), None)
 
-        # Document from overhead row (or first item with doc in this submission)
-        doc_row = oh if oh and oh.get("document_url") else None
-        if not doc_row:
-            doc_row = next((r for r in items if r.get("document_url")), None)
+        # Document from first item with doc in this submission
+        doc_row = next((r for r in items if r.get("document_url")), None)
 
         submissions.append({
             "submission_number": sn,
@@ -1045,6 +1076,7 @@ async def get_spare_parts_by_po(
             "vat_amount": round(sub_vat, 2),
             "discount_amount": round(sub_discount, 2),
             "other_costs": round(sub_other, 2),
+            "other_costs_description": sub_other_desc,
             "total": round(sub_total, 2),
             "document": {
                 "url": doc_row.get("document_url"),
@@ -1080,8 +1112,8 @@ async def get_spare_parts_by_po(
     has_shared_fleets = any(r.get("shared_fleet_numbers") for r in item_rows)
     po_cost_type = "direct" if len(distinct_plants) == 1 and not has_workshop and not has_category and not has_shared_fleets else "shared"
 
-    # Combined overhead (backward compat — sum across all submissions)
-    overhead = {
+    # Combined VAT/discount/other summary across all submissions
+    cost_breakdown = {
         "vat_amount": round(sum(s["vat_amount"] for s in submissions), 2),
         "discount_amount": round(sum(s["discount_amount"] for s in submissions), 2),
         "other_costs": round(sum(s["other_costs"] for s in submissions), 2),
@@ -1101,7 +1133,7 @@ async def get_spare_parts_by_po(
                 {"id": s["id"], "name": s["name"], "items_count": s["items_count"], "total_cost": round(s["total_cost"], 2)}
                 for s in suppliers_list
             ],
-            "overhead": overhead,
+            "overhead": cost_breakdown,
             "submissions": submissions,
         },
     }
@@ -1214,6 +1246,8 @@ async def update_po(
         description=f"Updated PO {po_number.upper()}: {', '.join(update_data.keys())}",
     )
 
+    broadcast("spare_parts", "update")
+
     return {
         "success": True,
         "message": f"Updated {len(existing)} items in PO {po_number.upper()}",
@@ -1254,6 +1288,8 @@ async def delete_po(
         ip_address=get_client_ip(request),
         description=f"Deleted PO {po_number.upper()} ({items_count} items, ₦{total_cost:,.2f})",
     )
+
+    broadcast("spare_parts", "delete")
 
     return {
         "success": True,
@@ -1301,20 +1337,19 @@ async def upload_po_document(
         logger.error("Failed to upload document", error=str(e), po_number=po_number)
         raise ValidationError(f"Failed to upload document: {str(e)}")
 
-    # Update the overhead row for this submission first (preferred single row)
-    result = await execute(
-        """UPDATE spare_parts
-           SET document_url = $1, document_name = $2, document_uploaded_at = now()
-           WHERE purchase_order_number ILIKE $3 AND submission_number = $4 AND is_po_overhead = true""",
-        document_url, file.filename, po_number, submission_number,
+    # Update the first row in this submission to hold the document reference
+    first_item = await fetchrow(
+        """SELECT id FROM spare_parts
+           WHERE purchase_order_number ILIKE $1 AND submission_number = $2
+           ORDER BY created_at LIMIT 1""",
+        po_number, submission_number,
     )
-    # Fallback: if no overhead row (single-fleet submission), update all rows in that submission
-    if result and result.endswith("0"):
+    if first_item:
         await execute(
             """UPDATE spare_parts
                SET document_url = $1, document_name = $2, document_uploaded_at = now()
-               WHERE purchase_order_number ILIKE $3 AND submission_number = $4""",
-            document_url, file.filename, po_number, submission_number,
+               WHERE id = $3::uuid""",
+            document_url, file.filename, str(first_item["id"]),
         )
 
     logger.info("PO document uploaded", po_number=po_number.upper(), submission=submission_number, filename=file.filename, user_id=current_user.id)
@@ -1488,6 +1523,8 @@ async def update_spare_part(
         description=f"Updated spare part {existing.get('part_description', str(part_id))}: {', '.join(update_fields.keys())}",
     )
 
+    broadcast("spare_parts", "update")
+
     return {"success": True, "data": updated}
 
 
@@ -1517,6 +1554,8 @@ async def delete_spare_part(
         old_values=existing, ip_address=get_client_ip(request),
         description=f"Deleted spare part {existing.get('part_description', str(part_id))}",
     )
+
+    broadcast("spare_parts", "delete")
 
     return {"success": True, "message": "Spare part deleted successfully"}
 
@@ -1693,7 +1732,7 @@ async def get_plant_costs(
     costs = costs or {"total_cost": 0, "parts_count": 0, "po_count": 0}
 
     # Recent parts (direct costs only, exclude overhead rows)
-    conds = ["sp.plant_id = $1::uuid", "sp.cost_type = 'direct'", "COALESCE(sp.is_po_overhead, false) = false"]
+    conds = ["sp.plant_id = $1::uuid", "sp.cost_type = 'direct'"]
     params: list[Any] = [str(plant_id)]
     if year:
         params.append(year)
@@ -1770,7 +1809,12 @@ async def get_plant_shared_costs(
 
     return {
         "success": True,
-        "data": {"plant": plant, "shared_costs": shared_costs, "shared_costs_count": len(shared_costs)},
+        "data": {
+            "plant": plant,
+            "shared_costs": shared_costs,
+            "shared_costs_count": len(shared_costs),
+            "total_shared_cost": round(sum(sc["total_amount"] for sc in shared_costs), 2),
+        },
     }
 
 
@@ -1910,11 +1954,7 @@ async def get_costs_by_period(
 
     rows = await fetch(
         f"""SELECT {period_column} AS period_val,
-                   COALESCE(SUM(
-                       CASE WHEN shared_fleet_numbers IS NOT NULL
-                            THEN total_cost / array_length(shared_fleet_numbers, 1)
-                            ELSE total_cost END
-                   ), 0)::float AS total_cost,
+                   COALESCE(SUM(total_cost), 0)::float AS total_cost,
                    count(*)::int AS items_count,
                    count(DISTINCT purchase_order_number)::int AS po_count
             FROM spare_parts
@@ -1982,11 +2022,7 @@ async def get_year_over_year(
 
     rows = await fetch(
         f"""SELECT year, {period_column} AS period_val,
-                   COALESCE(SUM(
-                       CASE WHEN shared_fleet_numbers IS NOT NULL
-                            THEN total_cost / array_length(shared_fleet_numbers, 1)
-                            ELSE total_cost END
-                   ), 0)::float AS total_cost
+                   COALESCE(SUM(total_cost), 0)::float AS total_cost
             FROM spare_parts
             WHERE {where} AND {period_column} IS NOT NULL
             GROUP BY year, {period_column}
@@ -2021,6 +2057,149 @@ async def get_year_over_year(
             "plant_id": str(plant_id) if plant_id else None,
             "location_id": str(location_id) if location_id else None,
             "yearly_totals": yearly_totals,
+        },
+    }
+
+
+# ============== REPEAT/DUPLICATE PURCHASE DETECTION ==============
+
+@router.get("/analytics/repeat-purchases")
+async def get_repeat_purchases(
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+    min_occurrences: int = Query(2, ge=2, description="Minimum number of POs for the same part"),
+    min_price_ratio: float = Query(1.0, ge=1.0, description="Minimum max/min price ratio to flag"),
+    plant_id: UUID | None = Query(None, description="Filter by specific plant"),
+    location_id: UUID | None = Query(None, description="Filter by location"),
+    include_consumables: bool = Query(True, description="Include consumables like oil, filters"),
+    sort_by: str = Query("price_ratio", pattern="^(price_ratio|total_spent|purchase_count|part_name|fleet_number)$"),
+    sort_order: str = Query("desc", pattern="^(asc|desc)$"),
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=200),
+) -> dict[str, Any]:
+    """Detect repeat/duplicate purchases of the same part for the same plant.
+
+    Groups spare parts by (plant + part_description) across different POs.
+    Flags entries where the same part was purchased multiple times, with
+    price ratio highlighting for potential overcharging.
+
+    This is a LIVE query — always reflects the current spare_parts data.
+    New POs automatically appear on next page load.
+
+    Returns:
+        List of repeat purchases with price analysis.
+    """
+    # Build WHERE clause — filter params start at $7 (after 6 fixed params)
+    conds: list[str] = []
+    filter_params: list[Any] = []
+    param_offset = 6  # $1-$6 are reserved for fixed params below
+
+    if plant_id:
+        filter_params.append(str(plant_id))
+        conds.append(f"sp.plant_id = ${param_offset + len(filter_params)}::uuid")
+
+    if location_id:
+        filter_params.append(str(location_id))
+        conds.append(f"sp.location_id = ${param_offset + len(filter_params)}::uuid")
+
+    where = " AND ".join(conds) if conds else "TRUE"
+
+    # Main query: group by plant + normalized part description
+    # Fixed params: $1=min_occurrences, $2=min_price_ratio, $3=sort_by, $4=sort_order, $5=limit, $6=offset
+    rows = await fetch(
+        f"""WITH grouped AS (
+              SELECT
+                sp.plant_id,
+                pm.fleet_number,
+                pm.description AS plant_description,
+                l.name AS location_name,
+                UPPER(TRIM(sp.part_description)) AS part_name,
+                count(DISTINCT sp.purchase_order_number) AS po_count,
+                count(*) AS purchase_count,
+                sum(sp.quantity) AS total_quantity,
+                sum(sp.total_cost)::float AS total_spent,
+                min(sp.unit_cost)::float AS min_unit_cost,
+                max(sp.unit_cost)::float AS max_unit_cost,
+                CASE
+                  WHEN min(sp.unit_cost) > 0
+                  THEN round((max(sp.unit_cost) / min(sp.unit_cost))::numeric, 1)::float
+                  ELSE 1.0
+                END AS price_ratio,
+                min(sp.po_date) AS first_purchase_date,
+                max(sp.po_date) AS last_purchase_date,
+                array_agg(DISTINCT sp.purchase_order_number ORDER BY sp.purchase_order_number) AS po_numbers,
+                array_agg(DISTINCT COALESCE(s.name, sp.supplier) ORDER BY COALESCE(s.name, sp.supplier)) AS suppliers
+              FROM spare_parts sp
+              LEFT JOIN plants_master pm ON pm.id = sp.plant_id
+              LEFT JOIN locations l ON l.id = sp.location_id
+              LEFT JOIN suppliers s ON s.id = sp.supplier_id
+              WHERE {where}
+              GROUP BY sp.plant_id, pm.fleet_number, pm.description, l.name,
+                       UPPER(TRIM(sp.part_description))
+              HAVING count(DISTINCT sp.purchase_order_number) >= $1
+            )
+            SELECT *, count(*) OVER() AS _total_count
+            FROM grouped
+            WHERE price_ratio >= $2
+            ORDER BY
+              CASE WHEN $3 = 'price_ratio' AND $4 = 'desc' THEN price_ratio END DESC NULLS LAST,
+              CASE WHEN $3 = 'price_ratio' AND $4 = 'asc' THEN price_ratio END ASC NULLS LAST,
+              CASE WHEN $3 = 'total_spent' AND $4 = 'desc' THEN total_spent END DESC NULLS LAST,
+              CASE WHEN $3 = 'total_spent' AND $4 = 'asc' THEN total_spent END ASC NULLS LAST,
+              CASE WHEN $3 = 'purchase_count' AND $4 = 'desc' THEN purchase_count END DESC NULLS LAST,
+              CASE WHEN $3 = 'purchase_count' AND $4 = 'asc' THEN purchase_count END ASC NULLS LAST,
+              CASE WHEN $3 = 'part_name' AND $4 = 'desc' THEN part_name END DESC NULLS LAST,
+              CASE WHEN $3 = 'part_name' AND $4 = 'asc' THEN part_name END ASC NULLS LAST,
+              CASE WHEN $3 = 'fleet_number' AND $4 = 'desc' THEN fleet_number END DESC NULLS LAST,
+              CASE WHEN $3 = 'fleet_number' AND $4 = 'asc' THEN fleet_number END ASC NULLS LAST,
+              price_ratio DESC, total_spent DESC
+            LIMIT $5 OFFSET $6""",
+        min_occurrences, min_price_ratio, sort_by, sort_order,
+        limit, (page - 1) * limit,
+        *filter_params,
+    )
+
+    total = rows[0].pop("_total_count", 0) if rows else 0
+    for row in rows[1:]:
+        row.pop("_total_count", None)
+
+    # Classify each entry
+    for row in rows:
+        ratio = row.get("price_ratio", 1.0)
+        if ratio >= 5.0:
+            row["severity"] = "critical"  # Likely error or overcharging
+        elif ratio >= 2.0:
+            row["severity"] = "warning"   # Significant price difference
+        elif ratio >= 1.3:
+            row["severity"] = "info"      # Moderate difference
+        else:
+            row["severity"] = "normal"    # Same price, legitimate repeat
+
+        # Convert date objects for JSON
+        if row.get("first_purchase_date"):
+            row["first_purchase_date"] = str(row["first_purchase_date"])
+        if row.get("last_purchase_date"):
+            row["last_purchase_date"] = str(row["last_purchase_date"])
+
+    # Summary stats
+    total_items = total
+    critical = sum(1 for r in rows if r.get("severity") == "critical")
+    warning = sum(1 for r in rows if r.get("severity") == "warning")
+    total_wasted = sum(r.get("total_spent", 0) for r in rows if r.get("severity") in ("critical", "warning"))
+
+    return {
+        "success": True,
+        "data": rows,
+        "meta": {
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "total_pages": (total + limit - 1) // limit if total > 0 else 0,
+        },
+        "summary": {
+            "total_repeat_items": total_items,
+            "critical_count": critical,
+            "warning_count": warning,
+            "flagged_total_spent": round(total_wasted, 2),
         },
     }
 

@@ -27,12 +27,16 @@ import {
   updateSparePart,
   getPlantSharedCosts,
   getYearOverYear,
+  getSparePartsYears,
+  getTopSites,
+  getRepeatPurchases,
   type SparePartsListParams,
   type CreateSparePartRequest,
   type POListParams,
   type BulkCreateRequest,
   type UpdatePORequest,
   type UpdateSparePartRequest,
+  type RepeatPurchaseParams,
 } from '@/lib/api/spare-parts';
 
 // ============================================================================
@@ -50,6 +54,8 @@ export const sparePartsKeys = {
     [...sparePartsKeys.all, 'top-suppliers', params] as const,
   highCostPlants: (params?: { limit?: number; year?: number }) =>
     [...sparePartsKeys.all, 'high-cost-plants', params] as const,
+  topSites: (params?: { year?: number; month?: number; quarter?: number }) =>
+    [...sparePartsKeys.all, 'top-sites', params] as const,
   byPO: (poNumber: string) => [...sparePartsKeys.all, 'po', poNumber] as const,
   poDocument: (poNumber: string) => [...sparePartsKeys.all, 'po-doc', poNumber] as const,
   purchaseOrders: () => [...sparePartsKeys.all, 'purchase-orders'] as const,
@@ -98,12 +104,25 @@ export function useSparePartsStats(params: {
   quarter?: number;
   location_id?: string;
   supplier_id?: string;
+  fleet_number?: string;
+  supplier?: string;
+  search?: string;
+  date_from?: string;
+  date_to?: string;
 } = {}) {
   return useQuery({
     queryKey: sparePartsKeys.stats(params),
     queryFn: () => getSparePartsStats(params),
     staleTime: 5 * 60 * 1000,
     placeholderData: keepPreviousData,
+  });
+}
+
+export function useSparePartsYears() {
+  return useQuery({
+    queryKey: [...sparePartsKeys.all, 'years'] as const,
+    queryFn: getSparePartsYears,
+    staleTime: 10 * 60 * 1000,
   });
 }
 
@@ -130,6 +149,17 @@ export function useHighCostPlants(params: { limit?: number; year?: number } = {}
 }
 
 /**
+ * Fetch top sites by maintenance spend
+ */
+export function useTopSites(params: { year?: number; month?: number; quarter?: number } = {}) {
+  return useQuery({
+    queryKey: sparePartsKeys.topSites(params),
+    queryFn: () => getTopSites(params),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/**
  * Fetch all parts for a specific PO number (returns data + meta)
  */
 export function usePartsByPO(poNumber: string | null) {
@@ -150,8 +180,10 @@ export function useCreateSparePart() {
   return useMutation({
     mutationFn: (data: CreateSparePartRequest) => createSparePart(data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: sparePartsKeys.lists() });
-      queryClient.invalidateQueries({ queryKey: sparePartsKeys.stats() });
+      queryClient.invalidateQueries({ queryKey: sparePartsKeys.all });
+      queryClient.invalidateQueries({ queryKey: ['suppliers'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['reports'] });
     },
   });
 }
@@ -165,8 +197,10 @@ export function useDeleteSparePart() {
   return useMutation({
     mutationFn: deleteSparePart,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: sparePartsKeys.lists() });
-      queryClient.invalidateQueries({ queryKey: sparePartsKeys.stats() });
+      queryClient.invalidateQueries({ queryKey: sparePartsKeys.all });
+      queryClient.invalidateQueries({ queryKey: ['suppliers'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['reports'] });
     },
   });
 }
@@ -192,8 +226,9 @@ export function useBulkCreateSpareParts() {
     mutationFn: (data: BulkCreateRequest) => bulkCreateSpareParts(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: sparePartsKeys.all });
-      // Also refresh suppliers list in case a new supplier was auto-created
       queryClient.invalidateQueries({ queryKey: ['suppliers'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['reports'] });
     },
   });
 }
@@ -208,6 +243,8 @@ export function useDeletePartsByPO() {
     mutationFn: deletePartsByPO,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: sparePartsKeys.all });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['reports'] });
     },
   });
 }
@@ -222,8 +259,9 @@ export function useUpdatePO() {
     mutationFn: ({ poNumber, data }: { poNumber: string; data: UpdatePORequest }) =>
       updatePO(poNumber, data),
     onSuccess: (_result, { poNumber }) => {
-      queryClient.invalidateQueries({ queryKey: sparePartsKeys.byPO(poNumber) });
-      queryClient.invalidateQueries({ queryKey: sparePartsKeys.purchaseOrders() });
+      queryClient.invalidateQueries({ queryKey: sparePartsKeys.all });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['reports'] });
     },
   });
 }
@@ -334,9 +372,10 @@ export function useUpdateSparePart() {
     mutationFn: ({ partId, data }: { partId: string; data: UpdateSparePartRequest }) =>
       updateSparePart(partId, data),
     onSuccess: (_result, { partId }) => {
-      queryClient.invalidateQueries({ queryKey: sparePartsKeys.detail(partId) });
-      queryClient.invalidateQueries({ queryKey: sparePartsKeys.lists() });
-      queryClient.invalidateQueries({ queryKey: sparePartsKeys.stats() });
+      queryClient.invalidateQueries({ queryKey: sparePartsKeys.all });
+      queryClient.invalidateQueries({ queryKey: ['suppliers'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['reports'] });
     },
   });
 }
@@ -394,6 +433,19 @@ export function useYearOverYear(params: {
   });
 }
 
+// ============================================================================
+// Repeat/Duplicate Purchase Detection
+// ============================================================================
+
+export function useRepeatPurchases(params: RepeatPurchaseParams) {
+  return useQuery({
+    queryKey: ['spare-parts', 'repeat-purchases', params],
+    queryFn: () => getRepeatPurchases(params),
+    staleTime: 5 * 60 * 1000,
+    placeholderData: keepPreviousData,
+  });
+}
+
 // Re-export types
 export type {
   SparePart,
@@ -401,6 +453,7 @@ export type {
   SparePartsStats,
   TopSupplier,
   HighCostPlant,
+  TopSite,
   PaginationMeta,
   CreateSparePartRequest,
   POSummary,
@@ -421,4 +474,6 @@ export type {
   YearOverYearEntry,
   YearOverYearResponse,
   PONumberSuggestion,
+  RepeatPurchase,
+  RepeatPurchaseParams,
 } from '@/lib/api/spare-parts';

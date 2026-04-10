@@ -29,6 +29,7 @@ import {
   PieChart,
   FolderKanban,
   Lightbulb,
+  AlertTriangle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -88,6 +89,11 @@ const plantNavItems = [
     title: 'Plant Analytics',
     href: '/spare-parts/analytics',
     icon: PieChart,
+  },
+  {
+    title: 'Repeat Purchases',
+    href: '/spare-parts/repeat-purchases',
+    icon: AlertTriangle,
   },
 ];
 

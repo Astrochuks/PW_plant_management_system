@@ -29,6 +29,7 @@ export interface SparePart {
   discount_percentage: number;
   discount_amount: number | null;
   other_costs: number;
+  other_costs_description: string | null;
   total_cost: number | null;
   purchase_order_number: string | null;
   po_date: string | null;
@@ -40,6 +41,7 @@ export interface SparePart {
   is_category: boolean;
   category_name: string | null;
   cost_type: string | null;            // "direct" | "shared"
+  is_bua: boolean;                     // plant is at a BUA site
   submission_number?: number;           // batch within a PO
   shared_fleet_numbers?: string[] | null; // fleets sharing this cost item
   // Timestamps & time bucketing
@@ -118,6 +120,7 @@ export interface POSubmission {
   vat_amount: number;
   discount_amount: number;
   other_costs: number;
+  other_costs_description: string | null;
   total: number;
   document: POSubmissionDocument | null;
 }
@@ -177,6 +180,7 @@ export interface BulkCreateRequest {
   discount_percentage?: number;
   discount_amount?: number;
   other_costs?: number;
+  other_costs_description?: string;
 }
 
 export interface CreateSparePartRequest {
@@ -206,6 +210,10 @@ export interface SparePartsStats {
   unique_suppliers: number;
   parts_in_period: number;
   spend_in_period: number;
+  direct_parts: number;
+  direct_spend: number;
+  shared_parts: number;
+  shared_spend: number;
 }
 
 export interface TopSupplier {
@@ -220,6 +228,15 @@ export interface HighCostPlant {
   description: string | null;
   total_cost: number;
   parts_count: number;
+}
+
+export interface TopSite {
+  location_id: string;
+  location_name: string;
+  total_spend: number;
+  items_count: number;
+  po_count: number;
+  plants_count: number;
 }
 
 export interface PaginationMeta {
@@ -299,6 +316,11 @@ export async function getSparePartsStats(params: {
   quarter?: number;
   location_id?: string;
   supplier_id?: string;
+  fleet_number?: string;
+  supplier?: string;
+  search?: string;
+  date_from?: string;
+  date_to?: string;
 } = {}): Promise<SparePartsStats> {
   const queryParams: Record<string, string> = {};
 
@@ -308,6 +330,11 @@ export async function getSparePartsStats(params: {
   if (params.quarter) queryParams.quarter = String(params.quarter);
   if (params.location_id) queryParams.location_id = params.location_id;
   if (params.supplier_id) queryParams.supplier_id = params.supplier_id;
+  if (params.fleet_number) queryParams.fleet_number = params.fleet_number;
+  if (params.supplier) queryParams.supplier = params.supplier;
+  if (params.search) queryParams.search = params.search;
+  if (params.date_from) queryParams.date_from = params.date_from;
+  if (params.date_to) queryParams.date_to = params.date_to;
 
   const response = await apiClient.get<ApiResponse<Record<string, unknown>>>('/spare-parts/stats', {
     params: queryParams,
@@ -322,7 +349,19 @@ export async function getSparePartsStats(params: {
     unique_suppliers: Number(d.unique_suppliers ?? 0),
     parts_in_period: Number(d.parts_in_period ?? 0),
     spend_in_period: Number(d.spend_in_period ?? 0),
+    direct_parts: Number(d.direct_parts ?? 0),
+    direct_spend: Number(d.direct_spend ?? 0),
+    shared_parts: Number(d.shared_parts ?? 0),
+    shared_spend: Number(d.shared_spend ?? 0),
   };
+}
+
+/**
+ * Get list of years with spare parts data.
+ */
+export async function getSparePartsYears(): Promise<number[]> {
+  const response = await apiClient.get<ApiResponse<number[]>>('/spare-parts/years');
+  return response.data.data;
 }
 
 /**
@@ -382,6 +421,30 @@ export async function getHighCostPlants(params: {
     description: String(row.plant_description ?? row.description ?? ''),
     total_cost: Number(row.maintenance_cost ?? row.total_cost ?? 0),
     parts_count: Number(row.parts_count ?? 0),
+  }));
+}
+
+export async function getTopSites(params: {
+  year?: number;
+  month?: number;
+  quarter?: number;
+} = {}): Promise<TopSite[]> {
+  const queryParams: Record<string, string> = {};
+  if (params.year) queryParams.year = String(params.year);
+  if (params.month) queryParams.month = String(params.month);
+  if (params.quarter) queryParams.quarter = String(params.quarter);
+
+  const response = await apiClient.get<ApiResponse<Record<string, unknown>[]>>('/spare-parts/top-sites', {
+    params: queryParams,
+  });
+
+  return response.data.data.map((row) => ({
+    location_id: String(row.location_id ?? ''),
+    location_name: String(row.location_name ?? ''),
+    total_spend: Number(row.total_spend ?? 0),
+    items_count: Number(row.items_count ?? 0),
+    po_count: Number(row.po_count ?? 0),
+    plants_count: Number(row.plants_count ?? 0),
   }));
 }
 
@@ -498,6 +561,7 @@ export async function bulkCreateSpareParts(data: BulkCreateRequest): Promise<{
   if (data.discount_percentage != null) queryParams.discount_percentage = String(data.discount_percentage);
   if (data.discount_amount != null) queryParams.discount_amount = String(data.discount_amount);
   if (data.other_costs != null) queryParams.other_costs = String(data.other_costs);
+  if (data.other_costs_description) queryParams.other_costs_description = data.other_costs_description;
 
   const response = await apiClient.post<{
     success: boolean;
@@ -749,6 +813,7 @@ export interface PlantSharedCostsResponse {
   plant: { id: string; fleet_number: string; description: string };
   shared_costs: PlantSharedCost[];
   shared_costs_count: number;
+  total_shared_cost: number;
 }
 
 export interface YearOverYearEntry {
@@ -927,4 +992,65 @@ export async function getYearOverYear(params: {
   }>('/spare-parts/analytics/year-over-year', { params: queryParams });
 
   return { data: response.data.data, meta: response.data.meta };
+}
+
+
+// ============================================================================
+// Repeat/Duplicate Purchase Detection
+// ============================================================================
+
+export interface RepeatPurchase {
+  plant_id: string | null;
+  fleet_number: string | null;
+  plant_description: string | null;
+  location_name: string | null;
+  part_name: string;
+  po_count: number;
+  purchase_count: number;
+  total_quantity: number;
+  total_spent: number;
+  min_unit_cost: number;
+  max_unit_cost: number;
+  price_ratio: number;
+  first_purchase_date: string | null;
+  last_purchase_date: string | null;
+  po_numbers: string[];
+  suppliers: string[];
+  severity: 'critical' | 'warning' | 'info' | 'normal';
+}
+
+export interface RepeatPurchaseParams {
+  min_occurrences?: number;
+  min_price_ratio?: number;
+  plant_id?: string;
+  location_id?: string;
+  sort_by?: string;
+  sort_order?: 'asc' | 'desc';
+  page?: number;
+  limit?: number;
+}
+
+export async function getRepeatPurchases(params: RepeatPurchaseParams = {}): Promise<{
+  data: RepeatPurchase[];
+  meta: { page: number; limit: number; total: number; total_pages: number };
+  summary: { total_repeat_items: number; critical_count: number; warning_count: number; flagged_total_spent: number };
+}> {
+  const queryParams: Record<string, string> = {};
+  if (params.min_occurrences) queryParams.min_occurrences = String(params.min_occurrences);
+  if (params.min_price_ratio) queryParams.min_price_ratio = String(params.min_price_ratio);
+  if (params.plant_id) queryParams.plant_id = params.plant_id;
+  if (params.location_id) queryParams.location_id = params.location_id;
+  if (params.sort_by) queryParams.sort_by = params.sort_by;
+  if (params.sort_order) queryParams.sort_order = params.sort_order;
+  if (params.page) queryParams.page = String(params.page);
+  if (params.limit) queryParams.limit = String(params.limit);
+
+  const response = await apiClient.get<{
+    success: boolean;
+    data: RepeatPurchase[];
+    meta: { page: number; limit: number; total: number; total_pages: number };
+    summary: { total_repeat_items: number; critical_count: number; warning_count: number; flagged_total_spent: number };
+  }>('/spare-parts/analytics/repeat-purchases', { params: queryParams });
+
+  return { data: response.data.data, meta: response.data.meta, summary: response.data.summary };
 }
