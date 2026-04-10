@@ -24,7 +24,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 // Tooltip removed — PO badges are now clickable links
-import { useRepeatPurchases, type RepeatPurchase } from '@/hooks/use-spare-parts';
+import { useRepeatPurchases, useRepeatPurchaseDetail, type RepeatPurchase } from '@/hooks/use-spare-parts';
+import { ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
 
 function formatNGN(amount: number): string {
   return new Intl.NumberFormat('en-NG', {
@@ -91,6 +92,7 @@ export default function RepeatPurchasesPage() {
   const [sortBy, setSortBy] = useState('last_purchase_date');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [severityFilter, setSeverityFilter] = useState('all');
+  const [expandedRow, setExpandedRow] = useState<string | null>(null);
 
   const queryParams = useMemo(() => ({
     page,
@@ -262,9 +264,18 @@ export default function RepeatPurchasesPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredData.map((item, idx) => (
-                  <RepeatPurchaseRow key={`${item.plant_id}-${item.part_name}-${idx}`} item={item} />
-                ))}
+                {filteredData.map((item, idx) => {
+                  const rowKey = `${item.plant_id || 'null'}-${item.part_name}`;
+                  const isExpanded = expandedRow === rowKey;
+                  return (
+                    <RepeatPurchaseRow
+                      key={`${rowKey}-${idx}`}
+                      item={item}
+                      isExpanded={isExpanded}
+                      onToggle={() => setExpandedRow(isExpanded ? null : rowKey)}
+                    />
+                  );
+                })}
               </TableBody>
             </Table>
           </div>
@@ -301,7 +312,7 @@ export default function RepeatPurchasesPage() {
   );
 }
 
-function RepeatPurchaseRow({ item }: { item: RepeatPurchase }) {
+function RepeatPurchaseRow({ item, isExpanded, onToggle }: { item: RepeatPurchase; isExpanded: boolean; onToggle: () => void }) {
   const rowBg = item.severity === 'critical' ? 'bg-red-50/50'
     : item.severity === 'warning' ? 'bg-amber-50/30'
     : '';
@@ -314,13 +325,17 @@ function RepeatPurchaseRow({ item }: { item: RepeatPurchase }) {
   };
 
   return (
-      <TableRow className={rowBg}>
+    <>
+      <TableRow className={`${rowBg} cursor-pointer hover:bg-muted/50`} onClick={onToggle}>
         <TableCell>
-          <SeverityBadge severity={item.severity} />
+          <div className="flex items-center gap-1">
+            {isExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+            <SeverityBadge severity={item.severity} />
+          </div>
         </TableCell>
         <TableCell className="font-mono font-medium text-sm">
           {item.fleet_number ? (
-            <Link href={`/plants/${item.plant_id}`} className="hover:underline text-primary">
+            <Link href={`/plants/${item.plant_id}`} className="hover:underline text-primary" onClick={(e) => e.stopPropagation()}>
               {item.fleet_number}
             </Link>
           ) : (
@@ -335,7 +350,7 @@ function RepeatPurchaseRow({ item }: { item: RepeatPurchase }) {
         </TableCell>
         <TableCell className="text-center">
           <Badge variant="secondary" className="text-xs">
-            {item.po_count} POs
+            {item.purchase_count}x
           </Badge>
         </TableCell>
         <TableCell className="text-right text-sm tabular-nums">{formatNGN(item.min_unit_cost)}</TableCell>
@@ -346,7 +361,7 @@ function RepeatPurchaseRow({ item }: { item: RepeatPurchase }) {
         <TableCell className="text-right text-sm font-medium tabular-nums">
           {formatNGN(item.total_spent)}
         </TableCell>
-        <TableCell>
+        <TableCell onClick={(e) => e.stopPropagation()}>
           <div className="flex flex-wrap gap-1">
             {item.po_numbers.map((po) => (
               <Link key={po} href={`/spare-parts/po/${encodeURIComponent(po)}`}>
@@ -369,5 +384,98 @@ function RepeatPurchaseRow({ item }: { item: RepeatPurchase }) {
           )}
         </TableCell>
       </TableRow>
+
+      {/* Expandable detail row */}
+      {isExpanded && (
+        <TableRow>
+          <TableCell colSpan={11} className="p-0">
+            <ExpandedPurchaseDetail partName={item.part_name} plantId={item.plant_id} />
+          </TableCell>
+        </TableRow>
+      )}
+    </>
+  );
+}
+
+function ExpandedPurchaseDetail({ partName, plantId }: { partName: string; plantId: string | null }) {
+  const { data: details, isLoading } = useRepeatPurchaseDetail(partName, plantId);
+
+  const formatDate = (d: string | null) => {
+    if (!d) return '-';
+    const s = d.includes('T') ? d : d + 'T00:00:00';
+    return new Date(s).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-6 bg-muted/30">
+        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+        <span className="text-sm text-muted-foreground">Loading purchase details...</span>
+      </div>
+    );
+  }
+
+  if (!details || details.length === 0) {
+    return (
+      <div className="text-center py-4 text-sm text-muted-foreground bg-muted/30">
+        No detail records found
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-muted/30 border-t">
+      <div className="px-6 py-3">
+        <p className="text-xs font-medium text-muted-foreground mb-2">
+          Individual purchases ({details.length} records)
+        </p>
+        <div className="rounded border bg-background overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="text-xs w-[40px]">#</TableHead>
+                <TableHead className="text-xs">Part Description</TableHead>
+                <TableHead className="text-xs w-[60px] text-center">Qty</TableHead>
+                <TableHead className="text-xs w-[110px] text-right">Unit Price</TableHead>
+                <TableHead className="text-xs w-[110px] text-right">Total</TableHead>
+                <TableHead className="text-xs w-[140px]">PO Number</TableHead>
+                <TableHead className="text-xs w-[100px]">PO Date</TableHead>
+                <TableHead className="text-xs w-[100px]">Entered</TableHead>
+                <TableHead className="text-xs">Supplier</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {details.map((d, i) => {
+                // Highlight the most expensive row
+                const maxCost = Math.max(...details.map((x) => x.unit_cost));
+                const minCost = Math.min(...details.map((x) => x.unit_cost));
+                const isMax = details.length > 1 && d.unit_cost === maxCost && maxCost !== minCost;
+                const isMin = details.length > 1 && d.unit_cost === minCost && maxCost !== minCost;
+
+                return (
+                  <TableRow key={d.id} className={isMax ? 'bg-red-50/60' : isMin ? 'bg-emerald-50/60' : ''}>
+                    <TableCell className="text-xs text-muted-foreground">{i + 1}</TableCell>
+                    <TableCell className="text-xs">{d.part_description}</TableCell>
+                    <TableCell className="text-xs text-center">{d.quantity}</TableCell>
+                    <TableCell className={`text-xs text-right tabular-nums font-medium ${isMax ? 'text-red-700' : isMin ? 'text-emerald-700' : ''}`}>
+                      {formatNGN(d.unit_cost)}
+                    </TableCell>
+                    <TableCell className="text-xs text-right tabular-nums">{formatNGN(d.total_cost)}</TableCell>
+                    <TableCell>
+                      <Link href={`/spare-parts/po/${encodeURIComponent(d.purchase_order_number)}`} className="text-xs font-mono text-primary hover:underline">
+                        {d.purchase_order_number}
+                      </Link>
+                    </TableCell>
+                    <TableCell className="text-xs">{formatDate(d.po_date)}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{formatDate(d.created_at)}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{d.supplier_name || '-'}</TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      </div>
+    </div>
   );
 }

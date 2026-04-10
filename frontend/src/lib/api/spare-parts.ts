@@ -1055,3 +1055,32 @@ export async function getRepeatPurchases(params: RepeatPurchaseParams = {}): Pro
 
   return { data: response.data.data, meta: response.data.meta, summary: response.data.summary };
 }
+
+export interface RepeatPurchaseDetail {
+  id: string;
+  part_description: string;
+  part_number: string | null;
+  quantity: number;
+  unit_cost: number;
+  total_cost: number;
+  purchase_order_number: string;
+  po_date: string | null;
+  created_at: string | null;
+  supplier_name: string | null;
+  reason_for_change: string | null;
+}
+
+export async function getRepeatPurchaseDetail(params: {
+  part_name: string;
+  plant_id?: string | null;
+}): Promise<RepeatPurchaseDetail[]> {
+  const queryParams: Record<string, string> = { part_name: params.part_name };
+  if (params.plant_id) queryParams.plant_id = params.plant_id;
+
+  const response = await apiClient.get<{
+    success: boolean;
+    data: RepeatPurchaseDetail[];
+  }>('/spare-parts/analytics/repeat-purchases/detail', { params: queryParams });
+
+  return response.data.data;
+}

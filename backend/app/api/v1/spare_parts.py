@@ -2211,6 +2211,54 @@ async def get_repeat_purchases(
     }
 
 
+@router.get("/analytics/repeat-purchases/detail")
+async def get_repeat_purchase_detail(
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+    part_name: str = Query(..., description="Part description (uppercase normalized)"),
+    plant_id: UUID | None = Query(None, description="Plant UUID (null for workshop/shared)"),
+) -> dict[str, Any]:
+    """Get individual purchase records for a specific plant+part combo.
+
+    Used to expand a row in the repeat purchases report and see each
+    individual purchase side by side.
+    """
+    conds = ["UPPER(TRIM(sp.part_description)) = $1"]
+    params: list[Any] = [part_name.upper().strip()]
+
+    if plant_id:
+        params.append(str(plant_id))
+        conds.append(f"sp.plant_id = ${len(params)}::uuid")
+    else:
+        conds.append("sp.plant_id IS NULL")
+
+    where = " AND ".join(conds)
+
+    rows = await fetch(
+        f"""SELECT sp.id, sp.part_description, sp.part_number,
+                   sp.quantity, sp.unit_cost::float, sp.total_cost::float,
+                   sp.purchase_order_number, sp.po_date, sp.created_at,
+                   COALESCE(s.name, sp.supplier) AS supplier_name,
+                   sp.reason_for_change
+            FROM spare_parts sp
+            LEFT JOIN suppliers s ON s.id = sp.supplier_id
+            WHERE {where}
+            ORDER BY sp.po_date DESC NULLS LAST, sp.created_at DESC""",
+        *params,
+    )
+
+    # Convert dates
+    for row in rows:
+        if row.get("po_date"):
+            row["po_date"] = str(row["po_date"])
+        if row.get("created_at"):
+            row["created_at"] = str(row["created_at"])
+
+    return {
+        "success": True,
+        "data": rows,
+    }
+
+
 # ============== SINGLE PART BY ID (must be last to avoid route conflicts) ==============
 
 @router.get("/{part_id}")

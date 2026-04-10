@@ -30,6 +30,7 @@ import {
   getSparePartsYears,
   getTopSites,
   getRepeatPurchases,
+  getRepeatPurchaseDetail,
   type SparePartsListParams,
   type CreateSparePartRequest,
   type POListParams,
@@ -446,6 +447,15 @@ export function useRepeatPurchases(params: RepeatPurchaseParams) {
   });
 }
 
+export function useRepeatPurchaseDetail(partName: string | null, plantId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['spare-parts', 'repeat-purchases', 'detail', partName, plantId],
+    queryFn: () => getRepeatPurchaseDetail({ part_name: partName!, plant_id: plantId }),
+    enabled: !!partName,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 // Re-export types
 export type {
   SparePart,
@@ -476,4 +486,5 @@ export type {
   PONumberSuggestion,
   RepeatPurchase,
   RepeatPurchaseParams,
+  RepeatPurchaseDetail,
 } from '@/lib/api/spare-parts';
