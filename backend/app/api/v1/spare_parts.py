@@ -2088,23 +2088,39 @@ async def get_repeat_purchases(
     Returns:
         List of repeat purchases with price analysis.
     """
-    # Build WHERE clause — filter params start at $7 (after 6 fixed params)
+    # Build WHERE clause
     conds: list[str] = []
-    filter_params: list[Any] = []
-    param_offset = 6  # $1-$6 are reserved for fixed params below
+    params: list[Any] = []
 
     if plant_id:
-        filter_params.append(str(plant_id))
-        conds.append(f"sp.plant_id = ${param_offset + len(filter_params)}::uuid")
+        params.append(str(plant_id))
+        conds.append(f"sp.plant_id = ${len(params)}::uuid")
 
     if location_id:
-        filter_params.append(str(location_id))
-        conds.append(f"sp.location_id = ${param_offset + len(filter_params)}::uuid")
+        params.append(str(location_id))
+        conds.append(f"sp.location_id = ${len(params)}::uuid")
 
     where = " AND ".join(conds) if conds else "TRUE"
 
-    # Main query: group by plant + normalized part description
-    # Fixed params: $1=min_occurrences, $2=min_price_ratio, $3=sort_by, $4=sort_order, $5=limit, $6=offset
+    # Validate sort column (whitelist to prevent SQL injection)
+    allowed_sorts = {"price_ratio", "total_spent", "purchase_count", "part_name", "fleet_number"}
+    safe_sort = sort_by if sort_by in allowed_sorts else "price_ratio"
+    safe_order = "ASC" if sort_order == "asc" else "DESC"
+
+    # Add fixed params: min_occurrences, min_price_ratio, limit, offset
+    params.append(min_occurrences)
+    n_min_occ = len(params)
+    params.append(min_price_ratio)
+    n_min_ratio = len(params)
+    params.append(limit)
+    n_limit = len(params)
+    params.append((page - 1) * limit)
+    n_offset = len(params)
+
+    # Main query: group by plant + normalized part description.
+    # Uses count(*) >= min_occurrences (not count(DISTINCT po)) to catch
+    # duplicates within the same PO (e.g., T207 bought the same part twice
+    # on the same PO at different dates/prices).
     rows = await fetch(
         f"""WITH grouped AS (
               SELECT
@@ -2135,27 +2151,15 @@ async def get_repeat_purchases(
               WHERE {where}
               GROUP BY sp.plant_id, pm.fleet_number, pm.description, l.name,
                        UPPER(TRIM(sp.part_description))
-              HAVING count(DISTINCT sp.purchase_order_number) >= $1
+              HAVING count(*) >= ${n_min_occ}
             )
             SELECT *, count(*) OVER() AS _total_count
             FROM grouped
-            WHERE price_ratio >= $2
-            ORDER BY
-              CASE WHEN $3 = 'price_ratio' AND $4 = 'desc' THEN price_ratio END DESC NULLS LAST,
-              CASE WHEN $3 = 'price_ratio' AND $4 = 'asc' THEN price_ratio END ASC NULLS LAST,
-              CASE WHEN $3 = 'total_spent' AND $4 = 'desc' THEN total_spent END DESC NULLS LAST,
-              CASE WHEN $3 = 'total_spent' AND $4 = 'asc' THEN total_spent END ASC NULLS LAST,
-              CASE WHEN $3 = 'purchase_count' AND $4 = 'desc' THEN purchase_count END DESC NULLS LAST,
-              CASE WHEN $3 = 'purchase_count' AND $4 = 'asc' THEN purchase_count END ASC NULLS LAST,
-              CASE WHEN $3 = 'part_name' AND $4 = 'desc' THEN part_name END DESC NULLS LAST,
-              CASE WHEN $3 = 'part_name' AND $4 = 'asc' THEN part_name END ASC NULLS LAST,
-              CASE WHEN $3 = 'fleet_number' AND $4 = 'desc' THEN fleet_number END DESC NULLS LAST,
-              CASE WHEN $3 = 'fleet_number' AND $4 = 'asc' THEN fleet_number END ASC NULLS LAST,
-              price_ratio DESC, total_spent DESC
-            LIMIT $5 OFFSET $6""",
-        min_occurrences, min_price_ratio, sort_by, sort_order,
-        limit, (page - 1) * limit,
-        *filter_params,
+            WHERE price_ratio >= ${n_min_ratio}
+            ORDER BY {safe_sort} {safe_order} NULLS LAST,
+                     price_ratio DESC, total_spent DESC
+            LIMIT ${n_limit} OFFSET ${n_offset}""",
+        *params,
     )
 
     total = rows[0].pop("_total_count", 0) if rows else 0
