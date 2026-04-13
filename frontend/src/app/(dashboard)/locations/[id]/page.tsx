@@ -64,6 +64,7 @@ import {
   useLocationWeeklyRecords,
   useLocationTransfers,
   useDeleteLocation,
+  useUpdateLocation,
 } from '@/hooks/use-locations'
 import { LocationProjectLink } from '@/components/locations/location-project-link'
 import { useLocationCosts } from '@/hooks/use-spare-parts'
@@ -177,6 +178,11 @@ export default function LocationDetailPage() {
             <div>
               <h1 className="text-2xl font-bold tracking-tight">{location.location_name}</h1>
               <div className="flex items-center gap-2 mt-0.5">
+                {location.is_active !== false ? (
+                  <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">active</Badge>
+                ) : (
+                  <Badge variant="outline" className="bg-red-50 text-red-700 border-red-300">inactive</Badge>
+                )}
                 {location.state_name && (
                   <Badge variant="outline">{location.state_name}</Badge>
                 )}
@@ -189,6 +195,7 @@ export default function LocationDetailPage() {
         </div>
         {isAdmin && (
           <div className="flex items-center gap-2">
+            <ActiveToggleButton locationId={id} isActive={location.is_active !== false} />
             <Button variant="outline" asChild>
               <Link href={`/locations/${id}/edit`}>
                 <Pencil className="h-4 w-4 mr-2" />
@@ -1055,4 +1062,37 @@ function formatNumber(num: number): string {
     minimumFractionDigits: 0,
     maximumFractionDigits: 1,
   }).format(num)
+}
+
+function ActiveToggleButton({ locationId, isActive }: { locationId: string; isActive: boolean }) {
+  const updateMutation = useUpdateLocation(locationId)
+  const queryClient = useQueryClient()
+
+  const handleToggle = () => {
+    const newState = !isActive
+    updateMutation.mutate(
+      { is_active: newState },
+      {
+        onSuccess: () => {
+          toast.success(newState ? 'Site marked as active' : 'Site marked as inactive — uploads will not change plant locations')
+          queryClient.invalidateQueries({ queryKey: locationsKeys.detail(locationId) })
+          queryClient.invalidateQueries({ queryKey: ['locations'] })
+        },
+        onError: (error) => {
+          toast.error(getErrorMessage(error))
+        },
+      }
+    )
+  }
+
+  return (
+    <Button
+      variant={isActive ? 'outline' : 'destructive'}
+      size="sm"
+      onClick={handleToggle}
+      disabled={updateMutation.isPending}
+    >
+      {updateMutation.isPending ? 'Updating...' : isActive ? 'Mark Inactive' : 'Mark Active'}
+    </Button>
+  )
 }

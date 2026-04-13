@@ -184,6 +184,7 @@ async def update_location(
     name: str | None = Query(None, min_length=2),
     state_id: UUID | None = Query(None, description="New state UUID"),
     project_id: str | None = Query(None, description="Link project UUID, or 'unlink' to clear"),
+    is_active: bool | None = Query(None, description="Whether this site is active (inactive sites don't update plant locations)"),
 ) -> dict[str, Any]:
     """Update an existing site (location).
 
@@ -233,12 +234,15 @@ async def update_location(
                 )
             update_data["project_id"] = project_id
 
+    if is_active is not None:
+        update_data["is_active"] = is_active
+
     if not update_data:
         raise ValidationError("No fields to update")
 
     # Fetch current values for audit diff
     existing = await fetchrow(
-        "SELECT id, name, state_id, state FROM locations WHERE id = $1::uuid",
+        "SELECT id, name, state_id, state, is_active FROM locations WHERE id = $1::uuid",
         str(location_id),
     )
 

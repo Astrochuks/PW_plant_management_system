@@ -34,6 +34,7 @@ export interface LocationStats {
   off_hire_plants: number;
   gpm_assessment_plants: number;
   unverified_plants: number;
+  is_active: boolean;
 }
 
 export interface State {
@@ -150,6 +151,7 @@ export interface UpdateLocationRequest {
   name?: string;
   state_id?: string;
   project_id?: string | null;
+  is_active?: boolean;
 }
 
 // Params types
@@ -243,6 +245,7 @@ export async function updateLocation(id: string, data: UpdateLocationRequest): P
   if (data.project_id !== undefined) {
     params.project_id = data.project_id === null ? 'unlink' : data.project_id;
   }
+  if (data.is_active !== undefined) params.is_active = String(data.is_active);
   const response = await apiClient.patch<ApiResponse<LocationRecord>>(`/locations/${id}`, null, { params });
   return response.data.data;
 }
