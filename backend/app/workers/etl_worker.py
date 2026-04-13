@@ -1927,16 +1927,18 @@ async def rebuild_location_timeline(plant_ids: list) -> dict[str, int]:
     logger.info("rebuild_location_timeline START", plant_count=len(plant_ids))
 
     # === 1 query: all weekly records for these plants ===
-    # IMPORTANT: We filter out condition='missing' records because a missing
-    # plant is NOT actually at that location — it's a placeholder saying
-    # "we expected this plant here but couldn't find it". Including such
-    # records would create spurious movements/transfers.
+    # IMPORTANT: We filter out:
+    #   1. condition='missing' — plant is NOT actually at that location
+    #   2. Records from INACTIVE locations — stale reports that don't reflect reality
+    # Including such records would create spurious movements/transfers.
     records = await fetch(
-        """SELECT plant_id, location_id, week_ending_date, year, week_number, condition
-           FROM plant_weekly_records
-           WHERE plant_id = ANY($1::uuid[])
-             AND (condition IS NULL OR condition != 'missing')
-           ORDER BY plant_id, year ASC, week_number ASC""",
+        """SELECT pwr.plant_id, pwr.location_id, pwr.week_ending_date, pwr.year, pwr.week_number, pwr.condition
+           FROM plant_weekly_records pwr
+           JOIN locations l ON l.id = pwr.location_id
+           WHERE pwr.plant_id = ANY($1::uuid[])
+             AND (pwr.condition IS NULL OR pwr.condition != 'missing')
+             AND l.is_active = true
+           ORDER BY pwr.plant_id, pwr.year ASC, pwr.week_number ASC""",
         plant_ids,
     )
 
@@ -2433,10 +2435,20 @@ async def save_confirmed_weekly_report(
             submission_id, datetime.utcnow(),
         )
 
+        # Check if this location is active (inactive sites don't update plant locations)
+        location_row = await fetchrow(
+            "SELECT id, name, is_active FROM locations WHERE id = $1::uuid",
+            location_id,
+        )
+        is_active_location = location_row.get("is_active", True) if location_row else True
+        location_name_for_log = location_row.get("name", "Unknown") if location_row else "Unknown"
+
         logger.info(
             "Saving confirmed weekly report",
             submission_id=submission_id,
             location_id=location_id,
+            location_name=location_name_for_log,
+            is_active_location=is_active_location,
             total_plants=len(validated_plants),
         )
 
@@ -2541,18 +2553,28 @@ async def save_confirmed_weekly_report(
             is_new_here = fleet_num not in plants_here_prev_week
             is_new_arrival_elsewhere = fleet_num in new_arrivals_elsewhere
 
-            # IMPORTANT: a plant marked 'missing' is NOT actually at this location.
-            # Don't update its current_location_id (and don't bump last_verified_*).
+            # IMPORTANT: Don't update current_location_id if:
+            # 1. Plant is marked 'missing' (it's NOT actually at this location)
+            # 2. This location is INACTIVE (stale reports that don't reflect reality)
             # The weekly_record is still saved (audit trail) but the plant master is left alone.
             is_missing_here = condition == "missing"
+            skip_location_update = is_missing_here or not is_active_location
 
-            if is_missing_here:
-                logger.info(
-                    "Plant marked missing — NOT updating current_location",
-                    fleet_number=fleet_num,
-                    this_location=str(location_id),
-                    week=f"{year}-W{week_number}",
-                )
+            if skip_location_update:
+                if is_missing_here:
+                    logger.info(
+                        "Plant marked missing — NOT updating current_location",
+                        fleet_number=fleet_num,
+                        this_location=location_name_for_log,
+                        week=f"{year}-W{week_number}",
+                    )
+                elif not is_active_location:
+                    logger.info(
+                        "Inactive location — NOT updating current_location",
+                        fleet_number=fleet_num,
+                        this_location=location_name_for_log,
+                        week=f"{year}-W{week_number}",
+                    )
             elif is_newer_or_same:
                 if (year, week_number) == existing_verification and is_new_arrival_elsewhere and not is_new_here:
                     # Same week, but another location has a new arrival for this plant
@@ -2576,17 +2598,17 @@ async def save_confirmed_weekly_report(
                     existing_week=f"{existing_verification[0]}-W{existing_verification[1]}",
                 )
 
-            # If new plant, set creation time and location (unless marked missing)
+            # If new plant, set creation time and location (unless missing or inactive site)
             is_new = fleet_num not in fleet_to_id
-            if is_new and not is_missing_here:
+            if is_new and not skip_location_update:
                 plant_upsert["created_at"] = datetime.utcnow()
                 plant_upsert["current_location_id"] = location_id
                 plant_upsert["last_verified_date"] = week_ending_date
                 plant_upsert["last_verified_year"] = year
                 plant_upsert["last_verified_week"] = week_number
                 new_fleet_numbers.add(fleet_num)
-            elif is_new and is_missing_here:
-                # Brand new plant that's already missing — create with NULL location
+            elif is_new and skip_location_update:
+                # Brand new plant that's missing or at inactive site — create with NULL location
                 plant_upsert["created_at"] = datetime.utcnow()
                 new_fleet_numbers.add(fleet_num)
 
