@@ -2017,11 +2017,19 @@ async def rebuild_location_timeline(plant_ids: list) -> dict[str, int]:
     transfers_to_confirm = []     # Existing pending transfer IDs to mark confirmed
     AUTO_REBUILD_MARKER = "AUTO_REBUILD_FROM_WEEKLY_RECORDS"
 
+    # Fleet numbers that should NEVER generate transfers or movement events.
+    # These are generic placeholders — multiple physical plants share the same
+    # fleet_number, so a "movement" is really a different plant at a different site.
+    SKIP_TRANSFER_FLEET_NUMBERS = {"NOFLEET", "NO FLEET", "N/A", "NONE", "TBA", "TBD", "UNKNOWN", ""}
+
     for pid, weekly_rows in plant_records.items():
         if not weekly_rows:
             continue
 
         fn = fleet_map.get(pid, "unknown")
+
+        # Skip movement/transfer detection for placeholder fleet numbers
+        skip_movements = fn.upper() in SKIP_TRANSFER_FLEET_NUMBERS
 
         # Merge consecutive weeks at same location into spans
         spans = []
@@ -2035,43 +2043,48 @@ async def rebuild_location_timeline(plant_ids: list) -> dict[str, int]:
             if row["location_id"] == current_span["location_id"]:
                 current_span["end_date"] = row["week_ending_date"]
             else:
-                # Location changed = movement event + transfer (if not duplicate)
+                # Location changed — but skip movements for placeholder fleets
+                # and skip same-site transfers (from = to)
                 from_loc = str(current_span["location_id"])
                 to_loc = str(row["location_id"])
                 # event_date is now a `date` object (parsed earlier)
                 event_date = row["week_ending_date"]
 
-                event_key = (str(pid), str(event_date), from_loc, to_loc)
-                if event_key not in existing_keys:
-                    events_to_create.append((
-                        str(pid), "movement", event_date,
-                        row["year"], row["week_number"],
-                        from_loc, to_loc,
-                        json.dumps({"fleet_number": fn, "auto_detected": True}),
-                        f"Plant {fn} moved from previous location",
-                    ))
-                    existing_keys.add(event_key)
+                # Only create events/transfers for real fleet numbers and different sites
+                if not skip_movements and from_loc != to_loc:
+                    event_key = (str(pid), str(event_date), from_loc, to_loc)
+                    if event_key not in existing_keys:
+                        events_to_create.append((
+                            str(pid), "movement", event_date,
+                            row["year"], row["week_number"],
+                            from_loc, to_loc,
+                            json.dumps({"fleet_number": fn, "auto_detected": True}),
+                            f"Plant {fn} moved from previous location",
+                        ))
+                        existing_keys.add(event_key)
 
-                # Transfer handling — STRICT 3-way priority:
-                #   1. Exact (plant, from, to, date) match exists → skip (true duplicate)
-                #   2. Pending transfer for this route (plant, from, to) → auto-confirm UPDATE
-                #   3. Otherwise → insert new confirmed transfer
-                exact_key = (str(pid), from_loc, to_loc, str(event_date))
-                route_key = (str(pid), from_loc, to_loc)
+                # Transfer handling — skip for placeholder fleets and same-site
+                if not skip_movements and from_loc != to_loc:
+                    # STRICT 3-way priority:
+                    #   1. Exact (plant, from, to, date) match exists → skip (true duplicate)
+                    #   2. Pending transfer for this route (plant, from, to) → auto-confirm UPDATE
+                    #   3. Otherwise → insert new confirmed transfer
+                    exact_key = (str(pid), from_loc, to_loc, str(event_date))
+                    route_key = (str(pid), from_loc, to_loc)
 
-                if exact_key in existing_transfer_keys:
-                    pass  # already have this exact transfer
-                elif route_key in pending_by_plant_route:
-                    # Auto-confirm the existing pending transfer
-                    pending_id = pending_by_plant_route.pop(route_key)
-                    transfers_to_confirm.append((pending_id, event_date))
-                    existing_transfer_keys.add(exact_key)
-                else:
-                    transfers_to_insert.append((
-                        str(pid), from_loc, to_loc, event_date, event_date,
-                        "confirmed", "inbound", AUTO_REBUILD_MARKER,
-                    ))
-                    existing_transfer_keys.add(exact_key)
+                    if exact_key in existing_transfer_keys:
+                        pass  # already have this exact transfer
+                    elif route_key in pending_by_plant_route:
+                        # Auto-confirm the existing pending transfer
+                        pending_id = pending_by_plant_route.pop(route_key)
+                        transfers_to_confirm.append((pending_id, event_date))
+                        existing_transfer_keys.add(exact_key)
+                    else:
+                        transfers_to_insert.append((
+                            str(pid), from_loc, to_loc, event_date, event_date,
+                            "confirmed", "inbound", AUTO_REBUILD_MARKER,
+                        ))
+                        existing_transfer_keys.add(exact_key)
 
                 spans.append(current_span)
                 current_span = {
