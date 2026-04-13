@@ -265,11 +265,11 @@ def fallback_parse(
         condition_notes = "Plant not found/verified"
 
     # OFF HIRE in remarks
-    elif "OFF HIRE" in remarks_normalized or "OFFHIRE" in remarks_normalized:
+    elif any(kw in remarks_normalized for kw in ["OFF HIRE", "OFF HIRED", "OFFHIRE", "OFF-HIRE", "OFF-HIRED"]):
         condition = "off_hire"
         condition_notes = "Off hire mentioned in remarks"
 
-    # BREAKDOWN patterns - missing parts, burned, fire, removed parts
+    # BREAKDOWN patterns - missing parts, burned, fire, explicit breakdown
     elif any(kw in remarks_normalized for kw in [
         "NO ENGINE", "NO COMPRESSOR", "NO COIL", "NO PUMP", "NO BATTERY",
         "ENGINE REMOVED", "COMPRESSOR REMOVED", "REMOVED",
@@ -277,25 +277,28 @@ def fallback_parse(
         "ENGINE BLOCK", "CRACKED", "SEIZED",
         "NO TYRE", "NO TRACK", "NO BUCKET",
         "BREAK DOWN", "BROKE DOWN", "BROKEN DOWN",
+        "BREAKDOWN", "B/DOWN", "B/D",
     ]):
         condition = "breakdown"
-        condition_notes = "Missing parts or fire damage"
+        condition_notes = "Breakdown detected"
 
     # WORKING / operational patterns - explicitly operating
-    # Guard against "NOT WORKING ..." false positives
-    # Repair-specific "WORKING ON ..." patterns that should NOT match as working
-    elif "NOT WORKING" not in remarks_normalized and (
-        remarks_normalized == "WORKING"
+    elif not any(kw in remarks_normalized for kw in [
+        "NOT WORKING", "WORK IN PROGRESS", "ENGINE STRIP",
+        "FOR REPAIRS", "FOR CHECKING", "FOR GENERAL REPAIRS",
+        "/STANDBY", "/ STANDBY",
+    ]) and (
+        remarks_normalized == "WORKING" or remarks_normalized == "OK" or remarks_normalized == "WORKED"
         or any(kw in remarks_normalized for kw in [
             "WORKING ON THE SITE", "WORKING ON SITE", "WORKING ON THE PROJECT",
             "WORKING ON PROJECT", "WORKING IN THE YARD", "WORKING IN YARD",
-            "WORKING AT", "WORKING IN", "WORKING WITH",
+            "WORKING AT", "WORKING IN", "WORKING WITH", "WORKING FOR",
             "IN OPERATION", "OPERATIONAL", "IN USE", "RUNNING", "OPERATING", "ACTIVE",
+            "WORKED", "SERVICED", "BACK RUNNING",
         ])
-        # Catch-all: "WORKING <anything>" unless it's a repair pattern
         or (remarks_normalized.startswith("WORKING") and not any(kw in remarks_normalized for kw in [
             "WORKING ON IT", "WORKING ON THE ENGINE", "WORKING ON THE PUMP",
-            "WORKING ON ENGINE", "WORKING ON PUMP",
+            "WORKING ON ENGINE", "WORKING ON PUMP", "WORKING IN PROGRESS",
         ]))
     ):
         condition = "working"
@@ -303,8 +306,9 @@ def fallback_parse(
 
     # UNDER REPAIR patterns - active repair work
     elif any(kw in remarks_normalized for kw in [
-        "SENT FOR", "FOR REBORE", "FOR REPAIRS", "FOR REPAIR",
-        "STRIP", "STRIPPING", "IN PROGRESS", "WORKING ON IT",
+        "SENT FOR", "FOR REBORE", "FOR REPAIRS", "FOR REPAIR", "FOR GENERAL REPAIRS",
+        "FOR CHECKING", "ENGINE STRIP", "STRIP IN PROGRESS", "STRIPPING",
+        "IN PROGRESS", "WORKING IN PROGRESS", "WORK IN PROGRESS", "WORKING ON IT",
         "WORKING ON THE ENGINE", "WORKING ON THE PUMP",
         "UNDER REPAIR", "UNDER MAINTENANCE", "BEING REPAIRED",
         "AWAITING PARTS", "WAITING FOR PARTS", "PARTS ORDERED",
@@ -312,13 +316,16 @@ def fallback_parse(
         condition = "under_repair"
         condition_notes = "Under repair/maintenance"
 
-    # STANDBY patterns - in workshop/location without issues
+    # STANDBY patterns - in workshop/location/container without issues
     elif any(kw in remarks_normalized for kw in [
         "PLANT WORKSHOP", "BEHIND WORKSHOP", "IN WORKSHOP", "AT WORKSHOP", "WORKSHOP",
-        "BEHIND PLANT", "STAND BY", "STANDBY", "ON STANDBY",
+        "BEHIND PLANT", "STAND BY", "STANDBY", "ON STANDBY", "STANDING BY",
         "IDLE", "AVAILABLE", "PARKED",
+        "T.CONTAINER", "T CONTAINER", "T. CONTAINER", "CONTAINER",
+        "PW3", "PW 3",
+        "INSIDE STORE", "IN STORE", "STORE",
+        "IN THE YARD", "IN YARD", "YARD",
     ]):
-        # Check if there's also an issue mentioned - if so, it's breakdown
         issue_keywords = ["NO ENGINE", "NO COMPRESSOR", "REMOVED", "BURNED", "FAULT", "BROKEN"]
         has_issue = any(kw in remarks_normalized for kw in issue_keywords)
         if has_issue:
@@ -333,20 +340,31 @@ def fallback_parse(
         condition = "working"
         condition_notes = "Repair completed"
 
-    # Generic problem/fault keywords
-    elif any(kw in remarks_normalized for kw in ["PROBLEM", "FAULT", "BROKEN", "DEFECT", "DAMAGE", "ISSUE", "FAULTY"]):
-        if hours_worked > 0:
-            condition = "working"
-            condition_notes = "Has issue but operational"
-        else:
-            condition = "breakdown"
-            condition_notes = "Has reported issue"
+    # FAULTY - has a problem but partially functional
+    elif any(kw in remarks_normalized for kw in [
+        "ENGINE PROBLEM", "CLUTCH PROBLEM", "ELECTRICAL PROBLEM",
+        "GEARBOX PROBLEM", "GEAR BOX PROBLEM", "TRANSMISSION PROBLEM",
+        "HYDRAULIC PROBLEM", "BRAKE PROBLEM", "STEERING PROBLEM",
+        "NEED TYRES", "NEED TYRE", "NEEDS TYRES",
+        "TYRES REQUIRED", "BRAKE LINING REQUIRED",
+        "FAULTY", "DEFECTIVE", "DEFECT", "MALFUNCTIONING",
+    ]):
+        condition = "faulty"
+        condition_notes = "Has fault/problem"
 
-    # "FROM (location)" with no other context = unverified
-    elif re.match(r"^FROM\s+\w+$", remarks_normalized) or re.match(r"^FROM\s+\w+\s+\w+$", remarks_normalized):
-        # Just "FROM BAUCHI" or "FROM FOKE QUARRY" with nothing else
-        condition = "unverified"
-        condition_notes = "Transferred in, status unknown"
+    # Catch-all "PROBLEM" — generic problem keyword
+    elif "PROBLEM" in remarks_normalized and "NO PROBLEM" not in remarks_normalized:
+        condition = "faulty"
+        condition_notes = "Problem mentioned in remarks"
+
+    # "FROM [location]" patterns
+    elif remarks_normalized.startswith("FROM ") and len(remarks_normalized) > 5:
+        if any(kw in remarks_normalized for kw in ["FOR REPAIRS", "FOR CHECKING", "FOR REPAIR"]):
+            condition = "under_repair"
+            condition_notes = "Transferred for repairs"
+        else:
+            condition = "standby"
+            condition_notes = "Transferred from another site"
 
     # No clear keywords - derive from hours
     else:

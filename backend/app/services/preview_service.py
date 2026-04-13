@@ -132,8 +132,20 @@ def detect_condition_from_keywords(
         # Normalize: uppercase, collapse whitespace
         r = " ".join(remarks.upper().split())
 
+        # OFF HIRE — check early (from remarks, not just column)
+        if any(kw in r for kw in ["OFF HIRE", "OFF HIRED", "OFFHIRE", "OFF-HIRE", "OFF-HIRED"]):
+            return DetectedCondition(
+                condition="off_hire",
+                confidence="high",
+                reason=f"Off hire in remarks: {remarks[:50]}"
+            )
+
         # SCRAP - very clear
-        if any(kw in r for kw in ["SCRAP", "SCRAP YARD", "WRITE OFF", "CONDEMNED", "DECOMMISSION"]):
+        scrap_keywords = [
+            "SCRAP", "SCRAP YARD", "WRITE OFF", "CONDEMNED", "DECOMMISSION",
+            "SCRAPPED", "IN PIECES", "DUSTBIN",
+        ]
+        if any(kw in r for kw in scrap_keywords):
             return DetectedCondition(
                 condition="scrap",
                 confidence="high",
@@ -144,14 +156,11 @@ def detect_condition_from_keywords(
         missing_keywords = [
             "MISSING", "NOT SEEN", "NOTSEEN", "NOT FOUND", "STOLEN",
             "CANNOT LOCATE", "NOT AVAILABLE", "NOT ON SITE",
-            # "Did not receive" patterns — sender site says it never arrived
             "DID NOT RECEIVE", "DIDNT RECEIVE", "DID'NT RECEIVE",
             "NOT RECEIVED", "NEVER RECEIVED", "NOT YET RECEIVED",
             "HAVE NOT RECEIVED", "HAVENT RECEIVED", "HAVN'T RECEIVED",
             "YET TO RECEIVE", "AWAITING ARRIVAL",
-            # "Reported transferred but not received" patterns
             "BUT NOT RECEIVED", "NOT RECEIVED IN", "NOT YET ARRIVED",
-            # Physical verification placeholders
             "PHYSICAL VERIFICATION - MISSING", "PHYSICAL VERIFICATION-MISSING",
         ]
         if any(kw in r for kw in missing_keywords):
@@ -161,7 +170,7 @@ def detect_condition_from_keywords(
                 reason=f"Keyword detected: {remarks[:50]}"
             )
 
-        # BREAKDOWN - missing parts or fire damage
+        # BREAKDOWN - missing parts, fire damage, or explicit breakdown
         breakdown_keywords = [
             "NO ENGINE", "NO COMPRESSOR", "NO COIL", "NO PUMP", "NO BATTERY",
             "ENGINE REMOVED", "COMPRESSOR REMOVED", "REMOVED ENGINE",
@@ -169,32 +178,37 @@ def detect_condition_from_keywords(
             "ENGINE BLOCK", "CRACKED ENGINE", "SEIZED",
             "NO TYRE", "NO TYRES", "NO TRACK", "NO BUCKET",
             "BREAK DOWN", "BROKE DOWN", "BROKEN DOWN",
+            "BREAKDOWN", "B/DOWN", "B/D",
         ]
         if any(kw in r for kw in breakdown_keywords):
             return DetectedCondition(
                 condition="breakdown",
                 confidence="high",
-                reason=f"Missing parts/damage: {remarks[:50]}"
+                reason=f"Breakdown detected: {remarks[:50]}"
             )
 
-        # WORKING - actively in use (check BEFORE under_repair so
-        # "working on the site" doesn't match "working on" in repair keywords)
-        # Guard against "NOT WORKING ..." false positives
+        # WORKING - actively in use
+        # Guard against "NOT WORKING ..." and "WORK IN PROGRESS" (repair)
         working_keywords = [
             "WORKING ON THE SITE", "WORKING ON SITE", "WORKING ON THE PROJECT",
             "WORKING ON PROJECT", "WORKING IN THE YARD", "WORKING IN YARD",
-            "WORKING AT", "WORKING IN", "WORKING WITH",
+            "WORKING AT", "WORKING IN", "WORKING WITH", "WORKING FOR",
             "IN OPERATION", "IN USE", "RUNNING", "OPERATING", "ACTIVE",
+            "WORKED", "OK", "SERVICED", "BACK RUNNING",
         ]
-        # Repair-specific "WORKING ON ..." patterns that should NOT match as working
         _repair_working = [
             "WORKING ON IT", "WORKING ON THE ENGINE", "WORKING ON THE PUMP",
             "WORKING ON ENGINE", "WORKING ON PUMP",
         ]
-        if "NOT WORKING" not in r and (
-            r == "WORKING"
+        # Don't match working if remarks contain repair/standby indicators
+        _not_working = [
+            "NOT WORKING", "WORK IN PROGRESS", "ENGINE STRIP",
+            "FOR REPAIRS", "FOR CHECKING", "FOR GENERAL REPAIRS",
+            "/STANDBY", "/ STANDBY",
+        ]
+        if not any(kw in r for kw in _not_working) and (
+            r == "WORKING" or r == "OK" or r == "WORKED"
             or any(kw in r for kw in working_keywords)
-            # Catch-all: "WORKING <anything>" unless it's a repair pattern
             or (r.startswith("WORKING") and not any(kw in r for kw in _repair_working))
         ):
             return DetectedCondition(
@@ -204,15 +218,16 @@ def detect_condition_from_keywords(
             )
 
         # UNDER REPAIR - active repair work
-        # Note: "WORKING ON" is intentionally specific (engine/pump/it) to
-        # avoid matching "working on the site" which means operational.
         repair_keywords = [
             "SENT FOR REBORE", "FOR REBORE", "SENT FOR REPAIRS", "FOR REPAIRS",
-            "STRIP IN PROGRESS", "STRIPPING",
+            "FOR GENERAL REPAIRS", "FOR CHECKING",
+            "STRIP IN PROGRESS", "STRIPPING", "ENGINE STRIP",
+            "WORKING IN PROGRESS",
             "WORKING ON IT", "WORKING ON THE ENGINE", "WORKING ON THE PUMP",
             "WORKING ON ENGINE", "WORKING ON PUMP",
             "UNDER REPAIR", "UNDER MAINTENANCE", "BEING REPAIRED",
             "AWAITING PARTS", "WAITING FOR PARTS", "PARTS ORDERED",
+            "WORK IN PROGRESS",
         ]
         if any(kw in r for kw in repair_keywords):
             return DetectedCondition(
@@ -221,26 +236,28 @@ def detect_condition_from_keywords(
                 reason=f"Repair work: {remarks[:50]}"
             )
 
-        # FAULTY - has a fault but still partially functional
-        faulty_keywords = [
-            "FAULTY", "FAULT", "DEFECTIVE", "DEFECT", "MALFUNCTIONING",
-            "NOT WORKING PROPERLY", "INTERMITTENT", "ERRATIC"
-        ]
-        if any(kw in r for kw in faulty_keywords):
+        # GPM ASSESSMENT (before standby/faulty — "REQUIRE ASSESSMENT" is specific)
+        if "GPM" in r or ("REQUIRE" in r and "ASSESS" in r):
             return DetectedCondition(
-                condition="faulty",
+                condition="gpm_assessment",
                 confidence="high",
                 reason=f"Keyword detected: {remarks[:50]}"
             )
 
-        # STANDBY - idle/available
+        # STANDBY - idle/available (check BEFORE faulty so
+        # "STAND BY, NEED TYRES" → standby, not faulty)
         standby_keywords = [
-            "STANDBY", "STAND BY", "STAND-BY",
+            "STANDBY", "STAND BY", "STAND-BY", "STANDING BY",
             "IDLE", "AVAILABLE", "PARKED",
-            "BEHIND PLANT", "PLANT WORKSHOP", "IN WORKSHOP", "AT WORKSHOP", "WORKSHOP"
+            "BEHIND PLANT", "PLANT WORKSHOP", "IN WORKSHOP", "AT WORKSHOP", "WORKSHOP",
+            # Container/store locations = plant is sitting idle
+            "T.CONTAINER", "T CONTAINER", "T. CONTAINER", "CONTAINER",
+            "PW3", "PW 3",
+            "INSIDE STORE", "IN STORE", "STORE",
+            "IN THE YARD", "IN YARD", "YARD",
         ]
         if any(kw in r for kw in standby_keywords):
-            # Check if there's also a problem mentioned
+            # Check if there's also a problem mentioned (→ breakdown, not standby)
             if any(kw in r for kw in ["NO ENGINE", "NO COMPRESSOR", "REMOVED", "BURNED"]):
                 return DetectedCondition(
                     condition="breakdown",
@@ -253,12 +270,54 @@ def detect_condition_from_keywords(
                 reason=f"Keyword detected: {remarks[:50]}"
             )
 
-        # GPM ASSESSMENT
-        if "GPM" in r or ("REQUIRE" in r and "ASSESSMENT" in r):
+        # FAULTY - has a fault/problem but still partially functional
+        faulty_keywords = [
+            "FAULTY", "FAULT", "DEFECTIVE", "DEFECT", "MALFUNCTIONING",
+            "NOT WORKING PROPERLY", "INTERMITTENT", "ERRATIC",
+            "ENGINE PROBLEM", "CLUTCH PROBLEM", "ELECTRICAL PROBLEM",
+            "GEARBOX PROBLEM", "GEAR BOX PROBLEM", "TRANSMISSION PROBLEM",
+            "HYDRAULIC PROBLEM", "BRAKE PROBLEM", "STEERING PROBLEM",
+            "SUSPENSION PROBLEM", "PUMP PROBLEM",
+            "NEED TYRES", "NEED TYRE", "NEEDS TYRES",
+            "TYRES REQUIRED", "BRAKE LINING REQUIRED",
+        ]
+        if any(kw in r for kw in faulty_keywords):
+            if not any(kw in r for kw in ["NO PROBLEM", "PROBLEM SOLVED", "PROBLEM FIXED"]):
+                return DetectedCondition(
+                    condition="faulty",
+                    confidence="high",
+                    reason=f"Fault detected: {remarks[:50]}"
+                )
+
+        # Catch-all "PROBLEM" — if "PROBLEM" appears and nothing else matched
+        if "PROBLEM" in r and not any(kw in r for kw in ["NO PROBLEM", "PROBLEM SOLVED"]):
             return DetectedCondition(
-                condition="gpm_assessment",
-                confidence="high",
-                reason=f"Keyword detected: {remarks[:50]}"
+                condition="faulty",
+                confidence="medium",
+                reason=f"Problem mentioned: {remarks[:50]}"
+            )
+
+        # "FROM [location]" pattern — transferred from somewhere
+        if r.startswith("FROM ") and len(r) > 5:
+            # Check if it also mentions repairs/checking
+            if any(kw in r for kw in ["FOR REPAIRS", "FOR CHECKING", "FOR REPAIR"]):
+                return DetectedCondition(
+                    condition="under_repair",
+                    confidence="high",
+                    reason=f"Transferred for repairs: {remarks[:50]}"
+                )
+            return DetectedCondition(
+                condition="standby",
+                confidence="medium",
+                reason=f"Transferred from another site: {remarks[:50]}"
+            )
+
+        # "TO BE CHECK" / "TO BE CHECKED" — unverified
+        if "TO BE CHECK" in r:
+            return DetectedCondition(
+                condition="unverified",
+                confidence="medium",
+                reason=f"Pending verification: {remarks[:50]}"
             )
 
         # Check for "FIXED" or "REPAIRED" - means now working
