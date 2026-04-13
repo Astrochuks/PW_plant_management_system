@@ -2568,9 +2568,25 @@ async def save_confirmed_weekly_report(
             # IMPORTANT: Don't update current_location_id if:
             # 1. Plant is marked 'missing' (it's NOT actually at this location)
             # 2. This location is INACTIVE (stale reports that don't reflect reality)
+            # 3. Plant was ALREADY claimed by another active site for THIS SAME week
+            #    (the first upload wins — prevents second upload from overwriting)
             # The weekly_record is still saved (audit trail) but the plant master is left alone.
             is_missing_here = condition == "missing"
-            skip_location_update = is_missing_here or not is_active_location
+
+            # Direct same-week check: if plant is already at a DIFFERENT site
+            # for THIS same week, the first upload should win.
+            existing_location = fleet_to_location.get(fleet_num)
+            already_at_different_site_this_week = (
+                existing_verification == (year, week_number)
+                and existing_location
+                and str(existing_location) != str(location_id)
+            )
+
+            skip_location_update = (
+                is_missing_here
+                or not is_active_location
+                or already_at_different_site_this_week
+            )
 
             if skip_location_update:
                 if is_missing_here:
@@ -2587,21 +2603,19 @@ async def save_confirmed_weekly_report(
                         this_location=location_name_for_log,
                         week=f"{year}-W{week_number}",
                     )
-            elif is_newer_or_same:
-                if (year, week_number) == existing_verification and is_new_arrival_elsewhere and not is_new_here:
-                    # Same week, but another location has a new arrival for this plant
-                    # and we're just continuing — don't overwrite location
+                elif already_at_different_site_this_week:
                     logger.info(
-                        "Skipping location overwrite: plant is a new arrival at another location this week",
+                        "Plant already at another site this week — NOT overwriting",
                         fleet_number=fleet_num,
-                        this_location=str(location_id),
+                        current_location=str(existing_location),
+                        this_location=location_name_for_log,
                         week=f"{year}-W{week_number}",
                     )
-                else:
-                    plant_upsert["current_location_id"] = location_id
-                    plant_upsert["last_verified_date"] = week_ending_date
-                    plant_upsert["last_verified_year"] = year
-                    plant_upsert["last_verified_week"] = week_number
+            elif is_newer_or_same:
+                plant_upsert["current_location_id"] = location_id
+                plant_upsert["last_verified_date"] = week_ending_date
+                plant_upsert["last_verified_year"] = year
+                plant_upsert["last_verified_week"] = week_number
             else:
                 logger.info(
                     "Skipping location overwrite for older upload",
@@ -2729,6 +2743,22 @@ async def save_confirmed_weekly_report(
                     confirm_ids, week_ending_date, datetime.utcnow(),
                 )
 
+        # Build set of plants that were skipped for location update
+        # (already claimed by another site this week). We also skip their
+        # weekly_record to prevent the ON CONFLICT from overwriting the
+        # other site's record.
+        plants_skipped_location = set()
+        for plant_data in validated_plants:
+            fn = plant_data["fleet_number"]
+            existing_loc = fleet_to_location.get(fn)
+            existing_ver = fleet_to_verification.get(fn, (0, 0))
+            if (
+                existing_ver == (year, week_number)
+                and existing_loc
+                and str(existing_loc) != str(location_id)
+            ):
+                plants_skipped_location.add(fn)
+
         # Create weekly records
         for plant_data in validated_plants:
             fleet_num = plant_data["fleet_number"]
@@ -2736,6 +2766,11 @@ async def save_confirmed_weekly_report(
 
             if not plant_id:
                 logger.warning("Plant not found after upsert", fleet_number=fleet_num)
+                continue
+
+            # Skip weekly_record for plants already claimed elsewhere this week
+            # (prevents ON CONFLICT from overwriting the other site's record)
+            if fleet_num in plants_skipped_location:
                 continue
 
             weekly_record = {
