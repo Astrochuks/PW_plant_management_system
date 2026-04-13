@@ -1967,20 +1967,9 @@ async def rebuild_location_timeline(plant_ids: list) -> dict[str, int]:
     current_location_map = {r["id"]: r["current_location_id"] for r in plant_info}
     fleet_map = {r["id"]: r["fleet_number"] for r in plant_info}
 
-    # === 1 query: delete this rebuild's previous outputs (NULL submission_id) ===
-    # Movement events from save_confirmed_weekly_report have submission_id set;
-    # rebuild's auto-generated events have submission_id IS NULL.
-    # We only delete OUR previous outputs so we can recreate them.
-    del_events = await execute(
-        """DELETE FROM plant_events
-           WHERE plant_id = ANY($1::uuid[])
-             AND event_type = 'movement'
-             AND submission_id IS NULL""",
-        plant_ids,
-    )
-    logger.info("rebuild: deleted prior movement events", result=del_events)
-
-    # === 1 query: read remaining movement events (from save_confirmed) for dedup ===
+    # === 1 query: read ALL existing movement events for dedup ===
+    # Instead of delete-then-insert (which loses data if insert fails),
+    # we use insert-if-not-exists. Events accumulate idempotently.
     existing_events = await fetch(
         """SELECT plant_id, event_date, from_location_id, to_location_id
            FROM plant_events
@@ -1991,6 +1980,7 @@ async def rebuild_location_timeline(plant_ids: list) -> dict[str, int]:
         (str(e["plant_id"]), str(e["event_date"]), str(e["from_location_id"]) if e.get("from_location_id") else None, str(e["to_location_id"]) if e.get("to_location_id") else None)
         for e in existing_events
     }
+    logger.info("rebuild: existing movement events for dedup", count=len(existing_keys))
 
     # === 1 query: read existing transfers for dedup ===
     existing_transfer_rows = await fetch(
@@ -2178,19 +2168,28 @@ async def rebuild_location_timeline(plant_ids: list) -> dict[str, int]:
             logger.error("rebuild: history Pass 2 UPDATE failed", error=repr(e), traceback=traceback.format_exc())
             raise
 
-    # === 1 query: batch insert events (explicit ::date cast) ===
-    if events_to_create:
+    # === Insert events one-by-one for resilience ===
+    # (executemany fails the entire batch if ONE row has a type issue;
+    # individual inserts let us skip bad rows and still create the rest)
+    events_inserted = 0
+    for evt in events_to_create:
         try:
-            await executemany(
+            await execute(
                 """INSERT INTO plant_events (plant_id, event_type, event_date, year, week_number,
                     from_location_id, to_location_id, details, remarks)
                 VALUES ($1::uuid, $2, $3::date, $4, $5, $6::uuid, $7::uuid, $8::jsonb, $9)""",
-                events_to_create,
+                *evt,
             )
-            logger.info("rebuild: events inserted", count=len(events_to_create))
+            events_inserted += 1
         except Exception as e:
-            logger.error("rebuild: events INSERT failed", error=repr(e), traceback=traceback.format_exc())
-            raise
+            logger.warning(
+                "rebuild: single event INSERT failed, skipping",
+                error=repr(e),
+                plant_id=evt[0] if evt else None,
+                event_date=str(evt[2]) if len(evt) > 2 else None,
+            )
+    if events_to_create:
+        logger.info("rebuild: events inserted", count=events_inserted, total=len(events_to_create))
 
     # === 1 query: batch insert NEW transfers (with AUTO_REBUILD marker) ===
     if transfers_to_insert:
