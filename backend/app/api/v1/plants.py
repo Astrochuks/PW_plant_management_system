@@ -419,10 +419,113 @@ def _format_date_parts(year: int | None, month: int | None, day: int | None) -> 
     return str(year)
 
 
+@router.get("/export/fleet-types")
+async def export_fleet_types_excel(
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+    location_id: UUID | None = Query(None, description="Filter by location"),
+    columns: str | None = Query(None, description="Comma-separated columns to include"),
+) -> Any:
+    """Export fleet type summary to Excel with P.W. branding."""
+    import io
+    from fastapi.responses import StreamingResponse
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    data = await fetch(
+        "SELECT * FROM get_fleet_summary_by_type($1)",
+        str(location_id) if location_id else None,
+    )
+
+    # All available columns with display names and DB keys
+    all_columns = [
+        {"key": "fleet_type", "header": "Fleet Type", "width": 30},
+        {"key": "total", "header": "Total", "width": 10},
+        {"key": "working", "header": "Working", "width": 10},
+        {"key": "standby", "header": "Standby", "width": 10},
+        {"key": "breakdown", "header": "Breakdown", "width": 12},
+        {"key": "under_repair", "header": "Under Repair", "width": 12},
+        {"key": "other", "header": "Other", "width": 10},
+    ]
+
+    # Filter to requested columns (or all)
+    if columns:
+        requested = {c.strip() for c in columns.split(",")}
+        export_cols = [c for c in all_columns if c["key"] in requested]
+    else:
+        export_cols = all_columns
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Fleet Type Summary"
+
+    header_font = Font(bold=True, size=10, color="101415")
+    header_fill = PatternFill(start_color="FFBF36", end_color="FFBF36", fill_type="solid")
+    header_alignment = Alignment(horizontal="center", vertical="center")
+    cell_border = Border(
+        left=Side(style="thin", color="808080"), right=Side(style="thin", color="808080"),
+        top=Side(style="thin", color="808080"), bottom=Side(style="thin", color="808080"),
+    )
+
+    # Row 1: P.W. branding
+    num_cols = len(export_cols)
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=num_cols)
+    title_cell = ws.cell(row=1, column=1, value="P.W. NIGERIA LTD. — Fleet Type Summary")
+    title_cell.font = Font(bold=True, size=14, color="101415")
+    title_cell.alignment = Alignment(vertical="center")
+    ws.row_dimensions[1].height = 40
+
+    # Row 2: Headers
+    for col_idx, col_def in enumerate(export_cols, 1):
+        cell = ws.cell(row=2, column=col_idx, value=col_def["header"])
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_alignment
+        cell.border = cell_border
+        ws.column_dimensions[get_column_letter(col_idx)].width = col_def["width"]
+
+    # Data rows
+    sorted_data = sorted(data, key=lambda x: x.get("total", 0), reverse=True)
+    for row_idx, item in enumerate(sorted_data, 3):
+        for col_idx, col_def in enumerate(export_cols, 1):
+            val = item.get(col_def["key"], 0)
+            cell = ws.cell(row=row_idx, column=col_idx, value=val)
+            cell.border = cell_border
+            if col_def["key"] != "fleet_type":
+                cell.alignment = Alignment(horizontal="center")
+
+    # Totals row
+    total_row = len(sorted_data) + 3
+    for col_idx, col_def in enumerate(export_cols, 1):
+        if col_def["key"] == "fleet_type":
+            cell = ws.cell(row=total_row, column=col_idx, value="TOTAL")
+        else:
+            cell = ws.cell(row=total_row, column=col_idx,
+                           value=sum(item.get(col_def["key"], 0) for item in sorted_data))
+            cell.alignment = Alignment(horizontal="center")
+        cell.font = Font(bold=True)
+        cell.border = cell_border
+
+    ws.freeze_panes = "A3"
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+
+    from datetime import datetime
+    filename = f"fleet_type_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
 @router.get("/export/excel")
 async def export_plants_excel(
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
-    exclude_not_seen: bool = Query(True, description="Exclude plants with 'not seen' in remarks"),
+    exclude_not_seen: bool = Query(False, description="Exclude plants with 'not seen' in remarks"),
     location_id: UUID | None = Query(None, description="Filter by location"),
     state: str | None = Query(None, description="Filter by state (e.g., 'Kaduna', 'FCT', 'Ogun')"),
     fleet_type: str | None = Query(None, description="Filter by fleet type(s), comma-separated"),
@@ -483,11 +586,13 @@ async def export_plants_excel(
 
     if fleet_type:
         fleet_type_list = [f.strip() for f in fleet_type.split(",")]
-        ft_conds = []
-        for ft in fleet_type_list:
-            params.append(f"%{ft}%")
-            ft_conds.append(f"fleet_type ILIKE ${len(params)}")
-        conds.append(f"({' OR '.join(ft_conds)})")
+        if len(fleet_type_list) == 1:
+            params.append(fleet_type_list[0])
+            conds.append(f"fleet_type = ${len(params)}")
+        else:
+            placeholders = ", ".join(f"${len(params) + i + 1}" for i in range(len(fleet_type_list)))
+            params.extend(fleet_type_list)
+            conds.append(f"fleet_type IN ({placeholders})")
 
     if condition:
         condition_list = [c.strip() for c in condition.split(",")]
@@ -848,13 +953,16 @@ async def list_plants(
             params.extend(condition_list)
             conds.append(f"condition IN ({placeholders})")
 
-    # Fleet type filter (ILIKE for partial matching)
+    # Fleet type filter (exact match — fleet types come from a controlled dropdown)
     if fleet_type_list:
-        ft_conds = []
-        for ft in fleet_type_list:
-            params.append(f"%{ft}%")
-            ft_conds.append(f"fleet_type ILIKE ${len(params)}")
-        conds.append(f"({' OR '.join(ft_conds)})")
+        if len(fleet_type_list) == 1:
+            params.append(fleet_type_list[0])
+            ft_conds_str = f"fleet_type = ${len(params)}"
+        else:
+            placeholders = ", ".join(f"${len(params) + i + 1}" for i in range(len(fleet_type_list)))
+            params.extend(fleet_type_list)
+            ft_conds_str = f"fleet_type IN ({placeholders})"
+        conds.append(ft_conds_str)
 
     # Location filters
     if unknown_location:

@@ -262,6 +262,20 @@ export async function exportPlantsExcel(params: ExportParams = {}): Promise<Blob
 }
 
 /**
+ * Export fleet type summary to Excel
+ */
+export async function exportFleetTypesExcel(locationId?: string): Promise<Blob> {
+  const params: Record<string, string> = {};
+  if (locationId) params.location_id = locationId;
+
+  const response = await apiClient.get('/plants/export/fleet-types', {
+    params,
+    responseType: 'blob',
+  });
+  return response.data;
+}
+
+/**
  * Get plant maintenance history
  */
 export interface MaintenanceRecord {
