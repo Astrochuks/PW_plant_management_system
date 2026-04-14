@@ -2268,7 +2268,7 @@ async def get_price_catalog(
     sort_by: str = Query("part_name", pattern="^(part_name|purchase_count|avg_unit_cost|total_spent|last_purchased)$"),
     sort_order: str = Query("asc", pattern="^(asc|desc)$"),
     page: int = Query(1, ge=1),
-    limit: int = Query(100, ge=1, le=500),
+    limit: int = Query(100, ge=1, le=5000),
 ) -> dict[str, Any]:
     """Parts price catalog — every unique part with price aggregation."""
     conds: list[str] = []
