@@ -64,10 +64,13 @@ export default function PriceCatalogPage() {
 
   const debouncedSearch = useDebounce(search, 300);
 
+  const queryLimit = isPrintMode ? 5000 : 100;
+  const queryPage = isPrintMode ? 1 : page;
+
   const { data, isLoading } = usePriceCatalog({
     search: debouncedSearch || undefined,
     sort_by: sortBy, sort_order: sortOrder,
-    page, limit: isPrintMode ? 5000 : 100,
+    page: queryPage, limit: queryLimit,
   });
 
   const handleSort = useCallback((col: string) => {
@@ -84,7 +87,6 @@ export default function PriceCatalogPage() {
 
   const handlePrint = useCallback(() => {
     setIsPrintMode(true);
-    setPage(1);
   }, []);
 
   // When print mode is active and data is loaded, trigger print
@@ -151,6 +153,10 @@ export default function PriceCatalogPage() {
           table { font-size: 9px !important; width: 100% !important; }
           th, td { padding: 2px 4px !important; white-space: nowrap !important; }
           @page { size: landscape; margin: 10mm; }
+          /* Hide app icon, sidebar, header, and any fixed elements */
+          nav, header, aside, [data-sidebar], .fixed, iframe,
+          img[alt*="logo"], img[src*="logo"],
+          div[style*="position: fixed"], div[style*="position:fixed"] { display: none !important; }
         }
       `}</style>
 
@@ -194,7 +200,7 @@ export default function PriceCatalogPage() {
             <TableBody>
               {data.data.map((item, idx) => (
                 <TableRow key={item.part_name} className="text-sm">
-                  <TableCell className="text-xs text-muted-foreground">{(page - 1) * 100 + idx + 1}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{(queryPage - 1) * queryLimit + idx + 1}</TableCell>
                   <TableCell className="font-medium">{item.part_name}</TableCell>
                   <TableCell className="text-xs text-muted-foreground font-mono">{item.part_number || '-'}</TableCell>
                   <TableCell className="text-center">
