@@ -2259,6 +2259,76 @@ async def get_repeat_purchase_detail(
     }
 
 
+# ============== PARTS PRICE CATALOG ==============
+
+@router.get("/analytics/price-catalog")
+async def get_price_catalog(
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+    search: str | None = Query(None, description="Search part name or part number"),
+    sort_by: str = Query("part_name", pattern="^(part_name|purchase_count|avg_unit_cost|total_spent|last_purchased)$"),
+    sort_order: str = Query("asc", pattern="^(asc|desc)$"),
+    page: int = Query(1, ge=1),
+    limit: int = Query(100, ge=1, le=500),
+) -> dict[str, Any]:
+    """Parts price catalog — every unique part with price aggregation."""
+    conds: list[str] = []
+    params: list[Any] = []
+
+    if search:
+        params.append(f"%{search}%")
+        n = len(params)
+        conds.append(f"(UPPER(sp.part_description) ILIKE ${n} OR COALESCE(sp.part_number, '') ILIKE ${n})")
+
+    where = " AND ".join(conds) if conds else "TRUE"
+
+    allowed_sorts = {"part_name", "purchase_count", "avg_unit_cost", "total_spent", "last_purchased"}
+    safe_sort = sort_by if sort_by in allowed_sorts else "part_name"
+    safe_order = "DESC" if sort_order == "desc" else "ASC"
+
+    params.append(limit)
+    params.append((page - 1) * limit)
+
+    rows = await fetch(
+        f"""SELECT
+              UPPER(TRIM(sp.part_description)) AS part_name,
+              COALESCE(MAX(sp.part_number), '') AS part_number,
+              count(*) AS purchase_count,
+              sum(sp.quantity) AS total_qty,
+              min(sp.unit_cost)::float AS min_unit_cost,
+              max(sp.unit_cost)::float AS max_unit_cost,
+              round(avg(sp.unit_cost)::numeric, 2)::float AS avg_unit_cost,
+              sum(sp.total_cost)::float AS total_spent,
+              max(sp.po_date) AS last_purchased,
+              count(DISTINCT COALESCE(s.name, sp.supplier)) AS supplier_count,
+              array_agg(DISTINCT COALESCE(s.name, sp.supplier) ORDER BY COALESCE(s.name, sp.supplier)) AS suppliers,
+              count(*) OVER() AS _total_count
+            FROM spare_parts sp
+            LEFT JOIN suppliers s ON s.id = sp.supplier_id
+            WHERE {where}
+            GROUP BY UPPER(TRIM(sp.part_description))
+            ORDER BY {safe_sort} {safe_order} NULLS LAST
+            LIMIT ${len(params) - 1} OFFSET ${len(params)}""",
+        *params,
+    )
+
+    total = rows[0].pop("_total_count", 0) if rows else 0
+    for row in rows[1:]:
+        row.pop("_total_count", None)
+
+    for row in rows:
+        if row.get("last_purchased"):
+            row["last_purchased"] = str(row["last_purchased"])
+
+    return {
+        "success": True,
+        "data": rows,
+        "meta": {
+            "page": page, "limit": limit, "total": total,
+            "total_pages": (total + limit - 1) // limit if total > 0 else 0,
+        },
+    }
+
+
 # ============== SINGLE PART BY ID (must be last to avoid route conflicts) ==============
 
 @router.get("/{part_id}")

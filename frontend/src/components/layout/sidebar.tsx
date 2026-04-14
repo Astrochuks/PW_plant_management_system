@@ -30,6 +30,7 @@ import {
   FolderKanban,
   Lightbulb,
   AlertTriangle,
+  BookOpen,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -94,6 +95,11 @@ const plantNavItems = [
     title: 'Repeat Purchases',
     href: '/spare-parts/repeat-purchases',
     icon: AlertTriangle,
+  },
+  {
+    title: 'Price Catalog',
+    href: '/spare-parts/price-catalog',
+    icon: BookOpen,
   },
 ];
 
