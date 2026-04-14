@@ -60,13 +60,14 @@ export default function PriceCatalogPage() {
   const [sortBy, setSortBy] = useState('part_name');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [page, setPage] = useState(1);
+  const [isPrintMode, setIsPrintMode] = useState(false);
 
   const debouncedSearch = useDebounce(search, 300);
 
   const { data, isLoading } = usePriceCatalog({
     search: debouncedSearch || undefined,
     sort_by: sortBy, sort_order: sortOrder,
-    page, limit: 100,
+    page, limit: isPrintMode ? 5000 : 100,
   });
 
   const handleSort = useCallback((col: string) => {
@@ -81,7 +82,15 @@ export default function PriceCatalogPage() {
 
   const sortIcon = (col: string) => sortBy === col ? (sortOrder === 'desc' ? ' ↓' : ' ↑') : '';
 
-  const handlePrint = useCallback(() => window.print(), []);
+  const handlePrint = useCallback(() => {
+    setIsPrintMode(true);
+    setPage(1);
+    // Wait for data to load then print
+    setTimeout(() => {
+      window.print();
+      setIsPrintMode(false);
+    }, 1500);
+  }, []);
 
   return (
     <div className="space-y-4">
@@ -128,8 +137,20 @@ export default function PriceCatalogPage() {
         </span>
       </div>
 
+      {/* Print styles */}
+      <style jsx global>{`
+        @media print {
+          body { font-size: 9px !important; }
+          table { font-size: 9px !important; width: 100% !important; }
+          th, td { padding: 2px 4px !important; white-space: nowrap !important; }
+          @page { size: landscape; margin: 10mm; }
+        }
+      `}</style>
+
       {/* Table */}
-      {isLoading ? (
+      {isLoading && isPrintMode ? (
+        <div className="text-center py-8 print:hidden">Loading all data for print...</div>
+      ) : isLoading ? (
         <Skeleton className="h-96" />
       ) : !data?.data.length ? (
         <div className="text-center py-16">
@@ -137,7 +158,7 @@ export default function PriceCatalogPage() {
           <p className="font-medium">No parts found</p>
         </div>
       ) : (
-        <div className="border rounded-lg overflow-hidden print:border-0">
+        <div className="border rounded-lg overflow-hidden print:border-0 print:overflow-visible">
           <Table>
             <TableHeader>
               <TableRow>
