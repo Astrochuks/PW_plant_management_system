@@ -85,12 +85,19 @@ export default function PriceCatalogPage() {
   const handlePrint = useCallback(() => {
     setIsPrintMode(true);
     setPage(1);
-    // Wait for data to load then print
-    setTimeout(() => {
-      window.print();
-      setIsPrintMode(false);
-    }, 1500);
   }, []);
+
+  // When print mode is active and data is loaded, trigger print
+  useEffect(() => {
+    if (isPrintMode && data && data.data.length > 0 && !isLoading) {
+      // Small delay for DOM to render
+      const t = setTimeout(() => {
+        window.print();
+        setIsPrintMode(false);
+      }, 300);
+      return () => clearTimeout(t);
+    }
+  }, [isPrintMode, data, isLoading]);
 
   return (
     <div className="space-y-4">
