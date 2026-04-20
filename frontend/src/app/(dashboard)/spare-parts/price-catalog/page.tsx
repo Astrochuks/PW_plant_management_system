@@ -180,8 +180,9 @@ export default function PriceCatalogPage() {
                   Part Name{sortIcon('part_name')}
                 </TableHead>
                 <TableHead className="w-[100px]">Part No.</TableHead>
-                <TableHead className="w-[70px] text-center cursor-pointer hover:text-foreground" onClick={() => handleSort('purchase_count')}>
-                  Bought{sortIcon('purchase_count')}
+                <TableHead className="w-[50px] text-center">Qty</TableHead>
+                <TableHead className="w-[50px] text-center cursor-pointer hover:text-foreground" onClick={() => handleSort('purchase_count')}>
+                  POs{sortIcon('purchase_count')}
                 </TableHead>
                 <TableHead className="w-[100px] text-right">Min Price</TableHead>
                 <TableHead className="w-[100px] text-right cursor-pointer hover:text-foreground" onClick={() => handleSort('avg_unit_cost')}>
@@ -199,10 +200,11 @@ export default function PriceCatalogPage() {
             </TableHeader>
             <TableBody>
               {data.data.map((item, idx) => (
-                <TableRow key={item.part_name} className="text-sm">
-                  <TableCell className="text-xs text-muted-foreground">{(queryPage - 1) * queryLimit + idx + 1}</TableCell>
+                <TableRow key={`${item.part_name}-${item.part_number}-${idx}`} className="text-sm">
+                  <TableCell className="text-xs text-muted-foreground">{idx + 1}</TableCell>
                   <TableCell className="font-medium">{item.part_name}</TableCell>
                   <TableCell className="text-xs text-muted-foreground font-mono">{item.part_number || '-'}</TableCell>
+                  <TableCell className="text-center text-xs tabular-nums">{item.total_qty}</TableCell>
                   <TableCell className="text-center">
                     <Badge variant="secondary" className="text-xs">{item.purchase_count}x</Badge>
                   </TableCell>
