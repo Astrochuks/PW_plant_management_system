@@ -1314,6 +1314,32 @@ async def update_plant(
         *params,
     )
 
+    # If location changed, update plant_location_history
+    old_location = existing.get("current_location_id")
+    new_location = update_data.get("current_location_id")
+    if new_location and str(new_location) != str(old_location or ""):
+        # Close current open span
+        await execute(
+            """UPDATE plant_location_history SET end_date = now()
+               WHERE plant_id = $1::uuid AND end_date IS NULL""",
+            str(plant_id),
+        )
+        # Create new span at the new location
+        await execute(
+            """INSERT INTO plant_location_history (plant_id, location_id, start_date, transfer_reason)
+               VALUES ($1::uuid, $2::uuid, now(), 'Admin manually changed location')""",
+            str(plant_id), str(new_location),
+        )
+        # Create movement event
+        if old_location:
+            await execute(
+                """INSERT INTO plant_events (plant_id, event_type, event_date, from_location_id, to_location_id, details, remarks)
+                   VALUES ($1::uuid, 'movement', now()::date, $2::uuid, $3::uuid, $4::jsonb, $5)""",
+                str(plant_id), str(old_location), str(new_location),
+                json.dumps({"fleet_number": existing.get("fleet_number", ""), "admin_edit": True}),
+                f"Admin changed location from {old_location} to {new_location}",
+            )
+
     logger.info(
         "Plant updated",
         plant_id=str(plant_id),
