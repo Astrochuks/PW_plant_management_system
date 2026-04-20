@@ -2265,12 +2265,17 @@ async def get_repeat_purchase_detail(
 async def get_price_catalog(
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
     search: str | None = Query(None, description="Search part name or part number"),
-    sort_by: str = Query("part_name", pattern="^(part_name|purchase_count|avg_unit_cost|total_spent|last_purchased)$"),
+    sort_by: str = Query("part_name", pattern="^(part_name|part_number|purchase_count|avg_unit_cost|total_spent|last_purchased)$"),
     sort_order: str = Query("asc", pattern="^(asc|desc)$"),
     page: int = Query(1, ge=1),
     limit: int = Query(100, ge=1, le=5000),
 ) -> dict[str, Any]:
-    """Parts price catalog — every unique part with price aggregation."""
+    """Parts price catalog — every unique part+part_number with price aggregation.
+
+    Groups by (part_description + part_number). Same description with different
+    part numbers = different products = separate rows. Parts without a part
+    number are grouped together by description alone.
+    """
     conds: list[str] = []
     params: list[Any] = []
 
@@ -2281,7 +2286,7 @@ async def get_price_catalog(
 
     where = " AND ".join(conds) if conds else "TRUE"
 
-    allowed_sorts = {"part_name", "purchase_count", "avg_unit_cost", "total_spent", "last_purchased"}
+    allowed_sorts = {"part_name", "part_number", "purchase_count", "avg_unit_cost", "total_spent", "last_purchased"}
     safe_sort = sort_by if sort_by in allowed_sorts else "part_name"
     safe_order = "DESC" if sort_order == "desc" else "ASC"
 
@@ -2291,7 +2296,7 @@ async def get_price_catalog(
     rows = await fetch(
         f"""SELECT
               UPPER(TRIM(sp.part_description)) AS part_name,
-              COALESCE(MAX(sp.part_number), '') AS part_number,
+              COALESCE(NULLIF(TRIM(sp.part_number), ''), '-') AS part_number,
               count(*) AS purchase_count,
               sum(sp.quantity) AS total_qty,
               min(sp.unit_cost)::float AS min_unit_cost,
@@ -2305,7 +2310,7 @@ async def get_price_catalog(
             FROM spare_parts sp
             LEFT JOIN suppliers s ON s.id = sp.supplier_id
             WHERE {where}
-            GROUP BY UPPER(TRIM(sp.part_description))
+            GROUP BY UPPER(TRIM(sp.part_description)), COALESCE(NULLIF(TRIM(sp.part_number), ''), '-')
             ORDER BY {safe_sort} {safe_order} NULLS LAST
             LIMIT ${len(params) - 1} OFFSET ${len(params)}""",
         *params,
