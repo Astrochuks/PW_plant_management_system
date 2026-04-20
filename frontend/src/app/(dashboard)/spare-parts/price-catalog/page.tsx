@@ -64,7 +64,7 @@ export default function PriceCatalogPage() {
 
   const debouncedSearch = useDebounce(search, 300);
 
-  const queryLimit = isPrintMode ? 5000 : 100;
+  const queryLimit = isPrintMode ? 10000 : 100;
   const queryPage = isPrintMode ? 1 : page;
 
   const { data, isLoading } = usePriceCatalog({
@@ -153,10 +153,14 @@ export default function PriceCatalogPage() {
           table { font-size: 9px !important; width: 100% !important; }
           th, td { padding: 2px 4px !important; white-space: nowrap !important; }
           @page { size: landscape; margin: 10mm; }
-          /* Hide app icon, sidebar, header, and any fixed elements */
-          nav, header, aside, [data-sidebar], .fixed, iframe,
-          img[alt*="logo"], img[src*="logo"],
-          div[style*="position: fixed"], div[style*="position:fixed"] { display: none !important; }
+          /* Hide EVERYTHING except the main content */
+          nav, header, aside, footer, [data-sidebar], .fixed, iframe,
+          img, video, canvas:not([data-print-chart]),
+          div[style*="position: fixed"], div[style*="position:fixed"],
+          div[style*="z-index: 9"], div[style*="z-index:9"],
+          #__next > div > aside, #__next > div > header,
+          button[class*="fixed"], div[class*="fixed"] { display: none !important; visibility: hidden !important; }
+          * { box-shadow: none !important; }
         }
       `}</style>
 
