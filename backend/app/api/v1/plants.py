@@ -1332,12 +1332,16 @@ async def update_plant(
         )
         # Create movement event
         if old_location:
+            from datetime import date as date_type
+            today = date_type.today()
+            iso = today.isocalendar()
             await execute(
-                """INSERT INTO plant_events (plant_id, event_type, event_date, from_location_id, to_location_id, details, remarks)
-                   VALUES ($1::uuid, 'movement', now()::date, $2::uuid, $3::uuid, $4::jsonb, $5)""",
-                str(plant_id), str(old_location), str(new_location),
+                """INSERT INTO plant_events (plant_id, event_type, event_date, year, week_number, from_location_id, to_location_id, details, remarks)
+                   VALUES ($1::uuid, 'movement', $2::date, $3, $4, $5::uuid, $6::uuid, $7::jsonb, $8)""",
+                str(plant_id), today, iso.year, iso.week,
+                str(old_location), str(new_location),
                 json.dumps({"fleet_number": existing.get("fleet_number", ""), "admin_edit": True}),
-                f"Admin changed location from {old_location} to {new_location}",
+                f"Admin corrected location",
             )
 
     logger.info(
