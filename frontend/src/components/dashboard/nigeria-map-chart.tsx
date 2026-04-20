@@ -166,7 +166,7 @@ export function NigeriaMapChart() {
           name: 'Plants',
           type: 'map',
           map: 'Nigeria',
-          roam: false,
+          roam: true,
           selectedMode: 'single',
           emphasis: {
             label: { show: true, fontSize: 12, fontWeight: 'bold', color: '#ffffff' },
@@ -188,13 +188,17 @@ export function NigeriaMapChart() {
           },
           label: {
             show: true,
-            fontSize: 8,
-            color: isDark ? '#94a3b8' : '#475569',
+            fontSize: 10,
+            color: isDark ? '#e2e8f0' : '#1e293b',
+            fontWeight: 'bold',
             formatter: (params: unknown) => {
               const p = params as { name: string; value: number }
               if (!p.value || p.value === 0) return ''
-              return `${p.value}`
+              // Short state name + count
+              const shortName = p.name.length > 12 ? p.name.slice(0, 10) + '..' : p.name
+              return `${shortName}\n${p.value}`
             },
+            lineHeight: 14,
           },
           itemStyle: {
             areaColor: isDark ? '#1e2024' : '#f1f5f9',
@@ -281,11 +285,11 @@ export function NigeriaMapChart() {
           {/* Map */}
           <div className="flex-1 min-w-0">
             {isLoading || !mapRegistered ? (
-              <Skeleton className="h-[400px] w-full" />
+              <Skeleton className="h-[550px] w-full" />
             ) : statesData && statesData.length > 0 ? (
-              <div ref={chartRef} data-print-chart className="h-[400px] w-full" />
+              <div ref={chartRef} data-print-chart className="h-[550px] w-full" />
             ) : (
-              <div className="h-[400px] flex items-center justify-center text-sm text-muted-foreground">
+              <div className="h-[550px] flex items-center justify-center text-sm text-muted-foreground">
                 No state data available
               </div>
             )}
