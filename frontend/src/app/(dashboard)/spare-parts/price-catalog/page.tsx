@@ -89,14 +89,24 @@ export default function PriceCatalogPage() {
     setIsPrintMode(true);
   }, []);
 
-  // When print mode is active and data is loaded, trigger print
+  // When print mode is active, wait for ALL data to load then print
   useEffect(() => {
-    if (isPrintMode && data && data.data.length > 0 && !isLoading) {
-      // Small delay for DOM to render
+    if (!isPrintMode) return;
+    // Must have data, not loading, and data count must exceed normal page size
+    // (meaning the print-mode query with limit=10000 has returned)
+    if (data && !isLoading && data.data.length > 100) {
       const t = setTimeout(() => {
         window.print();
         setIsPrintMode(false);
-      }, 300);
+      }, 500);
+      return () => clearTimeout(t);
+    }
+    // Edge case: total is <= 100, so print-mode data looks same as normal
+    if (data && !isLoading && data.meta.total <= 100 && data.data.length === data.meta.total) {
+      const t = setTimeout(() => {
+        window.print();
+        setIsPrintMode(false);
+      }, 500);
       return () => clearTimeout(t);
     }
   }, [isPrintMode, data, isLoading]);
@@ -146,23 +156,7 @@ export default function PriceCatalogPage() {
         </span>
       </div>
 
-      {/* Print styles */}
-      <style jsx global>{`
-        @media print {
-          body { font-size: 9px !important; }
-          table { font-size: 9px !important; width: 100% !important; }
-          th, td { padding: 2px 4px !important; white-space: nowrap !important; }
-          @page { size: landscape; margin: 10mm; }
-          /* Hide EVERYTHING except the main content */
-          nav, header, aside, footer, [data-sidebar], .fixed, iframe,
-          img, video, canvas:not([data-print-chart]),
-          div[style*="position: fixed"], div[style*="position:fixed"],
-          div[style*="z-index: 9"], div[style*="z-index:9"],
-          #__next > div > aside, #__next > div > header,
-          button[class*="fixed"], div[class*="fixed"] { display: none !important; visibility: hidden !important; }
-          * { box-shadow: none !important; }
-        }
-      `}</style>
+      {/* Print styles are in globals.css under .print-catalog */}
 
       {/* Table */}
       {isLoading && isPrintMode ? (
