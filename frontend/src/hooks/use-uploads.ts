@@ -90,10 +90,21 @@ export function useConfirmWeeklyReport() {
     mutationFn: ({ locationId, year, weekNumber, weekEndingDate, plants, missingPlantActions, file }) =>
       confirmWeeklyReport(locationId, year, weekNumber, weekEndingDate, plants, missingPlantActions, file),
     onSuccess: () => {
+      // Invalidate immediately for submissions (status update is synchronous)
       queryClient.invalidateQueries({ queryKey: submissionsKeys.all });
-      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-      queryClient.invalidateQueries({ queryKey: ['plants'] });
-      queryClient.invalidateQueries({ queryKey: ['locations'] });
+
+      // The confirm endpoint returns immediately but the actual DB writes
+      // happen in a background task. Delay data invalidation so the
+      // background task has time to finish writing before React Query refetches.
+      const delayedInvalidate = () => {
+        queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+        queryClient.invalidateQueries({ queryKey: ['plants'] });
+        queryClient.invalidateQueries({ queryKey: ['locations'] });
+        queryClient.invalidateQueries({ queryKey: ['reports'] });
+      };
+      // First invalidation after 3s (small uploads), second after 8s (larger ones)
+      setTimeout(delayedInvalidate, 3000);
+      setTimeout(delayedInvalidate, 8000);
     },
   });
 }

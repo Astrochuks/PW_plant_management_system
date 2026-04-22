@@ -61,10 +61,11 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             )
 
         # Process request
+        status_code = 500  # default in case of unhandled disconnect
+        error = None
         try:
             response = await call_next(request)
             status_code = response.status_code
-            error = None
         except Exception as e:
             status_code = 500
             error = str(e)

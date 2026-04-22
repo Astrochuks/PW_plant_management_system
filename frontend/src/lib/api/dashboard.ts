@@ -62,6 +62,8 @@ export interface DashboardSummary {
   top_locations: LocationStat[];
   recent_submissions: RecentSubmission[];
   unread_notifications: number;
+  total_sites: number;
+  total_states: number;
 }
 
 export interface FleetSummaryItem {
@@ -113,8 +115,15 @@ interface PaginatedApiResponse<T> {
 
 // API Functions
 
-export async function getDashboardSummary(): Promise<DashboardSummary> {
-  const response = await apiClient.get<ApiResponse<DashboardSummary>>('/reports/dashboard');
+export interface DashboardFilterParams {
+  state_id?: string;
+  location_id?: string;
+  fleet_type?: string;
+  year?: number;
+}
+
+export async function getDashboardSummary(params?: DashboardFilterParams): Promise<DashboardSummary> {
+  const response = await apiClient.get<ApiResponse<DashboardSummary>>('/reports/dashboard', { params });
   return response.data.data;
 }
 
@@ -149,4 +158,89 @@ export async function getPlantEvents(params?: {
 
 export async function acknowledgeEvent(eventId: string): Promise<void> {
   await apiClient.patch(`/plants/events/${eventId}/acknowledge`);
+}
+
+// Recently purchased plants
+export interface RecentlyPurchasedPlant {
+  id: string;
+  fleet_number: string;
+  description: string | null;
+  fleet_type: string | null;
+  make: string | null;
+  model: string | null;
+  purchase_year: number;
+  purchase_month: number | null;
+  purchase_cost: number | null;
+  condition: string | null;
+  current_location: string | null;
+}
+
+export async function getRecentlyPurchased(limit = 10): Promise<RecentlyPurchasedPlant[]> {
+  const response = await apiClient.get<ApiResponse<RecentlyPurchasedPlant[]>>(
+    '/reports/recently-purchased',
+    { params: { limit } },
+  );
+  return response.data.data;
+}
+
+// States summary for the dashboard map
+
+export interface StateSummary {
+  id: string;
+  name: string;
+  code: string;
+  region: string | null;
+  sites_count: number;
+  total_plants: number;
+  working_plants: number;
+  breakdown_plants: number;
+  under_repair_plants: number;
+  missing_plants: number;
+  scrap_plants: number;
+}
+
+export async function getStatesSummary(fleetType?: string): Promise<StateSummary[]> {
+  const params = fleetType ? { fleet_type: fleetType } : {};
+  const response = await apiClient.get<ApiResponse<Record<string, unknown>[]>>(
+    '/reports/states-summary',
+    { params },
+  );
+  return response.data.data.map((row) => ({
+    id: String(row.id ?? ''),
+    name: String(row.name ?? ''),
+    code: String(row.code ?? ''),
+    region: row.region ? String(row.region) : null,
+    sites_count: Number(row.sites_count ?? 0),
+    total_plants: Number(row.total_plants ?? 0),
+    working_plants: Number(row.working_plants ?? 0),
+    breakdown_plants: Number(row.breakdown_plants ?? 0),
+    under_repair_plants: Number(row.under_repair_plants ?? 0),
+    missing_plants: Number(row.missing_plants ?? 0),
+    scrap_plants: Number(row.scrap_plants ?? 0),
+  }));
+}
+
+// ── Fleet Distribution (states → sites → fleet type breakdown) ──────
+
+export interface FleetDistSite {
+  site_name: string;
+  total_plants: number;
+  fleet_types: Record<string, number>;
+}
+
+export interface FleetDistState {
+  state_name: string;
+  state_code: string;
+  region: string | null;
+  total_plants: number;
+  sites: FleetDistSite[];
+}
+
+export async function getFleetDistribution(fleetType?: string): Promise<FleetDistState[]> {
+  const params = fleetType ? { fleet_type: fleetType } : {};
+  const response = await apiClient.get<ApiResponse<FleetDistState[]>>(
+    '/reports/fleet-distribution',
+    { params },
+  );
+  return response.data.data;
 }

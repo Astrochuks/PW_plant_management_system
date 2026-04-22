@@ -90,10 +90,11 @@ function ConditionBadge({ condition }: { condition: PlantCondition | null }) {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-NG', {
+function formatCurrency(amount: number, currency = 'NGN'): string {
+  const locale = currency === 'NGN' ? 'en-NG' : currency === 'GBP' ? 'en-GB' : currency === 'EUR' ? 'de-DE' : 'en-US';
+  return new Intl.NumberFormat(locale, {
     style: 'currency',
-    currency: 'NGN',
+    currency,
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(amount)
@@ -145,7 +146,7 @@ function PlantDetailContent({ plantId }: { plantId: string }) {
   const { data: weeklyRecords = [], isLoading: weeklyLoading } = usePlantWeeklyRecords(activeTab === 'usage' ? plantId : null)
   const { data: events = [], isLoading: eventsLoading } = usePlantEvents(activeTab === 'events' ? plantId : null)
   const { data: costData, isLoading: costsLoading } = usePlantCosts(activeTab === 'costs' ? plantId : null, costParams)
-  const { data: sharedCostsData, isLoading: sharedCostsLoading } = usePlantSharedCosts(activeTab === 'costs' ? plantId : null)
+  const { data: sharedCostsData, isLoading: sharedCostsLoading } = usePlantSharedCosts(plantId)
   const deleteMutation = useDeletePlant()
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
@@ -258,21 +259,79 @@ function PlantDetailContent({ plantId }: { plantId: string }) {
               <CardContent>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
                   <InfoItem icon={Truck} label="Fleet Type" value={plant.fleet_type} />
-                  <InfoItem icon={MapPin} label="Current Site" value={plant.current_location} />
+                  {plant.division === 'mining' && (
+                    <InfoItem icon={Truck} label="Division" value="Mining" />
+                  )}
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 rounded-lg bg-muted flex-shrink-0">
+                      <MapPin className="h-4 w-4 text-muted-foreground" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs text-muted-foreground">Current Site</p>
+                      <p className="text-sm font-medium truncate flex items-center gap-1.5">
+                        {plant.current_location || '-'}
+                        {plant.is_bua && <span className="inline-flex items-center rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700 dark:bg-red-900/40 dark:text-red-400">BUA</span>}
+                      </p>
+                    </div>
+                  </div>
                   <InfoItem icon={Truck} label="Make" value={plant.make} />
                   <InfoItem icon={Truck} label="Model" value={plant.model} />
+                  <InfoItem icon={Truck} label="Capacity" value={plant.capacity} />
                   <InfoItem icon={Hash} label="Chassis Number" value={plant.chassis_number} />
-                  <InfoItem icon={Calendar} label="Year of Manufacture" value={plant.year_of_manufacture?.toString()} />
+                  <InfoItem icon={Hash} label="Engine Number" value={plant.engine_number} />
+                  <InfoItem icon={Calendar} label="Manufacture Date" value={
+                    plant.year_of_manufacture
+                      ? plant.manufacture_month
+                        ? plant.manufacture_day
+                          ? `${plant.manufacture_day} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][plant.manufacture_month - 1]} ${plant.year_of_manufacture}`
+                          : `${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][plant.manufacture_month - 1]} ${plant.year_of_manufacture}`
+                        : String(plant.year_of_manufacture)
+                      : null
+                  } />
                   <InfoItem icon={Hash} label="Serial M" value={plant.serial_m} />
                   <InfoItem icon={Hash} label="Serial E" value={plant.serial_e} />
-                  <InfoItem icon={Calendar} label="Purchase Year" value={plant.purchase_year?.toString()} />
+                  <InfoItem icon={Calendar} label="Purchase Date" value={
+                    plant.purchase_year
+                      ? plant.purchase_month
+                        ? plant.purchase_day
+                          ? `${plant.purchase_day} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][plant.purchase_month - 1]} ${plant.purchase_year}`
+                          : `${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][plant.purchase_month - 1]} ${plant.purchase_year}`
+                        : String(plant.purchase_year)
+                      : null
+                  } />
+                  <InfoItem icon={MapPin} label="Purchase Site" value={plant.purchase_site} />
                   <InfoItem
                     icon={DollarSign}
                     label="Purchase Cost"
-                    value={plant.purchase_cost ? formatCurrency(plant.purchase_cost) : null}
+                    value={plant.purchase_cost ? formatCurrency(plant.purchase_cost, plant.purchase_currency || 'NGN') : null}
                   />
                   <InfoItem icon={MapPin} label="State" value={plant.state} />
                 </div>
+
+                {/* Components */}
+                {plant.components && plant.components.length > 0 && (
+                  <div className="mt-6 pt-4 border-t">
+                    <h4 className="text-sm font-medium text-muted-foreground mb-3">Components</h4>
+                    <div className="border rounded-lg overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="bg-muted/50 border-b">
+                            <th className="text-left text-xs font-medium text-muted-foreground px-4 py-2">Component</th>
+                            <th className="text-left text-xs font-medium text-muted-foreground px-4 py-2">Model</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y">
+                          {plant.components.map((comp: { name: string; model: string }, idx: number) => (
+                            <tr key={idx} className="hover:bg-muted/20">
+                              <td className="px-4 py-2 font-medium">{comp.name}</td>
+                              <td className="px-4 py-2 text-muted-foreground font-mono text-xs">{comp.model || '-'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
@@ -562,6 +621,17 @@ function PlantDetailContent({ plantId }: { plantId: string }) {
                     : '\u20A60'}
                 </p>
               </div>
+              {sharedCostsData && sharedCostsData.shared_costs_count > 0 && (
+                <div>
+                  <p className="text-xs text-muted-foreground">Shared Maintenance Cost</p>
+                  <p className="text-lg font-semibold text-amber-600">
+                    {formatCurrency(sharedCostsData.total_shared_cost)}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {sharedCostsData.shared_costs_count} shared item{sharedCostsData.shared_costs_count !== 1 ? 's' : ''}
+                  </p>
+                </div>
+              )}
               <Separator />
               <div className="grid grid-cols-2 gap-4">
                 <div>

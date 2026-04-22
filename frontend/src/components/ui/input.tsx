@@ -2,7 +2,18 @@ import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
-function Input({ className, type, ...props }: React.ComponentProps<"input">) {
+function Input({ className, type, onWheel, ...props }: React.ComponentProps<"input">) {
+  // Prevent scroll wheel from changing number input values
+  const handleWheel = React.useCallback(
+    (e: React.WheelEvent<HTMLInputElement>) => {
+      if (type === "number") {
+        e.currentTarget.blur()
+      }
+      onWheel?.(e)
+    },
+    [type, onWheel]
+  )
+
   return (
     <input
       type={type}
@@ -13,6 +24,7 @@ function Input({ className, type, ...props }: React.ComponentProps<"input">) {
         "aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive",
         className
       )}
+      onWheel={handleWheel}
       {...props}
     />
   )

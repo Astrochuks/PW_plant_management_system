@@ -490,6 +490,7 @@ export default function PODetailPage() {
             const totalVat = overhead?.vat_amount || parts.reduce((s, p) => s + (Number(p.vat_amount) || 0), 0);
             const totalDiscount = overhead?.discount_amount || parts.reduce((s, p) => s + (Number(p.discount_amount) || 0), 0);
             const totalOther = overhead?.other_costs || parts.reduce((s, p) => s + (Number(p.other_costs) || 0), 0);
+            const otherDesc = parts.find(p => p.other_costs_description)?.other_costs_description ?? null;
             const grandTotal = Number(meta?.total_cost) || 0;
             const hasOverhead = totalVat > 0 || totalDiscount > 0 || totalOther > 0;
             return (
@@ -507,6 +508,7 @@ export default function PODetailPage() {
                     vat={totalVat}
                     discount={totalDiscount}
                     other={totalOther}
+                    otherDescription={otherDesc}
                     total={grandTotal}
                     hasOverhead={hasOverhead}
                   />
@@ -607,6 +609,7 @@ export default function PODetailPage() {
                         vat={sub.vat_amount}
                         discount={sub.discount_amount}
                         other={sub.other_costs}
+                        otherDescription={sub.other_costs_description}
                         total={sub.total}
                         hasOverhead={hasOverhead}
                       />
@@ -653,6 +656,7 @@ function CostBreakdownSection({
   vat,
   discount,
   other,
+  otherDescription,
   total,
   hasOverhead,
 }: {
@@ -661,6 +665,7 @@ function CostBreakdownSection({
   vat: number;
   discount: number;
   other: number;
+  otherDescription?: string | null;
   total: number;
   hasOverhead: boolean;
 }) {
@@ -684,7 +689,9 @@ function CostBreakdownSection({
       )}
       {other > 0 && (
         <div className="flex justify-between text-sm">
-          <span className="text-muted-foreground">Other Costs</span>
+          <span className="text-muted-foreground">
+            {otherDescription ? `Other Costs (${otherDescription})` : 'Other Costs'}
+          </span>
           <span>{formatCurrency(other)}</span>
         </div>
       )}

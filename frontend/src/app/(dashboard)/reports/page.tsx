@@ -10,10 +10,19 @@ import {
   AlertTriangle,
   Download,
   ArrowRight,
+  FileBarChart,
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 
 const reports = [
+  {
+    title: 'Report Generator',
+    description: 'Generate weekly, monthly, quarterly, or yearly fleet reports with Excel export',
+    href: '/reports/generate',
+    icon: FileBarChart,
+    iconBg: 'bg-primary/10',
+    iconColor: 'text-primary',
+  },
   {
     title: 'Fleet Summary',
     description: 'Fleet breakdown by equipment type with condition counts',

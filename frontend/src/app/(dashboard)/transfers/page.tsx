@@ -267,9 +267,12 @@ function TransferRow({
         <ArrowRight className="h-4 w-4 text-muted-foreground mx-auto" />
       </TableCell>
       <TableCell className="text-sm">
-        {transfer.to_location?.name ?? (
-          <span className="text-muted-foreground">Unknown</span>
-        )}
+        <span className="flex items-center gap-1.5">
+          {transfer.to_location?.name ?? (
+            <span className="text-muted-foreground">Unknown</span>
+          )}
+          {transfer.to_location?.is_bua && <span className="inline-flex items-center rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700 dark:bg-red-900/40 dark:text-red-400">BUA</span>}
+        </span>
       </TableCell>
       <TableCell>
         <Badge variant="outline" className={`text-xs ${style.className}`}>

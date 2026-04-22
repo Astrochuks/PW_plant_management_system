@@ -14,6 +14,7 @@ import {
   getPlantWeeklyRecords,
   getPlantEvents,
   getFilteredPlantStats,
+  getPurchaseYears,
   createPlant,
   updatePlant,
   deletePlant,
@@ -149,6 +150,17 @@ export function useLocations() {
 }
 
 /**
+ * Hook to fetch distinct purchase years (for filter dropdown)
+ */
+export function usePurchaseYears() {
+  return useQuery({
+    queryKey: ['purchase-years'],
+    queryFn: getPurchaseYears,
+    staleTime: 10 * 60 * 1000,
+  });
+}
+
+/**
  * Hook to fetch all fleet types (for filter dropdown)
  */
 export function useFleetTypes() {
@@ -217,6 +229,7 @@ export function useCreatePlant() {
       queryClient.invalidateQueries({ queryKey: plantsKeys.filteredStats({}) });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
       queryClient.invalidateQueries({ queryKey: ['locations'] });
+      queryClient.invalidateQueries({ queryKey: ['purchase-years'] });
     },
   });
 }
@@ -235,6 +248,7 @@ export function useUpdatePlant(plantId: string) {
       queryClient.invalidateQueries({ queryKey: plantsKeys.filteredStats({}) });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
       queryClient.invalidateQueries({ queryKey: ['locations'] });
+      queryClient.invalidateQueries({ queryKey: ['purchase-years'] });
     },
   });
 }

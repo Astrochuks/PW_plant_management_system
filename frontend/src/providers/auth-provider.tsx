@@ -38,8 +38,8 @@ interface AuthProviderProps {
   children: React.ReactNode;
 }
 
-// Refresh the token 5 minutes before it expires
-const REFRESH_BUFFER_MS = 5 * 60 * 1000;
+// Refresh the token 10 minutes before it expires (long upload sessions need more buffer)
+const REFRESH_BUFFER_MS = 10 * 60 * 1000;
 // Retry failed refreshes after 30 seconds
 const REFRESH_RETRY_MS = 30 * 1000;
 

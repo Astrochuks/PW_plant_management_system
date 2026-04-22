@@ -25,8 +25,8 @@ export interface Transfer {
   confirmed_at: string | null;
   // Enriched fields
   plant: { id: string; fleet_number: string; description: string | null } | null;
-  from_location: { id: string; name: string } | null;
-  to_location: { id: string; name: string } | null;
+  from_location: { id: string; name: string; is_bua?: boolean } | null;
+  to_location: { id: string; name: string; is_bua?: boolean } | null;
   source_week: number | null;
   source_year: number | null;
   week_ending_date: string | null;
@@ -48,8 +48,8 @@ export interface SiteTransferRequest {
   transfer_date: string | null;
   notes: string | null;
   plant: { fleet_number: string; description: string | null; fleet_type: string | null };
-  from_site: { id: string; name: string };
-  to_site: { id: string; name: string };
+  from_site: { id: string; name: string; is_bua?: boolean };
+  to_site: { id: string; name: string; is_bua?: boolean };
 }
 
 export interface CreateTransferPayload {

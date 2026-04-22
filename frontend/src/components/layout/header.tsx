@@ -59,8 +59,8 @@ export function Header({ sidebarCollapsed, onMenuClick }: HeaderProps) {
   return (
     <header
       className={cn(
-        'fixed top-0 right-0 z-30 h-16 bg-background border-b border-border transition-all duration-300',
-        sidebarCollapsed ? 'left-[70px]' : 'left-[240px]'
+        'fixed top-0 right-0 z-30 h-16 bg-background border-b border-border transition-all duration-300 left-0',
+        sidebarCollapsed ? 'lg:left-[70px]' : 'lg:left-[240px]'
       )}
     >
       <div className="flex h-full items-center justify-between px-6">

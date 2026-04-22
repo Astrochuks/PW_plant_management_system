@@ -229,7 +229,10 @@ export function useSubmitDraft() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: siteKeys.all })
       queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+      queryClient.invalidateQueries({ queryKey: ['plants'] })
       queryClient.invalidateQueries({ queryKey: ['locations'] })
+      queryClient.invalidateQueries({ queryKey: ['submissions'] })
+      queryClient.invalidateQueries({ queryKey: ['reports'] })
     },
   })
 }

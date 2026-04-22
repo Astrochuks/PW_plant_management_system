@@ -42,6 +42,7 @@ export type ColumnKey =
   | 'fleet_type'
   | 'make'
   | 'model'
+  | 'capacity'
   | 'current_location'
   | 'state'
   | 'condition'
@@ -49,10 +50,15 @@ export type ColumnKey =
   | 'chassis_number'
   | 'year_of_manufacture'
   | 'purchase_year'
+  | 'purchase_site'
   | 'purchase_cost'
+  | 'engine_number'
+  | 'serial_m'
+  | 'serial_e'
   | 'total_maintenance_cost'
   | 'parts_replaced_count'
   | 'last_maintenance_date'
+  | 'division'
   | 'remarks';
 
 interface ColumnDef {
@@ -62,6 +68,17 @@ interface ColumnDef {
   align?: 'left' | 'center' | 'right';
   render: (plant: PlantSummary) => React.ReactNode;
   skeleton?: string;
+}
+
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+function formatDateParts(year: number | null | undefined, month: number | null | undefined, day: number | null | undefined): string {
+  if (!year) return '-';
+  if (month && month >= 1 && month <= 12) {
+    if (day) return `${day} ${MONTHS[month - 1]} ${year}`;
+    return `${MONTHS[month - 1]} ${year}`;
+  }
+  return String(year);
 }
 
 const COLUMN_DEFS: ColumnDef[] = [
@@ -95,6 +112,18 @@ const COLUMN_DEFS: ColumnDef[] = [
     skeleton: 'w-24',
   },
   {
+    key: 'division',
+    header: 'Division',
+    width: 'w-[90px]',
+    render: (p) =>
+      p.division === 'mining' ? (
+        <Badge variant="secondary" className="bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200 text-xs">Mining</Badge>
+      ) : (
+        <span className="text-sm text-muted-foreground">Civil</span>
+      ),
+    skeleton: 'w-12',
+  },
+  {
     key: 'make',
     header: 'Make',
     width: 'w-[120px]',
@@ -109,10 +138,22 @@ const COLUMN_DEFS: ColumnDef[] = [
     skeleton: 'w-16',
   },
   {
+    key: 'capacity',
+    header: 'Capacity',
+    width: 'w-[120px]',
+    render: (p) => p.capacity || '-',
+    skeleton: 'w-16',
+  },
+  {
     key: 'current_location',
     header: 'Site',
-    width: 'w-[140px]',
-    render: (p) => p.current_location || '-',
+    width: 'w-[160px]',
+    render: (p) => (
+      <span className="flex items-center gap-1.5">
+        {p.current_location || '-'}
+        {p.is_bua && <span className="inline-flex items-center rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700 dark:bg-red-900/40 dark:text-red-400">BUA</span>}
+      </span>
+    ),
     skeleton: 'w-20',
   },
   {
@@ -150,20 +191,48 @@ const COLUMN_DEFS: ColumnDef[] = [
     skeleton: 'w-20',
   },
   {
+    key: 'engine_number',
+    header: 'Engine Number',
+    width: 'w-[140px]',
+    render: (p) => <span className="font-mono text-xs">{p.engine_number || '-'}</span>,
+    skeleton: 'w-20',
+  },
+  {
+    key: 'serial_m',
+    header: 'Serial M',
+    width: 'w-[140px]',
+    render: (p) => <span className="font-mono text-xs">{p.serial_m || '-'}</span>,
+    skeleton: 'w-20',
+  },
+  {
+    key: 'serial_e',
+    header: 'Serial E',
+    width: 'w-[140px]',
+    render: (p) => <span className="font-mono text-xs">{p.serial_e || '-'}</span>,
+    skeleton: 'w-20',
+  },
+  {
     key: 'year_of_manufacture',
-    header: 'Year Mfg',
-    width: 'w-[100px]',
+    header: 'Manufacture Date',
+    width: 'w-[140px]',
     align: 'center',
-    render: (p) => p.year_of_manufacture ?? '-',
-    skeleton: 'w-12',
+    render: (p) => formatDateParts(p.year_of_manufacture, p.manufacture_month, p.manufacture_day),
+    skeleton: 'w-16',
   },
   {
     key: 'purchase_year',
-    header: 'Purchase Year',
-    width: 'w-[120px]',
+    header: 'Purchase Date',
+    width: 'w-[140px]',
     align: 'center',
-    render: (p) => p.purchase_year ?? '-',
-    skeleton: 'w-12',
+    render: (p) => formatDateParts(p.purchase_year, p.purchase_month, p.purchase_day),
+    skeleton: 'w-16',
+  },
+  {
+    key: 'purchase_site',
+    header: 'Purchase Site',
+    width: 'w-[150px]',
+    render: (p) => p.purchase_site || '-',
+    skeleton: 'w-20',
   },
   {
     key: 'purchase_cost',
@@ -171,7 +240,7 @@ const COLUMN_DEFS: ColumnDef[] = [
     width: 'w-[130px]',
     align: 'right',
     render: (p) =>
-      p.purchase_cost != null ? formatCurrency(p.purchase_cost) : '-',
+      p.purchase_cost != null ? formatCurrency(p.purchase_cost, p.purchase_currency || 'NGN') : '-',
     skeleton: 'w-16',
   },
   {
@@ -234,13 +303,18 @@ export const ALL_COLUMNS: { key: ColumnKey; label: string }[] = [
   { key: 'fleet_type', label: 'Type' },
   { key: 'make', label: 'Make' },
   { key: 'model', label: 'Model' },
+  { key: 'capacity', label: 'Capacity' },
   { key: 'current_location', label: 'Site' },
   { key: 'state', label: 'State' },
   { key: 'condition', label: 'Condition' },
   { key: 'physical_verification', label: 'Verified' },
   { key: 'chassis_number', label: 'Chassis Number' },
-  { key: 'year_of_manufacture', label: 'Year Mfg' },
-  { key: 'purchase_year', label: 'Purchase Year' },
+  { key: 'engine_number', label: 'Engine Number' },
+  { key: 'serial_m', label: 'Serial M' },
+  { key: 'serial_e', label: 'Serial E' },
+  { key: 'year_of_manufacture', label: 'Manufacture Date' },
+  { key: 'purchase_year', label: 'Purchase Date' },
+  { key: 'purchase_site', label: 'Purchase Site' },
   { key: 'purchase_cost', label: 'Purchase Cost' },
   { key: 'total_maintenance_cost', label: 'Maintenance Cost' },
   { key: 'parts_replaced_count', label: 'Parts Replaced' },
@@ -537,10 +611,11 @@ function PlantsTableSkeleton({ columns }: { columns: ColumnDef[] }) {
   );
 }
 
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-NG', {
+function formatCurrency(amount: number, currency = 'NGN'): string {
+  const locale = currency === 'NGN' ? 'en-NG' : currency === 'GBP' ? 'en-GB' : currency === 'EUR' ? 'de-DE' : 'en-US';
+  return new Intl.NumberFormat(locale, {
     style: 'currency',
-    currency: 'NGN',
+    currency,
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(amount);

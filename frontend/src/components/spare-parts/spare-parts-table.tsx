@@ -65,13 +65,16 @@ export function SparePartsTable({ parts, loading, onRowClick }: SparePartsTableP
                 {part.replaced_date ? formatDate(part.replaced_date) : '-'}
               </TableCell>
               <TableCell className="font-mono font-medium">
-                {part.shared_fleet_numbers && part.shared_fleet_numbers.length > 0
-                  ? part.shared_fleet_numbers.join(', ')
-                  : part.fleet_number
-                  || part.fleet_number_raw
-                  || (part.is_workshop ? 'WORKSHOP' : null)
-                  || (part.is_category ? (part.category_name || 'CATEGORY') : null)
-                  || '-'}
+                <span className="flex items-center gap-1.5">
+                  {part.shared_fleet_numbers && part.shared_fleet_numbers.length > 0
+                    ? part.shared_fleet_numbers.join(', ')
+                    : part.fleet_number
+                    || part.fleet_number_raw
+                    || (part.is_workshop ? 'WORKSHOP' : null)
+                    || (part.is_category ? (part.category_name || 'CATEGORY') : null)
+                    || '-'}
+                  {part.is_bua && <span className="inline-flex items-center rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700 dark:bg-red-900/40 dark:text-red-400">BUA</span>}
+                </span>
               </TableCell>
               <TableCell className="max-w-[300px]">
                 <div className="truncate" title={part.part_description}>

@@ -7,7 +7,7 @@
 
 import { useState, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Package, Wrench, TrendingUp, Users, DollarSign, Truck, ChevronRight, BarChart3, Calendar, GitCompareArrows } from 'lucide-react';
+import { Package, Wrench, TrendingUp, Users, DollarSign, Truck, ChevronRight, BarChart3, Calendar, GitCompareArrows, MapPin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -29,9 +29,10 @@ import {
 import {
   useSpareParts,
   useSparePartsStats,
+  useSparePartsYears,
   useTopSuppliers,
   useHighCostPlants,
-  useSparePartsSummary,
+  useTopSites,
   useCostsByPeriod,
   useYearOverYear,
 } from '@/hooks/use-spare-parts';
@@ -40,12 +41,14 @@ import { SparePartsFilters, type SparePartsFiltersState } from '@/components/spa
 import { SparePartDetailModal } from '@/components/spare-parts/spare-part-detail-modal';
 import { Pagination } from '@/components/plants/pagination';
 import { useDebounce } from '@/hooks/use-debounce';
+import { useLocations } from '@/hooks/use-plants';
 import type { SparePart } from '@/lib/api/spare-parts';
 
 const DEFAULT_FILTERS: SparePartsFiltersState = {
   search: '',
   fleet_number: '',
   supplier: '',
+  location_id: '',
   date_from: '',
   date_to: '',
 };
@@ -58,17 +61,21 @@ export default function SparePartsPage() {
   const [filters, setFilters] = useState<SparePartsFiltersState>(DEFAULT_FILTERS);
   const [selectedPartId, setSelectedPartId] = useState<string | null>(null);
   const currentYear = new Date().getFullYear();
+  const [statsYear, setStatsYear] = useState<number | null>(currentYear); // null = all years
   const [periodType, setPeriodType] = useState<'week' | 'month' | 'quarter'>('month');
   const [periodYear, setPeriodYear] = useState<number>(currentYear);
   const [yoyYears, setYoyYears] = useState<number[]>([currentYear, currentYear - 1]);
   const [yoyGroupBy, setYoyGroupBy] = useState<'month' | 'quarter'>('month');
+  const [sitesYear, setSitesYear] = useState<number | null>(null);
+  const [sitesMonth, setSitesMonth] = useState<number | null>(null);
+  const [sitesQuarter, setSitesQuarter] = useState<number | null>(null);
 
   // Debounce text inputs
   const debouncedSearch = useDebounce(filters.search, 300);
   const debouncedFleet = useDebounce(filters.fleet_number, 300);
   const debouncedSupplier = useDebounce(filters.supplier, 300);
 
-  // Build query params
+  // Build query params — table also filters by selected year
   const queryParams = useMemo(
     () => ({
       page,
@@ -76,18 +83,41 @@ export default function SparePartsPage() {
       search: debouncedSearch || undefined,
       fleet_number: debouncedFleet || undefined,
       supplier: debouncedSupplier || undefined,
+      location_id: filters.location_id || undefined,
+      date_from: filters.date_from || undefined,
+      date_to: filters.date_to || undefined,
+      year: statsYear ?? undefined,
+    }),
+    [page, debouncedSearch, debouncedFleet, debouncedSupplier, filters.location_id, filters.date_from, filters.date_to, statsYear]
+  );
+
+  // Stats params — reactive to ALL filters
+  const statsParams = useMemo(
+    () => ({
+      year: statsYear ?? undefined,
+      location_id: filters.location_id || undefined,
+      fleet_number: debouncedFleet || undefined,
+      supplier: debouncedSupplier || undefined,
+      search: debouncedSearch || undefined,
       date_from: filters.date_from || undefined,
       date_to: filters.date_to || undefined,
     }),
-    [page, debouncedSearch, debouncedFleet, debouncedSupplier, filters.date_from, filters.date_to]
+    [statsYear, filters.location_id, debouncedFleet, debouncedSupplier, debouncedSearch, filters.date_from, filters.date_to]
   );
 
   // Data fetching
   const { data: partsData, isLoading: partsLoading } = useSpareParts(queryParams);
-  const { data: stats, isLoading: statsLoading } = useSparePartsStats();
+  const { data: stats, isLoading: statsLoading } = useSparePartsStats(statsParams);
+  const { data: locations = [] } = useLocations();
+  const { data: availableYears = [] } = useSparePartsYears();
   const { data: topSuppliers } = useTopSuppliers({ limit: 5 });
   const { data: highCostPlants } = useHighCostPlants({ limit: 5 });
-  const { data: summary } = useSparePartsSummary();
+  const sitesParams = useMemo(() => ({
+    ...(sitesYear ? { year: sitesYear } : {}),
+    ...(sitesMonth ? { month: sitesMonth } : {}),
+    ...(sitesQuarter ? { quarter: sitesQuarter } : {}),
+  }), [sitesYear, sitesMonth, sitesQuarter]);
+  const { data: topSites } = useTopSites(sitesParams);
   const { data: periodData, isLoading: periodLoading } = useCostsByPeriod({
     period: periodType,
     year: periodYear,
@@ -129,14 +159,41 @@ export default function SparePartsPage() {
         </div>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Year Selector + Stats Cards */}
+      <div className="space-y-4">
+        <div className="flex items-center gap-3">
+          <Select
+            value={statsYear === null ? '_all' : String(statsYear)}
+            onValueChange={(v) => {
+              setStatsYear(v === '_all' ? null : Number(v));
+              setPage(1);
+            }}
+          >
+            <SelectTrigger className="w-[130px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="_all">All years</SelectItem>
+              {availableYears.map((y) => (
+                <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {statsYear !== null && (
+            <span className="text-xs text-muted-foreground">
+              Showing stats &amp; records for {statsYear}
+            </span>
+          )}
+        </div>
+
         {statsLoading ? (
-          Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-[100px]" />
-          ))
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-[100px]" />
+            ))}
+          </div>
         ) : stats ? (
-          <>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <StatsCard
               title="Total Records"
               value={stats.total_parts.toLocaleString()}
@@ -151,21 +208,48 @@ export default function SparePartsPage() {
               iconBg="bg-emerald-100 dark:bg-emerald-900"
               iconColor="text-emerald-600 dark:text-emerald-300"
             />
-            <StatsCard
-              title="Unique Plants"
-              value={stats.unique_plants.toLocaleString()}
-              icon={TrendingUp}
-              iconBg="bg-violet-100 dark:bg-violet-900"
-              iconColor="text-violet-600 dark:text-violet-300"
-            />
-            <StatsCard
-              title="Suppliers"
-              value={stats.unique_suppliers.toLocaleString()}
-              icon={Users}
-              iconBg="bg-amber-100 dark:bg-amber-900"
-              iconColor="text-amber-600 dark:text-amber-300"
-            />
-          </>
+            {debouncedFleet ? (
+              <>
+                <StatsCard
+                  title="Direct Cost"
+                  value={formatCurrency(Number(stats.direct_spend) || 0)}
+                  icon={TrendingUp}
+                  iconBg="bg-violet-100 dark:bg-violet-900"
+                  iconColor="text-violet-600 dark:text-violet-300"
+                  subtitle={`${stats.direct_parts} item${stats.direct_parts !== 1 ? 's' : ''}`}
+                />
+                {stats.shared_parts > 0 && (
+                  <StatsCard
+                    title="Shared Cost"
+                    value={formatCurrency(Number(stats.shared_spend) || 0)}
+                    icon={Users}
+                    iconBg="bg-amber-100 dark:bg-amber-900"
+                    iconColor="text-amber-600 dark:text-amber-300"
+                    subtitle={`${stats.shared_parts} item${stats.shared_parts !== 1 ? 's' : ''}`}
+                  />
+                )}
+              </>
+            ) : (
+              <>
+                <StatsCard
+                  title="Unique Plants"
+                  value={stats.unique_plants.toLocaleString()}
+                  icon={TrendingUp}
+                  iconBg="bg-violet-100 dark:bg-violet-900"
+                  iconColor="text-violet-600 dark:text-violet-300"
+                />
+                {!debouncedSupplier && (
+                  <StatsCard
+                    title="Suppliers"
+                    value={stats.unique_suppliers.toLocaleString()}
+                    icon={Users}
+                    iconBg="bg-amber-100 dark:bg-amber-900"
+                    iconColor="text-amber-600 dark:text-amber-300"
+                  />
+                )}
+              </>
+            )}
+          </div>
         ) : null}
       </div>
 
@@ -173,6 +257,7 @@ export default function SparePartsPage() {
       <SparePartsFilters
         filters={filters}
         onFiltersChange={handleFiltersChange}
+        locations={locations}
       />
 
       {/* Table */}
@@ -193,29 +278,90 @@ export default function SparePartsPage() {
 
       {/* Analytics Section */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Cost Summary Breakdown */}
-        {summary && summary.total_cost > 0 && (
-          <Card>
-            <CardHeader className="pb-3">
+        {/* Top Sites */}
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
               <CardTitle className="text-base flex items-center gap-2">
-                <DollarSign className="h-4 w-4" />
-                Cost Breakdown
+                <MapPin className="h-4 w-4" />
+                Sites by Maintenance Cost
               </CardTitle>
-            </CardHeader>
-            <CardContent>
+              <div className="flex items-center gap-2">
+                <Select
+                  value={sitesYear ? String(sitesYear) : 'all'}
+                  onValueChange={(v) => {
+                    setSitesYear(v === 'all' ? null : Number(v));
+                    if (v === 'all') { setSitesMonth(null); setSitesQuarter(null); }
+                  }}
+                >
+                  <SelectTrigger className="h-7 text-xs w-[90px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Years</SelectItem>
+                    {availableYears.map((y) => (
+                      <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {sitesYear && (
+                  <Select
+                    value={sitesQuarter ? `Q${sitesQuarter}` : 'all'}
+                    onValueChange={(v) => {
+                      if (v === 'all') { setSitesQuarter(null); }
+                      else { setSitesQuarter(Number(v.replace('Q', ''))); setSitesMonth(null); }
+                    }}
+                  >
+                    <SelectTrigger className="h-7 text-xs w-[80px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Qtrs</SelectItem>
+                      <SelectItem value="Q1">Q1</SelectItem>
+                      <SelectItem value="Q2">Q2</SelectItem>
+                      <SelectItem value="Q3">Q3</SelectItem>
+                      <SelectItem value="Q4">Q4</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
+                {sitesYear && !sitesQuarter && (
+                  <Select
+                    value={sitesMonth ? String(sitesMonth) : 'all'}
+                    onValueChange={(v) => setSitesMonth(v === 'all' ? null : Number(v))}
+                  >
+                    <SelectTrigger className="h-7 text-xs w-[90px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Months</SelectItem>
+                      {['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].map((m, i) => (
+                        <SelectItem key={i + 1} value={String(i + 1)}>{m}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {topSites && topSites.length > 0 ? (
               <div className="space-y-3">
-                <CostDistBar label="Direct" amount={summary.direct_cost} total={summary.total_cost} color="bg-blue-500" />
-                <CostDistBar label="Shared" amount={summary.shared_cost} total={summary.total_cost} color="bg-violet-500" />
-                <CostDistBar label="Workshop" amount={summary.workshop_cost} total={summary.total_cost} color="bg-amber-500" />
-                <CostDistBar label="Category" amount={summary.category_cost} total={summary.total_cost} color="bg-emerald-500" />
+                {topSites.map((site, idx) => (
+                  <div key={site.location_id} className="flex items-center gap-3">
+                    <span className="text-xs text-muted-foreground w-4">{idx + 1}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{site.location_name}</p>
+                      <p className="text-xs text-muted-foreground">{site.plants_count} plants &middot; {site.po_count} POs</p>
+                    </div>
+                    <span className="text-sm font-medium">{formatCurrency(site.total_spend)}</span>
+                  </div>
+                ))}
               </div>
-              <div className="flex justify-between text-sm mt-4 pt-3 border-t">
-                <span className="text-muted-foreground">Total ({summary.total_pos} POs, {summary.total_parts} items)</span>
-                <span className="font-medium">{formatCurrency(summary.total_cost)}</span>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+            ) : (
+              <p className="text-sm text-muted-foreground text-center py-4">No site data for this period</p>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Top Suppliers */}
         {topSuppliers && topSuppliers.length > 0 && (
@@ -503,12 +649,14 @@ function StatsCard({
   icon: Icon,
   iconBg,
   iconColor,
+  subtitle,
 }: {
   title: string;
   value: string;
   icon: React.ElementType;
   iconBg: string;
   iconColor: string;
+  subtitle?: string;
 }) {
   return (
     <Card>
@@ -519,6 +667,9 @@ function StatsCard({
               {title}
             </p>
             <p className="text-2xl font-bold mt-1">{value}</p>
+            {subtitle && (
+              <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>
+            )}
           </div>
           <div className={`p-2.5 rounded-lg ${iconBg}`}>
             <Icon className={`h-5 w-5 ${iconColor}`} />
@@ -530,27 +681,6 @@ function StatsCard({
 }
 
 // ---------------------------------------------------------------------------
-// Cost Distribution Bar
-// ---------------------------------------------------------------------------
-function CostDistBar({ label, amount, total, color }: {
-  label: string;
-  amount: number;
-  total: number;
-  color: string;
-}) {
-  const pct = total > 0 ? Math.round((amount / total) * 100) : 0;
-  return (
-    <div className="flex items-center gap-3">
-      <span className="text-sm w-20 text-muted-foreground">{label}</span>
-      <div className="flex-1 h-3 bg-muted rounded-full overflow-hidden">
-        <div className={`h-full ${color} rounded-full`} style={{ width: `${pct}%` }} />
-      </div>
-      <span className="text-xs font-medium w-10 text-right">{pct}%</span>
-      <span className="text-xs text-muted-foreground w-20 text-right">{formatCurrency(amount)}</span>
-    </div>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------

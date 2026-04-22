@@ -57,7 +57,9 @@ const ENTITY_KEY_MAP: Record<string, string[][]> = {
   spare_parts: [
     ['spare-parts'],
     ['suppliers'],
+    ['plants'],
     ['dashboard'],
+    ['reports'],
     ['notifications'],
   ],
 };

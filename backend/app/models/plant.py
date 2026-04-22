@@ -17,11 +17,21 @@ class PlantBase(BaseModel):
     model: str | None = Field(None, max_length=100)
     chassis_number: str | None = Field(None, max_length=100)
     year_of_manufacture: int | None = Field(None, ge=1900, le=2100)
+    manufacture_month: int | None = Field(None, ge=1, le=12, description="Month of manufacture (1-12)")
+    manufacture_day: int | None = Field(None, ge=1, le=31, description="Day of manufacture (1-31)")
     purchase_year: int | None = Field(None, ge=1900, le=2100, description="Year the plant was purchased")
+    purchase_month: int | None = Field(None, ge=1, le=12, description="Month the plant was purchased (1-12)")
+    purchase_day: int | None = Field(None, ge=1, le=31, description="Day the plant was purchased (1-31)")
     purchase_cost: float | None = Field(None, ge=0)
+    purchase_currency: str | None = Field("NGN", max_length=3, pattern="^(NGN|USD|EUR|GBP)$", description="Currency for purchase cost")
+    capacity: str | None = Field(None, max_length=100, description="Capacity/rating of the plant (e.g., 10 tons, 500 litres)")
+    engine_number: str | None = Field(None, max_length=100)
     serial_m: str | None = Field(None, max_length=100)
     serial_e: str | None = Field(None, max_length=100)
     remarks: str | None = None
+    purchase_site: str | None = Field(None, max_length=255, description="Site/location where the plant was purchased")
+    components: list[dict[str, str]] | None = Field(None, description="List of components, each with 'name' and optional 'model'")
+    division: str | None = Field(None, max_length=20, pattern="^(mining|civil)$", description="Division: mining or civil (NULL = civil)")
     current_location_id: UUID | None = None
 
     @field_validator("fleet_number")
@@ -46,12 +56,22 @@ class PlantUpdate(BaseModel):
     model: str | None = None
     chassis_number: str | None = None
     year_of_manufacture: int | None = None
+    manufacture_month: int | None = Field(None, ge=1, le=12)
+    manufacture_day: int | None = Field(None, ge=1, le=31)
     purchase_year: int | None = Field(None, ge=1900, le=2100, description="Year the plant was purchased")
+    purchase_month: int | None = Field(None, ge=1, le=12, description="Month the plant was purchased (1-12)")
+    purchase_day: int | None = Field(None, ge=1, le=31, description="Day the plant was purchased (1-31)")
     purchase_cost: float | None = None
+    purchase_currency: str | None = Field(None, pattern="^(NGN|USD|EUR|GBP)$")
+    capacity: str | None = None
+    engine_number: str | None = None
     serial_m: str | None = None
     serial_e: str | None = None
     remarks: str | None = None
+    purchase_site: str | None = None
+    components: list[dict[str, str]] | None = None
     current_location_id: UUID | None = None
+    division: str | None = Field(None, pattern="^(mining|civil)$", description="Division: mining or civil")
     condition: str | None = Field(
         None,
         pattern="^(working|standby|under_repair|breakdown|faulty|scrap|missing|off_hire|gpm_assessment|unverified)$",
@@ -64,6 +84,7 @@ class Plant(PlantBase):
     """Full plant model with all fields."""
 
     id: UUID
+    division: str | None = None
     condition: str  # Unified condition field
     physical_verification: bool
     created_at: datetime
@@ -94,10 +115,20 @@ class PlantSummary(BaseModel):
     model: str | None = None
     chassis_number: str | None = None
     year_of_manufacture: int | None = None
+    manufacture_month: int | None = None
+    manufacture_day: int | None = None
     purchase_year: int | None = None
+    purchase_month: int | None = None
+    purchase_day: int | None = None
     purchase_cost: float | None = None
+    purchase_currency: str | None = "NGN"
+    capacity: str | None = None
+    engine_number: str | None = None
     serial_m: str | None = None
     serial_e: str | None = None
+    purchase_site: str | None = None
+    components: list[dict[str, str]] | None = None
+    division: str | None = None
     condition: str | None = None  # Unified condition field
     physical_verification: bool | None = None
     current_location_id: UUID | None = None

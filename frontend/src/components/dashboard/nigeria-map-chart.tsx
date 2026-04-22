@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
+import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import * as echarts from 'echarts'
 import { useTheme } from 'next-themes'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -13,15 +13,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { MapIcon, RotateCcw } from 'lucide-react'
+import {
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from '@/components/ui/table'
+import { MapIcon, RotateCcw, Download } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { useStatesSummary, useFleetSummary } from '@/hooks/use-dashboard'
-import { useDashboardSummary } from '@/hooks/use-dashboard'
-import type { StateSummary } from '@/lib/api/dashboard'
+import { useStatesSummary, useFleetSummary, useFleetDistribution } from '@/hooks/use-dashboard'
+import type { StateSummary, FleetDistState } from '@/lib/api/dashboard'
 
-/**
- * Maps database state names to GeoJSON feature names.
- */
 const DB_TO_GEO_NAME: Record<string, string> = {
   'FCT': 'Federal Capital Territory',
   'FCT-Abuja': 'Federal Capital Territory',
@@ -40,23 +39,15 @@ export function NigeriaMapChart() {
   const [mounted, setMounted] = useState(false)
   const [mapRegistered, setMapRegistered] = useState(false)
 
-  // Local filter state (lives on the map, not global)
   const [selectedFleetType, setSelectedFleetType] = useState<string | null>(null)
   const [selectedStateId, setSelectedStateId] = useState<string | null>(null)
 
-  // Data hooks
   const { data: statesData, isLoading } = useStatesSummary(selectedFleetType ?? undefined)
   const { data: fleetTypes } = useFleetSummary()
-  const { data: summary } = useDashboardSummary()
+  const { data: distData } = useFleetDistribution(selectedFleetType ?? undefined)
 
-  // Get locations from summary to map site → state
-  const locations = summary?.top_locations
+  useEffect(() => { setMounted(true) }, [])
 
-  useEffect(() => {
-    setMounted(true)
-  }, [])
-
-  // Register map data lazily
   useEffect(() => {
     if (!mounted) return
     let cancelled = false
@@ -68,7 +59,6 @@ export function NigeriaMapChart() {
     return () => { cancelled = true }
   }, [mounted])
 
-  // Build lookup from GeoJSON name → state data
   const dataMap = useMemo(() => {
     if (!statesData) return new Map<string, StateSummary>()
     const map = new Map<string, StateSummary>()
@@ -78,11 +68,61 @@ export function NigeriaMapChart() {
     return map
   }, [statesData])
 
-  // Selected state info for the sidebar
-  const selectedState = useMemo(() => {
-    if (!selectedStateId || !statesData) return null
-    return statesData.find((s) => s.id === selectedStateId) ?? null
-  }, [selectedStateId, statesData])
+  // Build site labels from fleet distribution data (respects fleet_type filter)
+  const sitesByState = useMemo(() => {
+    if (!distData) return new Map<string, { name: string; plants: number }[]>()
+    const map = new Map<string, { name: string; plants: number }[]>()
+    for (const state of distData) {
+      const geoName = toGeoName(state.state_name)
+      const sites = state.sites
+        .filter(s => s.total_plants > 0)
+        .map(s => ({ name: s.site_name, plants: s.total_plants }))
+      if (sites.length > 0) map.set(geoName, sites)
+    }
+    return map
+  }, [distData])
+
+  // Collect all fleet types across the distribution data for table headers
+  const allFleetTypeNames = useMemo(() => {
+    if (!distData) return []
+    const set = new Set<string>()
+    for (const state of distData) {
+      for (const site of state.sites) {
+        for (const ft of Object.keys(site.fleet_types)) {
+          set.add(ft)
+        }
+      }
+    }
+    return Array.from(set).sort()
+  }, [distData])
+
+  // Export CSV
+  const handleExport = useCallback(() => {
+    if (!distData) return
+    const ftCols = allFleetTypeNames
+    const header = ['State', 'State Code', 'Region', 'Site', 'Total Plants', ...ftCols]
+    const rows: string[][] = []
+    for (const state of distData) {
+      for (const site of state.sites) {
+        rows.push([
+          state.state_name,
+          state.state_code,
+          state.region || '',
+          site.site_name,
+          String(site.total_plants),
+          ...ftCols.map(ft => String(site.fleet_types[ft] || 0)),
+        ])
+      }
+    }
+    const csv = [header, ...rows].map(r => r.map(c => `"${c}"`).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `fleet-distribution${selectedFleetType ? `-${selectedFleetType}` : ''}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [distData, allFleetTypeNames, selectedFleetType])
 
   useEffect(() => {
     if (!chartRef.current || !mounted || !mapRegistered || !statesData) return
@@ -92,28 +132,14 @@ export function NigeriaMapChart() {
     }
 
     const isDark = resolvedTheme === 'dark'
-
-    // Find max for color scale (exclude zeros for better gradient)
     const plantsWithData = statesData.filter((s) => s.total_plants > 0)
     const maxPlants = Math.max(...plantsWithData.map((s) => s.total_plants), 1)
 
-    // Build data array — include all states with data
     const mapData = statesData.map((s) => ({
       name: toGeoName(s.name),
       value: s.total_plants,
       selected: s.id === selectedStateId,
     }))
-
-    // Build site list per state for tooltip
-    const sitesByState = new Map<string, { name: string; plants: number }[]>()
-    if (locations) {
-      for (const loc of locations) {
-        const stateName = loc.state_name || 'Unknown'
-        const geoName = toGeoName(stateName)
-        if (!sitesByState.has(geoName)) sitesByState.set(geoName, [])
-        sitesByState.get(geoName)!.push({ name: loc.location_name, plants: loc.total_plants })
-      }
-    }
 
     const option: echarts.EChartsOption = {
       tooltip: {
@@ -128,8 +154,7 @@ export function NigeriaMapChart() {
 
           const sites = sitesByState.get(p.name) || []
           const siteLines = sites
-            .sort((a, b) => b.plants - a.plants)
-            .slice(0, 8)
+            .slice(0, 10)
             .map(s => `&nbsp;&nbsp;• ${s.name}: <strong>${s.plants}</strong>`)
             .join('<br/>')
 
@@ -139,7 +164,7 @@ export function NigeriaMapChart() {
             `<hr style="margin:4px 0;border-color:${isDark ? '#333' : '#e4e4e7'}"/>`,
             `<strong>${state.sites_count} site${state.sites_count > 1 ? 's' : ''} · ${state.total_plants} plants</strong>`,
             siteLines,
-            sites.length > 8 ? `&nbsp;&nbsp;<em>+${sites.length - 8} more...</em>` : '',
+            sites.length > 10 ? `&nbsp;&nbsp;<em>+${sites.length - 10} more...</em>` : '',
           ].filter(Boolean).join('<br/>')
         },
         extraCssText: 'max-width:320px; white-space:normal;',
@@ -166,7 +191,7 @@ export function NigeriaMapChart() {
           name: 'Plants',
           type: 'map',
           map: 'Nigeria',
-          roam: true,
+          roam: 'move',
           selectedMode: 'single',
           emphasis: {
             label: { show: true, fontSize: 12, fontWeight: 'bold', color: '#ffffff' },
@@ -188,17 +213,56 @@ export function NigeriaMapChart() {
           },
           label: {
             show: true,
-            fontSize: 10,
+            fontSize: 9,
             color: isDark ? '#e2e8f0' : '#1e293b',
-            fontWeight: 'bold',
             formatter: (params: unknown) => {
               const p = params as { name: string; value: number }
               if (!p.value || p.value === 0) return ''
-              // Short state name + count
-              const shortName = p.name.length > 12 ? p.name.slice(0, 10) + '..' : p.name
-              return `${shortName}\n${p.value}`
+
+              const sites = sitesByState.get(p.name) || []
+              if (sites.length === 0) return ''
+
+              const lines: string[] = [`{title|${p.name}}`]
+              const maxSites = sites.length > 5 ? 3 : 4
+              for (let i = 0; i < Math.min(sites.length, maxSites); i++) {
+                const s = sites[i]
+                const shortName = s.name.length > 16 ? s.name.slice(0, 14) + '..' : s.name
+                lines.push(`{site|${shortName}} {count|${s.plants}}`)
+              }
+              if (sites.length > maxSites) {
+                lines.push(`{more|+${sites.length - maxSites} more}`)
+              }
+
+              return lines.join('\n')
             },
-            lineHeight: 14,
+            rich: {
+              title: {
+                fontSize: 10,
+                fontWeight: 'bold',
+                color: isDark ? '#f1f5f9' : '#0f172a',
+                lineHeight: 14,
+                padding: [0, 0, 2, 0],
+              },
+              site: {
+                fontSize: 8,
+                color: isDark ? '#94a3b8' : '#475569',
+                lineHeight: 12,
+              },
+              count: {
+                fontSize: 8,
+                fontWeight: 'bold',
+                color: isDark ? '#60a5fa' : '#2563eb',
+                lineHeight: 12,
+              },
+              more: {
+                fontSize: 7,
+                color: isDark ? '#64748b' : '#94a3b8',
+                fontStyle: 'italic',
+                lineHeight: 11,
+              },
+            },
+            lineHeight: 12,
+            overflow: 'none',
           },
           itemStyle: {
             areaColor: isDark ? '#1e2024' : '#f1f5f9',
@@ -212,7 +276,6 @@ export function NigeriaMapChart() {
 
     chartInstance.current.setOption(option, true)
 
-    // Click handler — select state
     chartInstance.current.off('click')
     chartInstance.current.on('click', (params: { name?: string }) => {
       if (!params.name) return
@@ -225,137 +288,150 @@ export function NigeriaMapChart() {
     const handleResize = () => chartInstance.current?.resize()
     window.addEventListener('resize', handleResize)
     return () => window.removeEventListener('resize', handleResize)
-  }, [statesData, resolvedTheme, mounted, mapRegistered, selectedStateId, dataMap])
+  }, [statesData, resolvedTheme, mounted, mapRegistered, selectedStateId, dataMap, sitesByState])
 
   useEffect(() => {
-    return () => {
-      chartInstance.current?.dispose()
-    }
+    return () => { chartInstance.current?.dispose() }
   }, [])
 
   const hasFilters = selectedFleetType || selectedStateId
 
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <CardTitle className="text-base flex items-center gap-2">
-            <MapIcon className="h-4 w-4" />
-            Fleet Distribution by State
-          </CardTitle>
-          <div className="flex items-center gap-2">
-            {/* Fleet type filter */}
-            <Select
-              value={selectedFleetType || '_all'}
-              onValueChange={(v) => setSelectedFleetType(v === '_all' ? null : v)}
-            >
-              <SelectTrigger className="w-[150px] h-8 text-xs">
-                <SelectValue placeholder="All Fleet Types" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="_all">All Fleet Types</SelectItem>
-                {fleetTypes?.map((ft) => (
-                  <SelectItem key={ft.fleet_type} value={ft.fleet_type}>
-                    {ft.fleet_type}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {hasFilters && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 px-2 text-xs text-muted-foreground"
-                onClick={() => { setSelectedFleetType(null); setSelectedStateId(null) }}
+    <div className="space-y-6">
+      <Card>
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <MapIcon className="h-4 w-4" />
+              Fleet Distribution by State
+            </CardTitle>
+            <div className="flex items-center gap-2">
+              <Select
+                value={selectedFleetType || '_all'}
+                onValueChange={(v) => setSelectedFleetType(v === '_all' ? null : v)}
               >
-                <RotateCcw className="h-3 w-3 mr-1" />
-                Reset
-              </Button>
-            )}
-          </div>
-        </div>
-        {selectedFleetType && (
-          <p className="text-xs text-muted-foreground mt-1">
-            Showing <span className="font-medium text-foreground">{selectedFleetType}</span> distribution
-          </p>
-        )}
-      </CardHeader>
-      <CardContent>
-        <div className="flex gap-4">
-          {/* Map */}
-          <div className="flex-1 min-w-0">
-            {isLoading || !mapRegistered ? (
-              <Skeleton className="h-[550px] w-full" />
-            ) : statesData && statesData.length > 0 ? (
-              <div ref={chartRef} data-print-chart className="h-[550px] w-full" />
-            ) : (
-              <div className="h-[550px] flex items-center justify-center text-sm text-muted-foreground">
-                No state data available
-              </div>
-            )}
-          </div>
-
-          {/* State detail sidebar */}
-          {selectedState && (
-            <div className="w-56 shrink-0 space-y-3 pt-2 border-l pl-4">
-              <div>
-                <h3 className="font-semibold text-sm">{selectedState.name}</h3>
-                <p className="text-xs text-muted-foreground">{selectedState.code} · {selectedState.region || 'N/A'}</p>
-              </div>
-              <div className="space-y-1.5">
-                <StatRow label="Total Plants" value={selectedState.total_plants} bold />
-                <StatRow label="Working" value={selectedState.working_plants} color="text-emerald-600" />
-                <StatRow label="Breakdown" value={selectedState.breakdown_plants} color="text-red-600" />
-                <StatRow label="Under Repair" value={selectedState.under_repair_plants} color="text-blue-600" />
-                <StatRow label="Missing" value={selectedState.missing_plants} color="text-orange-500" />
-                <StatRow label="Scrap" value={selectedState.scrap_plants} color="text-gray-500" />
-              </div>
-              {/* Sites in this state */}
-              {locations && (
-                <div className="space-y-1">
-                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Sites</p>
-                  <div className="space-y-1 max-h-[160px] overflow-y-auto">
-                    {locations
-                      .filter(l => l.state_name === selectedState.name)
-                      .sort((a, b) => b.total_plants - a.total_plants)
-                      .map(site => (
-                        <div key={site.id} className="flex items-center justify-between text-xs">
-                          <span className="truncate mr-2">{site.location_name}</span>
-                          <Badge variant="secondary" className="text-[10px] px-1 py-0 shrink-0">{site.total_plants}</Badge>
-                        </div>
-                      ))
-                    }
-                  </div>
-                </div>
+                <SelectTrigger className="w-[150px] h-8 text-xs">
+                  <SelectValue placeholder="All Fleet Types" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_all">All Fleet Types</SelectItem>
+                  {fleetTypes?.map((ft) => (
+                    <SelectItem key={ft.fleet_type} value={ft.fleet_type}>
+                      {ft.fleet_type}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {hasFilters && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 px-2 text-xs text-muted-foreground"
+                  onClick={() => { setSelectedFleetType(null); setSelectedStateId(null) }}
+                >
+                  <RotateCcw className="h-3 w-3 mr-1" />
+                  Reset
+                </Button>
               )}
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full h-7 text-xs"
-                onClick={() => setSelectedStateId(null)}
-              >
-                Clear selection
-              </Button>
+            </div>
+          </div>
+          {selectedFleetType && (
+            <p className="text-xs text-muted-foreground mt-1">
+              Showing <span className="font-medium text-foreground">{selectedFleetType}</span> distribution
+            </p>
+          )}
+        </CardHeader>
+        <CardContent>
+          {isLoading || !mapRegistered ? (
+            <Skeleton className="h-[1000px] w-full" />
+          ) : statesData && statesData.length > 0 ? (
+            <div ref={chartRef} data-print-chart className="h-[1000px] w-full" />
+          ) : (
+            <div className="h-[1000px] flex items-center justify-center text-sm text-muted-foreground">
+              No state data available
             </div>
           )}
-        </div>
-      </CardContent>
-    </Card>
-  )
-}
+        </CardContent>
+      </Card>
 
-function StatRow({ label, value, color, bold }: {
-  label: string
-  value: number
-  color?: string
-  bold?: boolean
-}) {
-  return (
-    <div className="flex items-center justify-between text-xs">
-      <span className="text-muted-foreground">{label}</span>
-      <span className={`${color || ''} ${bold ? 'font-semibold' : 'font-medium'}`}>
-        {value.toLocaleString()}
-      </span>
+      {/* Fleet Distribution Table */}
+      {distData && distData.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <CardTitle className="text-base">
+                Fleet Distribution Breakdown
+                {selectedFleetType && (
+                  <span className="text-sm font-normal text-muted-foreground ml-2">
+                    — {selectedFleetType}
+                  </span>
+                )}
+              </CardTitle>
+              <Button variant="outline" size="sm" onClick={handleExport}>
+                <Download className="h-4 w-4 mr-2" />
+                Export CSV
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="border rounded-lg overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[40px]">#</TableHead>
+                    <TableHead className="min-w-[120px]">State</TableHead>
+                    <TableHead className="min-w-[150px]">Site</TableHead>
+                    <TableHead className="w-[80px] text-center">Total</TableHead>
+                    {allFleetTypeNames.map(ft => (
+                      <TableHead key={ft} className="text-center whitespace-nowrap text-xs">
+                        {ft}
+                      </TableHead>
+                    ))}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {distData.flatMap((state, si) =>
+                    state.sites.map((site, siteIdx) => (
+                      <TableRow key={`${state.state_name}-${site.site_name}`} className="text-sm">
+                        {siteIdx === 0 ? (
+                          <>
+                            <TableCell
+                              rowSpan={state.sites.length}
+                              className="text-xs text-muted-foreground align-top font-medium"
+                            >
+                              {si + 1}
+                            </TableCell>
+                            <TableCell
+                              rowSpan={state.sites.length}
+                              className="font-semibold align-top"
+                            >
+                              <div>{state.state_name}</div>
+                              <div className="text-[10px] text-muted-foreground font-normal">
+                                {state.state_code} · {state.region || 'N/A'} · {state.total_plants} plants
+                              </div>
+                            </TableCell>
+                          </>
+                        ) : null}
+                        <TableCell>{site.site_name}</TableCell>
+                        <TableCell className="text-center">
+                          <Badge variant="secondary" className="text-xs tabular-nums">
+                            {site.total_plants}
+                          </Badge>
+                        </TableCell>
+                        {allFleetTypeNames.map(ft => (
+                          <TableCell key={ft} className="text-center text-xs tabular-nums">
+                            {site.fleet_types[ft] || <span className="text-muted-foreground/40">-</span>}
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }

@@ -2,13 +2,12 @@
 
 | Field | Value |
 |---|---|
-| **Document Status** | DRAFT — paused, will resume later |
+| **Document Status** | DRAFT — awaiting review |
 | **Author** | Ram + Claude |
 | **Date** | 2026-04-08 |
 | **Version** | 0.1 |
 | **Reviewers** | (to be assigned) |
 | **Approval Required From** | Product Owner (Ram) |
-| **Last Action** | PRD written, waiting for Ram to: (1) review and adjust content, (2) answer the 12 open questions in section 7. Switched focus to a different feature on 2026-04-09. Resume by re-reading this PRD and answering the open questions. |
 
 ---
 
@@ -90,7 +89,7 @@ The current Projects module is a **registry** — it stores a list of projects w
 - **Tech comfort:** Medium.
 - **Goals:** Maximize plant utilization, minimize idle time, allocate plants to where they're needed.
 - **Pain points:** Doesn't know how much each plant earns per week or which projects use it most.
-- **What he needs:** Plant utilization view per project, hours-billed report, idle plant alerts.
+- **What he needs:** Plant utilization view per project, hours-billed report, idle plant alerts.2
 
 ### 3.5 Chuks — Admin (System Administrator)
 - **Role:** admin

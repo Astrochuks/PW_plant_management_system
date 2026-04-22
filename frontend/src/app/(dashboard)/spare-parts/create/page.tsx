@@ -69,6 +69,7 @@ interface FormState {
   discount_percentage: string;
   discount_amount: string;
   other_costs: string;
+  other_costs_description: string;
   requisition_number: string;
 }
 
@@ -84,6 +85,7 @@ const INITIAL_FORM: FormState = {
   discount_percentage: '',
   discount_amount: '',
   other_costs: '',
+  other_costs_description: '',
   requisition_number: '',
 };
 
@@ -252,6 +254,7 @@ function POCreateForm() {
       }
 
       if (form.other_costs) payload.other_costs = Number(form.other_costs);
+      if (form.other_costs_description.trim()) payload.other_costs_description = form.other_costs_description.trim();
 
       bulkCreate.mutate(payload, {
         onSuccess: (result) => {
@@ -668,15 +671,24 @@ function POCreateForm() {
             {/* Other Costs */}
             <div className="space-y-2">
               <Label>Other Costs</Label>
-              <Input
-                type="number"
-                step="0.01"
-                min="0"
-                placeholder="e.g. 1500"
-                value={form.other_costs}
-                onChange={(e) => updateField('other_costs', e.target.value)}
-                className="max-w-[200px]"
-              />
+              <div className="flex items-center gap-3">
+                <Input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  placeholder="e.g. 1500"
+                  value={form.other_costs}
+                  onChange={(e) => updateField('other_costs', e.target.value)}
+                  className="max-w-[200px]"
+                />
+                <Input
+                  type="text"
+                  placeholder="Description (optional) e.g. Freight, Handling fee"
+                  value={form.other_costs_description}
+                  onChange={(e) => updateField('other_costs_description', e.target.value)}
+                  className="flex-1"
+                />
+              </div>
             </div>
 
             {/* Live Cost Breakdown */}

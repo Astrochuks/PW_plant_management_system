@@ -226,7 +226,12 @@ function TransferRow({
         )}
       </td>
       <td className="px-4 py-3 text-sm">{req.from_site.name}</td>
-      <td className="px-4 py-3 text-sm">{req.to_site.name}</td>
+      <td className="px-4 py-3 text-sm">
+        <span className="flex items-center gap-1.5">
+          {req.to_site.name}
+          {req.to_site.is_bua && <span className="inline-flex items-center rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700 dark:bg-red-900/40 dark:text-red-400">BUA</span>}
+        </span>
+      </td>
       <td className="px-4 py-3">
         <Badge
           variant="outline"

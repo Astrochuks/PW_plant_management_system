@@ -112,7 +112,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
       {/* Main Content */}
       <main
         className={cn(
-          'pt-16 min-h-screen transition-all duration-300',
+          'pt-16 min-h-screen transition-all duration-300 print:pt-0 print:pl-0',
           sidebarCollapsed ? 'lg:pl-[70px]' : 'lg:pl-[240px]'
         )}
       >

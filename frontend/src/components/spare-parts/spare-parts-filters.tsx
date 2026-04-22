@@ -8,21 +8,36 @@
 import { Search, X, Calendar } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 export interface SparePartsFiltersState {
   search: string;
   fleet_number: string;
   supplier: string;
+  location_id: string;
   date_from: string;
   date_to: string;
+}
+
+interface Location {
+  id: string;
+  location_name?: string;
+  name?: string;
 }
 
 interface SparePartsFiltersProps {
   filters: SparePartsFiltersState;
   onFiltersChange: (filters: SparePartsFiltersState) => void;
+  locations?: Location[];
 }
 
-export function SparePartsFilters({ filters, onFiltersChange }: SparePartsFiltersProps) {
+export function SparePartsFilters({ filters, onFiltersChange, locations = [] }: SparePartsFiltersProps) {
   const updateFilter = <K extends keyof SparePartsFiltersState>(
     key: K,
     value: SparePartsFiltersState[K]
@@ -35,6 +50,7 @@ export function SparePartsFilters({ filters, onFiltersChange }: SparePartsFilter
       search: '',
       fleet_number: '',
       supplier: '',
+      location_id: '',
       date_from: '',
       date_to: '',
     });
@@ -44,6 +60,7 @@ export function SparePartsFilters({ filters, onFiltersChange }: SparePartsFilter
     filters.search ||
     filters.fleet_number ||
     filters.supplier ||
+    filters.location_id ||
     filters.date_from ||
     filters.date_to;
 
@@ -85,6 +102,24 @@ export function SparePartsFilters({ filters, onFiltersChange }: SparePartsFilter
           onChange={(e) => updateFilter('supplier', e.target.value)}
           className="w-[180px]"
         />
+
+        {/* Site Filter */}
+        <Select
+          value={filters.location_id || '_all'}
+          onValueChange={(v) => updateFilter('location_id', v === '_all' ? '' : v)}
+        >
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="All sites" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="_all">All sites</SelectItem>
+            {locations.map((loc) => (
+              <SelectItem key={loc.id} value={loc.id}>
+                {loc.location_name || loc.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
         {/* Date Range */}
         <div className="flex items-center gap-2">

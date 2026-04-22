@@ -282,27 +282,53 @@ input[type="number"] {
    ================================================================ */
 @media print {
   /* Page setup */
-  @page { size: landscape; margin: 10mm; }
+  @page { size: landscape; margin: 8mm; }
 
-  /* Compact table */
-  body { font-size: 9px !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-  table { font-size: 9px !important; width: 100% !important; }
-  th, td { padding: 2px 4px !important; white-space: nowrap !important; }
+  /* Compact table — 7px fits all columns in landscape */
+  body { font-size: 7px !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  table { font-size: 7px !important; width: 100% !important; table-layout: auto !important; border-collapse: collapse !important; }
+  th, td { padding: 1px 3px !important; white-space: nowrap !important; overflow: hidden !important; }
 
-  /* Hide ALL non-content: sidebar, header, nav, floating elements, images */
-  nav, aside, footer, iframe, video,
+  /* Let the main content expand fully */
+  main, main > div, [class*="space-y"] { margin-left: 0 !important; padding-left: 0 !important; width: 100% !important; max-width: 100% !important; }
+
+  /* Nuclear hide — sidebar, nav, header, all floating/fixed overlays, images, canvas */
+  nav, aside, header, footer, iframe, video, canvas,
   [data-sidebar], [role="navigation"],
-  img:not([data-print-keep]),
-  div[style*="position: fixed"], div[style*="position:fixed"],
-  div[style*="z-index: 99"], div[style*="z-index:99"],
-  div[style*="z-index: 9999"], div[style*="z-index:9999"] {
+  img:not([data-print-keep]) {
     display: none !important;
     visibility: hidden !important;
     width: 0 !important;
     height: 0 !important;
     overflow: hidden !important;
+    position: absolute !important;
+    left: -9999px !important;
+  }
+
+  /* Hide ALL fixed and sticky positioned elements (catches app icons, toasts, overlays) */
+  *[style*="position: fixed"],
+  *[style*="position:fixed"] {
+    display: none !important;
+  }
+  /* Also catch elements set via CSS classes */
+  .fixed, .sticky, [class*="fixed"], [class*="sticky"] {
+    display: none !important;
+  }
+
+  /* Hide TanStack React Query Devtools (z-index: 100000, bottom-right) */
+  .tsqd-parent-container,
+  [class*="tsqd"],
+  [style*="z-index: 100000"],
+  [style*="z-index:100000"] {
+    display: none !important;
+    visibility: hidden !important;
+    width: 0 !important;
+    height: 0 !important;
   }
 
   /* Remove shadows and decorations */
   * { box-shadow: none !important; text-shadow: none !important; }
+
+  /* Table container: no border-radius, full width */
+  .border.rounded-lg { border-radius: 0 !important; border: none !important; }
 }
