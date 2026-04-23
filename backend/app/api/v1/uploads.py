@@ -418,18 +418,34 @@ async def list_weekly_submissions(
 
         submissions.append(item)
 
-    # Calculate summary counts
-    status_counts = {}
-    total_plants_processed = 0
-    total_plants_created = 0
-    total_plants_updated = 0
+    # Calculate summary counts ACROSS THE FULL FILTERED SET (not just this page).
+    # The list rows above use LIMIT/OFFSET, so iterating them would only count the
+    # page. A separate aggregate query gives correct totals for all matching rows.
+    # Reuse the same WHERE filters but drop the LIMIT/OFFSET params.
+    agg_params = params[:-2]  # strip limit + offset
+    agg_row = await fetchrow(
+        f"""SELECT
+              COALESCE(SUM(plants_processed), 0)::int AS total_plants_processed,
+              COALESCE(SUM(plants_created), 0)::int AS total_plants_created,
+              COALESCE(SUM(plants_updated), 0)::int AS total_plants_updated,
+              COUNT(*) FILTER (WHERE status = 'pending')::int AS pending,
+              COUNT(*) FILTER (WHERE status = 'processing')::int AS processing,
+              COUNT(*) FILTER (WHERE status = 'completed')::int AS completed,
+              COUNT(*) FILTER (WHERE status = 'partial')::int AS partial,
+              COUNT(*) FILTER (WHERE status = 'failed')::int AS failed
+            FROM weekly_report_submissions wrs
+            WHERE {where}""",
+        *agg_params,
+    ) or {}
 
-    for item in submissions:
-        status = item.get("status", "unknown")
-        status_counts[status] = status_counts.get(status, 0) + 1
-        total_plants_processed += item.get("plants_processed") or 0
-        total_plants_created += item.get("plants_created") or 0
-        total_plants_updated += item.get("plants_updated") or 0
+    status_counts = {
+        k: agg_row.get(k, 0)
+        for k in ("pending", "processing", "completed", "partial", "failed")
+        if agg_row.get(k, 0) > 0
+    }
+    total_plants_processed = agg_row.get("total_plants_processed", 0)
+    total_plants_created = agg_row.get("total_plants_created", 0)
+    total_plants_updated = agg_row.get("total_plants_updated", 0)
 
     return {
         "success": True,
