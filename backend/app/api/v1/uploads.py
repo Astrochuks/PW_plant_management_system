@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import traceback
 from datetime import date, datetime
 from typing import Annotated, Any
 from uuid import UUID
@@ -643,6 +644,94 @@ async def delete_weekly_submission(
     return {
         "success": True,
         "message": f"Submission deleted ({deleted_records} plant records removed)",
+    }
+
+
+@router.post("/admin/rebuild-timeline")
+async def admin_rebuild_timeline(
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+    submission_id: UUID | None = None,
+    plant_ids: list[UUID] | None = None,
+) -> dict:
+    """Re-run rebuild_location_timeline for a submission or specific plant IDs.
+
+    Use this when a weekly report upload completed with status='partial' (indicating
+    the rebuild failed for some plants), or to manually regenerate timeline data.
+
+    Exactly one of {submission_id, plant_ids} must be provided.
+    - submission_id: rebuild for all plants in that submission's weekly records
+    - plant_ids: rebuild for a specific list (useful for surgical retries)
+    """
+    from app.workers.etl_worker import rebuild_location_timeline
+
+    if not submission_id and not plant_ids:
+        return {"success": False, "error": "Provide either submission_id or plant_ids"}
+    if submission_id and plant_ids:
+        return {"success": False, "error": "Provide only ONE of submission_id or plant_ids"}
+
+    # Resolve plant IDs from submission if needed
+    if submission_id:
+        rows = await fetch(
+            """SELECT DISTINCT pwr.plant_id
+               FROM plant_weekly_records pwr
+               WHERE pwr.submission_id = $1::uuid""",
+            str(submission_id),
+        )
+        resolved_plant_ids = [str(r["plant_id"]) for r in rows]
+    else:
+        resolved_plant_ids = [str(pid) for pid in plant_ids or []]
+
+    if not resolved_plant_ids:
+        return {"success": False, "error": "No plants found to rebuild"}
+
+    # Chunk to be resilient (same pattern as save_confirmed)
+    CHUNK_SIZE = 100
+    totals = {"history": 0, "events": 0, "transfers_inserted": 0, "transfers_confirmed": 0}
+    failed_chunks: list[dict] = []
+
+    for chunk_idx in range(0, len(resolved_plant_ids), CHUNK_SIZE):
+        chunk = resolved_plant_ids[chunk_idx:chunk_idx + CHUNK_SIZE]
+        try:
+            result = await rebuild_location_timeline(chunk)
+            for k in totals:
+                totals[k] += result.get(k, 0)
+        except Exception as e:
+            tb = traceback.format_exc()
+            failed_chunks.append({
+                "chunk_start": chunk_idx,
+                "chunk_size": len(chunk),
+                "sample_plant_ids": chunk[:5],
+                "error": repr(e),
+            })
+            logger.error(
+                "Admin rebuild: chunk failed",
+                chunk_start=chunk_idx,
+                chunk_size=len(chunk),
+                sample_plant_ids=chunk[:5],
+                error=repr(e),
+                traceback=tb,
+            )
+
+    # If this was a submission rebuild AND all chunks succeeded, flip status to completed
+    if submission_id and not failed_chunks:
+        await execute(
+            "UPDATE weekly_report_submissions SET status = 'completed' WHERE id = $1::uuid AND status = 'partial'",
+            str(submission_id),
+        )
+
+    logger.info(
+        "Admin rebuild timeline finished",
+        plants_requested=len(resolved_plant_ids),
+        failed_chunks=len(failed_chunks),
+        admin_id=current_user.id,
+        **totals,
+    )
+
+    return {
+        "success": len(failed_chunks) == 0,
+        "plants_processed": len(resolved_plant_ids),
+        "totals": totals,
+        "failed_chunks": failed_chunks,
     }
 
 

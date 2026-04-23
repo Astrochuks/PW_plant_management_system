@@ -3096,34 +3096,76 @@ async def save_confirmed_weekly_report(
         except Exception as e:
             logger.warning("Failed to create notification", error=repr(e))
 
-        # Update submission status
-        await execute(
-            """UPDATE weekly_report_submissions SET
-                status = 'completed', processing_completed_at = $2,
-                plants_processed = $3, plants_created = $4, plants_updated = $5
-            WHERE id = $1::uuid""",
-            submission_id, datetime.utcnow(),
-            result["plants_processed"], result["plants_created"], result["plants_updated"],
-        )
-
         # Rebuild location history and events from weekly records.
-        # Log full traceback if it fails so we can diagnose, but don't crash the upload.
+        # Process in CHUNKS so a single bad plant doesn't wipe out the whole batch.
+        # Per-chunk failures are recorded but don't abort the upload.
         all_plant_ids = list(fleet_to_id.values())
         logger.info(
             "Calling rebuild_location_timeline",
             plant_count=len(all_plant_ids),
             sample_plant_ids=all_plant_ids[:3],
         )
+        rebuild_failed_chunks: list[dict[str, Any]] = []
+        rebuild_totals = {"history": 0, "events": 0, "transfers_inserted": 0, "transfers_confirmed": 0}
+
+        CHUNK_SIZE = 100  # 682 plants → 7 chunks. One bad chunk loses ~100 plants max.
         if all_plant_ids:
-            try:
-                rebuild_result = await rebuild_location_timeline(all_plant_ids)
-                logger.info("rebuild_location_timeline succeeded", **rebuild_result)
-            except Exception as e:
+            for chunk_idx in range(0, len(all_plant_ids), CHUNK_SIZE):
+                chunk = all_plant_ids[chunk_idx:chunk_idx + CHUNK_SIZE]
+                try:
+                    chunk_result = await rebuild_location_timeline(chunk)
+                    for k in rebuild_totals:
+                        rebuild_totals[k] += chunk_result.get(k, 0)
+                except Exception as e:
+                    tb = traceback.format_exc()
+                    rebuild_failed_chunks.append({
+                        "chunk_start": chunk_idx,
+                        "chunk_size": len(chunk),
+                        "sample_plant_ids": chunk[:5],
+                        "error": repr(e),
+                    })
+                    logger.error(
+                        "Rebuild chunk FAILED — other chunks will continue",
+                        submission_id=submission_id,
+                        chunk_start=chunk_idx,
+                        chunk_size=len(chunk),
+                        sample_plant_ids=chunk[:5],
+                        error=repr(e),
+                        traceback=tb,
+                    )
+            if rebuild_failed_chunks:
                 logger.error(
-                    "Failed to rebuild location timeline in confirmed save",
-                    error=repr(e),
-                    traceback=traceback.format_exc(),
+                    "rebuild_location_timeline had failed chunks",
+                    submission_id=submission_id,
+                    total_chunks=(len(all_plant_ids) + CHUNK_SIZE - 1) // CHUNK_SIZE,
+                    failed_chunks=len(rebuild_failed_chunks),
+                    plants_affected=sum(c["chunk_size"] for c in rebuild_failed_chunks),
+                    totals=rebuild_totals,
                 )
+                result["errors"].append(
+                    f"Rebuild failed for {len(rebuild_failed_chunks)} chunk(s) "
+                    f"({sum(c['chunk_size'] for c in rebuild_failed_chunks)} plants). "
+                    f"Use POST /admin/rebuild-timeline to retry."
+                )
+            else:
+                logger.info("rebuild_location_timeline succeeded (all chunks)", **rebuild_totals)
+
+        # Mark submission as 'partial' if rebuild failed for any chunk, otherwise 'completed'.
+        # The weekly_records and plants_master are already saved above — only history/events/transfers
+        # are missing for failed chunks. A partial status lets the admin know to re-trigger.
+        final_status = "partial" if rebuild_failed_chunks else "completed"
+        result["rebuild_failed_chunks"] = len(rebuild_failed_chunks)
+
+        # Update submission status AFTER rebuild so status reflects rebuild outcome
+        await execute(
+            """UPDATE weekly_report_submissions SET
+                status = $6, processing_completed_at = $2,
+                plants_processed = $3, plants_created = $4, plants_updated = $5
+            WHERE id = $1::uuid""",
+            submission_id, datetime.utcnow(),
+            result["plants_processed"], result["plants_created"], result["plants_updated"],
+            final_status,
+        )
 
         result["success"] = True
         broadcast("plants", "import", f"{result['plants_processed']} plants saved")
