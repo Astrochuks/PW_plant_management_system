@@ -80,6 +80,11 @@ async def parse_fleet_input(raw_input: str) -> list[dict[str, Any]]:
     - Workshop entries: WORKSHOP, W/SHOP, WS
     - Category entries: LOW LOADER, VOLVO, CONSUMABLES, PRECAST, etc.
 
+    Performance: uses at most TWO batched DB queries regardless of fleet count
+    (one for plants lookup, one for prefix/fleet-type lookup) instead of one
+    query per fleet. For a 5-fleet PO this cuts 10 sequential round-trips
+    down to 2.
+
     Args:
         raw_input: Comma-separated fleet numbers/types.
 
@@ -93,16 +98,22 @@ async def parse_fleet_input(raw_input: str) -> list[dict[str, Any]]:
         - category_name: Normalized category name if is_category
         - is_resolved: True if plant_id was matched
     """
-    results = []
-    last_prefix = None
+    # ── Pass 1: classify parts, collecting DB-lookup candidates ─────────
+    # Each slot is either a fully-resolved dict (workshop/category/compound)
+    # OR a dict flagged for DB resolution with the keys it needs.
+    slots: list[dict[str, Any]] = []
+    plant_fleet_numbers_needed: set[str] = set()   # full fleet numbers to look up
+    prefixes_needed: set[str] = set()              # prefixes to look up (fallback when no plant match)
+    fleet_type_names_needed: set[str] = set()      # free-text fleet type names
 
-    # Split by comma and clean
+    last_prefix = None
     parts = [p.strip().upper() for p in raw_input.split(",") if p.strip()]
 
     for part in parts:
-        # Check for workshop entries
+        # Workshop entries — no DB lookup needed
         if part in WORKSHOP_KEYWORDS:
-            results.append({
+            slots.append({
+                "_resolved": True,
                 "fleet_number_raw": part,
                 "plant_id": None,
                 "fleet_type": None,
@@ -113,10 +124,11 @@ async def parse_fleet_input(raw_input: str) -> list[dict[str, Any]]:
             })
             continue
 
-        # Check for category entries (LOW LOADER, VOLVO, CONSUMABLES, etc.)
+        # Category entries (LOW LOADER, VOLVO, CONSUMABLES, etc.) — no DB lookup
         category = _normalize_category(part)
         if category:
-            results.append({
+            slots.append({
+                "_resolved": True,
                 "fleet_number_raw": part,
                 "plant_id": None,
                 "fleet_type": None,
@@ -127,7 +139,7 @@ async def parse_fleet_input(raw_input: str) -> list[dict[str, Any]]:
             })
             continue
 
-        # Try to extract prefix and number (e.g., T468, AC10)
+        # Fleet number pattern: optional prefix + digits (T468, AC10, 463)
         match = re.match(r"^([A-Z]+)?(\d+)$", part)
 
         if match:
@@ -137,43 +149,19 @@ async def parse_fleet_input(raw_input: str) -> list[dict[str, Any]]:
             if prefix:
                 fleet_number = f"{prefix}{number}"
                 last_prefix = prefix
-
-                # Try to find plant by fleet number
-                plant = await fetchrow(
-                    "SELECT id, fleet_type FROM plants_master WHERE fleet_number = $1",
-                    fleet_number,
-                )
-
-                if plant:
-                    results.append({
-                        "fleet_number_raw": part,
-                        "plant_id": plant["id"],
-                        "fleet_type": plant.get("fleet_type"),
-                        "is_workshop": False,
-                        "is_category": False,
-                        "category_name": None,
-                        "is_resolved": True,
-                    })
-                else:
-                    # Check if prefix maps to a fleet type
-                    fleet_type_match = await fetchrow(
-                        "SELECT fleet_type FROM fleet_number_prefixes WHERE prefix = $1",
-                        prefix,
-                    )
-                    results.append({
-                        "fleet_number_raw": part,
-                        "plant_id": None,
-                        "fleet_type": fleet_type_match["fleet_type"]
-                        if fleet_type_match
-                        else prefix,
-                        "is_workshop": False,
-                        "is_category": False,
-                        "category_name": None,
-                        "is_resolved": False,
-                    })
+                plant_fleet_numbers_needed.add(fleet_number)
+                prefixes_needed.add(prefix)  # may be needed for fallback
+                slots.append({
+                    "_resolved": False,
+                    "_type": "fleet_number",
+                    "fleet_number_raw": part,
+                    "_fleet_number": fleet_number,
+                    "_prefix": prefix,
+                })
             else:
-                # No prefix found - just a number, unresolved
-                results.append({
+                # Digits with no prefix available — permanently unresolved
+                slots.append({
+                    "_resolved": True,
                     "fleet_number_raw": part,
                     "plant_id": None,
                     "fleet_type": None,
@@ -183,33 +171,102 @@ async def parse_fleet_input(raw_input: str) -> list[dict[str, Any]]:
                     "is_resolved": False,
                 })
         else:
-            # Not a standard fleet number pattern
-            # Check if it's a fleet type name like "TRUCKS" or "GENERATORS"
-            fleet_type_match = await fetchrow(
-                "SELECT fleet_type FROM fleet_number_prefixes WHERE fleet_type ILIKE $1 LIMIT 1",
-                f"%{part}%",
-            )
+            # Not a standard fleet number — might be a fleet-type name like "TRUCKS"
+            fleet_type_names_needed.add(part)
+            slots.append({
+                "_resolved": False,
+                "_type": "fleet_type_name",
+                "fleet_number_raw": part,
+                "_name": part,
+            })
 
-            if fleet_type_match:
-                # Matched a fleet type
+    # ── Pass 2: run ONE batched query per lookup kind ──────────────────
+    # plants_master lookup (batch)
+    plant_map: dict[str, dict[str, Any]] = {}
+    if plant_fleet_numbers_needed:
+        plant_rows = await fetch(
+            "SELECT id, fleet_number, fleet_type FROM plants_master WHERE fleet_number = ANY($1::text[])",
+            list(plant_fleet_numbers_needed),
+        )
+        plant_map = {r["fleet_number"]: r for r in plant_rows}
+
+    # prefix → fleet_type lookup (batch)
+    prefix_map: dict[str, str] = {}
+    if prefixes_needed:
+        prefix_rows = await fetch(
+            "SELECT prefix, fleet_type FROM fleet_number_prefixes WHERE prefix = ANY($1::text[])",
+            list(prefixes_needed),
+        )
+        prefix_map = {r["prefix"]: r["fleet_type"] for r in prefix_rows}
+
+    # fleet_type_name → canonical fleet_type (batch; uses ILIKE matching)
+    # Single query loading all rows so we can match in-Python without N ILIKE calls.
+    fleet_type_map: dict[str, str] = {}
+    if fleet_type_names_needed:
+        ft_rows = await fetch("SELECT DISTINCT fleet_type FROM fleet_number_prefixes")
+        all_ftypes = [r["fleet_type"] for r in ft_rows if r["fleet_type"]]
+        for name in fleet_type_names_needed:
+            for ft in all_ftypes:
+                if name.upper() in ft.upper():
+                    fleet_type_map[name] = ft
+                    break
+
+    # ── Pass 3: assemble final results ─────────────────────────────────
+    results: list[dict[str, Any]] = []
+    for slot in slots:
+        if slot.get("_resolved"):
+            # Already a complete record
+            slot.pop("_resolved", None)
+            results.append(slot)
+            continue
+
+        if slot["_type"] == "fleet_number":
+            fleet_number = slot["_fleet_number"]
+            prefix = slot["_prefix"]
+            plant = plant_map.get(fleet_number)
+            if plant:
                 results.append({
-                    "fleet_number_raw": part,
-                    "plant_id": None,
-                    "fleet_type": fleet_type_match["fleet_type"],
+                    "fleet_number_raw": slot["fleet_number_raw"],
+                    "fleet_number_normalized": fleet_number,  # "T463" even if user typed "463"
+                    "plant_id": plant["id"],
+                    "fleet_type": plant.get("fleet_type"),
                     "is_workshop": False,
-                    "is_category": True,  # Fleet type without number = category
-                    "category_name": fleet_type_match["fleet_type"],
+                    "is_category": False,
+                    "category_name": None,
                     "is_resolved": True,
                 })
             else:
-                # Unknown entry - treat as category
                 results.append({
-                    "fleet_number_raw": part,
+                    "fleet_number_raw": slot["fleet_number_raw"],
+                    "fleet_number_normalized": fleet_number,
+                    "plant_id": None,
+                    "fleet_type": prefix_map.get(prefix, prefix),
+                    "is_workshop": False,
+                    "is_category": False,
+                    "category_name": None,
+                    "is_resolved": False,
+                })
+        elif slot["_type"] == "fleet_type_name":
+            name = slot["_name"]
+            matched = fleet_type_map.get(name)
+            if matched:
+                results.append({
+                    "fleet_number_raw": slot["fleet_number_raw"],
+                    "plant_id": None,
+                    "fleet_type": matched,
+                    "is_workshop": False,
+                    "is_category": True,
+                    "category_name": matched,
+                    "is_resolved": True,
+                })
+            else:
+                results.append({
+                    "fleet_number_raw": slot["fleet_number_raw"],
                     "plant_id": None,
                     "fleet_type": None,
                     "is_workshop": False,
                     "is_category": True,
-                    "category_name": part,  # Use raw input as category name
+                    "category_name": name,
                     "is_resolved": True,
                 })
 

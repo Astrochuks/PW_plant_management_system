@@ -226,10 +226,14 @@ export function useBulkCreateSpareParts() {
   return useMutation({
     mutationFn: (data: BulkCreateRequest) => bulkCreateSpareParts(data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: sparePartsKeys.all });
-      queryClient.invalidateQueries({ queryKey: ['suppliers'] });
-      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-      queryClient.invalidateQueries({ queryKey: ['reports'] });
+      // refetchType: 'none' marks queries stale without triggering immediate
+      // refetches — they refresh when the user next visits those screens.
+      // This keeps the mutation's resolve time tight so the UI can navigate
+      // away from the create form without waiting on dashboard/reports refetches.
+      queryClient.invalidateQueries({ queryKey: sparePartsKeys.all, refetchType: 'none' });
+      queryClient.invalidateQueries({ queryKey: ['suppliers'], refetchType: 'none' });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'], refetchType: 'none' });
+      queryClient.invalidateQueries({ queryKey: ['reports'], refetchType: 'none' });
     },
   });
 }
@@ -394,13 +398,15 @@ export function useAutocompleteDescriptions(q: string) {
 }
 
 /**
- * Autocomplete PO numbers (enabled when q >= 1 char)
+ * Autocomplete PO numbers. Only fires once the input reaches 3 characters
+ * so we don't hit the endpoint on every keystroke (single chars typically
+ * return too many matches anyway).
  */
 export function useAutocompletePONumbers(q: string) {
   return useQuery({
     queryKey: sparePartsKeys.autocompletePONumbers(q),
     queryFn: () => autocompletePONumbers(q),
-    enabled: q.length >= 1,
+    enabled: q.length >= 3,
     staleTime: 30 * 1000,
   });
 }

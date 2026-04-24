@@ -525,68 +525,72 @@ async def create_spare_parts_bulk(
     other_costs_description: str | None = Query(None, description="Description of other costs"),
 ) -> dict[str, Any]:
     """UNIFIED PO ENTRY - Handles ALL scenarios."""
+    import asyncio
     import json
+    import time
     from app.services.fleet_parser import parse_fleet_input, get_cost_classification
     from app.core.pool import get_pool
 
+    t_start = time.perf_counter()
+    timings: dict[str, float] = {}
+
+    def _mark(label: str, t_from: float) -> None:
+        timings[label] = round((time.perf_counter() - t_from) * 1000, 1)
+
     po_upper = purchase_order_number.upper().strip()
 
-    # Determine submission_number for this batch (1 for new POs, 2+ for appends)
-    next_sub = await fetchval(
-        "SELECT COALESCE(MAX(submission_number), 0) + 1 FROM spare_parts "
-        "WHERE purchase_order_number = $1",
-        po_upper,
-    )
-
-    # Resolve supplier
-    resolved_supplier_id = None
-    resolved_supplier_name = None
-    supplier_matched_by = None
-
-    if supplier_id:
-        # Trust admin-selected supplier_id from dropdown — but still fetch the name
-        sup = await fetchrow(
-            "SELECT id, name FROM suppliers WHERE id = $1::uuid", str(supplier_id),
-        )
-        if sup:
-            resolved_supplier_id = sup["id"]
-            resolved_supplier_name = sup["name"]
-        else:
-            resolved_supplier_id = str(supplier_id)
-        supplier_matched_by = "exact"
-    elif supplier:
+    # ── Phase 1: run independent queries in PARALLEL ────────────────
+    # next_sub, supplier resolution, and fleet parsing don't depend on each
+    # other. Running them concurrently turns ~3 sequential round-trips into 1.
+    async def _resolve_supplier() -> tuple[Any, str | None, str | None]:
+        """Returns (supplier_id, supplier_name, matched_by)."""
+        if supplier_id:
+            sup = await fetchrow(
+                "SELECT id, name FROM suppliers WHERE id = $1::uuid", str(supplier_id),
+            )
+            if sup:
+                return sup["id"], sup["name"], "exact"
+            return str(supplier_id), None, "exact"
+        if not supplier:
+            return None, None, None
         supplier_input = supplier.strip()
-        # Exact match (case-insensitive)
+        # Exact match first
         sup = await fetchrow(
             "SELECT id, name FROM suppliers WHERE name ILIKE $1", supplier_input,
         )
         if sup:
-            resolved_supplier_id = sup["id"]
-            resolved_supplier_name = sup["name"]
-            supplier_matched_by = "exact"
-        else:
-            # Fuzzy match
-            fuzzy = await fetch(
-                "SELECT * FROM find_similar_supplier($1, $2)",
-                supplier_input, 0.3,
-            )
-            if fuzzy:
-                best = fuzzy[0]
-                resolved_supplier_id = best["id"]
-                resolved_supplier_name = best["name"]
-                supplier_matched_by = "fuzzy"
-                logger.info("Fuzzy matched supplier", input=supplier_input, matched_to=best["name"])
-            else:
-                # Create new supplier
-                new_sup = await fetchrow(
-                    "INSERT INTO suppliers (name) VALUES ($1) RETURNING *",
-                    supplier_input,
-                )
-                if new_sup:
-                    resolved_supplier_id = new_sup["id"]
-                    resolved_supplier_name = new_sup["name"]
-                    supplier_matched_by = "new"
-                    logger.info("Created new supplier", supplier_name=supplier_input)
+            return sup["id"], sup["name"], "exact"
+        # Fuzzy match fallback
+        fuzzy = await fetch(
+            "SELECT * FROM find_similar_supplier($1, $2)",
+            supplier_input, 0.3,
+        )
+        if fuzzy:
+            best = fuzzy[0]
+            logger.info("Fuzzy matched supplier", input=supplier_input, matched_to=best["name"])
+            return best["id"], best["name"], "fuzzy"
+        # Create new supplier (still needs its own round-trip but only on true novelty)
+        new_sup = await fetchrow(
+            "INSERT INTO suppliers (name) VALUES ($1) RETURNING *", supplier_input,
+        )
+        if new_sup:
+            logger.info("Created new supplier", supplier_name=supplier_input)
+            return new_sup["id"], new_sup["name"], "new"
+        return None, None, None
+
+    t_parallel = time.perf_counter()
+    (next_sub, parsed_fleets, supplier_result) = await asyncio.gather(
+        fetchval(
+            "SELECT COALESCE(MAX(submission_number), 0) + 1 FROM spare_parts "
+            "WHERE purchase_order_number = $1",
+            po_upper,
+        ),
+        parse_fleet_input(fleet_numbers),
+        _resolve_supplier(),
+    )
+    _mark("parallel_queries_ms", t_parallel)
+
+    resolved_supplier_id, resolved_supplier_name, supplier_matched_by = supplier_result
 
     parsed_date = parse_flexible_date(po_date)
 
@@ -625,8 +629,7 @@ async def create_spare_parts_bulk(
         if not items_list:
             raise ValidationError("No valid items. Format: description|qty|cost|part_no|fleet;next...")
 
-    # Parse fleet numbers (now async)
-    parsed_fleets = await parse_fleet_input(fleet_numbers)
+    # parsed_fleets was already awaited in the parallel phase above
     if not parsed_fleets:
         raise ValidationError("At least one fleet entry is required")
 
@@ -652,24 +655,16 @@ async def create_spare_parts_bulk(
     direct_items = [item for item in items_list if item.get("item_fleet")]
     shared_items = [item for item in items_list if not item.get("item_fleet")]
 
-    # Build fleet lookup — batch query instead of N individual queries
+    # Build fleet lookup — parse_fleet_input already resolved plant_id, fleet_type,
+    # and the normalized fleet_number via batched queries. No extra DB round-trips
+    # needed. We key by both raw input ("463") AND normalized fleet number ("T463")
+    # so per-item fleet assignments match either form.
     fleet_lookup: dict[str, dict] = {}
-    plant_ids_to_resolve = []
     for fleet in parsed_fleets:
         fleet_lookup[fleet["fleet_number_raw"]] = fleet
-        if fleet.get("plant_id"):
-            plant_ids_to_resolve.append(str(fleet["plant_id"]))
-
-    if plant_ids_to_resolve:
-        plant_rows = await fetch(
-            "SELECT id, fleet_number FROM plants_master WHERE id = ANY($1::uuid[])",
-            plant_ids_to_resolve,
-        )
-        plant_id_to_fleet = {str(r["id"]): r["fleet_number"] for r in plant_rows}
-        for fleet in parsed_fleets:
-            pid = fleet.get("plant_id")
-            if pid and str(pid) in plant_id_to_fleet:
-                fleet_lookup[plant_id_to_fleet[str(pid)]] = fleet
+        normalized = fleet.get("fleet_number_normalized")
+        if normalized and normalized != fleet["fleet_number_raw"]:
+            fleet_lookup[normalized] = fleet
 
     date_val = parsed_date
     req_upper = requisition_number.upper() if requisition_number else None
@@ -856,6 +851,7 @@ async def create_spare_parts_bulk(
         ]
 
         pool = get_pool()
+        t_insert = time.perf_counter()
         async with pool.acquire() as conn:
             async with conn.transaction():
                 # Disable triggers for this transaction only (auto-reverts on commit)
@@ -907,8 +903,10 @@ async def create_spare_parts_bulk(
                              AND cost_type = 'shared'""",
                         shared_fleet_list, po_upper, next_sub,
                     )
+        _mark("insert_ms", t_insert)
 
     resolved_fleets = [f["fleet_number_raw"] for f in parsed_fleets]
+    timings["total_ms"] = round((time.perf_counter() - t_start) * 1000, 1)
 
     logger.info(
         "PO bulk entry created",
@@ -918,6 +916,7 @@ async def create_spare_parts_bulk(
         records_created=records_created,
         cost_type=cost_type,
         user_id=current_user.id,
+        **timings,
     )
 
     background_tasks.add_task(

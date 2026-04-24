@@ -5,7 +5,7 @@
  * Form for creating a purchase order with structured line items
  */
 
-import { useState, useCallback, useMemo, useRef } from 'react';
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -41,6 +41,7 @@ import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import { useBulkCreateSpareParts, useUploadPODocument, useAutocompletePONumbers, type BulkCreateRequest } from '@/hooks/use-spare-parts';
 import { useLocationsWithStats } from '@/hooks/use-locations';
+import { useDebounce } from '@/hooks/use-debounce';
 import { ProtectedRoute } from '@/components/protected-route';
 import { SupplierCombobox } from '@/components/spare-parts/supplier-combobox';
 
@@ -90,6 +91,67 @@ const INITIAL_FORM: FormState = {
 };
 
 // ============================================================================
+// Draft persistence — keep the form alive across refreshes
+// ============================================================================
+
+const DRAFT_KEY = 'po_create_draft_v1';
+
+interface DraftShape {
+  form: FormState;
+  lineItems: LineItem[];
+  vatMode: 'percentage' | 'amount';
+  discountMode: 'percentage' | 'amount';
+}
+
+function loadDraft(): DraftShape | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as DraftShape;
+    // Basic shape validation
+    if (!parsed.form || !Array.isArray(parsed.lineItems)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function saveDraft(draft: DraftShape): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+  } catch {
+    // quota exceeded / disabled — fail silently
+  }
+}
+
+function clearDraft(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.removeItem(DRAFT_KEY);
+  } catch {
+    // nothing
+  }
+}
+
+function draftIsEmpty(draft: DraftShape): boolean {
+  const f = draft.form;
+  const hasFormField = !!(
+    f.purchase_order_number || f.fleet_numbers || f.po_date || f.supplier ||
+    f.supplier_id || f.location_id || f.vat_percentage || f.vat_amount ||
+    f.discount_percentage || f.discount_amount || f.other_costs ||
+    f.other_costs_description || f.requisition_number
+  );
+  const hasLineItem = draft.lineItems.some(
+    (i) => i.description || i.part_number || i.fleet ||
+           (i.unit_cost && i.unit_cost !== '0' && i.unit_cost !== '') ||
+           (i.quantity && i.quantity !== '1')
+  );
+  return !hasFormField && !hasLineItem;
+}
+
+// ============================================================================
 // Helpers
 // ============================================================================
 
@@ -121,22 +183,52 @@ function POCreateForm() {
   const uploadDoc = useUploadPODocument();
   const { data: locations } = useLocationsWithStats();
 
-  const [form, setForm] = useState<FormState>(INITIAL_FORM);
-  const [lineItems, setLineItems] = useState<LineItem[]>([createEmptyItem()]);
-  const [vatMode, setVatMode] = useState<'percentage' | 'amount'>('percentage');
-  const [discountMode, setDiscountMode] = useState<'percentage' | 'amount'>('percentage');
+  // Load any previously-saved draft on mount (synchronous — runs once in initializer)
+  const draft = useMemo(() => {
+    const d = loadDraft();
+    return d && !draftIsEmpty(d) ? d : null;
+  }, []);
+
+  const [form, setForm] = useState<FormState>(draft?.form ?? INITIAL_FORM);
+  const [lineItems, setLineItems] = useState<LineItem[]>(
+    draft?.lineItems && draft.lineItems.length > 0 ? draft.lineItems : [createEmptyItem()]
+  );
+  const [vatMode, setVatMode] = useState<'percentage' | 'amount'>(draft?.vatMode ?? 'percentage');
+  const [discountMode, setDiscountMode] = useState<'percentage' | 'amount'>(draft?.discountMode ?? 'percentage');
   const [poDocument, setPoDocument] = useState<File | null>(null);
+  const [draftRestored, setDraftRestored] = useState(!!draft);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Live PO existence check
+  // Persist draft on every form/lineItems change (debounced via the state itself —
+  // each setState already batches updates, and localStorage writes are <1ms)
+  useEffect(() => {
+    const next: DraftShape = { form, lineItems, vatMode, discountMode };
+    if (draftIsEmpty(next)) {
+      clearDraft();
+    } else {
+      saveDraft(next);
+    }
+  }, [form, lineItems, vatMode, discountMode]);
+
+  const discardDraft = useCallback(() => {
+    clearDraft();
+    setForm(INITIAL_FORM);
+    setLineItems([createEmptyItem()]);
+    setVatMode('percentage');
+    setDiscountMode('percentage');
+    setDraftRestored(false);
+  }, []);
+
+  // Live PO existence check — debounced so we don't hit the endpoint on every keystroke
   const poQuery = form.purchase_order_number.trim().toUpperCase();
-  const { data: poSuggestions } = useAutocompletePONumbers(poQuery);
+  const debouncedPoQuery = useDebounce(poQuery, 400);
+  const { data: poSuggestions } = useAutocompletePONumbers(debouncedPoQuery);
   const existingPO = useMemo(() => {
-    if (!poQuery || !poSuggestions) return null;
+    if (!debouncedPoQuery || !poSuggestions) return null;
     return poSuggestions.find(
-      (s) => s.po_number.toUpperCase() === poQuery
+      (s) => s.po_number.toUpperCase() === debouncedPoQuery
     ) ?? null;
-  }, [poQuery, poSuggestions]);
+  }, [debouncedPoQuery, poSuggestions]);
 
   const updateField = useCallback(
     <K extends keyof FormState>(key: K, value: FormState[K]) => {
@@ -260,13 +352,21 @@ function POCreateForm() {
         onSuccess: (result) => {
           const meta = result.meta as Record<string, number> | undefined;
           const count = meta?.records_created ?? result.data?.length ?? 0;
+
+          // PO saved successfully — clear the draft so we don't restore it next visit
+          clearDraft();
+
+          // Navigate FIRST — perceived speed improves when the page swap happens
+          // immediately instead of waiting for toast render + document upload.
+          router.push(`/spare-parts/po/${encodeURIComponent(form.purchase_order_number)}`);
+
+          // Toast + document upload happen on the new page without blocking
           toast.success(
             existingPO
               ? `Added ${count} items to existing PO ${form.purchase_order_number}`
               : `Created ${count} spare part records for PO ${form.purchase_order_number}`
           );
 
-          // Upload document in background — don't block navigation
           if (poDocument) {
             const poNum = form.purchase_order_number.trim();
             const submissionNumber = (meta as Record<string, number> | undefined)?.submission_number;
@@ -278,9 +378,6 @@ function POCreateForm() {
               }
             );
           }
-
-          // Navigate immediately — don't wait for document upload
-          router.push(`/spare-parts/po/${encodeURIComponent(form.purchase_order_number)}`);
         },
         onError: (err) => {
           toast.error(
@@ -315,6 +412,26 @@ function POCreateForm() {
           </div>
         </div>
       </div>
+
+      {draftRestored && (
+        <div className="flex items-start gap-3 p-3 rounded-lg border border-primary/20 bg-primary/5">
+          <FileText className="h-4 w-4 text-primary mt-0.5 shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm font-medium">Draft restored</p>
+            <p className="text-xs text-muted-foreground">
+              We brought back your unsaved PO from your last session. Continue where you left off, or start fresh.
+            </p>
+          </div>
+          <div className="flex gap-2 shrink-0">
+            <Button type="button" variant="ghost" size="sm" onClick={() => setDraftRestored(false)}>
+              Dismiss
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={discardDraft}>
+              Start fresh
+            </Button>
+          </div>
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* PO Details */}
