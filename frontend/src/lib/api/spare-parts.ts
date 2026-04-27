@@ -31,6 +31,10 @@ export interface SparePart {
   other_costs: number;
   other_costs_description: string | null;
   total_cost: number | null;
+  // Currency / FX (Option A: frozen at PO entry)
+  currency?: string;             // 'NGN' (default) | 'GBP' | 'USD' | 'EUR' | ...
+  fx_rate_to_ngn?: number;       // exchange rate at PO entry, frozen
+  total_cost_ngn?: number | null;// NGN-equivalent of total_cost (auto-computed)
   purchase_order_number: string | null;
   po_date: string | null;
   requisition_number: string | null;
@@ -128,7 +132,10 @@ export interface POSubmission {
 export interface PODetailMeta {
   po_number: string;
   items_count: number;
-  total_cost: number;
+  total_cost: number;            // in original currency
+  total_cost_ngn?: number;       // NGN-equivalent (= total_cost when currency = NGN)
+  currency?: string;             // 'NGN' | 'GBP' | 'USD' | 'EUR' | ...
+  fx_rate_to_ngn?: number;
   distinct_plants: number;
   cost_type?: 'direct' | 'shared';
   supplier: { id: string; name: string } | null;
@@ -181,6 +188,8 @@ export interface BulkCreateRequest {
   discount_amount?: number;
   other_costs?: number;
   other_costs_description?: string;
+  currency?: string;            // ISO 4217: NGN (default), GBP, USD, EUR
+  fx_rate_to_ngn?: number;      // exchange rate at PO entry. Required when currency != NGN
 }
 
 export interface CreateSparePartRequest {

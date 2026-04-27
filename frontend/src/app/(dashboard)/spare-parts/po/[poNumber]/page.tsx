@@ -409,11 +409,17 @@ export default function PODetailPage() {
               <div className="p-2 rounded-lg bg-emerald-100 dark:bg-emerald-900">
                 <DollarSign className="h-4 w-4 text-emerald-600 dark:text-emerald-300" />
               </div>
-              <div>
+              <div className="min-w-0">
                 <p className="text-xs text-muted-foreground">Total Cost</p>
                 <p className="text-xl font-bold">
-                  {formatCurrency(Number(meta?.total_cost) || 0)}
+                  {formatCurrency(Number(meta?.total_cost) || 0, meta?.currency || 'NGN')}
                 </p>
+                {(meta?.currency && meta.currency !== 'NGN') && (
+                  <p className="text-[11px] text-muted-foreground">
+                    ≈ {formatNGN(Number(meta?.total_cost_ngn) || 0)}
+                    {meta?.fx_rate_to_ngn ? ` @ ${meta.fx_rate_to_ngn}/${meta.currency}` : ''}
+                  </p>
+                )}
               </div>
             </div>
           </CardContent>
@@ -511,6 +517,8 @@ export default function PODetailPage() {
                     otherDescription={otherDesc}
                     total={grandTotal}
                     hasOverhead={hasOverhead}
+                    currency={meta?.currency || 'NGN'}
+                    fxRate={meta?.fx_rate_to_ngn}
                   />
                 </CardContent>
               </Card>
@@ -564,6 +572,8 @@ export default function PODetailPage() {
                     other={totalOther}
                     total={grandTotal}
                     hasOverhead={hasOverhead}
+                    currency={meta?.currency || 'NGN'}
+                    fxRate={meta?.fx_rate_to_ngn}
                   />
                 );
               })()}
@@ -588,7 +598,7 @@ export default function PODetailPage() {
                     <div className="text-sm text-muted-foreground">
                       {sub.items_count} item{sub.items_count !== 1 ? 's' : ''}
                       <span className="ml-2 font-medium text-foreground">
-                        {formatCurrency(sub.total)}
+                        {formatCurrency(sub.total, meta?.currency || 'NGN')}
                       </span>
                     </div>
                   </div>
@@ -659,6 +669,8 @@ function CostBreakdownSection({
   otherDescription,
   total,
   hasOverhead,
+  currency = 'NGN',
+  fxRate,
 }: {
   itemCount: number;
   subtotal: number;
@@ -668,23 +680,26 @@ function CostBreakdownSection({
   otherDescription?: string | null;
   total: number;
   hasOverhead: boolean;
+  currency?: string;
+  fxRate?: number;
 }) {
+  const isFx = currency !== 'NGN' && fxRate && fxRate > 0;
   return (
     <div className="space-y-2 max-w-md">
       <div className="flex justify-between text-sm">
         <span className="text-muted-foreground">Items Subtotal ({itemCount} items)</span>
-        <span>{formatCurrency(subtotal)}</span>
+        <span>{formatCurrency(subtotal, currency)}</span>
       </div>
       {vat > 0 && (
         <div className="flex justify-between text-sm">
           <span className="text-muted-foreground">VAT</span>
-          <span>{formatCurrency(vat)}</span>
+          <span>{formatCurrency(vat, currency)}</span>
         </div>
       )}
       {discount > 0 && (
         <div className="flex justify-between text-sm text-green-600">
           <span>Discount</span>
-          <span>-{formatCurrency(discount)}</span>
+          <span>-{formatCurrency(discount, currency)}</span>
         </div>
       )}
       {other > 0 && (
@@ -692,14 +707,20 @@ function CostBreakdownSection({
           <span className="text-muted-foreground">
             {otherDescription ? `Other Costs (${otherDescription})` : 'Other Costs'}
           </span>
-          <span>{formatCurrency(other)}</span>
+          <span>{formatCurrency(other, currency)}</span>
         </div>
       )}
       {hasOverhead && <Separator />}
       <div className={`flex justify-between font-medium ${hasOverhead ? 'text-base' : 'text-sm'}`}>
         <span>{hasOverhead ? 'Grand Total' : 'Total'}</span>
-        <span>{formatCurrency(total)}</span>
+        <span>{formatCurrency(total, currency)}</span>
       </div>
+      {isFx && (
+        <div className="flex justify-between text-xs text-muted-foreground pt-1 border-t mt-1">
+          <span>NGN equivalent (1 {currency} = ₦{fxRate})</span>
+          <span>≈ {formatNGN(total * (fxRate || 1))}</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -751,10 +772,10 @@ function ItemsTable({
               </TableCell>
               <TableCell className="text-center">{part.quantity}</TableCell>
               <TableCell className="text-right">
-                {part.unit_cost != null ? formatCurrency(part.unit_cost) : '-'}
+                {part.unit_cost != null ? formatCurrency(part.unit_cost, part.currency || 'NGN') : '-'}
               </TableCell>
               <TableCell className="text-right font-medium">
-                {part.total_cost != null ? formatCurrency(part.total_cost) : '-'}
+                {part.total_cost != null ? formatCurrency(part.total_cost, part.currency || 'NGN') : '-'}
               </TableCell>
             </TableRow>
           ))}
@@ -804,6 +825,7 @@ function ItemsTableGroupedBySupplier({
           (s, p) => s + (Number(p.total_cost) || 0),
           0
         );
+        const groupCurrency = group.parts[0]?.currency || 'NGN';
         return (
           <Card key={key}>
             <CardHeader className="pb-3">
@@ -816,7 +838,7 @@ function ItemsTableGroupedBySupplier({
                   {group.parts.length} item{group.parts.length !== 1 ? 's' : ''}
                   {hasMultipleSuppliers && (
                     <span className="ml-2 font-medium text-foreground">
-                      {formatCurrency(groupSubtotal)}
+                      {formatCurrency(groupSubtotal, groupCurrency)}
                     </span>
                   )}
                 </div>
@@ -1032,11 +1054,29 @@ function formatDate(dateString: string): string {
   });
 }
 
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-NG', {
-    style: 'currency',
-    currency: 'NGN',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount);
+// Locale used per ISO 4217 code so Intl renders the right symbol/grouping.
+const CURRENCY_LOCALES: Record<string, string> = {
+  NGN: 'en-NG',
+  GBP: 'en-GB',
+  USD: 'en-US',
+  EUR: 'de-DE',
+};
+
+function formatCurrency(amount: number, code: string = 'NGN'): string {
+  const upper = (code || 'NGN').toUpperCase();
+  try {
+    return new Intl.NumberFormat(CURRENCY_LOCALES[upper] ?? 'en-US', {
+      style: 'currency',
+      currency: upper,
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(amount);
+  } catch {
+    // Unknown ISO code — fall back to a plain prefix
+    return `${upper} ${new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(amount)}`;
+  }
+}
+
+function formatNGN(amount: number): string {
+  return formatCurrency(amount, 'NGN');
 }

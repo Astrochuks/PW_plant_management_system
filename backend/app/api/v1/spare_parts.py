@@ -365,7 +365,7 @@ async def get_top_sites(
         f"""SELECT
                 l.id AS location_id,
                 l.name AS location_name,
-                COALESCE(SUM(sp.total_cost), 0)::float AS total_spend,
+                COALESCE(SUM(sp.total_cost_ngn), 0)::float AS total_spend,
                 COUNT(*)::int AS items_count,
                 COUNT(DISTINCT sp.purchase_order_number)::int AS po_count,
                 COUNT(DISTINCT sp.plant_id)::int AS plants_count
@@ -523,6 +523,8 @@ async def create_spare_parts_bulk(
     discount_amount: float | None = Query(None, ge=0, description="Total discount amount"),
     other_costs: float = Query(default=0, ge=0, description="Other costs"),
     other_costs_description: str | None = Query(None, description="Description of other costs"),
+    currency: str = Query(default="NGN", min_length=3, max_length=3, description="ISO 4217 currency code (NGN, GBP, USD, EUR)"),
+    fx_rate_to_ngn: float = Query(default=1.0, gt=0, description="Exchange rate to NGN at PO entry. Frozen, not recomputed later."),
 ) -> dict[str, Any]:
     """UNIFIED PO ENTRY - Handles ALL scenarios."""
     import asyncio
@@ -538,6 +540,9 @@ async def create_spare_parts_bulk(
         timings[label] = round((time.perf_counter() - t_from) * 1000, 1)
 
     po_upper = purchase_order_number.upper().strip()
+    currency_upper = (currency or "NGN").upper().strip()
+    # NGN is always rate 1; ignore any client-supplied value to avoid bad data
+    fx_rate = 1.0 if currency_upper == "NGN" else float(fx_rate_to_ngn or 1)
 
     # ── Phase 1: run independent queries in PARALLEL ────────────────
     # next_sub, supplier resolution, and fleet parsing don't depend on each
@@ -742,6 +747,8 @@ async def create_spare_parts_bulk(
             current_user.id,
             False,                       # is_po_overhead
             other_costs_description,     # other_costs_description
+            currency_upper,              # currency
+            fx_rate,                     # fx_rate_to_ngn
         ))
         direct_count += 1
 
@@ -803,6 +810,8 @@ async def create_spare_parts_bulk(
             current_user.id,
             False,                       # is_po_overhead
             other_costs_description,     # other_costs_description
+            currency_upper,              # currency
+            fx_rate,                     # fx_rate_to_ngn
         ))
         shared_count += 1
 
@@ -817,7 +826,7 @@ async def create_spare_parts_bulk(
          unit_costs, po_numbers, po_dates, req_numbers, loc_ids, sup_ids,
          sup_names, vat_amounts, disc_amounts, other_amounts,
          years, months, weeks, quarters, created_bys, po_overheads,
-         other_descs) = zip(*rows)
+         other_descs, currencies, fx_rates) = zip(*rows)
 
         insert_args = [
             [str(v) if v else None for v in plant_ids],
@@ -848,6 +857,8 @@ async def create_spare_parts_bulk(
             list(po_overheads),
             [next_sub] * len(rows),
             list(other_descs),
+            list(currencies),
+            [float(r) for r in fx_rates],
         ]
 
         pool = get_pool()
@@ -866,7 +877,8 @@ async def create_spare_parts_bulk(
                             location_id, supplier_id, supplier,
                             vat_amount, discount_amount, other_costs, vat_percentage, discount_percentage,
                             year, month, week_number, quarter, created_by, is_po_overhead,
-                            submission_number, other_costs_description)
+                            submission_number, other_costs_description,
+                            currency, fx_rate_to_ngn)
                        SELECT
                             u.plant_id::uuid, u.assigned_id::uuid, u.fleet_raw, u.is_ws, u.is_cat,
                             u.cat_name, u.ctype, u.descr, u.part_no, u.qty, u.ucost,
@@ -874,20 +886,23 @@ async def create_spare_parts_bulk(
                             u.loc::uuid, u.sup_id::uuid, u.sup_name,
                             u.vat_amt, u.disc_amt, u.other_amt, 0, 0,
                             u.yr, u.mo, u.wk, u.qtr, u.cb::uuid, u.is_overhead,
-                            u.sub_num, u.other_desc
+                            u.sub_num, u.other_desc,
+                            u.curr, u.fx
                        FROM UNNEST(
                             $1::text[], $2::text[], $3::text[], $4::bool[], $5::bool[],
                             $6::text[], $7::text[], $8::text[], $9::text[], $10::int[],
                             $11::float[], $12::text[], $13::date[], $14::text[], $15::text[],
                             $16::text[], $17::text[], $18::float[], $19::float[], $20::float[],
                             $21::int[], $22::int[], $23::int[], $24::int[], $25::text[],
-                            $26::bool[], $27::int[], $28::text[]
+                            $26::bool[], $27::int[], $28::text[],
+                            $29::text[], $30::float[]
                        ) AS u(plant_id, assigned_id, fleet_raw, is_ws, is_cat,
                               cat_name, ctype, descr, part_no, qty, ucost,
                               po_num, po_dt, req_num, loc, sup_id,
                               sup_name, vat_amt, disc_amt, other_amt,
                               yr, mo, wk, qtr, cb, is_overhead,
-                              sub_num, other_desc)""",
+                              sub_num, other_desc,
+                              curr, fx)""",
                     *insert_args,
                 )
                 # result is like "INSERT 0 10" — parse the count
@@ -943,7 +958,10 @@ async def create_spare_parts_bulk(
             "items_count": len(items_list),
             "records_created": records_created,
             "subtotal": round(subtotal, 2),
+            "subtotal_ngn": round(subtotal * fx_rate, 2),
             "submission_number": next_sub,
+            "currency": currency_upper,
+            "fx_rate_to_ngn": fx_rate,
             "supplier": {
                 "id": resolved_supplier_id,
                 "name": resolved_supplier_name,
@@ -1036,15 +1054,25 @@ async def get_spare_parts_by_po(
     sub_map: dict[int, dict[str, Any]] = {}
     item_rows: list[dict] = []
     grand_total = 0.0
+    grand_total_ngn = 0.0
     combined_vat = 0.0
     combined_discount = 0.0
     combined_other = 0.0
+    # Currency is set at PO level on create, so all rows share it.
+    # We pick the first row's values; if mixed currencies somehow appear,
+    # the meta reports the first one and total_cost_ngn still aggregates correctly.
+    po_currency: str | None = None
+    po_fx_rate: float | None = None
 
     for row in rows:
         sn = row.get("submission_number") or 1
         if sn not in sub_map:
             sub_map[sn] = []
         grand_total += float(row.get("total_cost") or 0)
+        grand_total_ngn += float(row.get("total_cost_ngn") or row.get("total_cost") or 0)
+        if po_currency is None:
+            po_currency = row.get("currency") or "NGN"
+            po_fx_rate = float(row.get("fx_rate_to_ngn") or 1)
         sub_map[sn].append(row)
         item_rows.append(row)
         combined_vat += float(row.get("vat_amount") or 0)
@@ -1125,6 +1153,9 @@ async def get_spare_parts_by_po(
             "po_number": po_number.upper(),
             "items_count": len(item_rows),
             "total_cost": round(grand_total, 2),
+            "total_cost_ngn": round(grand_total_ngn, 2),
+            "currency": po_currency or "NGN",
+            "fx_rate_to_ngn": po_fx_rate if po_fx_rate is not None else 1,
             "distinct_plants": max(len(distinct_plants), len(distinct_fleets)),
             "cost_type": po_cost_type,
             "supplier": primary_supplier,
@@ -1674,10 +1705,12 @@ async def list_purchase_orders(
     offset = (page - 1) * limit
     params.append(limit)
     params.append(offset)
+    # Grand total uses NGN-equivalent so cross-currency POs aggregate correctly.
+    # Per-row v.total_amount stays in original currency for PO-row display.
     data = await fetch(
         f"""SELECT v.*, l.name AS location_name,
                    count(*) OVER() AS _total_count,
-                   SUM(v.total_amount) OVER() AS _grand_total
+                   SUM(v.total_amount_ngn) OVER() AS _grand_total
             FROM v_purchase_orders_summary v
             LEFT JOIN locations l ON l.id = v.location_id
             WHERE {where}
@@ -1697,7 +1730,7 @@ async def list_purchase_orders(
         "data": data,
         "meta": {
             "page": page, "limit": limit, "total": total,
-            "total_amount": round(grand_total, 2),
+            "total_amount": round(grand_total, 2),  # always in NGN
             "total_pages": (total + limit - 1) // limit if total > 0 else 0,
         },
     }
@@ -1842,13 +1875,14 @@ async def get_location_costs(
 
     where = " AND ".join(conds)
 
-    # Use SQL aggregation instead of fetching all rows
+    # Use SQL aggregation instead of fetching all rows.
+    # NGN-equivalent so cross-currency POs aggregate correctly.
     agg = await fetchrow(
         f"""SELECT
-                COALESCE(SUM(total_cost), 0)::float AS total_cost,
-                COALESCE(SUM(CASE WHEN plant_id IS NOT NULL AND NOT is_workshop AND NOT COALESCE(is_category, false) THEN total_cost ELSE 0 END), 0)::float AS direct_cost,
-                COALESCE(SUM(CASE WHEN is_workshop THEN total_cost ELSE 0 END), 0)::float AS workshop_cost,
-                COALESCE(SUM(CASE WHEN COALESCE(is_category, false) THEN total_cost ELSE 0 END), 0)::float AS category_cost,
+                COALESCE(SUM(total_cost_ngn), 0)::float AS total_cost,
+                COALESCE(SUM(CASE WHEN plant_id IS NOT NULL AND NOT is_workshop AND NOT COALESCE(is_category, false) THEN total_cost_ngn ELSE 0 END), 0)::float AS direct_cost,
+                COALESCE(SUM(CASE WHEN is_workshop THEN total_cost_ngn ELSE 0 END), 0)::float AS workshop_cost,
+                COALESCE(SUM(CASE WHEN COALESCE(is_category, false) THEN total_cost_ngn ELSE 0 END), 0)::float AS category_cost,
                 count(*)::int AS items_count,
                 count(DISTINCT plant_id)::int AS plants_count
             FROM spare_parts WHERE {where}""",
@@ -1894,12 +1928,13 @@ async def get_overall_summary(
 
     where = " AND ".join(conds) if conds else "TRUE"
 
+    # NGN-equivalent across all rows so cross-currency POs aggregate correctly.
     agg = await fetchrow(
         f"""SELECT
-                COALESCE(SUM(total_cost), 0)::float AS total_cost,
-                COALESCE(SUM(CASE WHEN plant_id IS NOT NULL AND NOT is_workshop AND NOT COALESCE(is_category, false) THEN total_cost ELSE 0 END), 0)::float AS direct_cost,
-                COALESCE(SUM(CASE WHEN is_workshop THEN total_cost ELSE 0 END), 0)::float AS workshop_cost,
-                COALESCE(SUM(CASE WHEN COALESCE(is_category, false) THEN total_cost ELSE 0 END), 0)::float AS category_cost,
+                COALESCE(SUM(total_cost_ngn), 0)::float AS total_cost,
+                COALESCE(SUM(CASE WHEN plant_id IS NOT NULL AND NOT is_workshop AND NOT COALESCE(is_category, false) THEN total_cost_ngn ELSE 0 END), 0)::float AS direct_cost,
+                COALESCE(SUM(CASE WHEN is_workshop THEN total_cost_ngn ELSE 0 END), 0)::float AS workshop_cost,
+                COALESCE(SUM(CASE WHEN COALESCE(is_category, false) THEN total_cost_ngn ELSE 0 END), 0)::float AS category_cost,
                 count(*)::int AS items_count,
                 count(DISTINCT purchase_order_number)::int AS po_count,
                 count(DISTINCT plant_id)::int AS plants_count,
@@ -1953,7 +1988,7 @@ async def get_costs_by_period(
 
     rows = await fetch(
         f"""SELECT {period_column} AS period_val,
-                   COALESCE(SUM(total_cost), 0)::float AS total_cost,
+                   COALESCE(SUM(total_cost_ngn), 0)::float AS total_cost,
                    count(*)::int AS items_count,
                    count(DISTINCT purchase_order_number)::int AS po_count
             FROM spare_parts
@@ -2021,7 +2056,7 @@ async def get_year_over_year(
 
     rows = await fetch(
         f"""SELECT year, {period_column} AS period_val,
-                   COALESCE(SUM(total_cost), 0)::float AS total_cost
+                   COALESCE(SUM(total_cost_ngn), 0)::float AS total_cost
             FROM spare_parts
             WHERE {where} AND {period_column} IS NOT NULL
             GROUP BY year, {period_column}
@@ -2131,7 +2166,7 @@ async def get_repeat_purchases(
                 count(DISTINCT sp.purchase_order_number) AS po_count,
                 count(*) AS purchase_count,
                 sum(sp.quantity) AS total_quantity,
-                sum(sp.total_cost)::float AS total_spent,
+                sum(sp.total_cost_ngn)::float AS total_spent,
                 min(sp.unit_cost)::float AS min_unit_cost,
                 max(sp.unit_cost)::float AS max_unit_cost,
                 CASE
@@ -2301,7 +2336,7 @@ async def get_price_catalog(
               min(sp.unit_cost)::float AS min_unit_cost,
               max(sp.unit_cost)::float AS max_unit_cost,
               round(avg(sp.unit_cost)::numeric, 2)::float AS avg_unit_cost,
-              sum(sp.total_cost)::float AS total_spent,
+              sum(sp.total_cost_ngn)::float AS total_spent,
               max(sp.po_date) AS last_purchased,
               count(DISTINCT COALESCE(s.name, sp.supplier)) AS supplier_count,
               array_agg(DISTINCT COALESCE(s.name, sp.supplier) ORDER BY COALESCE(s.name, sp.supplier)) AS suppliers,

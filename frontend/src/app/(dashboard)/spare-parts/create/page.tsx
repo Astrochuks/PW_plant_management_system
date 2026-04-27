@@ -72,6 +72,8 @@ interface FormState {
   other_costs: string;
   other_costs_description: string;
   requisition_number: string;
+  currency: string;          // 'NGN' | 'GBP' | 'USD' | 'EUR' | other
+  fx_rate_to_ngn: string;    // string for input field, parsed to number on submit
 }
 
 const INITIAL_FORM: FormState = {
@@ -88,7 +90,21 @@ const INITIAL_FORM: FormState = {
   other_costs: '',
   other_costs_description: '',
   requisition_number: '',
+  currency: 'NGN',
+  fx_rate_to_ngn: '',
 };
+
+// Currencies offered in the dropdown. NGN is the default; others require an FX rate.
+const CURRENCY_OPTIONS = [
+  { code: 'NGN', symbol: '₦', label: 'Nigerian Naira' },
+  { code: 'GBP', symbol: '£', label: 'British Pound' },
+  { code: 'USD', symbol: '$', label: 'US Dollar' },
+  { code: 'EUR', symbol: '€', label: 'Euro' },
+] as const;
+
+function currencySymbol(code: string): string {
+  return CURRENCY_OPTIONS.find((c) => c.code === code)?.symbol ?? code + ' ';
+}
 
 // ============================================================================
 // Draft persistence — keep the form alive across refreshes
@@ -288,8 +304,13 @@ function POCreateForm() {
           : 0;
     const otherValue = form.other_costs ? Number(form.other_costs) : 0;
     const grandTotal = subtotal + vatValue - discountValue + otherValue;
-    return { vatValue, discountValue, otherValue, grandTotal };
-  }, [subtotal, vatMode, discountMode, form.vat_percentage, form.vat_amount, form.discount_percentage, form.discount_amount, form.other_costs]);
+    // NGN equivalent: only meaningful when a non-NGN currency + valid FX rate are set.
+    const fxRate = Number(form.fx_rate_to_ngn);
+    const grandTotalNgn = form.currency !== 'NGN' && fxRate > 0
+      ? grandTotal * fxRate
+      : null;
+    return { vatValue, discountValue, otherValue, grandTotal, grandTotalNgn };
+  }, [subtotal, vatMode, discountMode, form.vat_percentage, form.vat_amount, form.discount_percentage, form.discount_amount, form.other_costs, form.currency, form.fx_rate_to_ngn]);
 
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
@@ -302,6 +323,15 @@ function POCreateForm() {
       if (!form.fleet_numbers.trim()) {
         toast.error('Fleet numbers are required');
         return;
+      }
+
+      // Foreign currency requires an FX rate so we can store the NGN equivalent.
+      if (form.currency !== 'NGN') {
+        const rate = Number(form.fx_rate_to_ngn);
+        if (!Number.isFinite(rate) || rate <= 0) {
+          toast.error(`Exchange rate to NGN is required for ${form.currency} POs`);
+          return;
+        }
       }
 
       const validItems = lineItems.filter((item) => item.description.trim());
@@ -347,6 +377,12 @@ function POCreateForm() {
 
       if (form.other_costs) payload.other_costs = Number(form.other_costs);
       if (form.other_costs_description.trim()) payload.other_costs_description = form.other_costs_description.trim();
+
+      // Currency: always send. Only send fx_rate_to_ngn when not NGN (backend forces 1 for NGN).
+      payload.currency = form.currency;
+      if (form.currency !== 'NGN') {
+        payload.fx_rate_to_ngn = Number(form.fx_rate_to_ngn);
+      }
 
       bulkCreate.mutate(payload, {
         onSuccess: (result) => {
@@ -684,7 +720,7 @@ function POCreateForm() {
                 <div className="text-sm text-muted-foreground">
                   Subtotal:{' '}
                   <span className="font-semibold text-foreground">
-                    ₦{formatCurrency(subtotal)}
+                    {currencySymbol(form.currency)}{formatCurrency(subtotal)}
                   </span>{' '}
                   ({validCount} {validCount === 1 ? 'item' : 'items'})
                 </div>
@@ -699,6 +735,56 @@ function POCreateForm() {
             <CardTitle className="text-base">Cost Adjustments</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
+            {/* Currency + FX Rate */}
+            <div className="space-y-2">
+              <Label>Currency</Label>
+              <div className="flex items-end gap-3 flex-wrap">
+                <div className="flex-shrink-0">
+                  <Select
+                    value={form.currency}
+                    onValueChange={(v) => {
+                      updateField('currency', v);
+                      // Reset FX rate when switching back to NGN
+                      if (v === 'NGN') updateField('fx_rate_to_ngn', '');
+                    }}
+                  >
+                    <SelectTrigger className="w-[160px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CURRENCY_OPTIONS.map((opt) => (
+                        <SelectItem key={opt.code} value={opt.code}>
+                          {opt.symbol} {opt.code} — {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {form.currency !== 'NGN' && (
+                  <div className="flex-1 min-w-[200px] max-w-[280px]">
+                    <Label className="text-xs text-muted-foreground mb-1.5">
+                      Exchange rate (1 {form.currency} = ? NGN) <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      placeholder={`e.g. ${form.currency === 'GBP' ? '2100' : form.currency === 'USD' ? '1650' : '1800'}`}
+                      value={form.fx_rate_to_ngn}
+                      onChange={(e) => updateField('fx_rate_to_ngn', e.target.value)}
+                    />
+                  </div>
+                )}
+              </div>
+              {form.currency !== 'NGN' && (
+                <p className="text-xs text-muted-foreground">
+                  Frozen at PO entry. The NGN equivalent is stored alongside the original price so historical totals never shift if rates change later.
+                </p>
+              )}
+            </div>
+
+            <Separator />
+
             {/* VAT */}
             <div className="space-y-2">
               <div className="flex items-center gap-3">
@@ -815,7 +901,7 @@ function POCreateForm() {
                 <div className="rounded-lg border bg-muted/30 p-4 space-y-2 text-sm">
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Subtotal</span>
-                    <span>₦{formatCurrency(subtotal)}</span>
+                    <span>{currencySymbol(form.currency)}{formatCurrency(subtotal)}</span>
                   </div>
                   {costBreakdown.vatValue > 0 && (
                     <div className="flex justify-between">
@@ -823,7 +909,7 @@ function POCreateForm() {
                         + VAT{vatMode === 'percentage' && form.vat_percentage ? ` (${form.vat_percentage}%)` : ''}
                       </span>
                       <span className="text-green-600 dark:text-green-400">
-                        +₦{formatCurrency(costBreakdown.vatValue)}
+                        +{currencySymbol(form.currency)}{formatCurrency(costBreakdown.vatValue)}
                       </span>
                     </div>
                   )}
@@ -833,21 +919,27 @@ function POCreateForm() {
                         - Discount{discountMode === 'percentage' && form.discount_percentage ? ` (${form.discount_percentage}%)` : ''}
                       </span>
                       <span className="text-red-600 dark:text-red-400">
-                        -₦{formatCurrency(costBreakdown.discountValue)}
+                        -{currencySymbol(form.currency)}{formatCurrency(costBreakdown.discountValue)}
                       </span>
                     </div>
                   )}
                   {costBreakdown.otherValue > 0 && (
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">+ Other Costs</span>
-                      <span>+₦{formatCurrency(costBreakdown.otherValue)}</span>
+                      <span>+{currencySymbol(form.currency)}{formatCurrency(costBreakdown.otherValue)}</span>
                     </div>
                   )}
                   <Separator />
                   <div className="flex justify-between font-semibold text-base">
                     <span>Grand Total</span>
-                    <span>₦{formatCurrency(costBreakdown.grandTotal)}</span>
+                    <span>{currencySymbol(form.currency)}{formatCurrency(costBreakdown.grandTotal)}</span>
                   </div>
+                  {costBreakdown.grandTotalNgn !== null && (
+                    <div className="flex justify-between text-xs text-muted-foreground pt-1">
+                      <span>NGN equivalent</span>
+                      <span>≈ ₦{formatCurrency(costBreakdown.grandTotalNgn)}</span>
+                    </div>
+                  )}
                 </div>
               </>
             )}

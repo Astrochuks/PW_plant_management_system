@@ -885,13 +885,16 @@ async def generate_report(
             *plant_params,
         )
 
+    # Cross-PO aggregations use total_cost_ngn so foreign-currency POs are
+    # converted to NGN before summing. total_cost (original currency) would
+    # naively add e.g. £ + ₦ values.
     async def q_spare_parts_summary():
         return await fetchrow(
             f"""SELECT count(*)::int AS total_items,
                        count(DISTINCT sp.purchase_order_number)::int AS total_pos,
                        count(DISTINCT sp.plant_id)::int AS plants_with_parts,
-                       COALESCE(sum(sp.total_cost), 0)::float AS total_spend,
-                       COALESCE(avg(sp.total_cost), 0)::float AS avg_cost_per_item
+                       COALESCE(sum(sp.total_cost_ngn), 0)::float AS total_spend,
+                       COALESCE(avg(sp.total_cost_ngn), 0)::float AS avg_cost_per_item
                 FROM spare_parts sp
                 LEFT JOIN locations loc ON loc.id = sp.location_id
                 {sp_join_pm}
@@ -904,7 +907,7 @@ async def generate_report(
             f"""SELECT COALESCE(s.name, sp.supplier) AS supplier_name,
                        count(*)::int AS items_count,
                        count(DISTINCT sp.purchase_order_number)::int AS po_count,
-                       COALESCE(sum(sp.total_cost), 0)::float AS total_spend
+                       COALESCE(sum(sp.total_cost_ngn), 0)::float AS total_spend
                 FROM spare_parts sp
                 LEFT JOIN suppliers s ON s.id = sp.supplier_id
                 LEFT JOIN locations loc ON loc.id = sp.location_id
@@ -921,7 +924,7 @@ async def generate_report(
             f"""SELECT pm.fleet_number, pm.description, pm.fleet_type, pm.condition,
                        l.name AS location_name,
                        count(sp.id)::int AS parts_count,
-                       COALESCE(sum(sp.total_cost), 0)::float AS total_spend
+                       COALESCE(sum(sp.total_cost_ngn), 0)::float AS total_spend
                 FROM spare_parts sp
                 JOIN plants_master pm ON pm.id = sp.plant_id
                 LEFT JOIN locations l ON l.id = pm.current_location_id
@@ -938,7 +941,7 @@ async def generate_report(
     async def q_sites_spend():
         return await fetch(
             f"""SELECT l.name AS location_name, s.name AS state_name,
-                       COALESCE(sum(sp.total_cost), 0)::float AS total_spend,
+                       COALESCE(sum(sp.total_cost_ngn), 0)::float AS total_spend,
                        count(*)::int AS items_count,
                        count(DISTINCT sp.purchase_order_number)::int AS po_count
                 FROM spare_parts sp
