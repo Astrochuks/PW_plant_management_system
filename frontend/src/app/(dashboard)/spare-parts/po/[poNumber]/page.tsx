@@ -1064,16 +1064,20 @@ const CURRENCY_LOCALES: Record<string, string> = {
 
 function formatCurrency(amount: number, code: string = 'NGN'): string {
   const upper = (code || 'NGN').toUpperCase();
+  // NGN has no commonly-used sub-unit in our data, so we keep it integer.
+  // Foreign currencies (GBP, USD, EUR) use 2 decimals so values like £0.65
+  // and £1.65 from invoices render exactly, not as £1 / £2.
+  const fractionDigits = upper === 'NGN' ? 0 : 2;
   try {
     return new Intl.NumberFormat(CURRENCY_LOCALES[upper] ?? 'en-US', {
       style: 'currency',
       currency: upper,
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
+      minimumFractionDigits: fractionDigits,
+      maximumFractionDigits: fractionDigits,
     }).format(amount);
   } catch {
     // Unknown ISO code — fall back to a plain prefix
-    return `${upper} ${new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(amount)}`;
+    return `${upper} ${new Intl.NumberFormat('en-US', { maximumFractionDigits: fractionDigits, minimumFractionDigits: fractionDigits }).format(amount)}`;
   }
 }
 

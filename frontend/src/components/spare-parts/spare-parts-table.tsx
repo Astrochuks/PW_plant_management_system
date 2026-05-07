@@ -102,10 +102,10 @@ export function SparePartsTable({ parts, loading, onRowClick }: SparePartsTableP
               </TableCell>
               <TableCell className="text-center">{part.quantity}</TableCell>
               <TableCell className="text-right">
-                {part.unit_cost != null ? formatCurrency(part.unit_cost) : '-'}
+                {part.unit_cost != null ? formatCurrency(part.unit_cost, part.currency || 'NGN') : '-'}
               </TableCell>
               <TableCell className="text-right font-medium">
-                {part.total_cost != null ? formatCurrency(part.total_cost) : '-'}
+                {part.total_cost != null ? formatCurrency(part.total_cost, part.currency || 'NGN') : '-'}
               </TableCell>
             </TableRow>
           ))}
@@ -161,11 +161,21 @@ function formatDate(dateString: string): string {
   });
 }
 
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-NG', {
-    style: 'currency',
-    currency: 'NGN',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount);
+const _CURRENCY_LOCALES: Record<string, string> = {
+  NGN: 'en-NG', GBP: 'en-GB', USD: 'en-US', EUR: 'de-DE',
+};
+
+function formatCurrency(amount: number, code: string = 'NGN'): string {
+  const upper = (code || 'NGN').toUpperCase();
+  const digits = upper === 'NGN' ? 0 : 2;
+  try {
+    return new Intl.NumberFormat(_CURRENCY_LOCALES[upper] ?? 'en-US', {
+      style: 'currency',
+      currency: upper,
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
+    }).format(amount);
+  } catch {
+    return `${upper} ${new Intl.NumberFormat('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(amount)}`;
+  }
 }

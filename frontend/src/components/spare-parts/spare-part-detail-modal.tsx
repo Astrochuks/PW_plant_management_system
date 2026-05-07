@@ -256,7 +256,7 @@ export function SparePartDetailModal({ partId, onClose }: SparePartDetailModalPr
                         className="w-32 h-7 text-right"
                       />
                     ) : (
-                      <span>{part.unit_cost != null ? formatCurrency(part.unit_cost) : '-'}</span>
+                      <span>{part.unit_cost != null ? formatCurrency(part.unit_cost, part.currency || 'NGN') : '-'}</span>
                     )}
                   </div>
                   <div className="flex justify-between text-sm">
@@ -278,14 +278,14 @@ export function SparePartDetailModal({ partId, onClose }: SparePartDetailModalPr
                   {part.other_costs > 0 && (
                     <div className="flex justify-between text-sm">
                       <span className="text-muted-foreground">Other Costs</span>
-                      <span>{formatCurrency(part.other_costs)}</span>
+                      <span>{formatCurrency(part.other_costs, part.currency || 'NGN')}</span>
                     </div>
                   )}
                   <Separator />
                   <div className="flex justify-between font-medium">
                     <span>Total Cost</span>
                     <span className="text-lg">
-                      {part.total_cost != null ? formatCurrency(part.total_cost) : '-'}
+                      {part.total_cost != null ? formatCurrency(part.total_cost, part.currency || 'NGN') : '-'}
                     </span>
                   </div>
                 </div>
@@ -467,11 +467,23 @@ function formatDate(dateString: string): string {
   });
 }
 
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-NG', {
-    style: 'currency',
-    currency: 'NGN',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount);
+// Locale per ISO 4217 code so Intl picks the right symbol/grouping.
+const _CURRENCY_LOCALES: Record<string, string> = {
+  NGN: 'en-NG', GBP: 'en-GB', USD: 'en-US', EUR: 'de-DE',
+};
+
+function formatCurrency(amount: number, code: string = 'NGN'): string {
+  const upper = (code || 'NGN').toUpperCase();
+  // NGN: integer (no kobo). Foreign currencies: 2 decimals (£0.65, $1.65, etc.)
+  const digits = upper === 'NGN' ? 0 : 2;
+  try {
+    return new Intl.NumberFormat(_CURRENCY_LOCALES[upper] ?? 'en-US', {
+      style: 'currency',
+      currency: upper,
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
+    }).format(amount);
+  } catch {
+    return `${upper} ${new Intl.NumberFormat('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(amount)}`;
+  }
 }
