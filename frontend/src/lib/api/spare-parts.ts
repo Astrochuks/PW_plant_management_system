@@ -571,6 +571,8 @@ export async function bulkCreateSpareParts(data: BulkCreateRequest): Promise<{
   if (data.discount_amount != null) queryParams.discount_amount = String(data.discount_amount);
   if (data.other_costs != null) queryParams.other_costs = String(data.other_costs);
   if (data.other_costs_description) queryParams.other_costs_description = data.other_costs_description;
+  if (data.currency) queryParams.currency = data.currency;
+  if (data.fx_rate_to_ngn != null) queryParams.fx_rate_to_ngn = String(data.fx_rate_to_ngn);
 
   const response = await apiClient.post<{
     success: boolean;
