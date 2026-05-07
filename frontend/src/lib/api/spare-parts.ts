@@ -85,8 +85,12 @@ export interface POSummary {
   req_no: string | null;
   items_count: number;
   plants_count: number;
-  total_amount: number;
-  subtotal: number;
+  total_amount: number;                // in original currency
+  subtotal: number;                    // in original currency
+  total_amount_ngn?: number;           // NGN-equivalent (added by view 004)
+  subtotal_ngn?: number;               // NGN-equivalent
+  currency?: string;                   // 'NGN' | 'GBP' | 'USD' | 'EUR' | ...
+  fx_rate_to_ngn?: number;
   has_workshop: boolean;
   has_category: boolean;
   cost_type: string;                   // "direct" | "shared"

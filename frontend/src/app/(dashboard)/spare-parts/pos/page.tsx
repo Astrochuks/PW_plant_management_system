@@ -268,7 +268,12 @@ function PurchaseOrdersPageInner() {
                   </TableCell>
                   <TableCell className="text-center">{po.items_count}</TableCell>
                   <TableCell className="text-right font-medium">
-                    {formatCurrency(Number(po.total_amount) || 0)}
+                    {formatCurrency(Number(po.total_amount) || 0, po.currency || 'NGN')}
+                    {po.currency && po.currency !== 'NGN' && po.total_amount_ngn != null && (
+                      <div className="text-[10px] text-muted-foreground font-normal">
+                        ≈ ₦{(Number(po.total_amount_ngn) / 1_000_000).toFixed(1)}M
+                      </div>
+                    )}
                   </TableCell>
                   <TableCell className="text-center">
                     <CostTypeBadge type={po.cost_type} />
@@ -353,17 +358,42 @@ function formatDate(dateString: string): string {
   });
 }
 
-function formatCurrency(amount: number): string {
-  if (amount >= 1_000_000) {
-    return `\u20A6${(amount / 1_000_000).toFixed(1)}M`;
+// Locales / symbols per ISO 4217 code.
+const _CURRENCY_LOCALES: Record<string, string> = {
+  NGN: 'en-NG', GBP: 'en-GB', USD: 'en-US', EUR: 'de-DE',
+};
+const _CURRENCY_SYMBOLS: Record<string, string> = {
+  NGN: '\u20A6', GBP: '£', USD: '$', EUR: '€',
+};
+
+// NGN uses compact notation since values scale large.
+// Foreign currencies show full amount with 2 decimals so invoice values
+// like £1,015.20 don't collapse into a meaningless '£1K'.
+function formatCurrency(amount: number, code: string = 'NGN'): string {
+  const upper = (code || 'NGN').toUpperCase();
+  if (upper === 'NGN') {
+    if (amount >= 1_000_000) {
+      return `\u20A6${(amount / 1_000_000).toFixed(1)}M`;
+    }
+    if (amount >= 1_000) {
+      return `\u20A6${(amount / 1_000).toFixed(0)}K`;
+    }
+    return new Intl.NumberFormat('en-NG', {
+      style: 'currency',
+      currency: 'NGN',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(amount);
   }
-  if (amount >= 1_000) {
-    return `\u20A6${(amount / 1_000).toFixed(0)}K`;
+  try {
+    return new Intl.NumberFormat(_CURRENCY_LOCALES[upper] ?? 'en-US', {
+      style: 'currency',
+      currency: upper,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch {
+    const sym = _CURRENCY_SYMBOLS[upper] ?? `${upper} `;
+    return `${sym}${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount)}`;
   }
-  return new Intl.NumberFormat('en-NG', {
-    style: 'currency',
-    currency: 'NGN',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount);
 }
