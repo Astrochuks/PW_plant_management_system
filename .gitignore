@@ -1,81 +1,49 @@
-# Environment variables
+# Environment / secrets
 .env
 .env.local
 .env.*.local
+.mcp.json
 
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.s                 x
-
-.Python
-venv/
-ENV/
-.venv/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Data files (keep in separate storage)
+# Local data (business files, spreadsheets — never in source control)
+data/
 *.xlsx
 *.xls
 *.csv
 etl_output/
+# ...except test fixtures, which must travel with the code
+!backend/tests/fixtures/**/*.xlsx
 
-# MCP config (contains sensitive info)
-.mcp.json
-
-# Node.js (for frontend)
-node_modules/
-.next/
-out/
-.nuxt/
-dist/
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+ENV/
+*.egg-info/
 
 # Testing
 .coverage
 htmlcov/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+dist/
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Claude Code local session config
+.claude/
 
 # Logs
 *.log
 logs/
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

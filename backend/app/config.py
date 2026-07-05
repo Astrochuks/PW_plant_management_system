@@ -71,9 +71,6 @@ class Settings(BaseSettings):
     metrics_enabled: bool = True
     metrics_flush_interval_seconds: int = 60
 
-    # OpenAI (unused — remarks parsing is keyword-based, but kept for future AI features)
-    openai_api_key: str | None = Field(default=None, description="OpenAI API key (optional, for future AI features)")
-
     @property
     def cors_origins_list(self) -> list[str]:
         """Parse CORS origins from JSON array or comma-separated string."""
