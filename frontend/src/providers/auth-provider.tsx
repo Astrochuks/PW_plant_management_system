@@ -20,7 +20,7 @@ import {
   getTokenExpiresAt,
 } from '@/lib/api/auth';
 import { getErrorMessage } from '@/lib/api/client';
-import { silentRefreshToken } from '@/lib/api/silent-refresh';
+import { silentRefreshToken, markSessionAlive, SESSION_EXPIRED_EVENT } from '@/lib/api/silent-refresh';
 import { useEventStream } from '@/hooks/use-event-stream';
 
 interface AuthContextType {
@@ -84,7 +84,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
           scheduleRefresh();
         } else {
           // Refresh returned null (token already rotated by interceptor).
-          // Re-read expiry from localStorage (interceptor may have saved new tokens)
+          // Re-read expiry from sessionStorage (interceptor may have saved new tokens)
           // and reschedule based on whatever is current.
           scheduleRefresh();
         }
@@ -95,7 +95,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }, delay);
   }, []);
 
-  // Restore auth state from localStorage on mount (no network call)
+  // Restore auth state from sessionStorage on mount (no network call)
   useEffect(() => {
     const savedUser = getSavedUser();
     if (savedUser && checkIsAuthenticated()) {
@@ -162,6 +162,30 @@ export function AuthProvider({ children }: AuthProviderProps) {
     return () => window.removeEventListener('online', handleOnline);
   }, [refreshAndInvalidate]);
 
+  // The refresh-token chain is permanently dead (e.g. "Already Used" / expired).
+  // silent-refresh has already cleared storage and tripped its circuit breaker,
+  // so no more /auth/refresh calls will fire. Here we just tear down UI state:
+  // stop the proactive timer, drop the user (this also closes the SSE stream),
+  // and route to /login — except on /uploads, where we avoid yanking the user
+  // mid-upload and let the page surface a re-login prompt via error toasts.
+  useEffect(() => {
+    function handleSessionExpired() {
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current);
+        refreshTimerRef.current = null;
+      }
+      setUser(null);
+      const onUploads = window.location.pathname.startsWith('/uploads');
+      const onLogin = window.location.pathname.includes('/login');
+      if (!onUploads && !onLogin) {
+        router.replace('/login');
+      }
+    }
+
+    window.addEventListener(SESSION_EXPIRED_EVENT, handleSessionExpired);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, handleSessionExpired);
+  }, [router]);
+
   // Cleanup timer on unmount
   useEffect(() => {
     return () => {
@@ -175,6 +199,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try {
       const response = await apiLogin(credentials);
       saveAuthData(response);
+      markSessionAlive(); // reset the circuit breaker — fresh token chain
       setUser(response.user);
       scheduleRefresh();
       // Site engineers get their own dedicated UI

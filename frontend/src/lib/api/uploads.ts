@@ -317,7 +317,7 @@ export async function getWeeklySubmission(id: string): Promise<{
  * For form-submitted reports: generates and returns a styled Excel.
  */
 export async function downloadSubmissionFile(id: string, fileName?: string): Promise<void> {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+  const token = typeof window !== 'undefined' ? sessionStorage.getItem('access_token') : null;
   const baseURL = apiClient.defaults.baseURL;
   const url = `${baseURL}/uploads/submissions/weekly/${id}/file`;
 
