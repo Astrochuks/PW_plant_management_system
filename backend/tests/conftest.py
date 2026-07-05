@@ -1,6 +1,7 @@
 """Pytest configuration and fixtures."""
 
 import os
+from pathlib import Path
 from typing import Generator
 from unittest.mock import MagicMock, patch
 
@@ -12,6 +13,49 @@ os.environ["ENVIRONMENT"] = "development"
 os.environ["SUPABASE_URL"] = "https://test.supabase.co"
 os.environ["SUPABASE_ANON_KEY"] = "test-anon-key"
 os.environ["SUPABASE_SERVICE_ROLE_KEY"] = "test-service-role-key"
+
+
+def _database_url() -> str | None:
+    """Real DATABASE_URL for integration tests: env first, then backend/.env."""
+    url = os.environ.get("DATABASE_URL")
+    if url:
+        return url
+    try:
+        from dotenv import dotenv_values
+
+        return dotenv_values(Path(__file__).parent.parent / ".env").get("DATABASE_URL")
+    except Exception:
+        return None
+
+
+@pytest.fixture
+async def db_conn():
+    """Real database connection wrapped in an always-rolled-back transaction.
+
+    Integration tests write freely; NOTHING persists after the test ends.
+    Skips (not fails) when no database is reachable, so unit tests stay
+    runnable offline.
+    """
+    import asyncpg
+
+    url = _database_url()
+    if not url:
+        pytest.skip("no DATABASE_URL available for integration test")
+
+    try:
+        conn = await asyncpg.connect(url, statement_cache_size=0, timeout=15)
+    except Exception as exc:
+        pytest.skip(f"database unreachable: {exc}")
+
+    tr = conn.transaction()
+    await tr.start()
+    try:
+        yield conn
+    finally:
+        try:
+            await tr.rollback()
+        finally:
+            await conn.close()
 
 
 @pytest.fixture(scope="session")

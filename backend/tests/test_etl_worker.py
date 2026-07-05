@@ -189,21 +189,22 @@ class TestFleetNumberNormalization:
     """Tests for fleet number normalization."""
 
     def test_basic_normalization(self):
-        """Basic fleet numbers should normalize correctly."""
-        assert normalize_fleet_number("PW 001") == "PW 001"
-        assert normalize_fleet_number("pw 001") == "PW 001"
+        """ALL internal spaces are removed — 'AF 25' and 'AF25' must match
+        as the same plant (production matching contract)."""
+        assert normalize_fleet_number("PW 001") == "PW001"
+        assert normalize_fleet_number("pw 001") == "PW001"
         assert normalize_fleet_number("PW001") == "PW001"
 
     def test_removes_common_prefixes(self):
         """Common prefixes should be stripped."""
-        assert normalize_fleet_number("Fleet No: PW 001") == "PW 001"
-        assert normalize_fleet_number("Fleet No. PW 002") == "PW 002"
-        assert normalize_fleet_number("No. PW 003") == "PW 003"
+        assert normalize_fleet_number("Fleet No: PW 001") == "PW001"
+        assert normalize_fleet_number("Fleet No. PW 002") == "PW002"
+        assert normalize_fleet_number("No. PW 003") == "PW003"
 
     def test_handles_whitespace(self):
-        """Extra whitespace should be normalized."""
-        assert normalize_fleet_number("  PW 001  ") == "PW 001"
-        assert normalize_fleet_number("PW  001") == "PW 001"  # Multiple spaces to single
+        """All whitespace collapses away entirely."""
+        assert normalize_fleet_number("  PW 001  ") == "PW001"
+        assert normalize_fleet_number("PW  001") == "PW001"
 
     def test_invalid_values_return_none(self):
         """Invalid values should return None."""

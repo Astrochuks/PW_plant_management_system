@@ -29,6 +29,28 @@ except ImportError:
 
 BASE_URL = "http://localhost:8000/api/v1"
 
+# ---------------------------------------------------------------------------
+# This module is a LIVE-SERVER smoke suite (rate limiting, concurrent logins)
+# and requires a running backend at localhost:8000 plus real Supabase auth.
+# When no server is up, skip the whole module instead of erroring — the
+# regular unit suite must stay green offline.
+# ---------------------------------------------------------------------------
+import pytest
+
+
+def _server_running() -> bool:
+    try:
+        httpx.get(f"{BASE_URL}/health", timeout=2.0)
+        return True
+    except Exception:
+        return False
+
+
+pytestmark = pytest.mark.skipif(
+    not _server_running(),
+    reason="live-server smoke tests: backend not running on localhost:8000",
+)
+
 
 def print_result(name, response, elapsed_ms):
     """Pretty print a test result."""

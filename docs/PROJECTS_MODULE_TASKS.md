@@ -26,10 +26,11 @@
 
 | ID | Task | Acceptance test | Depends on |
 |---|---|---|---|
-| T0.1 ◐ | `docker-compose.yml` at repo root: `backend` service (build `backend/Dockerfile`, volume-mount `./backend/app`, `--reload`, env from `backend/.env`, port 8000) + `frontend` service (node:20 image, volume mount, `npm run dev`, named volume for `node_modules`, port 3000) + healthchecks. `.dockerignore` for both. | `docker compose config` valid; `docker compose up` → `GET :8000/api/v1/health` 200 and `GET :3000/login` 200 (run when native dev servers are stopped) | — |
-| T0.2 | Test runner in Docker: `docker compose run --rm backend pytest`. Add `scripts/test.sh` wrapper (runs pytest in container if Docker up, else local venv). | Existing backend tests pass identically in container and venv | T0.1 |
+| T0.1 ✅ | `docker-compose.yml` at repo root: `backend` service (build `backend/Dockerfile`, volume-mount `./backend/app`, `--reload`, env from `backend/.env`, port 8000) + `frontend` service (node:20 image, volume mount, `npm run dev`, named volume for `node_modules`, port 3000) + healthchecks. `.dockerignore` for both. | `docker compose config` valid; `docker compose up` → `GET :8000/api/v1/health` 200 and `GET :3000/login` 200 (run when native dev servers are stopped) | — |
+| T0.2 ✅ | Test runner in Docker: `docker compose run --rm backend pytest`. Add `scripts/test.sh` wrapper (runs pytest in container if Docker up, else local venv). | Existing backend tests pass identically in container and venv | T0.1 |
 | T0.3 ✅ | Test fixtures: `backend/tests/fixtures/projects/` with the 2017 Award Letters workbook + Week 2 & Week 10 Akwa Ibom files (copied); `conftest.py` fixture paths. | Fixture-loading test opens all 3 via openpyxl, asserts expected sheet names | — |
-| T0.4 | Test DB strategy: pytest fixtures create/teardown a dedicated schema (or use transactions with rollback) against the dev database, so integration tests never pollute real tables. | Integration smoke test writes + rolls back; real table counts unchanged | T0.2 |
+| T0.4 ✅ | Test DB strategy: pytest fixtures create/teardown a dedicated schema (or use transactions with rollback) against the dev database, so integration tests never pollute real tables. | Integration smoke test writes + rolls back; real table counts unchanged | T0.2 |
+| T0.5 ✅ | (added during Phase 0) Repair legacy test suite: test_plants auth via dependency_overrides, health response shapes, fleet-normalization contract, test_auth live-server suite skips when no server. | Full suite green: 43 passed, 7 skipped (live smoke), 0 failed — identical in venv and Docker | T0.2 |
 
 ## Phase 1 — Award Letters → clean Project Register
 
