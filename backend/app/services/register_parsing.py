@@ -524,3 +524,120 @@ def extract_client_default_state(client_name: Any) -> str | None:
         return states[0] if len(states) == 1 else None
     except Exception:
         return None
+
+
+# ---------------------------------------------------------------------------
+# T1.7 — project type / work nature classification
+# ---------------------------------------------------------------------------
+
+PROJECT_TYPES = (
+    "road", "bridge", "drainage", "building", "airport", "water",
+    "infrastructure", "other",
+)
+WORK_NATURES = (
+    "construction", "dualization", "rehabilitation", "maintenance",
+    "emergency_repair", "completion",
+)
+
+#: type → keyword patterns. Order of the OUTER list is only a tiebreak;
+#: primary asset = the type whose keyword appears EARLIEST in the name
+#: ("Roads & Bridges" → road; "Bridge with Approach Roads" → bridge).
+_TYPE_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("airport", r"\bairports?\b(?!\s+road)|\bapron\b|\brunway\b|\btaxiway\b|\bairfield\b"),
+    ("bridge", r"\bbridges?\b|\bflyover\b"),
+    ("water", r"\bwater\s+(?:schemes?|tanks?|works|supply)\b|\bborehole\b|\bdam\b"),
+    ("drainage", r"\bdrain(?:age|s)?\b|\bculverts?\b|\berosion\b|\bflood\b|\bcanal\b"
+                 r"|\bdredging\b|\bchanneli[sz]ation\b|\bcreek\b"),
+    ("building", r"\bbuildings?\b|\bmarket\b|\bhospital\b|\bschool\b|\bchurch\b"
+                 r"|\bmosque\b|\bhostel\b|\bquarters\b|\bhous(?:e|ing)\b|\bestate\b"
+                 r"|\bcomplex\b|\boffice\b|\bstadium\b"),
+    # NOTE: work-verbs (asphalt/overlay/pavement) deliberately NOT here —
+    # they describe the work, not the asset ("Overlay of Airport Runway"
+    # is an airport job). They live in _NATURE_PATTERNS instead.
+    ("road", r"\broads?\b|\bdualiz?s?ation\b|\bdualisation\b|\bcarriageway\b"
+             r"|\bexpressway\b|\bstreets?\b|\bbye?-?pass\b|\bring\s+road\b"
+             r"|\bjunction\b|\binterchange\b"
+             r"|\bhighway\b|\blanes?\b|\bspur\b|\bcres(?:c)?ents?\b"
+             r"|\bloop\b|\bterminus\b"),
+    ("infrastructure", r"\binfrastructur\w*\b|\bearthworks?\b|\blandscaping\b"
+                       r"|\bjetty\b|\bferry\b|\bconveyor\b|\breclamation\b"
+                       r"|\bfence\b|\bwall\b|\bpipe\s+works?\b|\baerators?\b"
+                       r"|\bsite\s+development\b|\bexternal\s+works\b"
+                       r"|\bmotor\s+park\b"),
+)
+
+_NATURE_PATTERNS: tuple[tuple[str, str], ...] = (
+    # Priority order (first match wins) — most specific verbs first
+    ("emergency_repair", r"\bemergency\b"),
+    ("dualization", r"\bdualiz?s?ation\b|\bdualisation\b"),
+    ("completion", r"\bcompletion\s+of\b|\bremobiliz?s?ation\b"),
+    ("maintenance", r"\bmaintenance\b"),
+    ("rehabilitation", r"\brehabilitation\b|\breconstru?ction\b|\brecoonstruction\b"
+                       r"|\breconstuction\b|\bupgrading\b|\brenovation\b"
+                       r"|\bremedial\b|\brepairs?\b|\boverlay\b|\bstrengthening\b"
+                       r"|\brealignment\b|\bscarification\b|\basphalting\b"
+                       r"|\bdredging\b"),
+    ("construction", r"\bconstruction\b|\bprovision\b|\bdevelopment\b"
+                     r"|\bextension\b|\bimprovement\b|\bdualiz?s?ation\b"),
+)
+
+
+@dataclass(frozen=True)
+class ClassifiedProject:
+    """project_type/work_nature guess for one register row.
+
+    confident=False → the caller must queue for human confirmation and
+    must NOT write the guess as authoritative.
+    """
+
+    project_type: str
+    work_nature: str
+    confident: bool
+    type_matches: tuple[str, ...] = ()
+
+    @property
+    def needs_review(self) -> bool:
+        return not self.confident
+
+
+def classify_project(project_name: Any) -> ClassifiedProject:
+    """Classify a project by its register name. Never raises.
+
+    The primary asset is the type whose keyword appears EARLIEST in the
+    name — "Construction of Roads & Bridges" is a road job with bridges,
+    "Kpantinapu Bridge with Approach Roads" is a bridge job with roads.
+    """
+    try:
+        name = str(project_name or "").lower()
+        if not name.strip():
+            return ClassifiedProject("other", "construction", False)
+
+        # --- type: earliest keyword position wins -------------------------
+        hits: list[tuple[int, str]] = []
+        for ptype, pattern in _TYPE_PATTERNS:
+            m = re.search(pattern, name)
+            if m:
+                hits.append((m.start(), ptype))
+        hits.sort()
+        matched_types = tuple(t for _, t in hits)
+
+        if not hits:
+            project_type, type_confident = "other", False
+        else:
+            project_type, type_confident = hits[0][1], True
+
+        # --- nature: priority order ----------------------------------------
+        work_nature, nature_confident = "construction", False
+        for nature, pattern in _NATURE_PATTERNS:
+            if re.search(pattern, name):
+                work_nature, nature_confident = nature, True
+                break
+
+        return ClassifiedProject(
+            project_type=project_type,
+            work_nature=work_nature,
+            confident=type_confident and nature_confident,
+            type_matches=matched_types,
+        )
+    except Exception:  # defensive backstop — contract says never raise
+        return ClassifiedProject("other", "construction", False)
