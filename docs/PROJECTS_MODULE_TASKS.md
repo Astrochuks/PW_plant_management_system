@@ -38,7 +38,7 @@
 
 | ID | Task | Acceptance test | Depends on |
 |---|---|---|---|
-| T1.1 | **Golden baseline.** Script runs the CURRENT parser on the 2017 workbook, dumps normalized JSON (projects, errors, warnings) to `backend/tests/golden/award_letters_v1_baseline.json`. Test asserts parser output == baseline. | Test green on two consecutive runs (proves determinism) | T0.3 |
+| T1.1 ✅ | **Golden baseline.** Script runs the CURRENT parser on the 2017 workbook, dumps normalized JSON (projects, errors, warnings) to `backend/tests/golden/award_letters_v1_baseline.json`. Test asserts parser output == baseline. | Test green on two consecutive runs (proves determinism) | T0.3 |
 | T1.2 | **Migration 008:** `clients` table; `projects` + `client_id`, `location_id`, `project_type`, `work_nature`, `scope_quantity`, `scope_unit`, `register_source`, `apg_amount/expiry/renewal_expiry`; `project_register_review_queue`. All guarded/idempotent. | Migration runs twice without error; schema assertions test (columns + FKs + indexes exist) | — |
 | T1.3 | **Clients backfill** script (idempotent): distinct `projects.client` → `clients` (normalized_name), set `client_id`. | Post-run: 0 projects with client string but NULL client_id; rerun changes nothing | T1.2 |
 | T1.4 | **Pure fn: contract-sum decomposition.** `parse_contract_sum(raw) → {original, variation, total, currency, warnings}` handling "Original: X, Variation: Y", "X & Y", plain numbers, junk. | Unit tests: ≥15 real samples from the workbook + edge cases (None, text, negative) | — |
