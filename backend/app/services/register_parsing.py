@@ -332,3 +332,195 @@ def parse_register_contract_sum(raw: Any) -> ContractSum:
             str(raw) if raw is not None else None,
             ("no_numbers_found",),
         )
+
+
+# ---------------------------------------------------------------------------
+# T1.6 — state resolution
+# ---------------------------------------------------------------------------
+
+#: 36 states + FCT, lowercase → canonical
+STATE_CANONICAL: dict[str, str] = {
+    "abia": "Abia", "adamawa": "Adamawa", "akwa ibom": "Akwa Ibom",
+    "anambra": "Anambra", "bauchi": "Bauchi", "bayelsa": "Bayelsa",
+    "benue": "Benue", "borno": "Borno", "cross river": "Cross River",
+    "delta": "Delta", "ebonyi": "Ebonyi", "edo": "Edo", "ekiti": "Ekiti",
+    "enugu": "Enugu", "gombe": "Gombe", "imo": "Imo", "jigawa": "Jigawa",
+    "kaduna": "Kaduna", "kano": "Kano", "katsina": "Katsina",
+    "kebbi": "Kebbi", "kogi": "Kogi", "kwara": "Kwara", "lagos": "Lagos",
+    "nasarawa": "Nasarawa", "niger": "Niger", "ogun": "Ogun", "ondo": "Ondo",
+    "osun": "Osun", "oyo": "Oyo", "plateau": "Plateau", "rivers": "Rivers",
+    "sokoto": "Sokoto", "taraba": "Taraba", "yobe": "Yobe",
+    "zamfara": "Zamfara", "fct": "FCT", "abuja": "FCT",
+}
+
+#: Recurring landmarks/areas in this register → state. Curated reference
+#: data (like fleet_number_prefixes); extend as new names appear.
+LANDMARK_STATES: dict[str, str] = {
+    # Lagos areas
+    "lekki": "Lagos", "ajah": "Lagos", "apapa": "Lagos", "epe": "Lagos",
+    "ikeja": "Lagos", "ikota": "Lagos", "elegushi": "Lagos", "ijora": "Lagos",
+    "badagry": "Lagos", "tin can": "Lagos", "yaba": "Lagos", "iddo": "Lagos",
+    "ebute metta": "Lagos", "mmia": "Lagos", "murtala muhammed": "Lagos",
+    "ejigbo": "Lagos",
+    # FCT
+    "jabi": "FCT", "gudu": "FCT", "karu": "FCT", "kubwa": "FCT",
+    "zuba": "FCT", "abaji": "FCT",
+    # Plateau
+    "jos": "Plateau", "vom": "Plateau", "manchok": "Plateau",
+    "panyam": "Plateau", "shendam": "Plateau", "bukuru": "Plateau",
+    # Others
+    "ibadan": "Oyo", "ogoja": "Cross River", "ikom": "Cross River",
+    "suleja": "Niger", "jalingo": "Taraba", "uyo": "Akwa Ibom",
+    "minna": "Niger", "kontagora": "Niger",
+}
+
+#: Words that make a bare state-name mention NOT a state reference.
+#: e.g. "River Niger", "Niger Barracks", "Niger Delta".
+_STATE_FALSE_POSITIVE_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("niger", r"(?:river\s+niger|niger\s+(?:barracks|delta|republic))"),
+    ("delta", r"(?:niger\s+delta)"),
+    ("rivers", r"(?:across\s+rivers|and\s+rivers)"),
+    ("katsina", r"katsina\s+ala"),  # Katsina Ala is a town in Benue
+)
+
+
+@dataclass(frozen=True)
+class ResolvedState:
+    """Result of resolving a project's state.
+
+    method: 'sheet' | 'explicit_state' | 'state_mention' | 'landmark'
+            | 'sheet_text' | 'client_default' | None
+    reason (when state is None): 'ambiguous_states' | 'no_state_found'
+    """
+
+    state: str | None
+    method: str | None
+    reason: str | None = None
+    candidates: tuple[str, ...] = ()
+
+    @property
+    def needs_review(self) -> bool:
+        return self.state is None
+
+
+def _distinct_states_in(text: str, *, explicit_only: bool) -> list[str]:
+    """Ordered distinct canonical states mentioned in text.
+
+    explicit_only=True → only 'X State(s)' phrases (highest confidence).
+    explicit_only=False → bare word-bounded mentions, with false-positive
+    guards applied.
+    """
+    lowered = text.lower()
+    found: list[str] = []
+
+    def _add(canonical: str) -> None:
+        if canonical not in found:
+            found.append(canonical)
+
+    names = sorted(STATE_CANONICAL, key=len, reverse=True)  # multi-word first
+
+    if explicit_only:
+        # Only state names IMMEDIATELY adjacent to the "State(s)" keyword,
+        # allowing joined lists: "Enugu / Kogi States" → both; but
+        # "Katsina Ala ... in Benue State" → Benue only (not Katsina).
+        name_alt = "|".join(re.escape(n) for n in names)
+        pattern = (
+            rf"\b((?:{name_alt})(?:\s*[/&,]\s*(?:{name_alt}))*)\s+states?\b"
+        )
+        for m in re.finditer(pattern, lowered):
+            for part in re.split(r"\s*[/&,]\s*", m.group(1)):
+                key = part.strip()
+                if key in STATE_CANONICAL:
+                    _add(STATE_CANONICAL[key])
+        return found
+
+    for name in names:
+        if not re.search(rf"\b{re.escape(name)}\b", lowered):
+            continue
+        guard = next(
+            (g for n, g in _STATE_FALSE_POSITIVE_PATTERNS if n == name), None
+        )
+        if guard and re.search(guard, lowered):
+            # Guard hit — but a separate legitimate mention may still exist,
+            # e.g. "Niger Barracks ... in Niger State" (explicit pass catches
+            # that case, so here we simply skip).
+            continue
+        _add(STATE_CANONICAL[name])
+    return found
+
+
+def _landmark_states_in(text: str) -> list[str]:
+    lowered = text.lower()
+    found: list[str] = []
+    for landmark, state in LANDMARK_STATES.items():
+        if re.search(rf"\b{re.escape(landmark)}\b", lowered) and state not in found:
+            found.append(state)
+    return found
+
+
+def resolve_state(
+    project_name: str,
+    sheet_name: str,
+    client_default_state: str | None = None,
+) -> ResolvedState:
+    """Resolve the state for one register row. Never raises.
+
+    Pass order (PRD v2 FR-A1, hardcoded row-index maps removed):
+      0. sheet named after a state              → that state
+      1. explicit "X State" phrase in name      → single: resolve; multi: queue
+      2. bare state mention (guarded)           → single: resolve; multi: queue
+      3. curated landmark match                 → single: resolve; multi: queue
+      4. state mention in the sheet name        → e.g. "FCDA ABUJA" → FCT
+      5. client default state                   → resolve
+      6. nothing                                → queue
+    """
+    try:
+        sheet_key = (sheet_name or "").strip().lower()
+        if sheet_key in STATE_CANONICAL:
+            return ResolvedState(STATE_CANONICAL[sheet_key], "sheet")
+
+        name = str(project_name or "")
+
+        explicit = _distinct_states_in(name, explicit_only=True)
+        if len(explicit) == 1:
+            return ResolvedState(explicit[0], "explicit_state")
+        if len(explicit) > 1:
+            return ResolvedState(None, None, "ambiguous_states", tuple(explicit))
+
+        mentions = _distinct_states_in(name, explicit_only=False)
+        if len(mentions) == 1:
+            return ResolvedState(mentions[0], "state_mention")
+        if len(mentions) > 1:
+            return ResolvedState(None, None, "ambiguous_states", tuple(mentions))
+
+        landmarks = _landmark_states_in(name)
+        if len(landmarks) == 1:
+            return ResolvedState(landmarks[0], "landmark")
+        if len(landmarks) > 1:
+            return ResolvedState(None, None, "ambiguous_states", tuple(landmarks))
+
+        sheet_mentions = _distinct_states_in(sheet_name or "", explicit_only=False)
+        if len(sheet_mentions) == 1:
+            return ResolvedState(sheet_mentions[0], "sheet_text")
+
+        if client_default_state:
+            return ResolvedState(client_default_state, "client_default")
+
+        return ResolvedState(None, None, "no_state_found")
+    except Exception:  # defensive backstop — contract says never raise
+        return ResolvedState(None, None, "no_state_found")
+
+
+def extract_client_default_state(client_name: Any) -> str | None:
+    """State implied by a client's own name ("Plateau State Govt." → Plateau).
+
+    Used to seed clients.default_state_id. Returns None unless exactly one
+    state is mentioned — never guesses.
+    """
+    try:
+        if not client_name:
+            return None
+        states = _distinct_states_in(str(client_name), explicit_only=False)
+        return states[0] if len(states) == 1 else None
+    except Exception:
+        return None
