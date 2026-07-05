@@ -109,7 +109,8 @@ def test_login_invalid():
     print(f"        Target: <800ms | Actual: {elapsed:.0f}ms")
 
 
-def test_login_valid(email, password):
+@pytest.mark.skip(reason="manual-only: needs real credentials — run `python tests/test_auth.py <email> <password>`")
+def test_login_valid(email="", password=""):
     """Test login with valid credentials."""
     print("\n" + "=" * 60)
     print("TEST 3: Valid Login")
