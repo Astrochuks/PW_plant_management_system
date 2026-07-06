@@ -237,3 +237,19 @@ export function useBulkDismissReviewItems() {
     },
   });
 }
+
+// ============================================================================
+// Register Benchmarks (T1.13)
+// ============================================================================
+
+import { getProjectBenchmarks, type TypeBenchmark } from '@/lib/api/projects';
+
+export type { TypeBenchmark };
+
+export function useProjectBenchmarks() {
+  return useQuery({
+    queryKey: [...projectsKeys.all, 'benchmarks'] as const,
+    queryFn: getProjectBenchmarks,
+    staleTime: 10 * 60 * 1000,
+  });
+}

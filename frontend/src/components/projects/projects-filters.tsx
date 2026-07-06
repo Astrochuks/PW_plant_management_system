@@ -9,7 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import type { ProjectStatus } from '@/lib/api/projects'
+import type { ProjectStatus, ProjectType, WorkNature } from '@/lib/api/projects'
 
 interface ProjectsFiltersProps {
   search: string
@@ -20,9 +20,33 @@ interface ProjectsFiltersProps {
   onStatusChange: (value: string) => void
   stateId: string
   onStateIdChange: (value: string) => void
+  projectType: string
+  onProjectTypeChange: (value: string) => void
+  workNature: string
+  onWorkNatureChange: (value: string) => void
   clients: string[]
   states: Array<{ id: string; name: string }>
 }
+
+const TYPE_OPTIONS: Array<{ value: ProjectType; label: string }> = [
+  { value: 'road', label: 'Road' },
+  { value: 'bridge', label: 'Bridge' },
+  { value: 'drainage', label: 'Drainage' },
+  { value: 'building', label: 'Building' },
+  { value: 'airport', label: 'Airport' },
+  { value: 'water', label: 'Water' },
+  { value: 'infrastructure', label: 'Infrastructure' },
+  { value: 'other', label: 'Other' },
+]
+
+const NATURE_OPTIONS: Array<{ value: WorkNature; label: string }> = [
+  { value: 'construction', label: 'Construction' },
+  { value: 'dualization', label: 'Dualization' },
+  { value: 'rehabilitation', label: 'Rehabilitation' },
+  { value: 'maintenance', label: 'Maintenance' },
+  { value: 'emergency_repair', label: 'Emergency Repair' },
+  { value: 'completion', label: 'Completion' },
+]
 
 const STATUS_OPTIONS: Array<{ value: ProjectStatus | ''; label: string }> = [
   { value: '', label: 'All Statuses' },
@@ -43,6 +67,10 @@ export function ProjectsFilters({
   onStatusChange,
   stateId,
   onStateIdChange,
+  projectType,
+  onProjectTypeChange,
+  workNature,
+  onWorkNatureChange,
   clients,
   states,
 }: ProjectsFiltersProps) {
@@ -81,6 +109,32 @@ export function ProjectsFilters({
           <SelectItem value="all">All States</SelectItem>
           {states.map((s) => (
             <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+
+      {/* Type filter */}
+      <Select value={projectType} onValueChange={onProjectTypeChange}>
+        <SelectTrigger className="w-full sm:w-[150px]">
+          <SelectValue placeholder="All Types" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">All Types</SelectItem>
+          {TYPE_OPTIONS.map((opt) => (
+            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+
+      {/* Work nature filter */}
+      <Select value={workNature} onValueChange={onWorkNatureChange}>
+        <SelectTrigger className="w-full sm:w-[170px]">
+          <SelectValue placeholder="All Work Types" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">All Work Types</SelectItem>
+          {NATURE_OPTIONS.map((opt) => (
+            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
           ))}
         </SelectContent>
       </Select>

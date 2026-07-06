@@ -58,6 +58,10 @@ export interface Project {
   revenue_to_date: number | null;
 
   status: ProjectStatus;
+  project_type: ProjectType | null;
+  work_nature: WorkNature | null;
+  register_source: RegisterSource | null;
+  completeness: number | null;
   is_legacy: boolean;
   notes: string | null;
   source_sheet: string | null;
@@ -71,6 +75,14 @@ export interface Project {
   updated_at: string;
 }
 
+export type ProjectType =
+  | 'road' | 'bridge' | 'drainage' | 'building'
+  | 'airport' | 'water' | 'infrastructure' | 'other';
+export type WorkNature =
+  | 'construction' | 'dualization' | 'rehabilitation'
+  | 'maintenance' | 'emergency_repair' | 'completion';
+export type RegisterSource = 'award_letters_workbook' | 'manual' | 'weekly_report_inferred';
+
 export interface ProjectsListParams {
   page?: number;
   limit?: number;
@@ -79,6 +91,9 @@ export interface ProjectsListParams {
   state_id?: string;
   status?: ProjectStatus;
   is_legacy?: boolean;
+  project_type?: ProjectType;
+  work_nature?: WorkNature;
+  register_source?: RegisterSource;
   sort_by?: string;
   sort_order?: 'asc' | 'desc';
 }
@@ -172,6 +187,9 @@ export async function getProjects(params: ProjectsListParams = {}): Promise<{
   if (params.state_id) queryParams.state_id = params.state_id;
   if (params.status) queryParams.status = params.status;
   if (params.is_legacy !== undefined) queryParams.is_legacy = String(params.is_legacy);
+  if (params.project_type) queryParams.project_type = params.project_type;
+  if (params.work_nature) queryParams.work_nature = params.work_nature;
+  if (params.register_source) queryParams.register_source = params.register_source;
   if (params.sort_by) queryParams.sort_by = params.sort_by;
   if (params.sort_order) queryParams.sort_order = params.sort_order;
 
@@ -351,4 +369,40 @@ export async function bulkDismissReviewItems(
     ...(field ? { field } : {}),
   });
   return { dismissed: Number(response.data.data.dismissed ?? 0) };
+}
+
+
+// ============================================================================
+// Register Benchmarks (T1.13)
+// ============================================================================
+
+export interface TypeBenchmark {
+  project_type: ProjectType;
+  n_projects: number;
+  n_valued: number;
+  total_value: number | null;
+  value_p25: number | null;
+  value_median: number | null;
+  value_p75: number | null;
+  n_delivered: number | null;
+  delivery_p25_months: number | null;
+  delivery_median_months: number | null;
+  delivery_p75_months: number | null;
+}
+
+export async function getProjectBenchmarks(): Promise<TypeBenchmark[]> {
+  const response = await apiClient.get('/projects/benchmarks');
+  return (response.data.data ?? []).map((b: TypeBenchmark) => ({
+    ...b,
+    n_projects: Number(b.n_projects ?? 0),
+    n_valued: Number(b.n_valued ?? 0),
+    total_value: b.total_value == null ? null : Number(b.total_value),
+    value_median: b.value_median == null ? null : Number(b.value_median),
+    value_p25: b.value_p25 == null ? null : Number(b.value_p25),
+    value_p75: b.value_p75 == null ? null : Number(b.value_p75),
+    n_delivered: b.n_delivered == null ? null : Number(b.n_delivered),
+    delivery_median_months: b.delivery_median_months == null ? null : Number(b.delivery_median_months),
+    delivery_p25_months: b.delivery_p25_months == null ? null : Number(b.delivery_p25_months),
+    delivery_p75_months: b.delivery_p75_months == null ? null : Number(b.delivery_p75_months),
+  }));
 }

@@ -157,6 +157,18 @@ async def bulk_dismiss_review_items(
     return {"success": True, "data": {"dismissed": count}}
 
 
+@router.get("/benchmarks")
+async def get_project_benchmarks(
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> dict[str, Any]:
+    """Register benchmarks: per-type contract-value quartiles + actual
+    award→completion delivery times (from v_project_benchmarks_by_type)."""
+    rows = await fetch(
+        "SELECT * FROM v_project_benchmarks_by_type ORDER BY n_projects DESC"
+    )
+    return {"success": True, "data": rows}
+
+
 @router.get("/stats")
 async def get_project_stats(
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
@@ -347,6 +359,17 @@ async def list_projects(
         None, pattern=r"^(active|completed|on_hold|cancelled|retention_period|legacy)$"
     ),
     is_legacy: bool | None = Query(None, description="Filter by legacy status"),
+    project_type: str | None = Query(
+        None,
+        pattern=r"^(road|bridge|drainage|building|airport|water|infrastructure|other)$",
+    ),
+    work_nature: str | None = Query(
+        None,
+        pattern=r"^(construction|dualization|rehabilitation|maintenance|emergency_repair|completion)$",
+    ),
+    register_source: str | None = Query(
+        None, pattern=r"^(award_letters_workbook|manual|weekly_report_inferred)$"
+    ),
     sort_by: str = Query("created_at"),
     sort_order: str = Query("desc", pattern=r"^(asc|desc)$"),
 ) -> dict[str, Any]:
@@ -376,6 +399,15 @@ async def list_projects(
     if is_legacy is not None:
         params.append(is_legacy)
         conds.append(f"v.is_legacy = ${len(params)}::boolean")
+    if project_type:
+        params.append(project_type)
+        conds.append(f"v.project_type = ${len(params)}")
+    if work_nature:
+        params.append(work_nature)
+        conds.append(f"v.work_nature = ${len(params)}")
+    if register_source:
+        params.append(register_source)
+        conds.append(f"v.register_source = ${len(params)}")
 
     where = " AND ".join(conds) if conds else "TRUE"
     safe_sort = sort_by if sort_by in _ALLOWED_SORT_COLUMNS else "created_at"

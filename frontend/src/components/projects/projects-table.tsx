@@ -44,6 +44,8 @@ export type ColumnKey =
   | 'retention_paid'
   | 'amount_paid'
   | 'source_sheet'
+  | 'project_type'
+  | 'completeness'
 
 interface ColumnDef {
   key: ColumnKey
@@ -134,6 +136,54 @@ const COLUMN_DEFS: ColumnDef[] = [
       return <Badge variant={style.variant} className={style.className}>{style.label}</Badge>
     },
     skeleton: 'w-16',
+  },
+  {
+    key: 'project_type',
+    header: 'Type',
+    width: 'w-[130px]',
+    render: (p) => (
+      <div className="flex flex-col gap-0.5">
+        {p.project_type ? (
+          <Badge variant="outline" className="w-fit text-[10px] capitalize">
+            {p.project_type}
+          </Badge>
+        ) : (
+          <span className="text-muted-foreground text-xs">-</span>
+        )}
+        {p.work_nature && (
+          <span className="text-muted-foreground text-[10px] capitalize">
+            {p.work_nature.replace('_', ' ')}
+          </span>
+        )}
+      </div>
+    ),
+    skeleton: 'w-16',
+  },
+  {
+    key: 'completeness',
+    header: 'Data',
+    width: 'w-[80px]',
+    align: 'center',
+    render: (p) => {
+      const c = p.completeness == null ? null : Number(p.completeness)
+      if (c == null) return <span className="text-muted-foreground text-xs">-</span>
+      const pct = Math.round(c * 100)
+      const color = pct >= 100 ? 'bg-emerald-500' : pct >= 67 ? 'bg-amber-500' : 'bg-red-500'
+      const source = p.register_source === 'weekly_report_inferred' ? ' · auto-created' : ''
+      return (
+        <span
+          className="inline-flex items-center gap-1.5 text-xs"
+          title={`${pct}% of core register fields filled${source}`}
+        >
+          <span className={`h-2 w-2 rounded-full ${color}`} />
+          {pct}%
+          {p.register_source === 'weekly_report_inferred' && (
+            <Badge variant="outline" className="ml-1 text-[9px]">auto</Badge>
+          )}
+        </span>
+      )
+    },
+    skeleton: 'w-10',
   },
   {
     key: 'contract_sum',
@@ -248,6 +298,8 @@ export const ALL_COLUMNS: { key: ColumnKey; label: string }[] = [
   { key: 'state', label: 'State' },
   { key: 'site', label: 'Site' },
   { key: 'status', label: 'Status' },
+  { key: 'project_type', label: 'Type' },
+  { key: 'completeness', label: 'Data Completeness' },
   { key: 'contract_sum', label: 'Contract Sum' },
   { key: 'award_date', label: 'Award Date' },
   { key: 'award_letter', label: 'Award Letter' },
@@ -268,6 +320,8 @@ export const DEFAULT_VISIBLE_COLUMNS: ColumnKey[] = [
   'client',
   'state',
   'status',
+  'project_type',
+  'completeness',
   'contract_sum',
   'award_date',
 ]

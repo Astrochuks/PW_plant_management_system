@@ -15,6 +15,7 @@ import { useStates } from '@/hooks/use-locations'
 import { useDebounce } from '@/hooks/use-debounce'
 import { useUrlFilters } from '@/hooks/use-url-filters'
 import { ProjectsStatsCards } from '@/components/projects/projects-stats-cards'
+import { RegisterBenchmarks } from '@/components/projects/register-benchmarks'
 import { ProjectsFilters } from '@/components/projects/projects-filters'
 import { ProjectsTable, DEFAULT_VISIBLE_COLUMNS } from '@/components/projects/projects-table'
 import type { ColumnKey } from '@/components/projects/projects-table'
@@ -28,6 +29,8 @@ const FILTER_DEFAULTS = {
   client: 'all',
   status: 'all',
   stateId: 'all',
+  projectType: 'all',
+  workNature: 'all',
   page: '1',
   viewMode: 'legacy',
 }
@@ -43,6 +46,8 @@ function ProjectsPageInner() {
   const client = filters.client
   const status = filters.status
   const stateId = filters.stateId
+  const projectType = filters.projectType
+  const workNature = filters.workNature
   const page = Number(filters.page) || 1
   const viewMode = (filters.viewMode || 'legacy') as ViewMode
 
@@ -63,6 +68,8 @@ function ProjectsPageInner() {
     client: client !== 'all' ? client : undefined,
     status: status !== 'all' ? (status as any) : undefined,
     state_id: stateId !== 'all' ? stateId : undefined,
+    project_type: projectType !== 'all' ? (projectType as any) : undefined,
+    work_nature: workNature !== 'all' ? (workNature as any) : undefined,
     is_legacy: isLegacyParam,
   })
 
@@ -77,6 +84,8 @@ function ProjectsPageInner() {
   const handleClientChange = (v: string) => setFilters({ client: v, page: '1' })
   const handleStatusChange = (v: string) => setFilters({ status: v, page: '1' })
   const handleStateIdChange = (v: string) => setFilters({ stateId: v, page: '1' })
+  const handleProjectTypeChange = (v: string) => setFilters({ projectType: v, page: '1' })
+  const handleWorkNatureChange = (v: string) => setFilters({ workNature: v, page: '1' })
   const handleViewModeChange = (mode: ViewMode) => setFilters({ viewMode: mode, page: '1' })
   const handleVisibleColumnsChange = useCallback((columns: ColumnKey[]) => {
     setVisibleColumns(columns)
@@ -126,6 +135,8 @@ function ProjectsPageInner() {
       {/* Stats */}
       <ProjectsStatsCards stats={statsData} isLoading={statsLoading} viewMode={viewMode} />
 
+      <RegisterBenchmarks />
+
       {/* Active / Legacy / All Toggle */}
       <div className="flex items-center gap-1 rounded-lg bg-muted p-1 w-fit">
         {([
@@ -160,6 +171,10 @@ function ProjectsPageInner() {
         onStatusChange={handleStatusChange}
         stateId={stateId}
         onStateIdChange={handleStateIdChange}
+        projectType={projectType}
+        onProjectTypeChange={handleProjectTypeChange}
+        workNature={workNature}
+        onWorkNatureChange={handleWorkNatureChange}
         clients={clients}
         states={states}
       />
