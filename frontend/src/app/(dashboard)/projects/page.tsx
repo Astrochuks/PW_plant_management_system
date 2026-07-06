@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback } from 'react'
 import Link from 'next/link'
-import { FolderKanban, Plus } from 'lucide-react'
+import { FolderKanban, Plus, ClipboardList } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/providers/auth-provider'
 import {
@@ -106,6 +106,12 @@ function ProjectsPageInner() {
 
         {isAdmin && (
           <div className="flex gap-2">
+            <Button asChild size="sm" variant="outline">
+              <Link href="/projects/review-queue">
+                <ClipboardList className="h-4 w-4 mr-2" />
+                Review Queue
+              </Link>
+            </Button>
             <ImportAwardLettersDialog />
             <Button asChild size="sm">
               <Link href="/projects/create">

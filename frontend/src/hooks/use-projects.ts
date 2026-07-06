@@ -173,3 +173,67 @@ export function usePrefetchProjectDetail() {
     [queryClient]
   );
 }
+
+// ============================================================================
+// Register Review Queue (admin)
+// ============================================================================
+
+import {
+  getReviewQueue,
+  getReviewQueueSummary,
+  resolveReviewItem,
+  bulkDismissReviewItems,
+  type ReviewQueueParams,
+  type ReviewQueueItem,
+  type ReviewQueuePage,
+  type ReviewQueueSummary,
+} from '@/lib/api/projects';
+
+export type { ReviewQueueParams, ReviewQueueItem, ReviewQueuePage, ReviewQueueSummary };
+
+export const reviewQueueKeys = {
+  all: ['projects', 'review-queue'] as const,
+  list: (params: ReviewQueueParams) => [...reviewQueueKeys.all, 'list', params] as const,
+  summary: () => [...reviewQueueKeys.all, 'summary'] as const,
+};
+
+export function useReviewQueue(params: ReviewQueueParams = {}) {
+  return useQuery({
+    queryKey: reviewQueueKeys.list(params),
+    queryFn: () => getReviewQueue(params),
+    staleTime: 2 * 60 * 1000,
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useReviewQueueSummary() {
+  return useQuery({
+    queryKey: reviewQueueKeys.summary(),
+    queryFn: getReviewQueueSummary,
+    staleTime: 2 * 60 * 1000,
+  });
+}
+
+export function useResolveReviewItem() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, value }: { id: string; value: string | null }) =>
+      resolveReviewItem(id, value),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: reviewQueueKeys.all });
+      // Applied values change project rows too
+      queryClient.invalidateQueries({ queryKey: projectsKeys.all });
+    },
+  });
+}
+
+export function useBulkDismissReviewItems() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ reason, field }: { reason: string; field?: string }) =>
+      bulkDismissReviewItems(reason, field),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: reviewQueueKeys.all });
+    },
+  });
+}

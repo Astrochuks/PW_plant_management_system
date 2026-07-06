@@ -260,3 +260,95 @@ export async function getLinkableProjects(): Promise<LinkableProject[]> {
   const response = await apiClient.get('/projects/linkable');
   return response.data.data;
 }
+
+// ============================================================================
+// Register Review Queue (T1.10/T1.11 — admin)
+// ============================================================================
+
+export interface ReviewQueueItem {
+  id: string;
+  import_batch_id: string | null;
+  sheet_name: string | null;
+  row_number: number | null;
+  project_id: string | null;
+  project_name: string | null;
+  field: string;
+  raw_value: string | null;
+  reason: string;
+  suggested_value: string | null;
+  resolved: boolean;
+  resolved_by: string | null;
+  resolved_at: string | null;
+  resolution_value: string | null;
+  created_at: string;
+}
+
+export interface ReviewQueuePage {
+  items: ReviewQueueItem[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface ReviewQueueSummary {
+  open_total: number;
+  by_reason: { reason: string; n: number }[];
+  by_field: { field: string; n: number }[];
+}
+
+export interface ReviewQueueParams {
+  sheet?: string;
+  reason?: string;
+  field?: string;
+  resolved?: boolean | null;
+  page?: number;
+  page_size?: number;
+}
+
+export async function getReviewQueue(params: ReviewQueueParams = {}): Promise<ReviewQueuePage> {
+  const response = await apiClient.get('/projects/review-queue', { params });
+  const data = response.data.data;
+  return {
+    ...data,
+    total: Number(data.total ?? 0),
+    items: (data.items ?? []).map((i: ReviewQueueItem) => ({
+      ...i,
+      row_number: i.row_number == null ? null : Number(i.row_number),
+    })),
+  };
+}
+
+export async function getReviewQueueSummary(): Promise<ReviewQueueSummary> {
+  const response = await apiClient.get('/projects/review-queue/summary');
+  const data = response.data.data;
+  return {
+    open_total: Number(data.open_total ?? 0),
+    by_reason: (data.by_reason ?? []).map((r: { reason: string; n: number }) => ({
+      reason: r.reason,
+      n: Number(r.n ?? 0),
+    })),
+    by_field: (data.by_field ?? []).map((f: { field: string; n: number }) => ({
+      field: f.field,
+      n: Number(f.n ?? 0),
+    })),
+  };
+}
+
+export async function resolveReviewItem(
+  id: string,
+  value: string | null,
+): Promise<{ id: string; applied: Record<string, string>; dismissed: boolean }> {
+  const response = await apiClient.post(`/projects/review-queue/${id}/resolve`, { value });
+  return response.data.data;
+}
+
+export async function bulkDismissReviewItems(
+  reason: string,
+  field?: string,
+): Promise<{ dismissed: number }> {
+  const response = await apiClient.post('/projects/review-queue/bulk-dismiss', {
+    reason,
+    ...(field ? { field } : {}),
+  });
+  return { dismissed: Number(response.data.data.dismissed ?? 0) };
+}
