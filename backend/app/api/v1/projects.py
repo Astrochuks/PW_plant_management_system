@@ -56,6 +56,107 @@ _UUID_FIELDS = {"state_id", "client_id", "location_id", "created_by", "updated_b
 # ============================================================================
 
 
+@router.get("/review-queue")
+async def get_review_queue(
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+    sheet: str | None = None,
+    reason: str | None = None,
+    field: str | None = None,
+    resolved: bool | None = False,
+    page: int = 1,
+    page_size: int = 50,
+) -> dict[str, Any]:
+    """Paginated register review queue (admin). resolved=None → all."""
+    from app.services import register_review_service as review
+
+    page = max(1, page)
+    page_size = min(max(1, page_size), 200)
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        data = await review.list_review_queue(
+            conn, sheet=sheet, reason=reason, field=field,
+            resolved=resolved, page=page, page_size=page_size,
+        )
+    return {"success": True, "data": data}
+
+
+@router.get("/review-queue/summary")
+async def get_review_queue_summary(
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+) -> dict[str, Any]:
+    from app.services import register_review_service as review
+
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        data = await review.summarize_review_queue(conn)
+    return {"success": True, "data": data}
+
+
+@router.post("/review-queue/{item_id}/resolve")
+async def resolve_review_queue_item(
+    item_id: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+    body: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Resolve one item. Body {"value": "..."} applies to the project;
+    {"value": null} or empty dismisses."""
+    from app.services import register_review_service as review
+
+    value = (body or {}).get("value")
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        result = await review.resolve_review_item(conn, item_id, current_user.id, value)
+
+    background_tasks.add_task(
+        audit_service.log,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        action="update",
+        table_name="project_register_review_queue",
+        record_id=item_id,
+        new_values=result,
+        ip_address=get_client_ip(request),
+        description=f"Resolved review item ({'dismissed' if result['dismissed'] else 'applied'})",
+    )
+    return {"success": True, "data": result}
+
+
+@router.post("/review-queue/bulk-dismiss")
+async def bulk_dismiss_review_items(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+    body: dict[str, Any] = None,
+) -> dict[str, Any]:
+    """Dismiss all unresolved items with a given reason (+optional field)."""
+    from app.services import register_review_service as review
+
+    body = body or {}
+    reason = body.get("reason")
+    if not reason:
+        raise ValidationError("'reason' is required")
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        count = await review.bulk_dismiss(
+            conn, current_user.id, reason=reason, field=body.get("field")
+        )
+
+    background_tasks.add_task(
+        audit_service.log,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        action="update",
+        table_name="project_register_review_queue",
+        record_id=reason,
+        new_values={"dismissed": count, "reason": reason, "field": body.get("field")},
+        ip_address=get_client_ip(request),
+        description=f"Bulk-dismissed {count} review items (reason={reason})",
+    )
+    return {"success": True, "data": {"dismissed": count}}
+
+
 @router.get("/stats")
 async def get_project_stats(
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
