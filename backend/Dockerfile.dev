@@ -20,4 +20,8 @@ ENV PYTHONUNBUFFERED=1 \
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# --reload-dir app: don't reload on test/fixture edits
+# --timeout-graceful-shutdown 5: SSE clients hold connections open forever;
+# without this a reload hangs at "Waiting for connections to close"
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", \
+     "--reload", "--reload-dir", "app", "--timeout-graceful-shutdown", "5"]
