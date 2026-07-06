@@ -47,6 +47,7 @@ def _normalized_run() -> dict:
         "projects": projects,
         "errors": result["errors"],
         "warnings": result["warnings"],
+        "review_items": result["review_items"],
         "sheets_processed": result["sheets_processed"],
         "total_rows": result["total_rows"],
     }
@@ -83,6 +84,10 @@ def test_matches_golden_baseline():
     )
     assert len(current["errors"]) == len(baseline["errors"])
     assert len(current["warnings"]) == len(baseline["warnings"])
+    assert len(current["review_items"]) == len(baseline["review_items"]), (
+        f"review items changed: {len(baseline['review_items'])} → "
+        f"{len(current['review_items'])}"
+    )
     assert current == baseline
 
 

@@ -18,11 +18,9 @@ import asyncpg
 from dotenv import dotenv_values
 
 
-def normalize_client_name(name: str) -> str:
-    """Canonical form for matching: uppercase, collapsed whitespace,
-    punctuation stripped. 'Plateau State Govt.' == 'PLATEAU STATE GOVT'"""
-    s = re.sub(r"[^\w\s]", " ", name.upper())
-    return re.sub(r"\s+", " ", s).strip()
+# Single canonical normalizer lives in register_parsing (imported so the
+# parser, import service and this script can never diverge).
+from app.services.register_parsing import normalize_client_name  # noqa: E402,F401
 
 
 def _database_url() -> str:

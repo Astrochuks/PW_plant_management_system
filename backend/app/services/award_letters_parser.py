@@ -1,16 +1,16 @@
-"""Award Letters Excel parser.
+"""Award Letters Excel parser (v2 — PRD v2 §8.1, task T1.8).
 
 Parses the Award Letters workbook (17 sheets, each named after a client/state).
-Each sheet has 15 columns with identical structure. Handles free-text dates,
-narrative contract sums, and varied status values.
+Each sheet has 15 columns with identical structure.
 
-State assignment logic:
-- Sheets named after Nigerian states → state = sheet name
-- FERMA → extract state from project name text
-- PRIVATE CLIENTS → hardcoded by row index
-- FCDA ABUJA → all FCT (Abuja)
-- FAAN → hardcoded by row index
-- FMW → hardcoded by row index
+v2 changes:
+- All cell parsing delegated to the pure functions in register_parsing
+  (contract sums, dates, state resolution, type/nature classification).
+- NOTHING is dropped silently: every ambiguous/unparseable cell emits a
+  review item (→ project_register_review_queue) with the raw value.
+- State resolution is text/landmark-based; row-index hardcoding removed
+  (the old maps had already drifted — e.g. an MMIA Lagos runway mapped
+  to Enugu).
 """
 
 import io
@@ -22,63 +22,18 @@ from uuid import uuid4
 import pandas as pd
 
 from app.monitoring.logging import get_logger
+from app.services.register_parsing import (
+    classify_project,
+    normalize_client_name,
+    parse_register_contract_sum,
+    parse_register_date,
+    resolve_state,
+)
 
 logger = get_logger(__name__)
 
 # Max length for project_name in the DB
 _MAX_PROJECT_NAME_LEN = 500
-
-# ── All 36 Nigerian states + FCT ──────────────────────────────────────────
-NIGERIAN_STATES: set[str] = {
-    "abia", "adamawa", "akwa ibom", "anambra", "bauchi", "bayelsa",
-    "benue", "borno", "cross river", "delta", "ebonyi", "edo",
-    "ekiti", "enugu", "gombe", "imo", "jigawa", "kaduna", "kano",
-    "katsina", "kebbi", "kogi", "kwara", "lagos", "nasarawa",
-    "niger", "ogun", "ondo", "osun", "oyo", "plateau", "rivers",
-    "sokoto", "taraba", "yobe", "zamfara", "fct",
-}
-
-# Normalised name → title-cased canonical name
-_STATE_CANONICAL: dict[str, str] = {
-    "abia": "Abia", "adamawa": "Adamawa", "akwa ibom": "Akwa Ibom",
-    "anambra": "Anambra", "bauchi": "Bauchi", "bayelsa": "Bayelsa",
-    "benue": "Benue", "borno": "Borno", "cross river": "Cross River",
-    "delta": "Delta", "ebonyi": "Ebonyi", "edo": "Edo", "ekiti": "Ekiti",
-    "enugu": "Enugu", "gombe": "Gombe", "imo": "Imo", "jigawa": "Jigawa",
-    "kaduna": "Kaduna", "kano": "Kano", "katsina": "Katsina",
-    "kebbi": "Kebbi", "kogi": "Kogi", "kwara": "Kwara", "lagos": "Lagos",
-    "nasarawa": "Nasarawa", "niger": "Niger", "ogun": "Ogun", "ondo": "Ondo",
-    "osun": "Osun", "oyo": "Oyo", "plateau": "Plateau", "rivers": "Rivers",
-    "sokoto": "Sokoto", "taraba": "Taraba", "yobe": "Yobe",
-    "zamfara": "Zamfara", "fct": "FCT",
-}
-
-# ── Hardcoded state mappings for non-state sheets ─────────────────────────
-# Row indices are 1-based (S/No in the sheet)
-
-_PRIVATE_CLIENTS_STATES: dict[int, str] = {
-    1: "Lagos", 2: "Lagos", 3: "Lagos", 4: "Lagos",
-    5: "Lagos", 6: "Lagos", 7: "Lagos", 8: "Lagos",
-    9: "FCT", 10: "FCT",
-    11: "Lagos", 12: "Lagos", 13: "Lagos", 14: "Lagos", 15: "Lagos",
-    16: "Ogun",
-    17: "Lagos", 18: "Lagos",
-    19: "FCT",
-}
-
-_FAAN_STATES: dict[int, str] = {
-    1: "Enugu", 2: "Enugu",
-    3: "Kaduna", 4: "Kaduna",
-    5: "Lagos",
-    6: "Edo",
-}
-
-_FMW_STATES: dict[int, str] = {
-    1: "Oyo", 2: "Plateau", 3: "Plateau", 4: "Plateau",
-    5: "Plateau", 6: "Benue", 7: "Taraba",
-    8: "Lagos", 9: "Cross River", 10: "Enugu",
-}
-
 
 # ── Column name → DB field mapping (case-insensitive) ─────────────────────
 _COLUMN_MAP: dict[str, str] = {
@@ -109,240 +64,6 @@ _CERT_DATE_TARGETS: dict[str, str] = {
     "final_completion_cert": "final_completion_date_raw",
     "maintenance_cert": "maintenance_cert_date_raw",
 }
-
-
-_NOISE_DATE_VALUES: frozenset[str] = frozenset({
-    "nil", "n/a", "na", "-", "none", "nill", "", "no", "yes",
-    "ongoing", "n.a", "tbc", "tbd",
-})
-
-# Months for regex extraction from narrative text
-_MONTH_PAT = (
-    r"(?:January|February|March|April|May|June|July|August|"
-    r"September|October|November|December|"
-    r"Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
-)
-
-# Common typos in the data
-_MONTH_TYPOS: dict[str, str] = {
-    "februar": "February",
-    "novemebr": "November",
-    "novemeber": "November",
-    "septmber": "September",
-    "sepetember": "September",
-    "ocotber": "October",
-    "agust": "August",
-    "feburary": "February",
-    "januray": "January",
-}
-
-
-def parse_free_text_date(text: str | None) -> date | None:
-    """Parse free-text dates like '30th March, 2006', 'Jan 2020', '2018'.
-
-    Also extracts dates embedded in narrative text such as:
-    - 'Applied for 17th November, 2014'
-    - 'Application submitted: 15th November, 2014'
-    - 'Applied 13th November, 2014 (14,761,734.91)'
-    - 'JAN,8TH, 2018'
-    """
-    if not text or not isinstance(text, str):
-        return None
-    text = text.strip()
-    if not text or text.lower() in _NOISE_DATE_VALUES:
-        return None
-
-    # If it's already a datetime-like object from pandas
-    if isinstance(text, (datetime, date)):
-        return text if isinstance(text, date) else text.date()
-
-    # Fix known month typos (e.g. "Februar" → "February")
-    cleaned = text
-    for typo, fix in _MONTH_TYPOS.items():
-        cleaned = re.sub(rf"\b{typo}\b", fix, cleaned, flags=re.IGNORECASE)
-
-    # Remove ordinal suffixes: 1st, 2nd, 3rd, 4th (including typos like "4ht")
-    cleaned = re.sub(r"(\d+)(st|nd|rd|th|ht)\b", r"\1", cleaned, flags=re.IGNORECASE)
-    # Handle "JAN,8TH, 2018" → "JAN 8, 2018" (month,day format)
-    cleaned = re.sub(r"([A-Za-z]{3,}),\s*(\d{1,2})\b", r"\1 \2", cleaned)
-    cleaned = re.sub(r"\s+", " ", cleaned).strip().rstrip(",").strip()
-    # Handle period instead of comma (e.g. "13th December. 2012")
-    cleaned = re.sub(r"\.(\s*\d{4})", r",\1", cleaned)
-
-    # If multiple dates separated by &, just take the first one
-    if "&" in cleaned:
-        cleaned = cleaned.split("&")[0].strip().rstrip(",").strip()
-    # Also handle comma-separated multiple dates
-    if "," in cleaned:
-        parts = cleaned.split(",")
-        if len(parts) >= 3:
-            # Could be "15th February, 2001, 16th November, 2006..."
-            # Just take the first date: first two parts
-            candidate = f"{parts[0].strip()}, {parts[1].strip()}"
-            try_date = _try_parse_formats(candidate)
-            if try_date:
-                return try_date
-
-    result = _try_parse_formats(cleaned)
-    if result:
-        return result
-
-    # Fallback: extract a date substring from narrative text.
-    # Handles "Applied for 17 November, 2014", etc.
-    m = re.search(rf"\b(\d{{1,2}})\s+({_MONTH_PAT}),?\s+(\d{{4}})\b", cleaned, re.IGNORECASE)
-    if m:
-        sub = f"{m.group(1)} {m.group(2)}, {m.group(3)}"
-        for fmt in ("%d %B, %Y", "%d %b, %Y"):
-            try:
-                return datetime.strptime(sub, fmt).date()
-            except ValueError:
-                continue
-
-    # Month + year only embedded in text: "Feb, 2002", "March, 2009"
-    m2 = re.search(rf"\b({_MONTH_PAT}),?\s+(\d{{4}})\b", cleaned, re.IGNORECASE)
-    if m2:
-        sub = f"{m2.group(1)} {m2.group(2)}"
-        for fmt in ("%B %Y", "%b %Y"):
-            try:
-                return datetime.strptime(sub, fmt).date()
-            except ValueError:
-                continue
-
-    logger.debug("Could not parse date", raw_text=text)
-    return None
-
-
-def _try_parse_formats(cleaned: str) -> date | None:
-    """Try common date formats on a cleaned string."""
-    formats = [
-        "%d %B, %Y", "%d %B %Y", "%B %d, %Y", "%B %d %Y",
-        "%d %b, %Y", "%d %b %Y", "%b %d, %Y", "%b %d %Y",
-        "%d/%m/%Y", "%m/%d/%Y", "%Y-%m-%d", "%d-%m-%Y",
-        "%d-%B-%Y", "%d-%b-%Y",
-        "%B, %Y", "%B %Y", "%b, %Y", "%b %Y",
-        "%Y",
-    ]
-    for fmt in formats:
-        try:
-            return datetime.strptime(cleaned, fmt).date()
-        except ValueError:
-            continue
-    return None
-
-
-def parse_contract_sum(raw: Any) -> dict[str, Any]:
-    """Parse contract sum — may be numeric, or narrative text.
-
-    Handles patterns:
-    - Plain number: 18461415
-    - "Original: X, Variation: Y, TOTAL: Z"
-    - "Revised from X to Y" / "X then to Y" → use the final (revised) value
-    - "Euro 108,313.00" → store numeric
-    - "100,042,061.74 NGN & 126,098.12 USD" → use NGN value
-    """
-    result: dict[str, Any] = {
-        "original_contract_sum": None,
-        "variation_sum": None,
-        "contract_sum_raw": None,
-    }
-
-    if raw is None or (isinstance(raw, float) and pd.isna(raw)):
-        return result
-
-    # If pandas already decoded as a number
-    if isinstance(raw, (int, float)):
-        result["original_contract_sum"] = float(raw)
-        result["contract_sum_raw"] = str(raw)
-        return result
-
-    text = str(raw).strip()
-    if not text:
-        return result
-    if _is_noise_value(text):
-        return result
-    result["contract_sum_raw"] = text
-
-    text_lower = text.lower()
-
-    # Pattern: "Original: X, Variation: Y. TOTAL: Z"
-    if "total" in text_lower and ("variation" in text_lower or "original" in text_lower):
-        numbers = _extract_numbers(text)
-        if len(numbers) >= 3:
-            result["original_contract_sum"] = numbers[0]
-            result["variation_sum"] = numbers[1]
-            # Use the TOTAL as current_contract_sum (computed later if not set)
-            return result
-        elif len(numbers) == 2:
-            result["original_contract_sum"] = numbers[0]
-            result["variation_sum"] = numbers[1]
-            return result
-
-    # Pattern: "Revised from X to Y" / "Revised to Y from X" / "X then to Y"
-    if "revised" in text_lower or "then to" in text_lower:
-        numbers = _extract_numbers(text)
-        if len(numbers) >= 2:
-            # "Revised to Y from X" → Y comes first, use it
-            # "Revised from X to Y" → Y comes last, use it
-            # "X then to Y" → Y comes last, use it
-            # In all patterns the value after "to" is the revised one.
-            m_to = re.search(r"\bto\s+([\d,]+\.?\d*)", text, re.IGNORECASE)
-            if m_to:
-                try:
-                    result["original_contract_sum"] = float(m_to.group(1).replace(",", ""))
-                    return result
-                except ValueError:
-                    pass
-            result["original_contract_sum"] = numbers[-1]
-            return result
-        elif len(numbers) == 1:
-            result["original_contract_sum"] = numbers[0]
-            return result
-
-    # Pattern: "X NGN & Y USD" — use NGN value (before "NGN")
-    if "ngn" in text_lower and "usd" in text_lower:
-        # Take the number before "NGN"
-        m = re.search(r"([\d,]+\.?\d*)\s*NGN", text, re.IGNORECASE)
-        if m:
-            try:
-                result["original_contract_sum"] = float(m.group(1).replace(",", ""))
-                return result
-            except ValueError:
-                pass
-
-    # Pattern: "Euro X" or similar foreign currency
-    if "euro" in text_lower or "usd" in text_lower:
-        numbers = _extract_numbers(text)
-        if numbers:
-            result["original_contract_sum"] = numbers[0]
-            return result
-
-    # Generic: extract all numbers and use the first
-    numbers = _extract_numbers(text)
-    if len(numbers) == 1:
-        result["original_contract_sum"] = numbers[0]
-    elif len(numbers) >= 2:
-        if "variation" in text_lower:
-            result["original_contract_sum"] = numbers[0]
-            result["variation_sum"] = numbers[1]
-        else:
-            result["original_contract_sum"] = numbers[0]
-
-    return result
-
-
-def _extract_numbers(text: str) -> list[float]:
-    """Extract all numeric values from text, ignoring currency symbols."""
-    cleaned_text = text.replace("N", "").replace("₦", "").replace("€", "").replace("$", "")
-    raw_numbers = re.findall(r"[\d,]+\.?\d*", cleaned_text)
-    result: list[float] = []
-    for n in raw_numbers:
-        try:
-            val = float(n.replace(",", ""))
-            if val > 0:  # Skip zero and negative
-                result.append(val)
-        except ValueError:
-            continue
-    return result
 
 
 def parse_amount(raw: Any) -> float | None:
@@ -402,76 +123,24 @@ def parse_amount(raw: Any) -> float | None:
     return None
 
 
-def _is_nigerian_state(name: str) -> bool:
-    """Check if a sheet name matches a Nigerian state."""
-    return name.strip().lower() in NIGERIAN_STATES
-
-
-def _extract_state_from_text(text: str) -> str | None:
-    """Try to find a Nigerian state name within free text (e.g. project name).
-
-    Searches for multi-word states first (e.g. 'Cross River', 'Akwa Ibom'),
-    then single-word states.
-    """
-    text_lower = text.lower()
-
-    # Check multi-word states first (sorted longest first)
-    multi_word = sorted(
-        [s for s in NIGERIAN_STATES if " " in s],
-        key=len, reverse=True,
-    )
-    for state in multi_word:
-        if state in text_lower:
-            return _STATE_CANONICAL[state]
-
-    # Check single-word states (must be word-bounded)
-    for state in NIGERIAN_STATES:
-        if " " in state:
-            continue
-        if re.search(rf"\b{re.escape(state)}\b", text_lower):
-            return _STATE_CANONICAL[state]
-
-    return None
-
-
-def _resolve_state_for_row(
-    sheet_name: str,
-    project_name: str,
-    row_number: int,
-) -> str | None:
-    """Determine the state_name for a project row."""
-    sheet_upper = sheet_name.strip().upper()
-
-    # State-named sheets
-    if _is_nigerian_state(sheet_name):
-        return _STATE_CANONICAL.get(sheet_name.strip().lower())
-
-    if sheet_upper == "FERMA":
-        return _extract_state_from_text(project_name)
-
-    if sheet_upper == "PRIVATE CLIENTS":
-        return _PRIVATE_CLIENTS_STATES.get(row_number)
-
-    if sheet_upper in ("FCDA ABUJA", "FCDA"):
-        return "FCT"
-
-    if sheet_upper in ("FAAN", "FAN"):
-        return _FAAN_STATES.get(row_number)
-
-    if sheet_upper == "FMW":
-        return _FMW_STATES.get(row_number)
-
-    return None
-
-
-def parse_award_letters_excel(file_content: bytes) -> dict[str, Any]:
+def parse_award_letters_excel(
+    file_content: bytes,
+    client_default_states: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """Parse all sheets of the Award Letters Excel workbook.
+
+    Args:
+        file_content: the .xlsx bytes.
+        client_default_states: optional {normalized_client_name: state_name}
+            map (from clients.default_state_id) used as the last state-
+            resolution fallback. Omitted in golden tests for determinism.
 
     Returns:
         {
             "projects": list[dict],
             "errors": list[dict],
-            "warnings": list[dict],
+            "warnings": list[dict],       # informational (not queue-worthy)
+            "review_items": list[dict],   # → project_register_review_queue
             "sheets_processed": int,
             "total_rows": int,
             "import_batch_id": str,
@@ -479,10 +148,12 @@ def parse_award_letters_excel(file_content: bytes) -> dict[str, Any]:
     """
     xls = pd.ExcelFile(io.BytesIO(file_content))
     batch_id = str(uuid4())
+    defaults = client_default_states or {}
 
     all_projects: list[dict[str, Any]] = []
     all_errors: list[dict[str, Any]] = []
     all_warnings: list[dict[str, Any]] = []
+    all_review: list[dict[str, Any]] = []
 
     for sheet_name in xls.sheet_names:
         try:
@@ -499,28 +170,38 @@ def parse_award_letters_excel(file_content: bytes) -> dict[str, Any]:
             df.columns = [str(c).strip() for c in df.columns]
             col_map = _build_column_map(df.columns.tolist())
 
-            row_number = 0
             for idx, row in df.iterrows():
                 try:
-                    project = _parse_row(row, col_map, sheet_name, int(idx), batch_id)
-                    if project:
-                        row_number += 1
-                        # Resolve state
-                        state_name = _resolve_state_for_row(
-                            sheet_name,
-                            project["project_name"],
-                            row_number,
-                        )
-                        if state_name:
-                            project["state_name"] = state_name
-                        else:
-                            all_warnings.append({
-                                "sheet": sheet_name,
-                                "row": row_number,
-                                "project": project["project_name"][:60],
-                                "message": "Could not determine state",
-                            })
-                        all_projects.append(project)
+                    project, row_review, row_warnings = _parse_row(
+                        row, col_map, sheet_name, int(idx), batch_id
+                    )
+                    if project is None:
+                        continue
+
+                    resolved = resolve_state(
+                        project["project_name"],
+                        sheet_name,
+                        defaults.get(normalize_client_name(project.get("client"))),
+                    )
+                    if resolved.state:
+                        project["state_name"] = resolved.state
+                        project["state_resolution_method"] = resolved.method
+                    else:
+                        row_review.append({
+                            "sheet_name": sheet_name,
+                            "row_number": int(idx) + 1,
+                            "project_name": project["project_name"][:200],
+                            "field": "state",
+                            "raw_value": project["project_name"][:200],
+                            "reason": resolved.reason,
+                            "suggested_value": (
+                                " / ".join(resolved.candidates) or None
+                            ),
+                        })
+
+                    all_projects.append(project)
+                    all_review.extend(row_review)
+                    all_warnings.extend(row_warnings)
                 except Exception as e:
                     all_errors.append({
                         "sheet": sheet_name,
@@ -538,6 +219,7 @@ def parse_award_letters_excel(file_content: bytes) -> dict[str, Any]:
         "projects": all_projects,
         "errors": all_errors,
         "warnings": all_warnings,
+        "review_items": all_review,
         "sheets_processed": len(xls.sheet_names),
         "total_rows": len(all_projects),
         "import_batch_id": batch_id,
@@ -614,21 +296,47 @@ def _parse_row(
     sheet_name: str,
     row_idx: int,
     batch_id: str,
-) -> dict[str, Any] | None:
-    """Parse a single row into a project dict. Returns None for empty rows."""
-    # Find project_name column
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]], list[dict[str, Any]]]:
+    """Parse a single row into (project, review_items, warnings).
+
+    Returns (None, [], []) for empty rows. NOTHING ambiguous is dropped
+    silently: unparseable/narrative cells emit review items carrying the
+    raw value; informational oddities emit warnings.
+    """
+    review: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
+
     name_idx = next((i for i, f in col_map.items() if f == "project_name"), None)
     if name_idx is None:
-        return None
+        return None, [], []
 
     project_name = row.iloc[name_idx] if name_idx < len(row) else None
     if pd.isna(project_name) or not str(project_name).strip():
-        return None
+        return None, [], []
 
-    # Truncate project name to DB column limit
     clean_name = str(project_name).strip()
     if len(clean_name) > _MAX_PROJECT_NAME_LEN:
         clean_name = clean_name[:_MAX_PROJECT_NAME_LEN]
+
+    def queue(field: str, raw_value: Any, reason: str, suggested: str | None = None) -> None:
+        review.append({
+            "sheet_name": sheet_name,
+            "row_number": row_idx + 1,
+            "project_name": clean_name[:200],
+            "field": field,
+            "raw_value": None if raw_value is None else str(raw_value)[:500],
+            "reason": reason,
+            "suggested_value": suggested,
+        })
+
+    def warn(field: str, raw_value: Any, message: str) -> None:
+        warnings.append({
+            "sheet": sheet_name,
+            "row": row_idx + 1,
+            "field": field,
+            "raw": None if raw_value is None else str(raw_value)[:200],
+            "message": message,
+        })
 
     project: dict[str, Any] = {
         "project_name": clean_name,
@@ -637,6 +345,7 @@ def _parse_row(
         "import_batch_id": batch_id,
         "client": sheet_name.strip().upper(),
         "is_legacy": True,
+        "register_source": "award_letters_workbook",
     }
 
     for col_idx, field_name in col_map.items():
@@ -651,7 +360,7 @@ def _parse_row(
             continue
 
         if field_name == "serial_number":
-            continue  # skip, not stored
+            continue  # not stored
 
         if field_name == "client" and val_str:
             project["client"] = val_str.strip().upper()
@@ -660,24 +369,38 @@ def _parse_row(
             project["has_award_letter"] = val_str.lower() in ("yes", "y", "true", "1")
 
         elif field_name == "contract_sum_raw":
-            parsed = parse_contract_sum(val)
-            project.update(parsed)
+            cs = parse_register_contract_sum(val)
+            if cs.raw is not None:
+                project["contract_sum_raw"] = cs.raw
+            if cs.original is not None:
+                project["original_contract_sum"] = cs.original
+            if cs.variation is not None:
+                project["variation_sum"] = cs.variation
+            if cs.total is not None:
+                project["current_contract_sum"] = cs.total
+            if cs.needs_review:
+                for w in cs.warnings:
+                    if w in ("total_mismatch", "ambiguous_numbers", "no_numbers_found"):
+                        queue(
+                            "contract_sum", cs.raw, w,
+                            suggested=None if cs.original is None else f"{cs.original:.2f}",
+                        )
+            for w in cs.warnings:
+                if w in ("revised_used_final", "multi_currency", "foreign_currency"):
+                    warn("contract_sum", cs.raw, w)
 
         elif field_name.endswith("_raw"):
-            # Skip noise values for raw date fields
-            if _is_noise_value(val_str):
-                continue
-            project[field_name] = val_str
-            # Try to parse the date companion (store as date object for asyncpg)
+            parsed = parse_register_date(val)
             date_field = field_name.replace("_raw", "")
-            if isinstance(val, (datetime, date)):
-                parsed_date = val.date() if isinstance(val, datetime) else val
-            elif isinstance(val, pd.Timestamp):
-                parsed_date = val.date()
-            else:
-                parsed_date = parse_free_text_date(val_str)
-            if parsed_date:
-                project[date_field] = parsed_date
+            if parsed.raw is not None and parsed.reason != "noise":
+                project[field_name] = parsed.raw
+            if parsed.value is not None:
+                project[date_field] = parsed.value
+            if parsed.needs_review or parsed.reason == "narrative_status":
+                queue(
+                    date_field, parsed.raw, parsed.reason,
+                    suggested=parsed.value.isoformat() if parsed.value else None,
+                )
 
         elif field_name == "retention_amount_paid":
             parsed_amt = parse_amount(val)
@@ -688,23 +411,23 @@ def _parse_row(
             clean = val_str.lower().strip()
             if clean in ("yes", "no"):
                 project[field_name] = clean
-            # Skip noise values like "File not in Ikeja"
+            elif not _is_noise_value(val_str):
+                # Narrative like "File not in Ikeja" — surface, don't drop
+                queue("retention_paid", val_str, "narrative_text")
 
         elif field_name in (
             "substantial_completion_cert",
             "final_completion_cert",
             "maintenance_cert",
         ):
-            # Skip noise values
             if _is_noise_value(val_str):
                 continue
 
             clean = val_str.strip()
 
-            # Some cert columns contain actual dates (e.g. "9th March, 2017")
-            # instead of "yes"/"no" — detect and store the date too
-            parsed_cert_date = parse_free_text_date(clean)
-            if parsed_cert_date:
+            # Some cert columns hold actual dates ("9th March, 2017")
+            parsed_cert = parse_register_date(clean)
+            if parsed_cert.value is not None:
                 date_field = {
                     "substantial_completion_cert": "substantial_completion_date",
                     "final_completion_cert": "final_completion_date",
@@ -712,17 +435,40 @@ def _parse_row(
                 }[field_name]
                 raw_field = date_field + "_raw"
                 if date_field not in project:
-                    project[date_field] = parsed_cert_date
+                    project[date_field] = parsed_cert.value
                 if raw_field not in project:
                     project[raw_field] = clean
+                if parsed_cert.needs_review:
+                    queue(
+                        date_field, clean, parsed_cert.reason,
+                        suggested=parsed_cert.value.isoformat(),
+                    )
+            elif parsed_cert.reason in ("narrative_no_date", "unparseable") and \
+                    clean.lower() not in ("yes", "no"):
+                # Cert text that is neither yes/no nor a date — reviewable
+                queue(field_name, clean, parsed_cert.reason)
 
-            # Normalize the cert text: lowercase and truncate to 50 chars
             project[field_name] = clean.lower()[:50]
 
-    # Compute current_contract_sum
-    orig = project.get("original_contract_sum")
-    var = project.get("variation_sum")
-    if orig is not None:
-        project["current_contract_sum"] = (orig or 0) + (var or 0)
+    # current_contract_sum: explicit TOTAL wins; else original + variation
+    if "current_contract_sum" not in project:
+        orig = project.get("original_contract_sum")
+        var = project.get("variation_sum")
+        if orig is not None:
+            project["current_contract_sum"] = (orig or 0) + (var or 0)
 
-    return project
+    # Type / nature classification — confident axes only; uncertainty queues
+    classified = classify_project(clean_name)
+    if classified.type_confident:
+        project["project_type"] = classified.project_type
+    if classified.nature_confident:
+        project["work_nature"] = classified.work_nature
+    if not classified.confident:
+        queue(
+            "classification",
+            clean_name[:200],
+            "low_confidence_classification",
+            suggested=f"{classified.project_type}/{classified.work_nature}",
+        )
+
+    return project, review, warnings

@@ -48,7 +48,7 @@ _ALLOWED_SORT_COLUMNS = {
 }
 
 # Fields that require ::uuid cast in parameterized queries
-_UUID_FIELDS = {"state_id", "created_by", "updated_by", "import_batch_id"}
+_UUID_FIELDS = {"state_id", "client_id", "location_id", "created_by", "updated_by", "import_batch_id"}
 
 
 # ============================================================================
@@ -142,7 +142,18 @@ async def import_award_letters(
     if len(file_content) > 10 * 1024 * 1024:
         raise ValidationError("File too large (max 10MB)")
 
-    parsed = parse_award_letters_excel(file_content)
+    # Client default states give the parser its final state-resolution
+    # fallback (clients.default_state_id, seeded from client names).
+    from app.services.award_letters_import import (
+        fetch_client_default_states,
+        persist_award_letters,
+    )
+
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        client_defaults = await fetch_client_default_states(conn)
+
+    parsed = parse_award_letters_excel(file_content, client_defaults)
 
     if not parsed["projects"]:
         return {
@@ -154,84 +165,8 @@ async def import_award_letters(
             },
         }
 
-    # Build state_name → state_id lookup (case-insensitive)
-    states = await fetch("SELECT id, name FROM states")
-    state_map: dict[str, str] = {}
-    for s in states:
-        state_map[s["name"].strip().lower()] = str(s["id"])
-
-    # Enrich projects: resolve state_name → state_id, add user refs
-    for proj in parsed["projects"]:
-        state_name = proj.pop("state_name", None)
-        if state_name:
-            sid = state_map.get(state_name.strip().lower())
-            if sid:
-                proj["state_id"] = sid
-        proj["created_by"] = current_user.id
-        proj["updated_by"] = current_user.id
-
-    # Collect all unique columns across all projects
-    all_cols: set[str] = set()
-    for proj in parsed["projects"]:
-        all_cols.update(proj.keys())
-    col_list = sorted(all_cols)
-
-    # Build a single parameterized INSERT template
-    placeholders = []
-    for i, col in enumerate(col_list):
-        if col in _UUID_FIELDS:
-            placeholders.append(f"${i + 1}::uuid")
-        elif col in ("has_award_letter", "is_legacy"):
-            placeholders.append(f"${i + 1}::boolean")
-        else:
-            placeholders.append(f"${i + 1}")
-
-    sql = (
-        f"INSERT INTO projects ({', '.join(col_list)}) "
-        f"VALUES ({', '.join(placeholders)})"
-    )
-
-    pool = get_pool()
-    created_count = 0
-    deleted_count = 0
-    insert_errors: list[dict[str, Any]] = []
-
     async with pool.acquire() as conn:
-        async with conn.transaction():
-            # Delete existing legacy projects first (clean reimport)
-            deleted_count = await conn.fetchval(
-                "WITH d AS (DELETE FROM projects WHERE is_legacy = true RETURNING 1) "
-                "SELECT count(*) FROM d"
-            )
-
-            # Batch insert all parsed projects
-            args_list = [
-                [proj.get(col) for col in col_list]
-                for proj in parsed["projects"]
-            ]
-
-            try:
-                # Wrap executemany in its own savepoint so that if it fails,
-                # the outer transaction is NOT aborted and we can fall back
-                # to row-by-row inserts.
-                async with conn.transaction():
-                    await conn.executemany(sql, args_list)
-                created_count = len(args_list)
-            except Exception:
-                # Savepoint rolled back, outer tx still valid.
-                # Fall back to row-by-row with individual savepoints.
-                created_count = 0
-                for proj_args, proj in zip(args_list, parsed["projects"]):
-                    try:
-                        async with conn.transaction():  # SAVEPOINT
-                            await conn.execute(sql, *proj_args)
-                        created_count += 1
-                    except Exception as row_err:
-                        insert_errors.append({
-                            "project_name": proj.get("project_name", "")[:80],
-                            "sheet": proj.get("source_sheet"),
-                            "error": str(row_err),
-                        })
+        stats = await persist_award_letters(conn, parsed, current_user.id)
 
     background_tasks.add_task(
         audit_service.log,
@@ -244,16 +179,21 @@ async def import_award_letters(
             "file_name": file.filename,
             "sheets_processed": parsed["sheets_processed"],
             "total_parsed": len(parsed["projects"]),
-            "created": created_count,
-            "deleted": deleted_count,
-            "errors": len(insert_errors),
+            "created": stats["created"],
+            "deleted": stats["deleted"],
+            "clients_upserted": stats["clients_upserted"],
+            "review_queued": stats["review_queued"],
+            "errors": len(stats["insert_errors"]),
         },
         ip_address=get_client_ip(request),
-        description=f"Reimported {created_count} legacy projects (deleted {deleted_count} old)",
+        description=(
+            f"Reimported {stats['created']} legacy projects "
+            f"(deleted {stats['deleted']}, queued {stats['review_queued']} for review)"
+        ),
     )
 
-    if created_count > 0:
-        broadcast("projects", "import", f"{created_count} projects imported")
+    if stats["created"] > 0:
+        broadcast("projects", "import", f"{stats['created']} projects imported")
 
     return {
         "success": True,
@@ -261,9 +201,11 @@ async def import_award_letters(
             "import_batch_id": parsed["import_batch_id"],
             "sheets_processed": parsed["sheets_processed"],
             "total_parsed": len(parsed["projects"]),
-            "created": created_count,
-            "deleted": deleted_count,
-            "errors": insert_errors[:20],
+            "created": stats["created"],
+            "deleted": stats["deleted"],
+            "clients_upserted": stats["clients_upserted"],
+            "review_queued": stats["review_queued"],
+            "errors": stats["insert_errors"][:20],
             "warnings": parsed["warnings"][:20],
             "parse_errors": parsed["errors"][:20],
         },

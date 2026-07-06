@@ -594,6 +594,8 @@ class ClassifiedProject:
     work_nature: str
     confident: bool
     type_matches: tuple[str, ...] = ()
+    type_confident: bool = False
+    nature_confident: bool = False
 
     @property
     def needs_review(self) -> bool:
@@ -638,6 +640,15 @@ def classify_project(project_name: Any) -> ClassifiedProject:
             work_nature=work_nature,
             confident=type_confident and nature_confident,
             type_matches=matched_types,
+            type_confident=type_confident,
+            nature_confident=nature_confident,
         )
     except Exception:  # defensive backstop — contract says never raise
         return ClassifiedProject("other", "construction", False)
+
+
+def normalize_client_name(name: Any) -> str:
+    """Canonical client-matching key: uppercase, punctuation stripped,
+    whitespace collapsed. 'Plateau State Govt.' == 'PLATEAU STATE GOVT'."""
+    s = re.sub(r"[^\w\s]", " ", str(name or "").upper())
+    return re.sub(r"\s+", " ", s).strip()
