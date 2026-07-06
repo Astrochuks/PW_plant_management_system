@@ -23,11 +23,14 @@ import pandas as pd
 
 from app.monitoring.logging import get_logger
 from app.services.register_parsing import (
+    canonicalize_client,
     classify_project,
+    default_client_for_sheet,
     normalize_client_name,
     parse_register_contract_sum,
     parse_register_date,
     resolve_state,
+    sheet_client_category,
 )
 
 logger = get_logger(__name__)
@@ -170,13 +173,66 @@ def parse_award_letters_excel(
             df.columns = [str(c).strip() for c in df.columns]
             col_map = _build_column_map(df.columns.tolist())
 
+            category = sheet_client_category(sheet_name)
+            group_client = None  # row-2 group label (e.g. "Plateau State Govt.")
+            client_idx = next(
+                (i for i, f in col_map.items() if f == "client"), None
+            )
+            name_idx = next(
+                (i for i, f in col_map.items() if f == "project_name"), None
+            )
+
             for idx, row in df.iterrows():
                 try:
+                    # Group-label row: client filled, project name empty.
+                    # Not a project — remember it as the sheet's inherited
+                    # client for blank Client cells below it.
+                    if client_idx is not None and name_idx is not None:
+                        cell_client = row.iloc[client_idx] if client_idx < len(row) else None
+                        cell_name = row.iloc[name_idx] if name_idx < len(row) else None
+                        if (
+                            group_client is None
+                            and not (pd.isna(cell_client) or not str(cell_client).strip())
+                            and (pd.isna(cell_name) or not str(cell_name).strip())
+                        ):
+                            group_client = str(cell_client).strip()
+                            continue
+
                     project, row_review, row_warnings = _parse_row(
                         row, col_map, sheet_name, int(idx), batch_id
                     )
                     if project is None:
                         continue
+
+                    # ── client identity (never the sheet name) ──────────
+                    raw_client = project.pop("client_raw", None) or group_client
+                    identity = canonicalize_client(
+                        raw_client, category
+                    ) or default_client_for_sheet(sheet_name)
+                    if identity is not None:
+                        project["client"] = identity.display_name
+                        project["client_type"] = identity.client_type
+                        project["client_state_name"] = identity.state_name
+                        if not identity.confident:
+                            row_review.append({
+                                "sheet_name": sheet_name,
+                                "row_number": int(idx) + 1,
+                                "project_name": project["project_name"][:200],
+                                "field": "client",
+                                "raw_value": str(raw_client)[:500] if raw_client else None,
+                                "reason": "unrecognized_client",
+                                "suggested_value": identity.display_name,
+                            })
+                    else:
+                        row_review.append({
+                            "sheet_name": sheet_name,
+                            "row_number": int(idx) + 1,
+                            "project_name": project["project_name"][:200],
+                            "field": "client",
+                            "raw_value": None,
+                            "reason": "missing_client",
+                            "suggested_value": None,
+                        })
 
                     resolved = resolve_state(
                         project["project_name"],
@@ -229,6 +285,14 @@ def parse_award_letters_excel(
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+# Date columns that only carry meaning when their cert is 'yes'
+_DATE_CERT_GATES: dict[str, str] = {
+    "substantial_completion_date": "substantial_completion_cert",
+    "final_completion_date": "final_completion_cert",
+    "maintenance_cert_date": "maintenance_cert",
+}
 
 def _find_header_row(df: pd.DataFrame) -> int | None:
     """Find the header row by looking for known column names."""
@@ -343,8 +407,8 @@ def _parse_row(
         "source_sheet": sheet_name,
         "source_row": row_idx + 1,
         "import_batch_id": batch_id,
-        "client": sheet_name.strip().upper(),
         "is_legacy": True,
+        "status": "legacy",  # workbook data is NEVER active (user decision)
         "register_source": "award_letters_workbook",
     }
 
@@ -363,7 +427,7 @@ def _parse_row(
             continue  # not stored
 
         if field_name == "client" and val_str:
-            project["client"] = val_str.strip().upper()
+            project["client_raw"] = val_str.strip()
 
         elif field_name == "has_award_letter":
             project["has_award_letter"] = val_str.lower() in ("yes", "y", "true", "1")
@@ -374,32 +438,45 @@ def _parse_row(
                 project["contract_sum_raw"] = cs.raw
             if cs.original is not None:
                 project["original_contract_sum"] = cs.original
-            if cs.variation is not None:
-                project["variation_sum"] = cs.variation
-            if cs.total is not None:
-                project["current_contract_sum"] = cs.total
             if cs.needs_review:
-                for w in cs.warnings:
-                    if w in ("total_mismatch", "ambiguous_numbers", "no_numbers_found"):
-                        queue(
-                            "contract_sum", cs.raw, w,
-                            suggested=None if cs.original is None else f"{cs.original:.2f}",
-                        )
-            for w in cs.warnings:
-                if w in ("revised_used_final", "multi_currency", "foreign_currency"):
-                    warn("contract_sum", cs.raw, w)
+                queue(
+                    "contract_sum", cs.raw, "not_plain_number",
+                    suggested=(
+                        None if cs.suggested_original is None
+                        else f"{cs.suggested_original:,.2f}"
+                    ),
+                )
+                if cs.suggested_variation is not None:
+                    queue(
+                        "variation_sum", cs.raw, "not_plain_number",
+                        suggested=f"{cs.suggested_variation:,.2f}",
+                    )
 
         elif field_name.endswith("_raw"):
-            parsed = parse_register_date(val)
             date_field = field_name.replace("_raw", "")
+
+            # Cert dates only exist alongside a 'yes' cert (user rule):
+            # raw text is preserved, but nothing parses and nothing queues.
+            gating_cert = _DATE_CERT_GATES.get(date_field)
+            if gating_cert is not None and project.get(gating_cert) != "yes":
+                if str(val).strip():
+                    project[field_name] = str(val).strip()[:500]
+                continue
+
+            parsed = parse_register_date(
+                val,
+                allow_narrative=(date_field == "retention_application_date"),
+            )
             if parsed.raw is not None and parsed.reason != "noise":
                 project[field_name] = parsed.raw
             if parsed.value is not None:
                 project[date_field] = parsed.value
-            if parsed.needs_review or parsed.reason == "narrative_status":
+            if parsed.needs_review:
                 queue(
                     date_field, parsed.raw, parsed.reason,
-                    suggested=parsed.value.isoformat() if parsed.value else None,
+                    suggested=(
+                        parsed.suggestion.isoformat() if parsed.suggestion else None
+                    ),
                 )
 
         elif field_name == "retention_amount_paid":
@@ -420,42 +497,19 @@ def _parse_row(
             "final_completion_cert",
             "maintenance_cert",
         ):
-            if _is_noise_value(val_str):
-                continue
+            # User rule: cert values are yes/no ONLY. Anything else (dates,
+            # "applied for…", narrative) → the cert stays blank and its
+            # date column is gated off above. The workbook keeps the raw.
+            clean = val_str.lower().strip().rstrip(".")
+            if clean in ("yes", "no"):
+                project[field_name] = clean
 
-            clean = val_str.strip()
-
-            # Some cert columns hold actual dates ("9th March, 2017")
-            parsed_cert = parse_register_date(clean)
-            if parsed_cert.value is not None:
-                date_field = {
-                    "substantial_completion_cert": "substantial_completion_date",
-                    "final_completion_cert": "final_completion_date",
-                    "maintenance_cert": "maintenance_cert_date",
-                }[field_name]
-                raw_field = date_field + "_raw"
-                if date_field not in project:
-                    project[date_field] = parsed_cert.value
-                if raw_field not in project:
-                    project[raw_field] = clean
-                if parsed_cert.needs_review:
-                    queue(
-                        date_field, clean, parsed_cert.reason,
-                        suggested=parsed_cert.value.isoformat(),
-                    )
-            elif parsed_cert.reason in ("narrative_no_date", "unparseable") and \
-                    clean.lower() not in ("yes", "no"):
-                # Cert text that is neither yes/no nor a date — reviewable
-                queue(field_name, clean, parsed_cert.reason)
-
-            project[field_name] = clean.lower()[:50]
-
-    # current_contract_sum: explicit TOTAL wins; else original + variation
-    if "current_contract_sum" not in project:
-        orig = project.get("original_contract_sum")
-        var = project.get("variation_sum")
-        if orig is not None:
-            project["current_contract_sum"] = (orig or 0) + (var or 0)
+    # current_contract_sum = original + variation (variation only ever
+    # arrives via human resolution now)
+    orig = project.get("original_contract_sum")
+    var = project.get("variation_sum")
+    if orig is not None:
+        project["current_contract_sum"] = (orig or 0) + (var or 0)
 
     # Type / nature classification — confident axes only; uncertainty queues
     classified = classify_project(clean_name)

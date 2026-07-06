@@ -78,7 +78,7 @@ class TestPersistAwardLetters:
         conn, _, batch_id, stats = db
         assert stats["created"] == 218
         assert stats["insert_errors"] == []
-        assert stats["review_queued"] == len(parsed["review_items"]) == 225
+        assert stats["review_queued"] == len(parsed["review_items"]) == 126
 
         in_db = await conn.fetchval(
             "SELECT count(*) FROM projects WHERE import_batch_id = $1::uuid",
@@ -101,6 +101,19 @@ class TestPersistAwardLetters:
             batch_id,
         )
         assert [r["register_source"] for r in sources] == ["award_letters_workbook"]
+
+        statuses = await conn.fetch(
+            "SELECT DISTINCT status FROM projects WHERE import_batch_id = $1::uuid",
+            batch_id,
+        )
+        assert [r["status"] for r in statuses] == ["legacy"]  # NEVER active
+
+        # client types populated on the clients master
+        types = {
+            r["client_type"]
+            for r in await conn.fetch("SELECT DISTINCT client_type FROM clients")
+        }
+        assert types <= {"state_government", "federal_government", "private"}
 
     async def test_review_queue_rows_link_to_projects(self, db):
         conn, _, batch_id, _ = db
@@ -140,7 +153,7 @@ class TestPersistAwardLetters:
         equal or improve vs the bare parse."""
         conn, *_ = db
         defaults = await fetch_client_default_states(conn)
-        assert len(defaults) >= 15
+        assert len(defaults) >= 10  # 12 state governments in the register
 
         reparsed = parse_award_letters_excel(FIXTURE.read_bytes(), defaults)
         bare_unresolved = sum(
@@ -189,7 +202,7 @@ class TestIdempotentReimport:
         assert snapshots[0] == snapshots[1], snapshots
         assert snapshots[0][0] == 218   # created
         assert snapshots[0][1] == 218   # exactly one generation of legacy rows
-        assert snapshots[0][2] == 225   # queue replaced, not appended
+        assert snapshots[0][2] == 126   # queue replaced, not appended
 
         # Full replacement semantics + client stability across reimports
         for stats in stats_list:

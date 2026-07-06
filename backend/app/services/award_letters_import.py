@@ -26,7 +26,7 @@ _UUID_FIELDS = {"state_id", "client_id", "created_by", "updated_by", "import_bat
 _BOOL_FIELDS = {"has_award_letter", "is_legacy"}
 
 #: parser-output keys that are not projects columns
-_NON_COLUMN_KEYS = {"state_name", "state_resolution_method"}
+_NON_COLUMN_KEYS = {"state_name", "state_resolution_method", "client_type", "client_state_name"}
 
 
 async def persist_award_letters(
@@ -51,19 +51,33 @@ async def persist_award_letters(
             for r in await conn.fetch("SELECT id, name FROM states")
         }
 
-        # ── clients upsert ──────────────────────────────────────────────
-        distinct: dict[str, str] = {}
+        # ── clients upsert (canonical name + type + default state) ─────
+        distinct: dict[str, tuple[str, str | None, str | None]] = {}
         for proj in projects:
-            raw = (proj.get("client") or "").strip()
-            if raw:
-                distinct.setdefault(normalize_client_name(raw), raw)
+            display = (proj.get("client") or "").strip()
+            if display:
+                distinct.setdefault(
+                    normalize_client_name(display),
+                    (
+                        display,
+                        proj.get("client_type"),
+                        proj.get("client_state_name"),
+                    ),
+                )
 
         clients_upserted = 0
-        for norm, raw in distinct.items():
+        for norm, (display, ctype, state_name) in distinct.items():
+            state_id = (
+                state_map.get(state_name.strip().lower()) if state_name else None
+            )
             result = await conn.execute(
-                """INSERT INTO clients (name, normalized_name)
-                   VALUES ($1, $2) ON CONFLICT (normalized_name) DO NOTHING""",
-                raw, norm,
+                """INSERT INTO clients (name, normalized_name, client_type, default_state_id)
+                   VALUES ($1, $2, $3, $4::uuid)
+                   ON CONFLICT (normalized_name) DO UPDATE SET
+                       client_type = COALESCE(clients.client_type, EXCLUDED.client_type),
+                       default_state_id = COALESCE(clients.default_state_id, EXCLUDED.default_state_id),
+                       updated_at = now()""",
+                display, norm, ctype, state_id,
             )
             if result == "INSERT 0 1":
                 clients_upserted += 1
@@ -148,6 +162,15 @@ async def persist_award_letters(
                 batch_id,
             )
         }
+        # Resolutions survive reimports: an item the human already resolved
+        # or dismissed (same sheet/row/field/raw value) is NOT recreated.
+        resolved_sigs = {
+            (r["sheet_name"], r["row_number"], r["field"], r["raw_value"] or "")
+            for r in await conn.fetch(
+                """SELECT sheet_name, row_number, field, raw_value
+                   FROM project_register_review_queue WHERE resolved = true"""
+            )
+        }
         queue_args = [
             (
                 batch_id,
@@ -160,6 +183,13 @@ async def persist_award_letters(
                 item.get("suggested_value"),
             )
             for item in review_items
+            if (
+                item.get("sheet_name"),
+                item.get("row_number"),
+                item.get("field"),
+                item.get("raw_value") or "",
+            )
+            not in resolved_sigs
         ]
         await conn.executemany(
             """INSERT INTO project_register_review_queue

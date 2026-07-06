@@ -36,8 +36,13 @@ export function ImportAwardLettersDialog() {
       const data = await importMutation.mutateAsync(file)
       setResult(data)
       toast.success(`Imported ${data.created} projects from ${data.sheets_processed} sheets`)
-    } catch {
-      toast.error('Import failed. Please check the file format.')
+    } catch (err) {
+      // Surface the SERVER's message — never mask the real failure
+      const message =
+        err instanceof Error && err.message
+          ? err.message
+          : 'Import failed — no details available. Check the backend logs.'
+      toast.error('Import failed', { description: message, duration: 12000 })
     }
   }
 

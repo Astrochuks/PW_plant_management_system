@@ -81,7 +81,7 @@ class TestListAndSummary:
     async def test_list_filters_and_pagination(self, db):
         db_conn, _ = db
         page = await review.list_review_queue(db_conn, page=1, page_size=10)
-        assert page["total"] == 225
+        assert page["total"] == 126
         assert len(page["items"]) == 10
 
         only_state = await review.list_review_queue(db_conn, field="state")
@@ -91,9 +91,9 @@ class TestListAndSummary:
     async def test_summary_counts(self, db):
         db_conn, _ = db
         s = await review.summarize_review_queue(db_conn)
-        assert s["open_total"] == 225
+        assert s["open_total"] == 126
         reasons = {r["reason"]: r["n"] for r in s["by_reason"]}
-        assert reasons["narrative_status"] == 46
+        assert reasons["narrative_status"] == 16
 
 
 class TestResolve:
@@ -176,7 +176,7 @@ class TestBulkDismiss:
     async def test_bulk_dismiss_by_reason(self, db):
         db_conn, user_id = db
         count = await review.bulk_dismiss(db_conn, user_id, reason="narrative_status")
-        assert count == 46
+        assert count == 16
         remaining = await db_conn.fetchval(
             "SELECT count(*) FROM project_register_review_queue "
             "WHERE resolved = false AND reason = 'narrative_status'"

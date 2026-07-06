@@ -278,8 +278,44 @@ async def import_award_letters(
             },
         }
 
-    async with pool.acquire() as conn:
-        stats = await persist_award_letters(conn, parsed, current_user.id)
+    # Defensive persistence: the DB can be busy (pooler contention, lock
+    # waits). Each attempt gets a FRESH copy of the parse (persist mutates
+    # its input) and everything is transactional — a failed attempt saves
+    # nothing, so retrying is always safe.
+    import asyncio as _asyncio
+    import copy as _copy
+
+    import asyncpg as _asyncpg
+
+    from app.core.exceptions import DatabaseError
+
+    stats = None
+    last_err: Exception | None = None
+    for attempt in (1, 2, 3):
+        try:
+            async with pool.acquire() as conn:
+                stats = await persist_award_letters(
+                    conn, _copy.deepcopy(parsed), current_user.id
+                )
+            break
+        except (TimeoutError, _asyncio.TimeoutError, _asyncpg.PostgresError, OSError) as exc:
+            last_err = exc
+            logger.warning(
+                "Award letters import attempt failed",
+                attempt=attempt,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            if attempt < 3:
+                await _asyncio.sleep(2 * attempt)
+    if stats is None:
+        raise DatabaseError(
+            message=(
+                "Import failed after 3 attempts — the database timed out or "
+                f"was busy ({type(last_err).__name__}). Nothing was saved; "
+                "it is safe to retry in a minute."
+            ),
+            operation="import_award_letters",
+        )
 
     background_tasks.add_task(
         audit_service.log,

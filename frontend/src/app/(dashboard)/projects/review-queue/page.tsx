@@ -12,7 +12,7 @@
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
-import { CheckCircle2, ClipboardList, Loader2, X } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, ClipboardList, Loader2, X } from 'lucide-react'
 
 import { ProtectedRoute } from '@/components/protected-route'
 import { Badge } from '@/components/ui/badge'
@@ -48,7 +48,7 @@ const REASON_LABELS: Record<string, string> = {
   narrative_status: 'Status word (e.g. Ongoing)',
   narrative_with_date: 'Date found in narrative',
   low_confidence_classification: 'Type/nature uncertain',
-  multi_date: 'Multiple dates (first used)',
+  multi_date: 'Multiple dates',
   narrative_text: 'Narrative text',
   no_state_found: 'No state found',
   ambiguous_states: 'Multiple states',
@@ -56,6 +56,9 @@ const REASON_LABELS: Record<string, string> = {
   ambiguous_numbers: 'Ambiguous numbers',
   unparseable: 'Unparseable',
   no_numbers_found: 'No numbers found',
+  not_plain_number: 'Not a plain number',
+  unrecognized_client: 'Client needs confirmation',
+  missing_client: 'No client found',
 }
 
 const VALUE_HINTS: Record<string, string> = {
@@ -67,6 +70,8 @@ const VALUE_HINTS: Record<string, string> = {
   retention_application_date: 'YYYY-MM-DD',
   state: 'State name, e.g. Lagos',
   contract_sum: 'Number, e.g. 125000000',
+  variation_sum: 'Number, e.g. 4500000',
+  client: 'Client name, e.g. Plateau State Government',
   retention_paid: 'yes or no',
   classification: 'type/nature, e.g. road/rehabilitation',
 }
@@ -131,6 +136,7 @@ function ResolveCell({ item }: { item: ReviewQueueItem }) {
 }
 
 function ReviewQueueContent() {
+  const [sheet, setSheet] = useState<string>('all')
   const [reason, setReason] = useState<string>('all')
   const [field, setField] = useState<string>('all')
   const [showResolved, setShowResolved] = useState(false)
@@ -139,13 +145,14 @@ function ReviewQueueContent() {
 
   const params = useMemo(
     () => ({
+      sheet: sheet === 'all' ? undefined : sheet,
       reason: reason === 'all' ? undefined : reason,
       field: field === 'all' ? undefined : field,
       resolved: showResolved ? null : false,
       page,
       page_size: pageSize,
     }),
-    [reason, field, showResolved, page],
+    [sheet, reason, field, showResolved, page],
   )
 
   const { data: summary } = useReviewQueueSummary()
@@ -173,6 +180,14 @@ function ReviewQueueContent() {
 
   return (
     <div className="space-y-6 p-6">
+      <div>
+        <Button asChild variant="ghost" size="sm" className="mb-2 -ml-2">
+          <Link href="/projects">
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Projects
+          </Link>
+        </Button>
+      </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-semibold">
@@ -187,6 +202,34 @@ function ReviewQueueContent() {
         <Badge variant={summary?.open_total ? 'destructive' : 'secondary'} className="text-sm">
           {summary?.open_total ?? '—'} open
         </Badge>
+      </div>
+
+      {/* Sheet-by-sheet cross-check — the primary workflow */}
+      <div>
+        <p className="text-muted-foreground mb-1.5 text-xs font-medium uppercase tracking-wide">
+          By sheet — work through them one at a time
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <button onClick={() => { setSheet('all'); setPage(1) }} className="focus:outline-none">
+            <Badge variant={sheet === 'all' ? 'default' : 'outline'}>
+              All sheets · {summary?.open_total ?? 0}
+            </Badge>
+          </button>
+          {(summary?.by_sheet ?? []).map((sh) => (
+            <button
+              key={sh.sheet_name ?? '—'}
+              onClick={() => {
+                setSheet(sh.sheet_name === sheet ? 'all' : (sh.sheet_name ?? 'all'))
+                setPage(1)
+              }}
+              className="focus:outline-none"
+            >
+              <Badge variant={sheet === sh.sheet_name ? 'default' : 'secondary'}>
+                {sh.sheet_name ?? '(no sheet)'} · {sh.n}
+              </Badge>
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Reason summary chips — click to filter */}

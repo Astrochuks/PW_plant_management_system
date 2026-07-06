@@ -34,6 +34,8 @@ _FIELD_TARGETS: dict[str, tuple[str, str]] = {
     "retention_application_date": ("retention_application_date", "date"),
     "state": ("state_id", "state"),
     "contract_sum": ("original_contract_sum", "number"),
+    "variation_sum": ("variation_sum", "number"),
+    "client": ("client", "client"),
     "retention_paid": ("retention_paid", "yes_no"),
     "classification": ("", "classification"),  # writes two columns
     "substantial_completion_cert": ("substantial_completion_cert", "text"),
@@ -109,6 +111,10 @@ async def list_review_queue(
 
 
 async def summarize_review_queue(conn: asyncpg.Connection) -> dict[str, Any]:
+    by_sheet = await conn.fetch(
+        """SELECT sheet_name, count(*) AS n FROM project_register_review_queue
+           WHERE resolved = false GROUP BY sheet_name ORDER BY sheet_name"""
+    )
     by_reason = await conn.fetch(
         """SELECT reason, count(*) AS n FROM project_register_review_queue
            WHERE resolved = false GROUP BY reason ORDER BY n DESC"""
@@ -122,6 +128,7 @@ async def summarize_review_queue(conn: asyncpg.Connection) -> dict[str, Any]:
     )
     return {
         "open_total": open_total,
+        "by_sheet": [dict(r) for r in by_sheet],
         "by_reason": [dict(r) for r in by_reason],
         "by_field": [dict(r) for r in by_field],
     }
@@ -192,6 +199,39 @@ async def resolve_review_item(
                     parts[0], parts[1], user_id, str(item["project_id"]),
                 )
                 applied = {"project_type": parts[0], "work_nature": parts[1]}
+
+            elif kind == "client":
+                from app.services.register_parsing import normalize_client_name
+
+                display = value.strip()
+                client_id = await conn.fetchval(
+                    """INSERT INTO clients (name, normalized_name)
+                       VALUES ($1, $2)
+                       ON CONFLICT (normalized_name) DO UPDATE SET updated_at = now()
+                       RETURNING id""",
+                    display, normalize_client_name(display),
+                )
+                await conn.execute(
+                    "UPDATE projects SET client = $1, client_id = $2::uuid, "
+                    "updated_by = $3::uuid, updated_at = now() WHERE id = $4::uuid",
+                    display, str(client_id), user_id, str(item["project_id"]),
+                )
+                applied = {"client": display, "client_id": str(client_id)}
+
+            elif column in ("original_contract_sum", "variation_sum"):
+                coerced = _coerce(kind, value)
+                other = (
+                    "variation_sum"
+                    if column == "original_contract_sum"
+                    else "original_contract_sum"
+                )
+                await conn.execute(
+                    f"UPDATE projects SET {column} = $1, "
+                    f"current_contract_sum = $1 + COALESCE({other}, 0), "
+                    f"updated_by = $2::uuid, updated_at = now() WHERE id = $3::uuid",
+                    coerced, user_id, str(item["project_id"]),
+                )
+                applied = {column: str(coerced), "current_contract_sum": "recomputed"}
 
             else:
                 coerced = _coerce(kind, value)

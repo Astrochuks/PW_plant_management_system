@@ -169,8 +169,23 @@ class TestClientDefaultStateExtraction:
         assert extract_client_default_state("Delkolt Multiconcepts Nigeria Limited") is None
         assert extract_client_default_state(None) is None
 
-    async def test_seeded_defaults_in_db(self, db_conn):
-        seeded = await db_conn.fetchval(
-            "SELECT count(*) FROM clients WHERE default_state_id IS NOT NULL"
+    async def test_import_sets_default_state_for_state_govt_clients(self, db_conn):
+        """State-government clients get default_state_id at import time
+        (synthetic, inside the rolled-back transaction — independent of
+        live data)."""
+        state_id = await db_conn.fetchval(
+            "SELECT id FROM states WHERE name = 'Plateau'"
         )
-        assert seeded >= 15  # 18 at seed time; new clients may appear later
+        await db_conn.execute(
+            """INSERT INTO clients (name, normalized_name, client_type, default_state_id)
+               VALUES ('Plateau State Government', 'PLATEAU STATE GOVERNMENT',
+                       'state_government', $1)
+               ON CONFLICT (normalized_name) DO NOTHING""",
+            state_id,
+        )
+        seeded = await db_conn.fetchval(
+            """SELECT count(*) FROM clients
+               WHERE normalized_name = 'PLATEAU STATE GOVERNMENT'
+                 AND default_state_id IS NOT NULL"""
+        )
+        assert seeded == 1

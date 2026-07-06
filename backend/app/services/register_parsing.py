@@ -59,11 +59,12 @@ _MONTH_WORDS: frozenset[str] = frozenset(
     )
 )
 
+# STRICT: the register's own three patterns only (day-month-year with
+# ordinals handled upstream, month-year, bare year). Numeric slash/dash
+# dates are ambiguous (DD/MM vs MM/DD) → they queue instead.
 _DATE_FORMATS = [
     "%d %B, %Y", "%d %B %Y", "%B %d, %Y", "%B %d %Y",
     "%d %b, %Y", "%d %b %Y", "%b %d, %Y", "%b %d %Y",
-    "%d/%m/%Y", "%m/%d/%Y", "%Y-%m-%d", "%d-%m-%Y",
-    "%d-%B-%Y", "%d-%b-%Y",
     "%B, %Y", "%B %Y", "%b, %Y", "%b %Y",
     "%Y",
 ]
@@ -75,28 +76,30 @@ _DATE_FORMATS = [
 
 @dataclass(frozen=True)
 class ParsedDate:
-    """Result of parsing one register date cell.
+    """Result of parsing one register date cell (STRICT rules, user decision
+    2026-07-06: only the register's own patterns parse — "7th July, 2000",
+    "July, 2000", "2000" — everything else queues with nothing written).
 
     reason values:
       None                  clean parse — trust the value
       'empty'               cell empty / not text
       'noise'               deliberate no-data marker ("Nil", "-", "N/A")
-      'narrative_status'    status words with no date ("Ongoing")
-      'narrative_with_date' date extracted from prose — review recommended
-      'narrative_no_date'   prose with no extractable date — review required
-      'multi_date'          several dates present; first taken — review
-      'unparseable'         nothing worked — review required
+      'narrative_status'    status words with no date ("Ongoing") — review
+      'narrative_with_date' date found in prose. Only written when the
+                            field allows narrative extraction (retention
+                            application date); elsewhere queued with the
+                            extraction as a suggestion
+      'narrative_no_date'   prose with no extractable date — review
+      'multi_date'          several dates present; NOTHING written; first
+                            date offered as suggestion — review
+      'unparseable'         nothing worked — review
     """
 
     value: date | None
     raw: str | None
     reason: str | None
-
-    @property
-    def needs_review(self) -> bool:
-        return self.reason in (
-            "narrative_with_date", "narrative_no_date", "multi_date", "unparseable"
-        )
+    suggestion: date | None = None
+    needs_review: bool = False
 
 
 def _clean_date_text(text: str) -> str:
@@ -146,10 +149,14 @@ def _has_narrative_words(cleaned: str) -> bool:
     return False
 
 
-def parse_register_date(raw: Any) -> ParsedDate:
-    """Parse one register date cell. Never raises."""
+def parse_register_date(raw: Any, *, allow_narrative: bool = False) -> ParsedDate:
+    """Parse one register date cell under the STRICT rules. Never raises.
+
+    allow_narrative=True (retention application date only): "Applied for
+    17th November, 2014" → the date is extracted AND written. Everywhere
+    else narrative text queues with the extraction as a suggestion.
+    """
     try:
-        # Already a real date/datetime (openpyxl/pandas often deliver these)
         if isinstance(raw, datetime):
             return ParsedDate(raw.date(), str(raw), None)
         if isinstance(raw, date):
@@ -166,48 +173,54 @@ def parse_register_date(raw: Any) -> ParsedDate:
         if lowered in NOISE_VALUES or lowered in ("no", "yes"):
             return ParsedDate(None, text, "noise")
         if lowered in NARRATIVE_STATUS_VALUES:
-            return ParsedDate(None, text, "narrative_status")
+            return ParsedDate(None, text, "narrative_status", needs_review=True)
 
         cleaned = _clean_date_text(text)
 
-        # Multiple dates joined by '&' → take the first, flag it
-        if "&" in cleaned:
+        # Multiple dates → STRICT: write nothing, offer the first as a
+        # suggestion for the human to confirm.
+        mentions = _find_date_mentions(cleaned)
+        is_multi = (
+            "&" in cleaned
+            or len(mentions) > 1
+            or (len(cleaned.split(",")) >= 3 and len(mentions) >= 1
+                and _try_formats(cleaned) is None
+                and not _has_narrative_words(cleaned))
+        )
+        if is_multi:
             first = cleaned.split("&")[0].strip().rstrip(",").strip()
-            value = _try_formats(first)
-            if value is None:
-                mentions = _find_date_mentions(first)
-                value = _try_formats(mentions[0]) if mentions else None
-            return ParsedDate(value, text, "multi_date" if value else "unparseable")
+            suggestion = _try_formats(first)
+            if suggestion is None and mentions:
+                suggestion = _try_formats(mentions[0])
+            return ParsedDate(
+                None, text, "multi_date", suggestion=suggestion, needs_review=True
+            )
 
-        # Straight parse of the whole cleaned string
+        # Straight parse of the whole cleaned string — the clean path
         value = _try_formats(cleaned)
         if value is not None:
             return ParsedDate(value, text, None)
 
-        # Comma-chained dates: "15 February, 2001, 16 November, 2006"
-        parts = [p.strip() for p in cleaned.split(",")]
-        if len(parts) >= 3:
-            candidate = f"{parts[0]}, {parts[1]}"
-            value = _try_formats(candidate)
-            if value is not None:
-                return ParsedDate(value, text, "multi_date")
-
-        # Date embedded in prose: "Applied for 17 November, 2014"
-        mentions = _find_date_mentions(cleaned)
+        # Prose containing exactly one date
         if mentions:
-            value = _try_formats(mentions[0])
-            if value is not None:
-                reason = "multi_date" if len(mentions) > 1 else (
-                    "narrative_with_date" if _has_narrative_words(cleaned) else None
+            extracted = _try_formats(mentions[0])
+            if extracted is not None:
+                if allow_narrative:
+                    return ParsedDate(extracted, text, "narrative_with_date")
+                return ParsedDate(
+                    None, text, "narrative_with_date",
+                    suggestion=extracted, needs_review=True,
                 )
-                return ParsedDate(value, text, reason)
 
         if _has_narrative_words(cleaned):
-            return ParsedDate(None, text, "narrative_no_date")
-        return ParsedDate(None, text, "unparseable")
+            return ParsedDate(None, text, "narrative_no_date", needs_review=True)
+        return ParsedDate(None, text, "unparseable", needs_review=True)
 
     except Exception:  # defensive backstop — contract says never raise
-        return ParsedDate(None, str(raw) if raw is not None else None, "unparseable")
+        return ParsedDate(
+            None, str(raw) if raw is not None else None, "unparseable",
+            needs_review=True,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -216,15 +229,10 @@ def parse_register_date(raw: Any) -> ParsedDate:
 
 @dataclass(frozen=True)
 class ContractSum:
-    """Decomposed contract sum.
-
-    warnings values (any combination):
-      'revised_used_final'      "Revised from X to Y" → Y used
-      'multi_currency'          NGN + foreign amounts present; NGN used
-      'foreign_currency'        sum is not in NGN
-      'total_mismatch'          original + variation != stated total (>1% off)
-      'ambiguous_numbers'       several numbers, structure unclear; first used
-      'no_numbers_found'        text cell with nothing numeric — review
+    """Decomposed contract sum (STRICT rules, user decision 2026-07-06):
+    only a plain number parses ("2,000,982.7" → 2000982.7). Anything with
+    letters, '&', 'Original:', 'Revised…' etc. parses NOTHING and queues,
+    carrying the parser's best reading as suggestions for the human.
     """
 
     original: float | None
@@ -233,13 +241,9 @@ class ContractSum:
     currency: str | None
     raw: str | None
     warnings: tuple[str, ...] = field(default=())
-
-    @property
-    def needs_review(self) -> bool:
-        return any(
-            w in ("total_mismatch", "ambiguous_numbers", "no_numbers_found")
-            for w in self.warnings
-        )
+    needs_review: bool = False
+    suggested_original: float | None = None
+    suggested_variation: float | None = None
 
 
 def _extract_numbers(text: str) -> list[float]:
@@ -255,10 +259,46 @@ def _extract_numbers(text: str) -> list[float]:
     return out
 
 
+def _suggest_contract_decomposition(text: str) -> tuple[float | None, float | None]:
+    """Best-effort (original, variation) reading of a non-plain contract-sum
+    cell — used ONLY as queue suggestions, never written to the register."""
+    lowered = text.lower()
+
+    if "revised" in lowered or "then to" in lowered:
+        m_to = re.search(r"\bto:?\s+([\d,]+\.?\d*)", text, re.IGNORECASE)
+        if m_to:
+            try:
+                return float(m_to.group(1).replace(",", "")), None
+            except ValueError:
+                pass
+        nums = _extract_numbers(text)
+        return (nums[-1] if nums else None), None
+
+    if "ngn" in lowered:
+        m = re.search(r"([\d,]+\.?\d*)\s*NGN", text, re.IGNORECASE)
+        if m:
+            try:
+                return float(m.group(1).replace(",", "")), None
+            except ValueError:
+                pass
+
+    nums = _extract_numbers(text)
+    m_total = re.search(r"total\s*:?\s*([\d,]+\.?\d*)", text, re.IGNORECASE)
+    if m_total:
+        try:
+            total = float(m_total.group(1).replace(",", ""))
+            nums = [n for n in nums if n != total] or nums
+        except ValueError:
+            pass
+    original = nums[0] if nums else None
+    variation = nums[1] if len(nums) >= 2 else None
+    return original, variation
+
+
 def parse_register_contract_sum(raw: Any) -> ContractSum:
-    """Decompose one contract-sum cell. Never raises."""
+    """STRICT: plain numbers only; everything else queues. Never raises."""
     try:
-        if raw is None or (isinstance(raw, float) and raw != raw):  # NaN check
+        if raw is None or (isinstance(raw, float) and raw != raw):  # NaN
             return ContractSum(None, None, None, None, None)
 
         if isinstance(raw, (int, float)):
@@ -268,69 +308,28 @@ def parse_register_contract_sum(raw: Any) -> ContractSum:
         if not text or text.lower().rstrip(".") in NOISE_VALUES:
             return ContractSum(None, None, None, None, text or None)
 
-        lowered = text.lower()
+        # The ONLY accepted text shape: digits with comma separators and an
+        # optional decimal part, e.g. "2,000,982.7"
+        if re.fullmatch(r"\d[\d,]*(?:\.\d+)?", text):
+            try:
+                return ContractSum(float(text.replace(",", "")), None, None, "NGN", text)
+            except ValueError:
+                pass  # falls through to review
 
-        # Foreign / mixed currency first — number extraction differs
-        if "ngn" in lowered and "usd" in lowered:
-            m = re.search(r"([\d,]+\.?\d*)\s*NGN", text, re.IGNORECASE)
-            if m:
-                return ContractSum(
-                    float(m.group(1).replace(",", "")), None, None, "NGN", text,
-                    ("multi_currency",),
-                )
-        if "euro" in lowered or "eur " in lowered:
-            nums = _extract_numbers(text)
-            if nums:
-                return ContractSum(nums[0], None, None, "EUR", text, ("foreign_currency",))
-        if "usd" in lowered or "dollar" in lowered:
-            nums = _extract_numbers(text)
-            if nums:
-                return ContractSum(nums[0], None, None, "USD", text, ("foreign_currency",))
-
-        # "Revised from X to Y" / "Revised to Y from X" / "X then to Y"
-        if "revised" in lowered or "then to" in lowered:
-            m_to = re.search(r"\bto:?\s+([\d,]+\.?\d*)", text, re.IGNORECASE)
-            nums = _extract_numbers(text)
-            final = (
-                float(m_to.group(1).replace(",", "")) if m_to
-                else (nums[-1] if nums else None)
-            )
-            if final is not None:
-                return ContractSum(final, None, None, "NGN", text, ("revised_used_final",))
-            return ContractSum(None, None, None, None, text, ("no_numbers_found",))
-
-        # "Original: X, Variation: Y, TOTAL: Z" and variants
-        has_structure = "original" in lowered or "variation" in lowered or "total" in lowered
-        if has_structure:
-            m_total = re.search(r"total\s*:?\s*([\d,]+\.?\d*)", text, re.IGNORECASE)
-            total = float(m_total.group(1).replace(",", "")) if m_total else None
-            nums = _extract_numbers(text)
-            if total is not None and total in nums:
-                nums = [n for n in nums if n != total] or nums
-            original = nums[0] if nums else None
-            variation = nums[1] if len(nums) >= 2 else None
-
-            warnings: list[str] = []
-            if total is not None and original is not None and variation is not None:
-                if abs((original + variation) - total) > 0.01 * total:
-                    warnings.append("total_mismatch")
-            if len(nums) > 2:
-                warnings.append("ambiguous_numbers")
-            return ContractSum(original, variation, total, "NGN", text, tuple(warnings))
-
-        # Generic
-        nums = _extract_numbers(text)
-        if not nums:
-            return ContractSum(None, None, None, None, text, ("no_numbers_found",))
-        if len(nums) == 1:
-            return ContractSum(nums[0], None, None, "NGN", text)
-        return ContractSum(nums[0], None, None, "NGN", text, ("ambiguous_numbers",))
+        so, sv = _suggest_contract_decomposition(text)
+        return ContractSum(
+            None, None, None, None, text,
+            warnings=("not_plain_number",),
+            needs_review=True,
+            suggested_original=so,
+            suggested_variation=sv,
+        )
 
     except Exception:  # defensive backstop — contract says never raise
         return ContractSum(
             None, None, None, None,
             str(raw) if raw is not None else None,
-            ("no_numbers_found",),
+            warnings=("not_plain_number",), needs_review=True,
         )
 
 
@@ -652,3 +651,121 @@ def normalize_client_name(name: Any) -> str:
     whitespace collapsed. 'Plateau State Govt.' == 'PLATEAU STATE GOVT'."""
     s = re.sub(r"[^\w\s]", " ", str(name or "").upper())
     return re.sub(r"\s+", " ", s).strip()
+
+
+# ---------------------------------------------------------------------------
+# Client identity (user decisions 2026-07-06)
+# ---------------------------------------------------------------------------
+# - Sheet names are NOT clients. Row 2 of each sheet is a group label; the
+#   Client column holds real clients; blank cells inherit the group.
+# - Categories derive from the sheet: state-named → state_government;
+#   FAAN/FMW/FERMA/FCDA → federal_government; PRIVATE CLIENTS → private.
+# - "Govt." expands to "Government"; "Government of Akwa Ibom (State)" and
+#   "Akwa Ibom State Govt" are the SAME client → "Akwa Ibom State Government".
+
+CLIENT_CATEGORIES = ("state_government", "federal_government", "private")
+
+_FEDERAL_SHEETS: frozenset[str] = frozenset({"FAAN", "FMW", "FERMA", "FCDA", "FCDA ABUJA"})
+
+
+def sheet_client_category(sheet_name: str) -> str | None:
+    """state_government | federal_government | private, from the sheet name."""
+    key = (sheet_name or "").strip()
+    if key.lower() in STATE_CANONICAL:
+        return "state_government"
+    if key.upper() in _FEDERAL_SHEETS:
+        return "federal_government"
+    if key.upper() == "PRIVATE CLIENTS":
+        return "private"
+    return None
+
+
+_GOVT_TOKEN = re.compile(r"\bGOVT\b\.?|\bGOV\b\.?|\bGOVN'?T\b\.?", re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class ClientIdentity:
+    """Canonical identity for one client mention."""
+
+    display_name: str
+    normalized_name: str
+    client_type: str | None
+    state_name: str | None = None   # for state governments
+    confident: bool = True
+
+
+def _smart_title(text: str) -> str:
+    """Title-case that preserves acronyms (FAAN, FMW, RCCG…)."""
+    words = []
+    for w in text.split():
+        if w.isupper() and 2 <= len(w) <= 6:
+            words.append(w)
+        else:
+            words.append(w.capitalize() if w.islower() or w.isupper() else w)
+    return " ".join(words)
+
+
+def canonicalize_client(
+    raw: Any,
+    category: str | None,
+    sheet_state: str | None = None,
+) -> ClientIdentity | None:
+    """Canonical client identity for a Client-column value. Never raises.
+
+    Returns None for empty input (caller falls back to the sheet's group
+    label / state government). confident=False → review queue.
+    """
+    try:
+        text = re.sub(r"\s+", " ", str(raw or "").replace("_x000D_", " ")).strip(" .,;")
+        if not text:
+            return None
+
+        expanded = _GOVT_TOKEN.sub("GOVERNMENT", text.upper())
+        expanded = re.sub(r"\s+", " ", expanded).strip(" .,")
+
+        # State-government patterns → one canonical entity per state
+        for pattern in (
+            r"^(?:THE\s+)?GOVERNMENT\s+OF\s+(.+?)(?:\s+STATE)?$",
+            r"^(?:THE\s+)?(.+?)\s+STATE\s+GOVERNMENT$",
+            # bare "Adamawa State" in a Client cell IS the state government
+            r"^(?:THE\s+)?(.+?)\s+STATE$",
+        ):
+            m = re.match(pattern, expanded)
+            if m:
+                candidate = m.group(1).strip().lower()
+                if candidate in STATE_CANONICAL:
+                    state = STATE_CANONICAL[candidate]
+                    display = f"{state} State Government"
+                    return ClientIdentity(
+                        display,
+                        normalize_client_name(display),
+                        "state_government",
+                        state_name=state,
+                    )
+
+        # Everything else: cleaned display, category from the sheet
+        display = _smart_title(_GOVT_TOKEN.sub("Government", text))
+        display = re.sub(r"\s+", " ", display).strip(" .,")
+        return ClientIdentity(
+            display,
+            normalize_client_name(display),
+            category,
+            state_name=None,
+            confident=category is not None,
+        )
+    except Exception:  # defensive backstop
+        return ClientIdentity(
+            str(raw)[:200], normalize_client_name(raw), category, confident=False
+        )
+
+
+def default_client_for_sheet(sheet_name: str) -> ClientIdentity | None:
+    """The client a blank Client cell inherits on a state-named sheet."""
+    key = (sheet_name or "").strip().lower()
+    state = STATE_CANONICAL.get(key)
+    if state is None:
+        return None
+    display = f"{state} State Government"
+    return ClientIdentity(
+        display, normalize_client_name(display), "state_government", state_name=state
+    )

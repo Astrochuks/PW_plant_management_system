@@ -310,6 +310,7 @@ export interface ReviewQueuePage {
 
 export interface ReviewQueueSummary {
   open_total: number;
+  by_sheet: { sheet_name: string | null; n: number }[];
   by_reason: { reason: string; n: number }[];
   by_field: { field: string; n: number }[];
 }
@@ -341,6 +342,10 @@ export async function getReviewQueueSummary(): Promise<ReviewQueueSummary> {
   const data = response.data.data;
   return {
     open_total: Number(data.open_total ?? 0),
+    by_sheet: (data.by_sheet ?? []).map((r: { sheet_name: string | null; n: number }) => ({
+      sheet_name: r.sheet_name,
+      n: Number(r.n ?? 0),
+    })),
     by_reason: (data.by_reason ?? []).map((r: { reason: string; n: number }) => ({
       reason: r.reason,
       n: Number(r.n ?? 0),
