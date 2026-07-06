@@ -65,22 +65,35 @@ async def persist_award_letters(
                     ),
                 )
 
-        clients_upserted = 0
-        for norm, (display, ctype, state_name) in distinct.items():
-            state_id = (
-                state_map.get(state_name.strip().lower()) if state_name else None
+        # ONE round-trip for all client upserts — under pooler degradation
+        # (~1s/round-trip observed 2026-07-06) the previous per-client loop
+        # was 33 round-trips and the import's main bottleneck.
+        clients_before = await conn.fetchval(
+            "SELECT count(*) FROM clients", timeout=30
+        )
+        upsert_args = [
+            (
+                display,
+                norm,
+                ctype,
+                state_map.get(state_name.strip().lower()) if state_name else None,
             )
-            result = await conn.execute(
-                """INSERT INTO clients (name, normalized_name, client_type, default_state_id)
-                   VALUES ($1, $2, $3, $4::uuid)
-                   ON CONFLICT (normalized_name) DO UPDATE SET
-                       client_type = COALESCE(clients.client_type, EXCLUDED.client_type),
-                       default_state_id = COALESCE(clients.default_state_id, EXCLUDED.default_state_id),
-                       updated_at = now()""",
-                display, norm, ctype, state_id,
-            )
-            if result == "INSERT 0 1":
-                clients_upserted += 1
+            for norm, (display, ctype, state_name) in distinct.items()
+        ]
+        await conn.executemany(
+            """INSERT INTO clients (name, normalized_name, client_type, default_state_id)
+               VALUES ($1, $2, $3, $4::uuid)
+               ON CONFLICT (normalized_name) DO UPDATE SET
+                   client_type = COALESCE(clients.client_type, EXCLUDED.client_type),
+                   default_state_id = COALESCE(clients.default_state_id, EXCLUDED.default_state_id),
+                   updated_at = now()""",
+            upsert_args,
+            timeout=60,
+        )
+        clients_after = await conn.fetchval(
+            "SELECT count(*) FROM clients", timeout=30
+        )
+        clients_upserted = clients_after - clients_before
         client_map = {
             r["normalized_name"]: str(r["id"])
             for r in await conn.fetch("SELECT id, normalized_name FROM clients")
@@ -105,12 +118,14 @@ async def persist_award_letters(
         # ── clean reimport ──────────────────────────────────────────────
         deleted = await conn.fetchval(
             "WITH d AS (DELETE FROM projects WHERE is_legacy = true RETURNING 1) "
-            "SELECT count(*) FROM d"
+            "SELECT count(*) FROM d",
+            timeout=60,
         )
         # Unresolved queue rows from prior imports are superseded by this
         # parse; resolved rows are kept as an audit trail.
         await conn.execute(
-            "DELETE FROM project_register_review_queue WHERE resolved = false"
+            "DELETE FROM project_register_review_queue WHERE resolved = false",
+            timeout=60,
         )
 
         # ── batch insert projects ───────────────────────────────────────
@@ -136,7 +151,7 @@ async def persist_award_letters(
         created = 0
         try:
             async with conn.transaction():  # savepoint
-                await conn.executemany(sql, args_list)
+                await conn.executemany(sql, args_list, timeout=120)
             created = len(args_list)
         except Exception:
             # Fall back to row-by-row with individual savepoints so one bad
@@ -197,6 +212,7 @@ async def persist_award_letters(
                 field, raw_value, reason, suggested_value)
                VALUES ($1::uuid, $2, $3, $4::uuid, $5, $6, $7, $8)""",
             queue_args,
+            timeout=60,
         )
 
     return {

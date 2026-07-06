@@ -307,6 +307,20 @@ async def import_award_letters(
             )
             if attempt < 3:
                 await _asyncio.sleep(2 * attempt)
+    if stats is not None and stats["created"] == 0 and parsed["projects"]:
+        first_errors = "; ".join(
+            f"{e.get('sheet')}: {e.get('error', '')[:120]}"
+            for e in stats["insert_errors"][:3]
+        ) or "no row-level errors captured"
+        raise DatabaseError(
+            message=(
+                f"Import saved 0 of {len(parsed['projects'])} projects — "
+                f"every row was rejected. First errors: {first_errors}"
+            ),
+            operation="import_award_letters",
+            retryable=False,
+        )
+
     if stats is None:
         raise DatabaseError(
             message=(

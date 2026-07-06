@@ -155,7 +155,7 @@ function ReviewQueueContent() {
     [sheet, reason, field, showResolved, page],
   )
 
-  const { data: summary } = useReviewQueueSummary()
+  const { data: summary, error: summaryError } = useReviewQueueSummary()
   const { data, isLoading } = useReviewQueue(params)
   const bulkDismiss = useBulkDismissReviewItems()
 
@@ -203,6 +203,12 @@ function ReviewQueueContent() {
           {summary?.open_total ?? '—'} open
         </Badge>
       </div>
+
+      {summaryError && (
+        <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+          Failed to load queue summary: {summaryError instanceof Error ? summaryError.message : String(summaryError)}
+        </div>
+      )}
 
       {/* Sheet-by-sheet cross-check — the primary workflow */}
       <div>

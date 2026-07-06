@@ -203,6 +203,10 @@ export function useReviewQueue(params: ReviewQueueParams = {}) {
     queryFn: () => getReviewQueue(params),
     staleTime: 2 * 60 * 1000,
     placeholderData: keepPreviousData,
+    // Trust the actual request, not the browser's online heuristic —
+    // embedded/flaky environments misreport offline and paused the query
+    networkMode: 'always',
+    retry: 2,
   });
 }
 
@@ -211,6 +215,9 @@ export function useReviewQueueSummary() {
     queryKey: reviewQueueKeys.summary(),
     queryFn: getReviewQueueSummary,
     staleTime: 2 * 60 * 1000,
+    refetchOnMount: 'always',
+    networkMode: 'always',
+    retry: 2,
   });
 }
 
