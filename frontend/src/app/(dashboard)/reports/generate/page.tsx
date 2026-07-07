@@ -736,7 +736,11 @@ function KpiCard({ label, value, color }: { label: string; value: string | numbe
   );
 }
 
-function ConditionBadge({ condition }: { condition: string }) {
+function ConditionBadge({ condition }: { condition: string | null }) {
+  // Reconciliation rows (e.g. "Workshop / general stock") have no condition
+  if (!condition) {
+    return <span className="text-muted-foreground text-[10px]">—</span>;
+  }
   const colors: Record<string, string> = {
     working: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300',
     breakdown: 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300',
