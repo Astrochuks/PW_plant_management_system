@@ -691,7 +691,7 @@ async def process_weekly_report(
                 })
             else:
                 # New plant - will resolve fleet_type in batch later
-                plant_data["condition"] = "unverified"  # Default for new plants
+                plant_data["condition"] = "standby"  # New plant, no info yet ('unverified' retired)
                 plants_to_insert.append(plant_data)
 
         # For plants with no remarks AND no usage, use previous week's remarks for condition derivation
@@ -783,7 +783,10 @@ async def process_weekly_report(
                     breakdown_hours=usage.get("breakdown_hours", 0),
                     off_hire=usage.get("off_hire", False),
                 )
-                plant["condition"] = condition
+                if condition:
+                    plant["condition"] = condition
+                # None → key untouched: inserts keep their 'standby' default,
+                # updates COALESCE to the existing condition (carry-forward)
                 plant["condition_confidence"] = parsed.confidence
                 # Store parsed data for weekly record
                 plant["_parsed"] = parsed
@@ -1172,7 +1175,7 @@ async def process_purchase_order(
                     resolved_type = await fetchval("SELECT resolve_fleet_type($1)", fleet_num)
                     new_plant = await fetchrow(
                         """INSERT INTO plants_master (fleet_number, fleet_type, condition, physical_verification)
-                           VALUES ($1, $2, 'unverified', false) RETURNING id""",
+                           VALUES ($1, $2, 'standby', false) RETURNING id""",
                         fleet_num, resolved_type,
                     )
                     plant_id = new_plant["id"]
@@ -3276,7 +3279,7 @@ async def process_direct_submission(
                             fleet_number,
                             row.get("fleet_number"),  # description fallback to fleet_number
                             location_id,
-                            row["condition"] or "unverified",
+                            row["condition"] or "standby",
                             row["physical_verification"] or False,
                             week_ending_date if row["physical_verification"] else None,
                             year if row["physical_verification"] else None,

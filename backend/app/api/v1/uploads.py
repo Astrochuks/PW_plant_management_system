@@ -1530,6 +1530,7 @@ async def preview_weekly_report(
                 breakdown_hours=breakdown_hours,
                 off_hire=off_hire,
                 physical_verification=physical_verification,
+                previous_condition=previous_condition,
             )
 
         # Auto-detect transfers from remarks
@@ -1684,14 +1685,10 @@ async def preview_weekly_report(
         "condition_options": [
             "working",
             "standby",
-            "under_repair",
             "breakdown",
-            "faulty",
             "off_hire",
             "scrap",
             "missing",
-            "gpm_assessment",
-            "unverified",
         ],
         "plants": preview_plants,
         "missing_plants": missing_plants,

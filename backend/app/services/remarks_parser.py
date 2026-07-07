@@ -15,18 +15,17 @@ from app.monitoring.logging import get_logger
 logger = get_logger(__name__)
 
 
-# Valid condition values
+# Valid condition values — SIX-value taxonomy (user decision 2026-07-07).
+# under_repair / faulty / gpm_assessment collapsed into breakdown;
+# 'unverified' retired: unknown = condition None → previous value carried
+# forward (plants_master update uses COALESCE; reports carry forward).
 VALID_CONDITIONS = [
-    "working",        # Working normally, in use (was "operational")
-    "standby",        # Available but not currently in use
-    "under_repair",   # Being repaired or maintained
-    "breakdown",      # Not working due to fault/damage
-    "faulty",         # Has a fault but still partially functional
-    "scrap",          # Written off, decommissioned
-    "missing",        # Cannot be found or verified
-    "off_hire",       # Contractually not available
-    "gpm_assessment", # Needs GPM assessment/review
-    "unverified",     # Cannot determine from available data
+    "working",    # Working normally, in use
+    "standby",    # Available but not currently in use
+    "breakdown",  # Not operational: broken, faulty, under repair, needs assessment
+    "missing",    # Cannot be found or verified
+    "scrap",      # Written off, decommissioned
+    "off_hire",   # Contractually not available
 ]
 
 
@@ -213,7 +212,7 @@ def fallback_parse(
             confidence=0.7,
         )
 
-    condition = "unverified"
+    condition = None  # unknown → carried forward downstream
 
     # 1. OFF HIRE COLUMN takes precedence
     if off_hire:
@@ -238,13 +237,13 @@ def fallback_parse(
 
     # Check for "TO BE VERIFIED" or "FOR CHECKING" first
     if "TO BE VERIFIED" in remarks_normalized or "FOR CHECKING" in remarks_normalized:
-        condition = "unverified"
-        condition_notes = "Awaiting verification"
+        condition = None  # unknown — keep last known condition
+        condition_notes = "Awaiting verification — carried forward"
 
     # GPM Assessment
     elif "GPM" in remarks_normalized or "REQUIRE" in remarks_normalized and "ASSESSMENT" in remarks_normalized:
-        condition = "gpm_assessment"
-        condition_notes = "Requires GPM assessment"
+        condition = "breakdown"  # taxonomy collapse: gpm_assessment → breakdown
+        condition_notes = "Requires GPM assessment (breakdown)"
 
     # SCRAP / decommissioned
     elif any(kw in remarks_normalized for kw in ["SCRAP", "WRITE OFF", "DECOMMISSION", "CONDEMNED"]):
@@ -313,8 +312,8 @@ def fallback_parse(
         "UNDER REPAIR", "UNDER MAINTENANCE", "BEING REPAIRED",
         "AWAITING PARTS", "WAITING FOR PARTS", "PARTS ORDERED",
     ]):
-        condition = "under_repair"
-        condition_notes = "Under repair/maintenance"
+        condition = "breakdown"  # taxonomy collapse: under_repair → breakdown
+        condition_notes = "Under repair/maintenance (breakdown)"
 
     # STANDBY patterns - in workshop/location/container without issues
     elif any(kw in remarks_normalized for kw in [
@@ -349,19 +348,19 @@ def fallback_parse(
         "TYRES REQUIRED", "BRAKE LINING REQUIRED",
         "FAULTY", "DEFECTIVE", "DEFECT", "MALFUNCTIONING",
     ]):
-        condition = "faulty"
-        condition_notes = "Has fault/problem"
+        condition = "breakdown"  # taxonomy collapse: faulty → breakdown
+        condition_notes = "Has fault/problem (breakdown)"
 
     # Catch-all "PROBLEM" — generic problem keyword
     elif "PROBLEM" in remarks_normalized and "NO PROBLEM" not in remarks_normalized:
-        condition = "faulty"
-        condition_notes = "Problem mentioned in remarks"
+        condition = "breakdown"
+        condition_notes = "Problem mentioned in remarks (breakdown)"
 
     # "FROM [location]" patterns
     elif remarks_normalized.startswith("FROM ") and len(remarks_normalized) > 5:
         if any(kw in remarks_normalized for kw in ["FOR REPAIRS", "FOR CHECKING", "FOR REPAIR"]):
-            condition = "under_repair"
-            condition_notes = "Transferred for repairs"
+            condition = "breakdown"
+            condition_notes = "Transferred for repairs (breakdown)"
         else:
             condition = "standby"
             condition_notes = "Transferred from another site"
@@ -378,8 +377,8 @@ def fallback_parse(
             condition = "standby"
             condition_notes = "On standby"
         else:
-            condition = "unverified"
-            condition_notes = "No clear data available"
+            condition = None  # unknown — keep last known condition
+            condition_notes = "No clear data available — carried forward"
 
     # Check for OUTBOUND transfers in remarks if not in columns
     # We only track outbound (going TO), not inbound (coming FROM)
@@ -484,8 +483,9 @@ def derive_condition(
     breakdown_hours: float,
     off_hire: bool,
     physical_verification: bool | None = None,
-) -> str:
-    """Derive final plant condition combining AI parsing with explicit data.
+) -> str | None:
+    """Derive final plant condition combining parsing with explicit data.
+    Returns None when unknown — callers must carry the previous value forward.
 
     This provides a second layer of validation on top of AI parsing.
 
@@ -504,23 +504,25 @@ def derive_condition(
     if off_hire:
         return "off_hire"
 
-    # 2. If AI has high confidence, trust it
-    if parsed.confidence >= 0.7:
+    # 2. If parsing has high confidence AND an actual condition, trust it
+    if parsed.confidence >= 0.7 and parsed.condition:
         return parsed.condition
 
     # 3. Fallback to hours-based derivation
     if breakdown_hours > hours_worked and breakdown_hours > 0:
         return "breakdown"
     elif hours_worked > 0:
-        return "operational"
+        return "working"  # (was 'operational' — never a valid value)
     elif standby_hours > 0:
         return "standby"
 
-    # 4. Use AI result even with lower confidence
+    # 4. Use parsed result even with lower confidence
     if parsed.condition and parsed.condition in VALID_CONDITIONS:
         return parsed.condition
 
-    return "unverified"
+    # Unknown → None: callers keep the previous condition (COALESCE on
+    # plants_master; carry-forward in as-of reports)
+    return None
 
 
 # Backwards compatibility - deprecated functions

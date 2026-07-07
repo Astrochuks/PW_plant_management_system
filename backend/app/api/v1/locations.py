@@ -436,7 +436,7 @@ async def get_location_plants(
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
-    status: str | None = Query(None, pattern="^(working|standby|under_repair|breakdown|faulty|scrap|missing|off_hire|gpm_assessment|unverified)$"),
+    status: str | None = Query(None, pattern="^(working|standby|breakdown|scrap|missing|off_hire)$"),
 ) -> dict[str, Any]:
     """Get plants at a specific location.
 

@@ -102,6 +102,7 @@ def detect_condition_from_keywords(
     breakdown_hours: float,
     off_hire: bool,
     physical_verification: bool,
+    previous_condition: str | None = None,
 ) -> DetectedCondition:
     """Detect plant condition using keywords and data.
 
@@ -230,18 +231,20 @@ def detect_condition_from_keywords(
             "WORK IN PROGRESS",
         ]
         if any(kw in r for kw in repair_keywords):
+            # Taxonomy collapse (2026-07-07): under_repair → breakdown
             return DetectedCondition(
-                condition="under_repair",
+                condition="breakdown",
                 confidence="high",
-                reason=f"Repair work: {remarks[:50]}"
+                reason=f"Repair work (breakdown): {remarks[:50]}"
             )
 
         # GPM ASSESSMENT (before standby/faulty — "REQUIRE ASSESSMENT" is specific)
         if "GPM" in r or ("REQUIRE" in r and "ASSESS" in r):
+            # Taxonomy collapse (2026-07-07): gpm_assessment → breakdown
             return DetectedCondition(
-                condition="gpm_assessment",
+                condition="breakdown",
                 confidence="high",
-                reason=f"Keyword detected: {remarks[:50]}"
+                reason=f"Needs assessment (breakdown): {remarks[:50]}"
             )
 
         # STANDBY - idle/available (check BEFORE faulty so
@@ -283,18 +286,19 @@ def detect_condition_from_keywords(
         ]
         if any(kw in r for kw in faulty_keywords):
             if not any(kw in r for kw in ["NO PROBLEM", "PROBLEM SOLVED", "PROBLEM FIXED"]):
+                # Taxonomy collapse (2026-07-07): faulty → breakdown
                 return DetectedCondition(
-                    condition="faulty",
+                    condition="breakdown",
                     confidence="high",
-                    reason=f"Fault detected: {remarks[:50]}"
+                    reason=f"Fault detected (breakdown): {remarks[:50]}"
                 )
 
         # Catch-all "PROBLEM" — if "PROBLEM" appears and nothing else matched
         if "PROBLEM" in r and not any(kw in r for kw in ["NO PROBLEM", "PROBLEM SOLVED"]):
             return DetectedCondition(
-                condition="faulty",
+                condition="breakdown",
                 confidence="medium",
-                reason=f"Problem mentioned: {remarks[:50]}"
+                reason=f"Problem mentioned (breakdown): {remarks[:50]}"
             )
 
         # "FROM [location]" pattern — transferred from somewhere
@@ -302,9 +306,9 @@ def detect_condition_from_keywords(
             # Check if it also mentions repairs/checking
             if any(kw in r for kw in ["FOR REPAIRS", "FOR CHECKING", "FOR REPAIR"]):
                 return DetectedCondition(
-                    condition="under_repair",
+                    condition="breakdown",
                     confidence="high",
-                    reason=f"Transferred for repairs: {remarks[:50]}"
+                    reason=f"Transferred for repairs (breakdown): {remarks[:50]}"
                 )
             return DetectedCondition(
                 condition="standby",
@@ -314,10 +318,11 @@ def detect_condition_from_keywords(
 
         # "TO BE CHECK" / "TO BE CHECKED" — unverified
         if "TO BE CHECK" in r:
+            # 'unverified' is retired — carry the last known condition
             return DetectedCondition(
-                condition="unverified",
-                confidence="medium",
-                reason=f"Pending verification: {remarks[:50]}"
+                condition=previous_condition or "standby",
+                confidence="low",
+                reason=f"Pending verification — carried forward: {remarks[:50]}"
             )
 
         # Check for "FIXED" or "REPAIRED" - means now working
@@ -330,10 +335,15 @@ def detect_condition_from_keywords(
 
     # 3. Not physically verified (after remarks so keywords like "not seen" take priority)
     if not physical_verification:
+        # 'unverified' is retired — keep what we last knew about the plant
         return DetectedCondition(
-            condition="unverified",
-            confidence="high",
-            reason="Not physically verified"
+            condition=previous_condition or "standby",
+            confidence="low",
+            reason=(
+                "Not physically verified — carried forward last condition"
+                if previous_condition else
+                "Not physically verified — no history, defaulting to standby"
+            ),
         )
 
     # 4. Empty remarks with no usage data → standby
@@ -364,11 +374,15 @@ def detect_condition_from_keywords(
             reason=f"Has standby hours: {standby_hours}"
         )
 
-    # 6. Default - low confidence, admin should check
+    # 6. Default — carry the last known condition ('unverified' is retired)
     return DetectedCondition(
-        condition="unverified",
+        condition=previous_condition or "standby",
         confidence="low",
-        reason="No clear keywords or data"
+        reason=(
+            "No clear keywords or data — carried forward last condition"
+            if previous_condition else
+            "No clear keywords or data — no history, defaulting to standby"
+        ),
     )
 
 

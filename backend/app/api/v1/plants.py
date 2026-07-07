@@ -197,7 +197,7 @@ async def acknowledge_event(
 async def search_plants(
     query: str,
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
-    condition: str | None = Query(None, pattern="^(working|standby|under_repair|breakdown|faulty|scrap|missing|off_hire|gpm_assessment|unverified)$"),
+    condition: str | None = Query(None, pattern="^(working|standby|breakdown|scrap|missing|off_hire)$"),
     location_id: UUID | None = None,
     fleet_type: str | None = Query(None, description="Filter by fleet type name"),
     limit: int = Query(20, ge=1, le=100),
@@ -327,7 +327,7 @@ async def get_fleet_utilization(
     limit: int = Query(20, ge=1, le=100),
     location_id: UUID | None = None,
     fleet_type: str | None = Query(None, description="Filter by fleet type name"),
-    condition: str | None = Query(None, pattern="^(working|standby|under_repair|breakdown|faulty|scrap|missing|off_hire|gpm_assessment|unverified)$", description="Filter by condition"),
+    condition: str | None = Query(None, pattern="^(working|standby|breakdown|scrap|missing|off_hire)$", description="Filter by condition"),
     search: str | None = None,
 ) -> dict[str, Any]:
     """Get fleet utilization view with comprehensive stats.
@@ -444,7 +444,6 @@ async def export_fleet_types_excel(
         {"key": "working", "header": "Working", "width": 10},
         {"key": "standby", "header": "Standby", "width": 10},
         {"key": "breakdown", "header": "Breakdown", "width": 12},
-        {"key": "under_repair", "header": "Under Repair", "width": 12},
         {"key": "other", "header": "Other", "width": 10},
     ]
 
@@ -899,7 +898,7 @@ async def list_plants(
     - `columns=fleet_number,condition,current_location` - Only these 3 fields
 
     **Condition values:**
-    working, standby, under_repair, breakdown, scrap, missing, off_hire, gpm_assessment, unverified
+    working, standby, breakdown, scrap, missing, off_hire
     """
     # Parse multi-value filters
     condition_list = [c.strip() for c in condition.split(",")] if condition else None
@@ -1216,7 +1215,7 @@ async def update_plant(
     purchase_site: str | None = Query(None, description="Site/location where the plant was purchased"),
     components: str | None = Query(None, description="JSON array of components, e.g. [{\"name\":\"Mixer\",\"model\":\"XY1\"}]"),
     current_location_id: UUID | None = Query(None, description="Current location UUID"),
-    condition: str | None = Query(None, pattern="^(working|standby|under_repair|breakdown|faulty|scrap|missing|off_hire|gpm_assessment|unverified)$", description="Plant condition"),
+    condition: str | None = Query(None, pattern="^(working|standby|breakdown|scrap|missing|off_hire)$", description="Plant condition"),
     physical_verification: bool | None = Query(None, description="Has been physically verified"),
     division: str | None = Query(None, pattern="^(mining|civil)$", description="Division: mining or civil"),
 ) -> dict[str, Any]:

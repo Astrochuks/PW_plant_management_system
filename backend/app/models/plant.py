@@ -74,7 +74,7 @@ class PlantUpdate(BaseModel):
     division: str | None = Field(None, pattern="^(mining|civil)$", description="Division: mining or civil")
     condition: str | None = Field(
         None,
-        pattern="^(working|standby|under_repair|breakdown|faulty|scrap|missing|off_hire|gpm_assessment|unverified)$",
+        pattern="^(working|standby|breakdown|scrap|missing|off_hire)$",
         description="Unified condition field for the plant",
     )
     physical_verification: bool | None = None

@@ -150,10 +150,8 @@ async def get_my_site(
                COALESCE(p.standby, 0)::int AS standby,
                COALESCE(p.breakdown, 0)::int AS breakdown,
                COALESCE(p.missing, 0)::int AS missing,
-               COALESCE(p.faulty, 0)::int AS faulty,
                COALESCE(p.scrap, 0)::int AS scrap,
                COALESCE(p.off_hire, 0)::int AS off_hire,
-               COALESCE(p.unverified, 0)::int AS unverified,
                ls.last_submission
            FROM locations l
            LEFT JOIN states s ON s.id = l.state_id
@@ -164,10 +162,8 @@ async def get_my_site(
                    count(*) FILTER (WHERE condition = 'standby')::int AS standby,
                    count(*) FILTER (WHERE condition = 'breakdown')::int AS breakdown,
                    count(*) FILTER (WHERE condition = 'missing')::int AS missing,
-                   count(*) FILTER (WHERE condition = 'faulty')::int AS faulty,
                    count(*) FILTER (WHERE condition = 'scrap')::int AS scrap,
-                   count(*) FILTER (WHERE condition = 'off_hire')::int AS off_hire,
-                   count(*) FILTER (WHERE condition = 'unverified')::int AS unverified
+                   count(*) FILTER (WHERE condition = 'off_hire')::int AS off_hire
                FROM plants_master pm
                WHERE pm.current_location_id = l.id
            ) p ON TRUE
