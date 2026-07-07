@@ -98,7 +98,7 @@ function ProjectsPageInner() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <div className="p-2.5 rounded-xl bg-primary/10">
             <FolderKanban className="h-6 w-6 text-primary" />
@@ -114,7 +114,7 @@ function ProjectsPageInner() {
         </div>
 
         {isAdmin && (
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button asChild size="sm" variant="outline">
               <Link href="/projects/submissions">
                 <UploadCloud className="h-4 w-4 mr-2" />

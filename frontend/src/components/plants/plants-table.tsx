@@ -405,9 +405,9 @@ export function PlantsTable({
   return (
     <div className="space-y-0">
       {/* Table Toolbar */}
-      <div className="flex items-center justify-between py-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 py-2">
         <p className="text-sm text-muted-foreground">{resultText}</p>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {/* Add Plant (admin only) */}
           {isAdmin && (
             <Button variant="default" size="sm" asChild>

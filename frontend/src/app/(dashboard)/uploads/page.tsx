@@ -133,14 +133,14 @@ function UploadPageContent() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Weekly Report Upload</h1>
           <p className="text-sm text-muted-foreground mt-1">
             Upload, review, and confirm weekly plant reports
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" asChild>
             <a href="/uploads/submissions">View Submissions</a>
           </Button>

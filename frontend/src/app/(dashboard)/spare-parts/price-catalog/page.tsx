@@ -229,7 +229,7 @@ export default function PriceCatalogPage() {
   return (
     <div className="space-y-4">
       {/* Header — hidden in print */}
-      <div className="flex items-center justify-between print:hidden">
+      <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="icon" asChild>
             <Link href="/spare-parts/analytics"><ArrowLeft className="h-4 w-4" /></Link>
@@ -243,7 +243,7 @@ export default function PriceCatalogPage() {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {/* Print column selector */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -366,7 +366,7 @@ export default function PriceCatalogPage() {
 
       {/* Pagination — hidden in print */}
       {data?.meta && data.meta.total_pages > 1 && (
-        <div className="flex items-center justify-between print:hidden">
+        <div className="flex flex-wrap items-center justify-between gap-2 print:hidden">
           <span className="text-sm text-muted-foreground">
             Page {data.meta.page} of {data.meta.total_pages} ({data.meta.total} parts)
           </span>

@@ -177,12 +177,12 @@ function AuditPageContent() {
               </SelectContent>
             </Select>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Input
                 type="date"
                 value={filters.start_date || ''}
                 onChange={(e) => updateFilter('start_date', e.target.value || undefined)}
-                className="w-[160px]"
+                className="w-[150px] max-w-full"
                 placeholder="Start date"
               />
               <span className="text-muted-foreground text-sm">to</span>
@@ -190,7 +190,7 @@ function AuditPageContent() {
                 type="date"
                 value={filters.end_date || ''}
                 onChange={(e) => updateFilter('end_date', e.target.value || undefined)}
-                className="w-[160px]"
+                className="w-[150px] max-w-full"
                 placeholder="End date"
               />
             </div>

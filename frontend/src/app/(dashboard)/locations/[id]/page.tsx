@@ -252,7 +252,7 @@ export default function LocationDetailPage() {
 
       {/* Tabs */}
       <Tabs defaultValue="plants" className="space-y-4">
-        <TabsList>
+        <TabsList className="max-w-full overflow-x-auto justify-start">
           <TabsTrigger value="plants" className="gap-1.5">
             <Truck className="h-4 w-4" />
             Plants

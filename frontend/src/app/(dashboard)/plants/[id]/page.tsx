@@ -241,7 +241,7 @@ function PlantDetailContent({ plantId }: { plantId: string }) {
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
         {/* Left: Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList variant="line" className="w-full justify-start border-b">
+          <TabsList variant="line" className="w-full justify-start border-b overflow-x-auto">
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="maintenance">Maintenance</TabsTrigger>
             <TabsTrigger value="costs">Costs</TabsTrigger>
