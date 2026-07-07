@@ -93,13 +93,13 @@ async def upload_weekly_report(
         raise NotFoundError("Project not found")
 
     # ── store the original file ─────────────────────────────────────────
-    from app.core.database import get_supabase_client
+    from app.core.database import get_supabase_admin_client  # Storage only
 
     storage_path = (
         f"weekly-reports/projects/{project_id}/"
         f"{year}-W{week_number:02d}/{file.filename}"
     )
-    client = get_supabase_client()
+    client = get_supabase_admin_client()
     try:
         client.storage.from_("reports").upload(
             storage_path, file_content,
@@ -110,7 +110,12 @@ async def upload_weekly_report(
         if "already exists" in str(e).lower() or "duplicate" in str(e).lower():
             client.storage.from_("reports").update(storage_path, file_content)
         else:
-            raise
+            logger.error("Storage upload failed",
+                         path=storage_path, error=f"{type(e).__name__}: {e}")
+            raise HTTPException(
+                status_code=502,
+                detail=f"Could not store the file in Supabase Storage: {e}",
+            ) from e
 
     submission_id = await fetchval(
         """INSERT INTO project_report_submissions
@@ -375,8 +380,8 @@ async def delete_project_submission(
 
     # Storage cleanup is best-effort — data consistency doesn't depend on it.
     try:
-        from app.core.database import get_supabase_client
-        get_supabase_client().storage.from_("reports").remove([sub["file_path"]])
+        from app.core.database import get_supabase_admin_client  # Storage only
+        get_supabase_admin_client().storage.from_("reports").remove([sub["file_path"]])
     except Exception as exc:
         logger.warning("Could not remove storage file",
                        path=sub["file_path"], error=str(exc))
@@ -688,6 +693,219 @@ async def get_project_operations_series(
             pid,
         )
     return {"success": True, "data": rows, "meta": {"granularity": granularity}}
+
+
+@router.get("/{project_id}/operations/financials")
+async def get_project_operations_financials(
+    project_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(require_projects_access)],
+) -> dict[str, Any]:
+    """Weekly earnings vs costs — is the site gaining or losing?
+
+    earnings = Works Completed subtotal + 7.5% VAT (the sheet's own
+    formula, verified to the kobo against its Net Earnings row).
+    costs    = recomputed from atomic cost-report rows (category rows
+    only; the sheet's total row is used as a cross-check, not as data).
+    """
+    pid = str(project_id)
+    if not await fetchval("SELECT 1 FROM projects WHERE id = $1::uuid", pid):
+        raise NotFoundError("Project not found")
+
+    rows = await fetch(
+        """
+        SELECT wr.year, wr.week_number, wr.week_ending_date,
+               ws_works.value                                   AS works_value,
+               cost.by_category                                 AS cost_by_category,
+               COALESCE(cost.total, 0)                          AS cost_total,
+               ws_cost.value                                    AS sheet_cost_total,
+               ws_net.value                                     AS sheet_net,
+               COALESCE(d.litres, 0)                            AS diesel_litres
+        FROM project_weekly_reports wr
+        LEFT JOIN LATERAL (
+            SELECT value FROM project_weekly_summary
+            WHERE weekly_report_id = wr.id AND section = 'Works Completed'
+              AND item = 'SUB-TOTAL' AND metric = 'this_week' LIMIT 1
+        ) ws_works ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT value FROM project_weekly_summary
+            WHERE weekly_report_id = wr.id AND section = 'Costs to Date'
+              AND item = 'Total Costs to Date' AND metric = 'this_week' LIMIT 1
+        ) ws_cost ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT value FROM project_weekly_summary
+            WHERE weekly_report_id = wr.id AND section = 'Costs to Date'
+              AND item LIKE 'Net Earnings%' AND metric = 'this_week' LIMIT 1
+        ) ws_net ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT sum(cat_total) AS total,
+                   jsonb_object_agg(cost_category, cat_total) AS by_category
+            FROM (
+                SELECT cost_category, sum(amount_this_week) AS cat_total
+                FROM project_cost_report
+                WHERE weekly_report_id = wr.id AND cost_category IS NOT NULL
+                GROUP BY cost_category
+            ) c
+        ) cost ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT sum(total_litres) AS litres
+            FROM project_diesel_consumption WHERE weekly_report_id = wr.id
+        ) d ON TRUE
+        WHERE wr.project_id = $1::uuid
+        ORDER BY wr.year, wr.week_number
+        """,
+        pid,
+    )
+
+    weeks: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    cum_net = 0.0
+    for r in rows:
+        works = float(r["works_value"] or 0)
+        vat = round(works * 0.075, 2)
+        earnings = works + vat
+        cost_total = float(r["cost_total"] or 0)
+        net = earnings - cost_total
+        cum_net += net
+
+        # cross-checks against the sheet's own arithmetic
+        sheet_cost = r["sheet_cost_total"]
+        if sheet_cost is not None and abs(float(sheet_cost) - cost_total) > 1.0:
+            warnings.append(
+                f"W{r['week_number']}: recomputed cost ₦{cost_total:,.2f} ≠ "
+                f"sheet total ₦{float(sheet_cost):,.2f}"
+            )
+        sheet_net = r["sheet_net"]
+        if sheet_net is not None and abs(float(sheet_net) - net) > 1.0:
+            warnings.append(
+                f"W{r['week_number']}: recomputed net ₦{net:,.2f} ≠ "
+                f"sheet net ₦{float(sheet_net):,.2f}"
+            )
+
+        by_cat = r["cost_by_category"] or {}
+        weeks.append({
+            "year": r["year"],
+            "week_number": r["week_number"],
+            "week_ending_date": r["week_ending_date"],
+            "works_value": works,
+            "vat": vat,
+            "earnings": earnings,
+            "cost_total": cost_total,
+            "cost_by_category": by_cat,
+            "diesel_cost": float(by_cat.get("AGO") or 0),
+            "diesel_litres": float(r["diesel_litres"] or 0),
+            "net": net,
+            "cumulative_net": round(cum_net, 2),
+            "sheet_net": float(sheet_net) if sheet_net is not None else None,
+        })
+
+    totals = {
+        "earnings": round(sum(w["earnings"] for w in weeks), 2),
+        "cost_total": round(sum(w["cost_total"] for w in weeks), 2),
+        "net": round(cum_net, 2),
+        "diesel_cost": round(sum(w["diesel_cost"] for w in weeks), 2),
+        "diesel_litres": round(sum(w["diesel_litres"] for w in weeks), 2),
+        "weeks_gaining": sum(1 for w in weeks if w["net"] > 0),
+        "weeks_losing": sum(1 for w in weeks if w["net"] < 0),
+        "cost_by_category": {},
+    }
+    cat_totals: dict[str, float] = {}
+    for w in weeks:
+        for cat, v in (w["cost_by_category"] or {}).items():
+            cat_totals[cat] = cat_totals.get(cat, 0.0) + float(v or 0)
+    totals["cost_by_category"] = {k: round(v, 2) for k, v in
+                                  sorted(cat_totals.items(), key=lambda x: -x[1])}
+
+    # BEME bill-level progress from the latest week's Works Completed section
+    bills = await fetch(
+        """
+        SELECT ws.item,
+               max(ws.value) FILTER (WHERE ws.metric = 'this_week')   AS this_week,
+               max(ws.value) FILTER (WHERE ws.metric = 'pct_complete') AS pct_complete
+        FROM project_weekly_summary ws
+        JOIN (SELECT id FROM project_weekly_reports
+              WHERE project_id = $1::uuid
+              ORDER BY year DESC, week_number DESC LIMIT 1) lr
+          ON lr.id = ws.weekly_report_id
+        WHERE ws.section = 'Works Completed'
+          AND ws.item NOT ILIKE 'SUB-TOTAL%'
+          AND ws.item NOT ILIKE 'Add VAT%'
+          AND ws.item NOT ILIKE 'Total%'
+        GROUP BY ws.item
+        ORDER BY max(ws.value) FILTER (WHERE ws.metric = 'pct_complete')
+                 DESC NULLS LAST
+        """,
+        pid,
+    )
+
+    return {"success": True, "data": {
+        "weeks": weeks,
+        "totals": totals,
+        "bills": bills,
+        "cross_check_warnings": warnings,
+    }}
+
+
+@router.get("/{project_id}/operations/plants")
+async def get_project_operations_plants(
+    project_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(require_projects_access)],
+) -> dict[str, Any]:
+    """Per-plant totals across every ingested week: hours, breakdowns,
+    plant cost, diesel — joined to the fleet register where resolved."""
+    pid = str(project_id)
+    if not await fetchval("SELECT 1 FROM projects WHERE id = $1::uuid", pid):
+        raise NotFoundError("Project not found")
+
+    rows = await fetch(
+        """
+        WITH util AS (
+            SELECT fleet_number_raw,
+                   max(plant_id::text)              AS plant_id,
+                   max(description)                 AS description,
+                   max(plant_category)              AS plant_category,
+                   count(DISTINCT week_number)::int AS weeks_seen,
+                   COALESCE(sum(hours_worked), 0)   AS hours_worked,
+                   COALESCE(sum(breakdown_hours), 0) AS breakdown_hours,
+                   COALESCE(sum(standby_hours), 0)  AS standby_hours,
+                   COALESCE(sum(plant_cost), 0)     AS plant_cost_ngn
+            FROM project_plant_utilization
+            WHERE project_id = $1::uuid
+            GROUP BY fleet_number_raw
+        ),
+        diesel AS (
+            SELECT fleet_number_raw,
+                   max(plant_id::text)              AS plant_id,
+                   max(description)                 AS description,
+                   count(DISTINCT week_number)::int AS weeks_seen,
+                   COALESCE(sum(total_litres), 0)   AS diesel_litres
+            FROM project_diesel_consumption
+            WHERE project_id = $1::uuid
+            GROUP BY fleet_number_raw
+        )
+        -- FULL join: some equipment appears only in the diesel sheet
+        -- (generators, service vehicles) and must still be listed
+        SELECT COALESCE(u.fleet_number_raw, d.fleet_number_raw) AS fleet_number_raw,
+               COALESCE(u.plant_id, d.plant_id)                 AS plant_id,
+               pm.fleet_number,
+               COALESCE(pm.description, u.description, d.description) AS description,
+               u.plant_category,
+               pm.condition,
+               COALESCE(u.weeks_seen, d.weeks_seen)             AS weeks_seen,
+               COALESCE(u.hours_worked, 0)                      AS hours_worked,
+               COALESCE(u.breakdown_hours, 0)                   AS breakdown_hours,
+               COALESCE(u.standby_hours, 0)                     AS standby_hours,
+               COALESCE(u.plant_cost_ngn, 0)                    AS plant_cost_ngn,
+               COALESCE(d.diesel_litres, 0)                     AS diesel_litres
+        FROM util u
+        FULL OUTER JOIN diesel d ON d.fleet_number_raw = u.fleet_number_raw
+        LEFT JOIN plants_master pm
+               ON pm.id = COALESCE(u.plant_id, d.plant_id)::uuid
+        ORDER BY COALESCE(u.hours_worked, 0) DESC,
+                 COALESCE(d.diesel_litres, 0) DESC
+        """,
+        pid,
+    )
+    return {"success": True, "data": rows}
 
 
 @router.get("/review-queue")

@@ -408,3 +408,35 @@ export function useProjectOperationsSeries(
     retry: 2,
   });
 }
+
+import {
+  getProjectFinancials,
+  getProjectPlantRollups,
+  type ProjectFinancials,
+  type FinancialWeek,
+  type ProjectPlantRollup,
+} from '@/lib/api/projects';
+
+export type { ProjectFinancials, FinancialWeek, ProjectPlantRollup };
+
+export function useProjectFinancials(projectId: string | undefined) {
+  return useQuery({
+    queryKey: [...operationsKeys.all, 'financials', projectId ?? ''] as const,
+    queryFn: () => getProjectFinancials(projectId!),
+    enabled: !!projectId,
+    staleTime: 2 * 60 * 1000,
+    networkMode: 'always',
+    retry: 2,
+  });
+}
+
+export function useProjectPlantRollups(projectId: string | undefined) {
+  return useQuery({
+    queryKey: [...operationsKeys.all, 'plants', projectId ?? ''] as const,
+    queryFn: () => getProjectPlantRollups(projectId!),
+    enabled: !!projectId,
+    staleTime: 2 * 60 * 1000,
+    networkMode: 'always',
+    retry: 2,
+  });
+}

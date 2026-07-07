@@ -13,7 +13,7 @@ from typing import Any
 
 import openpyxl
 
-from app.core.database import get_supabase_client
+from app.core.database import get_supabase_admin_client  # Storage only
 from app.core.pool import fetchrow, get_pool
 from app.monitoring.logging import get_logger
 from app.services.weekly_report_import import persist_weekly_report
@@ -53,7 +53,7 @@ async def process_project_weekly_report(submission_id: str) -> None:
         await _set_status(submission_id, status="parsing")
 
         # ── download ─────────────────────────────────────────────────────
-        client = get_supabase_client()
+        client = get_supabase_admin_client()
         file_bytes = client.storage.from_("reports").download(sub["file_path"])
         if not file_bytes:
             raise RuntimeError(f"Storage returned empty file for {sub['file_path']}")

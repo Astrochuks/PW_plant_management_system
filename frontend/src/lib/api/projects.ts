@@ -661,3 +661,104 @@ export async function getProjectOperationsSeries(
     return out;
   });
 }
+
+// ── Financials + per-plant rollups ──────────────────────────────────────────
+
+export interface FinancialWeek {
+  year: number;
+  week_number: number;
+  week_ending_date: string;
+  works_value: number;
+  vat: number;
+  earnings: number;
+  cost_total: number;
+  cost_by_category: Record<string, number>;
+  diesel_cost: number;
+  diesel_litres: number;
+  net: number;
+  cumulative_net: number;
+  sheet_net: number | null;
+}
+
+export interface ProjectFinancials {
+  weeks: FinancialWeek[];
+  totals: {
+    earnings: number;
+    cost_total: number;
+    net: number;
+    diesel_cost: number;
+    diesel_litres: number;
+    weeks_gaining: number;
+    weeks_losing: number;
+    cost_by_category: Record<string, number>;
+  };
+  bills: { item: string; this_week: number | null; pct_complete: number | null }[];
+  cross_check_warnings: string[];
+}
+
+export async function getProjectFinancials(projectId: string): Promise<ProjectFinancials> {
+  const response = await apiClient.get(`/projects/${projectId}/operations/financials`);
+  const d = response.data.data;
+  const numRec = (o: Record<string, unknown> | null | undefined) =>
+    Object.fromEntries(Object.entries(o ?? {}).map(([k, v]) => [k, Number(v ?? 0)]));
+  return {
+    weeks: (d.weeks ?? []).map((w: Record<string, unknown>) => ({
+      ...w,
+      works_value: Number(w.works_value ?? 0),
+      vat: Number(w.vat ?? 0),
+      earnings: Number(w.earnings ?? 0),
+      cost_total: Number(w.cost_total ?? 0),
+      cost_by_category: numRec(w.cost_by_category as Record<string, unknown>),
+      diesel_cost: Number(w.diesel_cost ?? 0),
+      diesel_litres: Number(w.diesel_litres ?? 0),
+      net: Number(w.net ?? 0),
+      cumulative_net: Number(w.cumulative_net ?? 0),
+      sheet_net: w.sheet_net == null ? null : Number(w.sheet_net),
+    })),
+    totals: {
+      ...d.totals,
+      earnings: Number(d.totals?.earnings ?? 0),
+      cost_total: Number(d.totals?.cost_total ?? 0),
+      net: Number(d.totals?.net ?? 0),
+      diesel_cost: Number(d.totals?.diesel_cost ?? 0),
+      diesel_litres: Number(d.totals?.diesel_litres ?? 0),
+      weeks_gaining: Number(d.totals?.weeks_gaining ?? 0),
+      weeks_losing: Number(d.totals?.weeks_losing ?? 0),
+      cost_by_category: numRec(d.totals?.cost_by_category),
+    },
+    bills: (d.bills ?? []).map((b: Record<string, unknown>) => ({
+      item: b.item,
+      this_week: b.this_week == null ? null : Number(b.this_week),
+      pct_complete: b.pct_complete == null ? null : Number(b.pct_complete),
+    })),
+    cross_check_warnings: d.cross_check_warnings ?? [],
+  };
+}
+
+export interface ProjectPlantRollup {
+  fleet_number_raw: string;
+  plant_id: string | null;
+  fleet_number: string | null;
+  description: string | null;
+  plant_category: string | null;
+  condition: string | null;
+  weeks_seen: number;
+  hours_worked: number;
+  breakdown_hours: number;
+  standby_hours: number;
+  plant_cost_ngn: number;
+  diesel_litres: number;
+}
+
+export async function getProjectPlantRollups(projectId: string): Promise<ProjectPlantRollup[]> {
+  const response = await apiClient.get(`/projects/${projectId}/operations/plants`);
+  return (response.data.data ?? []).map((r: Record<string, unknown>) => ({
+    ...r,
+    weeks_seen: Number(r.weeks_seen ?? 0),
+    hours_worked: Number(r.hours_worked ?? 0),
+    breakdown_hours: Number(r.breakdown_hours ?? 0),
+    standby_hours: Number(r.standby_hours ?? 0),
+    plant_cost_ngn: Number(r.plant_cost_ngn ?? 0),
+    diesel_litres: Number(r.diesel_litres ?? 0),
+  }));
+}

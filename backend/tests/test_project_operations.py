@@ -114,3 +114,70 @@ class TestSeries:
         pid = _akwa_project_id(client)
         r = client.get(f"/api/v1/projects/{pid}/operations/series?granularity=day")
         assert r.status_code == 422
+
+
+class TestFinancials:
+    def test_weekly_net_matches_sheet_arithmetic(self, client, as_management):
+        """Our recomputed net must equal the sheet's own Net Earnings row
+        for EVERY week — (works subtotal + 7.5% VAT) − recomputed costs."""
+        pid = _akwa_project_id(client)
+        r = client.get(f"/api/v1/projects/{pid}/operations/financials")
+        assert r.status_code == 200
+        d = r.json()["data"]
+        assert len(d["weeks"]) == 9
+        assert d["cross_check_warnings"] == []
+
+        w10 = next(w for w in d["weeks"] if w["week_number"] == 10)
+        assert w10["works_value"] == pytest.approx(294_550_350.0)
+        assert w10["cost_total"] == pytest.approx(196_009_206.03, abs=0.01)
+        assert w10["net"] == pytest.approx(120_632_420.22, abs=0.5)
+        assert w10["sheet_net"] == pytest.approx(w10["net"], abs=0.5)
+        assert w10["diesel_cost"] == pytest.approx(13_753_600.0)
+        assert w10["diesel_litres"] > 5000
+
+        # every week individually reconciles with the sheet
+        for w in d["weeks"]:
+            if w["sheet_net"] is not None:
+                assert w["net"] == pytest.approx(w["sheet_net"], abs=1.0), \
+                    f"W{w['week_number']}"
+
+    def test_totals_and_bills(self, client, as_management):
+        pid = _akwa_project_id(client)
+        d = client.get(
+            f"/api/v1/projects/{pid}/operations/financials"
+        ).json()["data"]
+        t = d["totals"]
+        assert t["net"] == pytest.approx(
+            sum(w["net"] for w in d["weeks"]), abs=0.5)
+        assert t["weeks_gaining"] + t["weeks_losing"] <= 9
+        assert t["diesel_cost"] > 0 and t["diesel_litres"] > 50_000
+        assert "AGO" in t["cost_by_category"]
+        assert len(d["bills"]) >= 5  # BEME bills with % complete
+
+    def test_plant_officer_blocked(self, client, as_plant_officer):
+        pid_r = client.get("/api/v1/projects/operations")
+        assert pid_r.status_code == 403
+
+
+class TestPlantsRollup:
+    def test_per_plant_totals(self, client, as_management):
+        pid = _akwa_project_id(client)
+        r = client.get(f"/api/v1/projects/{pid}/operations/plants")
+        assert r.status_code == 200
+        rows = r.json()["data"]
+        assert len(rows) > 100  # ~126 plants on site
+
+        # rollup must equal the summary totals
+        summary = client.get(
+            f"/api/v1/projects/{pid}/operations/summary"
+        ).json()["data"]["totals"]
+        assert sum(float(p["hours_worked"]) for p in rows) == pytest.approx(
+            float(summary["hours_worked"]), rel=1e-9)
+        assert sum(float(p["diesel_litres"]) for p in rows) == pytest.approx(
+            float(summary["diesel_litres"]), rel=1e-9)
+
+        # resolved plants carry register identity + condition
+        ac163 = next(p for p in rows if p["fleet_number_raw"] == "AC163")
+        assert ac163["fleet_number"] == "AC163"
+        assert ac163["condition"] is not None
+        assert ac163["weeks_seen"] == 9
