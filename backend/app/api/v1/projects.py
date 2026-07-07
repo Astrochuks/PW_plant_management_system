@@ -296,6 +296,111 @@ async def link_unmapped_fleet_number(
             "data": {"linked_to": plant["fleet_number"], "rows_backfilled": updated}}
 
 
+@router.post("/unmapped-fleet-numbers/re-resolve")
+async def re_resolve_fleet_numbers(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+) -> dict[str, Any]:
+    """Re-attempt deterministic matching for all unlinked fleet rows.
+
+    Useful after a plant is added to (or corrected in) plants_master:
+    any NULL plant_id row whose normalized fleet number now matches
+    exactly gets linked, in both project tables.
+    """
+    updated = 0
+    for table in ("project_plant_utilization", "project_diesel_consumption"):
+        result = await execute(
+            f"""UPDATE {table} t SET plant_id = pm.id
+                FROM plants_master pm
+                WHERE t.plant_id IS NULL
+                  AND pm.fleet_number = upper(replace(trim(t.fleet_number_raw), ' ', ''))""",
+        )
+        updated += int(result.split()[-1])
+
+    if updated:
+        background_tasks.add_task(
+            audit_service.log,
+            user_id=current_user.id,
+            user_email=current_user.email,
+            action="update",
+            table_name="project_plant_utilization",
+            record_id="re-resolve",
+            new_values={"rows_backfilled": updated},
+            ip_address=get_client_ip(request),
+            description=f"Re-resolved fleet numbers ({updated} rows linked)",
+        )
+    return {"success": True, "data": {"rows_backfilled": updated}}
+
+
+@router.delete("/submissions/{submission_id}")
+async def delete_project_submission(
+    submission_id: UUID,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+) -> dict[str, Any]:
+    """Delete a submission and (if it produced one) that week's report data.
+
+    The weekly-report header delete cascades every per-week operational
+    table. Certificates touched only by this week are removed too — they
+    come back on re-upload because each workbook carries the full ledger.
+    """
+    sub = await fetchrow(
+        """SELECT s.*, p.short_name FROM project_report_submissions s
+           JOIN projects p ON p.id = s.project_id
+           WHERE s.id = $1::uuid""",
+        str(submission_id),
+    )
+    if sub is None:
+        raise NotFoundError("Submission not found")
+    if sub["status"] in ("queued", "parsing"):
+        raise ValidationError("Submission is currently processing — wait or retry later")
+
+    pool = get_pool()
+    async with pool.acquire() as conn, conn.transaction():
+        # Wipe the week's data (cascades all operational tables). Target the
+        # (project, year, week) triple, not just weekly_report_id — an older
+        # failed submission may have NULL weekly_report_id while the data
+        # exists from a later retry.
+        deleted_report = await conn.fetchval(
+            """DELETE FROM project_weekly_reports
+               WHERE project_id = $1::uuid AND year = $2 AND week_number = $3
+               RETURNING id""",
+            str(sub["project_id"]), sub["year"], sub["week_number"],
+        )
+        await conn.execute(
+            "DELETE FROM project_report_submissions WHERE id = $1::uuid",
+            str(submission_id),
+        )
+
+    # Storage cleanup is best-effort — data consistency doesn't depend on it.
+    try:
+        from app.core.database import get_supabase_client
+        get_supabase_client().storage.from_("reports").remove([sub["file_path"]])
+    except Exception as exc:
+        logger.warning("Could not remove storage file",
+                       path=sub["file_path"], error=str(exc))
+
+    background_tasks.add_task(
+        audit_service.log,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        action="delete",
+        table_name="project_report_submissions",
+        record_id=str(submission_id),
+        old_values={"project": sub["short_name"], "year": sub["year"],
+                    "week_number": sub["week_number"], "status": sub["status"]},
+        ip_address=get_client_ip(request),
+        description=(f"Deleted W{sub['week_number']}/{sub['year']} submission for "
+                     f"{sub['short_name']}"
+                     + (" incl. weekly report data" if deleted_report else "")),
+    )
+    return {"success": True,
+            "data": {"deleted_week_data": bool(deleted_report),
+                     "year": sub["year"], "week_number": sub["week_number"]}}
+
+
 @router.get("/review-queue")
 async def get_review_queue(
     current_user: Annotated[CurrentUser, Depends(require_admin)],

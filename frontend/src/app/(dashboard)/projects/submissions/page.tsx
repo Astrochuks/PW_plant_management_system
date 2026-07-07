@@ -10,7 +10,7 @@ import Link from 'next/link'
 import { toast } from 'sonner'
 import {
   ArrowLeft, CheckCircle2, ClipboardX, FileSpreadsheet, Loader2,
-  RefreshCcw, UploadCloud, XCircle,
+  RefreshCcw, Trash2, UploadCloud, XCircle,
 } from 'lucide-react'
 
 import { useAuth } from '@/providers/auth-provider'
@@ -31,6 +31,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import {
+  useDeleteProjectSubmission,
   useProjects,
   useProjectSubmissions,
   useRetryProjectSubmission,
@@ -148,6 +149,7 @@ function UploadDialog() {
 function SubmissionRow({ sub, isAdmin }: { sub: ProjectSubmission; isAdmin: boolean }) {
   const [expanded, setExpanded] = useState(false)
   const retry = useRetryProjectSubmission()
+  const deleteSub = useDeleteProjectSubmission()
   const badge = STATUS_BADGE[sub.status] ?? STATUS_BADGE.queued
   const counts = (sub.row_counts ?? {}) as Record<string, unknown>
   const warnings = (counts._warnings ?? []) as string[]
@@ -179,20 +181,50 @@ function SubmissionRow({ sub, isAdmin }: { sub: ProjectSubmission; isAdmin: bool
           })}
         </TableCell>
         <TableCell>
-          {isAdmin && (sub.status === 'failed' || sub.status === 'partial') && (
-            <Button
-              size="sm" variant="ghost" className="h-7"
-              onClick={(e) => {
-                e.stopPropagation()
-                retry.mutate(sub.id, {
-                  onSuccess: () => toast.success('Re-queued'),
-                  onError: (err: Error) => toast.error(err.message),
-                })
-              }}
-            >
-              <RefreshCcw className="h-3.5 w-3.5" />
-            </Button>
-          )}
+          <div className="flex items-center gap-1">
+            {isAdmin && (sub.status === 'failed' || sub.status === 'partial') && (
+              <Button
+                size="sm" variant="ghost" className="h-7"
+                title="Retry processing"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  retry.mutate(sub.id, {
+                    onSuccess: () => toast.success('Re-queued'),
+                    onError: (err: Error) => toast.error(err.message),
+                  })
+                }}
+              >
+                <RefreshCcw className="h-3.5 w-3.5" />
+              </Button>
+            )}
+            {isAdmin && sub.status !== 'queued' && sub.status !== 'parsing' && (
+              <Button
+                size="sm" variant="ghost"
+                className="text-destructive hover:text-destructive h-7"
+                title="Delete this week's data"
+                disabled={deleteSub.isPending}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  const wk = `W${String(sub.week_number).padStart(2, '0')}/${sub.year}`
+                  if (!window.confirm(
+                    `Delete ${wk} for ${sub.short_name || sub.project_name}?\n\n` +
+                    'This removes ALL data ingested from this file. ' +
+                    'You can re-upload the week afterwards.'
+                  )) return
+                  deleteSub.mutate(sub.id, {
+                    onSuccess: (r) => toast.success(
+                      r.deleted_week_data
+                        ? `${wk} deleted — week data removed`
+                        : `${wk} submission deleted (no week data existed)`
+                    ),
+                    onError: (err: Error) => toast.error(err.message),
+                  })
+                }}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </div>
         </TableCell>
       </TableRow>
       {expanded && (

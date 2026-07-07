@@ -95,3 +95,32 @@ class TestSubmissionsRead:
             "/api/v1/projects/submissions/00000000-0000-0000-0000-000000000000/retry"
         )
         assert r.status_code == 403
+
+
+class TestSubmissionDelete:
+    def test_delete_admin_only(self, client, as_management):
+        r = client.delete(
+            "/api/v1/projects/submissions/00000000-0000-0000-0000-000000000000"
+        )
+        assert r.status_code == 403
+
+    def test_delete_unknown_404(self, client, as_admin):
+        r = client.delete(
+            "/api/v1/projects/submissions/00000000-0000-0000-0000-000000000000"
+        )
+        if r.status_code == 503:
+            pytest.skip("database unavailable")
+        assert r.status_code == 404
+
+
+class TestFleetReResolve:
+    def test_re_resolve_admin_only(self, client, as_management):
+        r = client.post("/api/v1/projects/unmapped-fleet-numbers/re-resolve")
+        assert r.status_code == 403
+
+    def test_re_resolve_returns_count(self, client, as_admin):
+        r = client.post("/api/v1/projects/unmapped-fleet-numbers/re-resolve")
+        if r.status_code == 503:
+            pytest.skip("database unavailable")
+        assert r.status_code == 200
+        assert "rows_backfilled" in r.json()["data"]

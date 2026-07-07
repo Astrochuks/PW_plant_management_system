@@ -92,9 +92,10 @@ class TestPersistWeek10:
         }
         for table, n in expect.items():
             assert stats["row_counts"][table] == n, table
+            # scope to this report — the live DB holds other weeks too
             in_db = await conn.fetchval(
-                f"SELECT count(*) FROM {table} WHERE project_id = $1::uuid",
-                project_id,
+                f"SELECT count(*) FROM {table} WHERE weekly_report_id = $1::uuid",
+                stats["weekly_report_id"],
             )
             assert in_db == n, f"{table}: db {in_db} != {n}"
 
@@ -104,13 +105,13 @@ class TestPersistWeek10:
         conn, _, project_id, stats = db
         linked = await conn.fetchval(
             """SELECT count(*) FROM project_plant_utilization
-               WHERE project_id = $1::uuid AND plant_id IS NOT NULL""",
-            project_id,
+               WHERE weekly_report_id = $1::uuid AND plant_id IS NOT NULL""",
+            stats["weekly_report_id"],
         )
         total = await conn.fetchval(
             """SELECT count(*) FROM project_plant_utilization
-               WHERE project_id = $1::uuid""",
-            project_id,
+               WHERE weekly_report_id = $1::uuid""",
+            stats["weekly_report_id"],
         )
         # The Akwa Ibom fleet numbers must overwhelmingly match plants_master
         assert linked / total > 0.8, f"only {linked}/{total} resolved"
@@ -119,14 +120,15 @@ class TestPersistWeek10:
     async def test_usage_joins_to_plants_master(self, db):
         """The cross-module bridge: project usage rows land on the same
         plant entities the plant module tracks."""
-        conn, _, project_id, _ = db
+        conn, _, project_id, stats = db
         row = await conn.fetchrow(
             """SELECT pu.hours_worked, pu.breakdown_hours, pm.fleet_number,
                       pm.condition
                FROM project_plant_utilization pu
                JOIN plants_master pm ON pm.id = pu.plant_id
-               WHERE pu.project_id = $1::uuid AND pu.fleet_number_raw = 'AC163'""",
-            project_id,
+               WHERE pu.weekly_report_id = $1::uuid
+                 AND pu.fleet_number_raw = 'AC163'""",
+            stats["weekly_report_id"],
         )
         assert row is not None
         assert row["fleet_number"] == "AC163"
@@ -161,6 +163,62 @@ class TestPersistWeek10:
         assert n > 20
 
 
+class TestDeleteWeekCascades:
+    async def test_header_delete_wipes_all_week_tables(self, db, parsed10):
+        """The delete-week endpoint relies on this: removing the weekly
+        report header must cascade every per-week operational table and
+        must not leave SET-NULL orphans behind."""
+        conn, user_id, project_id, first = db
+        wr_id = first["weekly_report_id"]
+
+        cascade_tables = [
+            r["table_name"] for r in await conn.fetch(
+                """SELECT c.table_name
+                   FROM information_schema.columns c
+                   WHERE c.column_name = 'weekly_report_id'
+                     AND c.table_name = ANY($1::text[])""",
+                list(first["row_counts"].keys()),
+            )
+        ]
+        orphans_before = {
+            t: await conn.fetchval(
+                f"""SELECT count(*) FROM {t}
+                    WHERE project_id = $1::uuid AND weekly_report_id IS NULL""",
+                project_id,
+            ) for t in cascade_tables
+        }
+
+        await conn.execute(
+            "DELETE FROM project_weekly_reports WHERE id = $1::uuid", wr_id
+        )
+
+        for t in cascade_tables:
+            remaining = await conn.fetchval(
+                f"SELECT count(*) FROM {t} WHERE weekly_report_id = $1::uuid",
+                wr_id,
+            )
+            assert remaining == 0, f"{t}: {remaining} rows kept the deleted report id"
+            orphans_after = await conn.fetchval(
+                f"""SELECT count(*) FROM {t}
+                    WHERE project_id = $1::uuid AND weekly_report_id IS NULL""",
+                project_id,
+            )
+            assert orphans_after == orphans_before[t], \
+                f"{t}: week deletion left {orphans_after - orphans_before[t]} orphans"
+
+    async def test_delete_then_reupload_restores_counts(self, db, parsed10):
+        conn, user_id, project_id, first = db
+        await conn.execute(
+            """DELETE FROM project_weekly_reports
+               WHERE project_id = $1::uuid AND year = 2026 AND week_number = 10""",
+            project_id,
+        )
+        stats = await persist_weekly_report(
+            conn, project_id, 2026, 10, copy.deepcopy(parsed10), user_id
+        )
+        assert stats["row_counts"] == first["row_counts"]
+
+
 class TestIdempotentReupload:
     async def test_reupload_replaces_never_duplicates(self, db, parsed10):
         conn, user_id, project_id, first = db
@@ -168,13 +226,15 @@ class TestIdempotentReupload:
             stats = await persist_weekly_report(
                 conn, project_id, 2026, 10, copy.deepcopy(parsed10), user_id
             )
-        # Same counts in the DB after 3 total persists
+        # Same counts in the DB after 3 total persists — scoped to the
+        # final report id (the live DB holds other weeks for this project)
         for table, n in first["row_counts"].items():
-            if table == "project_contract_summary_snapshot":
-                continue
+            if table in ("project_contract_summary_snapshot",
+                         "project_bill1_items"):
+                continue  # snapshot keyed per week; bill1 items are master rows
             in_db = await conn.fetchval(
-                f"SELECT count(*) FROM {table} WHERE project_id = $1::uuid",
-                project_id,
+                f"SELECT count(*) FROM {table} WHERE weekly_report_id = $1::uuid",
+                stats["weekly_report_id"],
             )
             assert in_db == n, f"{table}: {in_db} != {n} after re-uploads"
 

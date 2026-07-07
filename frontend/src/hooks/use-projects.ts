@@ -270,6 +270,7 @@ import {
   getProjectSubmission,
   uploadWeeklyReport,
   retryProjectSubmission,
+  deleteProjectSubmission,
   getUnmappedFleetNumbers,
   linkUnmappedFleetNumber,
   type ProjectSubmission,
@@ -315,6 +316,14 @@ export function useRetryProjectSubmission() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => retryProjectSubmission(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: submissionKeys.all }),
+  });
+}
+
+export function useDeleteProjectSubmission() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => deleteProjectSubmission(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: submissionKeys.all }),
   });
 }

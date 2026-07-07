@@ -468,6 +468,18 @@ export async function retryProjectSubmission(id: string): Promise<void> {
   await apiClient.post(`/projects/submissions/${id}/retry`);
 }
 
+export async function deleteProjectSubmission(
+  id: string,
+): Promise<{ deleted_week_data: boolean; year: number; week_number: number }> {
+  const response = await apiClient.delete(`/projects/submissions/${id}`);
+  return response.data.data;
+}
+
+export async function reResolveFleetNumbers(): Promise<{ rows_backfilled: number }> {
+  const response = await apiClient.post('/projects/unmapped-fleet-numbers/re-resolve');
+  return response.data.data;
+}
+
 export interface UnmappedFleetNumber {
   fleet_number_raw: string;
   occurrences: number;
