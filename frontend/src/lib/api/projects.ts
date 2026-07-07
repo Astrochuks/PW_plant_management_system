@@ -411,3 +411,85 @@ export async function getProjectBenchmarks(): Promise<TypeBenchmark[]> {
     delivery_p75_months: b.delivery_p75_months == null ? null : Number(b.delivery_p75_months),
   }));
 }
+
+// ============================================================================
+// Weekly Report Submissions (Phase 2)
+// ============================================================================
+
+export type SubmissionStatus = 'queued' | 'parsing' | 'success' | 'partial' | 'failed' | 'deleted';
+
+export interface ProjectSubmission {
+  id: string;
+  project_id: string;
+  short_name: string | null;
+  project_name: string;
+  year: number;
+  week_number: number;
+  week_ending_date: string | null;
+  file_name: string | null;
+  source: 'excel' | 'manual';
+  status: SubmissionStatus;
+  error_message: string | null;
+  sheets_processed: Record<string, string> | null;
+  row_counts: Record<string, unknown> | null;
+  parse_duration_ms: number | null;
+  retry_count: number;
+  uploaded_at: string;
+}
+
+export async function uploadWeeklyReport(
+  file: File, projectId: string, year: number, weekNumber: number,
+): Promise<{ submission_id: string; status: string }> {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('project_id', projectId);
+  form.append('year', String(year));
+  form.append('week_number', String(weekNumber));
+  const response = await apiClient.post('/projects/upload-weekly-report', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 120000,
+  });
+  return response.data.data;
+}
+
+export async function getProjectSubmissions(params: {
+  status?: SubmissionStatus; project_id?: string; page?: number; limit?: number;
+} = {}): Promise<{ data: ProjectSubmission[]; total: number }> {
+  const response = await apiClient.get('/projects/submissions', { params });
+  return { data: response.data.data, total: Number(response.data.meta?.total ?? 0) };
+}
+
+export async function getProjectSubmission(id: string): Promise<ProjectSubmission> {
+  const response = await apiClient.get(`/projects/submissions/${id}`);
+  return response.data.data;
+}
+
+export async function retryProjectSubmission(id: string): Promise<void> {
+  await apiClient.post(`/projects/submissions/${id}/retry`);
+}
+
+export interface UnmappedFleetNumber {
+  fleet_number_raw: string;
+  occurrences: number;
+  projects: number;
+  first_week: number;
+  last_week: number;
+  description: string | null;
+}
+
+export async function getUnmappedFleetNumbers(): Promise<UnmappedFleetNumber[]> {
+  const response = await apiClient.get('/projects/unmapped-fleet-numbers');
+  return (response.data.data ?? []).map((r: UnmappedFleetNumber) => ({
+    ...r,
+    occurrences: Number(r.occurrences ?? 0),
+  }));
+}
+
+export async function linkUnmappedFleetNumber(
+  fleetNumberRaw: string, plantId: string,
+): Promise<{ linked_to: string; rows_backfilled: number }> {
+  const response = await apiClient.post('/projects/unmapped-fleet-numbers/link', {
+    fleet_number_raw: fleetNumberRaw, plant_id: plantId,
+  });
+  return response.data.data;
+}

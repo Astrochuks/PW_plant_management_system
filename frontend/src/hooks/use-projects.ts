@@ -260,3 +260,79 @@ export function useProjectBenchmarks() {
     staleTime: 10 * 60 * 1000,
   });
 }
+
+// ============================================================================
+// Weekly Report Submissions (Phase 2)
+// ============================================================================
+
+import {
+  getProjectSubmissions,
+  getProjectSubmission,
+  uploadWeeklyReport,
+  retryProjectSubmission,
+  getUnmappedFleetNumbers,
+  linkUnmappedFleetNumber,
+  type ProjectSubmission,
+  type SubmissionStatus,
+  type UnmappedFleetNumber,
+} from '@/lib/api/projects';
+
+export type { ProjectSubmission, SubmissionStatus, UnmappedFleetNumber };
+
+export const submissionKeys = {
+  all: ['projects', 'submissions'] as const,
+  list: (params: object) => [...submissionKeys.all, 'list', params] as const,
+  detail: (id: string) => [...submissionKeys.all, 'detail', id] as const,
+  unmapped: () => ['projects', 'unmapped-fleet'] as const,
+};
+
+export function useProjectSubmissions(params: {
+  status?: SubmissionStatus; project_id?: string; page?: number; limit?: number;
+} = {}, opts: { poll?: boolean } = {}) {
+  return useQuery({
+    queryKey: submissionKeys.list(params),
+    queryFn: () => getProjectSubmissions(params),
+    staleTime: 30 * 1000,
+    networkMode: 'always',
+    retry: 2,
+    refetchInterval: opts.poll ? 4000 : undefined,
+  });
+}
+
+export function useUploadWeeklyReport() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ file, projectId, year, weekNumber }: {
+      file: File; projectId: string; year: number; weekNumber: number;
+    }) => uploadWeeklyReport(file, projectId, year, weekNumber),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: submissionKeys.all });
+    },
+  });
+}
+
+export function useRetryProjectSubmission() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => retryProjectSubmission(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: submissionKeys.all }),
+  });
+}
+
+export function useUnmappedFleetNumbers() {
+  return useQuery({
+    queryKey: submissionKeys.unmapped(),
+    queryFn: getUnmappedFleetNumbers,
+    staleTime: 5 * 60 * 1000,
+    networkMode: 'always',
+  });
+}
+
+export function useLinkUnmappedFleetNumber() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ raw, plantId }: { raw: string; plantId: string }) =>
+      linkUnmappedFleetNumber(raw, plantId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: submissionKeys.unmapped() }),
+  });
+}

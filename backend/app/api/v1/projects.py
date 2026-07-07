@@ -223,6 +223,79 @@ async def retry_project_submission(
     return {"success": True, "data": {"status": "queued"}}
 
 
+@router.get("/unmapped-fleet-numbers")
+async def list_unmapped_fleet_numbers(
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+) -> dict[str, Any]:
+    """Fleet numbers in project reports that don't match plants_master."""
+    rows = await fetch(
+        """SELECT fleet_number_raw,
+                  count(*)::int AS occurrences,
+                  count(DISTINCT project_id)::int AS projects,
+                  min(week_number)::int AS first_week,
+                  max(week_number)::int AS last_week,
+                  max(description) AS description
+           FROM (
+               SELECT fleet_number_raw, project_id, week_number, description
+               FROM project_plant_utilization WHERE plant_id IS NULL
+               UNION ALL
+               SELECT fleet_number_raw, project_id, week_number, description
+               FROM project_diesel_consumption WHERE plant_id IS NULL
+           ) u
+           WHERE fleet_number_raw IS NOT NULL
+           GROUP BY fleet_number_raw
+           ORDER BY occurrences DESC"""
+    )
+    return {"success": True, "data": rows}
+
+
+@router.post("/unmapped-fleet-numbers/link")
+async def link_unmapped_fleet_number(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+    body: dict[str, Any] = None,
+) -> dict[str, Any]:
+    """Link a raw fleet number to a plant — backfills ALL historical rows
+    in both project tables."""
+    body = body or {}
+    raw = (body.get("fleet_number_raw") or "").strip()
+    plant_id = body.get("plant_id")
+    if not raw or not plant_id:
+        raise ValidationError("fleet_number_raw and plant_id are required")
+
+    plant = await fetchrow(
+        "SELECT id, fleet_number FROM plants_master WHERE id = $1::uuid",
+        str(plant_id),
+    )
+    if plant is None:
+        raise NotFoundError("Plant not found")
+
+    updated = 0
+    for table in ("project_plant_utilization", "project_diesel_consumption"):
+        result = await execute(
+            f"""UPDATE {table} SET plant_id = $1::uuid
+                WHERE fleet_number_raw = $2 AND plant_id IS NULL""",
+            str(plant_id), raw,
+        )
+        updated += int(result.split()[-1])
+
+    background_tasks.add_task(
+        audit_service.log,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        action="update",
+        table_name="project_plant_utilization",
+        record_id=raw,
+        new_values={"fleet_number_raw": raw, "plant_id": str(plant_id),
+                    "rows_backfilled": updated},
+        ip_address=get_client_ip(request),
+        description=f"Linked fleet {raw} → {plant['fleet_number']} ({updated} rows)",
+    )
+    return {"success": True,
+            "data": {"linked_to": plant["fleet_number"], "rows_backfilled": updated}}
+
+
 @router.get("/review-queue")
 async def get_review_queue(
     current_user: Annotated[CurrentUser, Depends(require_admin)],
