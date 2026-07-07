@@ -107,11 +107,10 @@ export default function ReportGeneratorPage() {
       ['Working', fc.working],
       ['Standby', fc.standby],
       ['Breakdown', fc.breakdown],
-      ['Under Repair', fc.under_repair],
       ['Missing', fc.missing],
       ['Scrap', fc.scrap],
       ['Off Hire', fc.off_hire],
-      ['Faulty', fc.faulty],
+      ['Unknown (carried forward)', fc.unknown ?? 0],
       [],
       ['Utilization Rate', `${fc.utilization_rate}%`],
     ];
@@ -136,8 +135,8 @@ export default function ReportGeneratorPage() {
 
     // ── Sheet 2: Fleet By Type ───────────────────────────────────
     {
-      const headers = ['Fleet Type', 'Total', 'Working', 'Standby', 'Breakdown', 'Under Repair', 'Other'];
-      const rows = report.fleet_by_type.map(r => [r.fleet_type, r.total, r.working, r.standby, r.breakdown, r.under_repair, r.other]);
+      const headers = ['Fleet Type', 'Total', 'Working', 'Standby', 'Breakdown', 'Other'];
+      const rows = report.fleet_by_type.map(r => [r.fleet_type, r.total, r.working, r.standby, r.breakdown, r.other]);
       // Add totals row
       rows.push([
         'TOTAL',
@@ -153,8 +152,8 @@ export default function ReportGeneratorPage() {
 
     // ── Sheet 3: States Summary ──────────────────────────────────
     {
-      const headers = ['State', 'Code', 'Region', 'Sites', 'Total Plants', 'Working', 'Breakdown', 'Under Repair', 'Missing', 'Scrap'];
-      const rows = report.states_summary.map(r => [r.name, r.code, r.region || '', r.sites_count, r.total_plants, r.working, r.breakdown, r.under_repair, r.missing, r.scrap]);
+      const headers = ['State', 'Code', 'Region', 'Sites', 'Total Plants', 'Working', 'Breakdown', 'Missing', 'Scrap', 'Unknown'];
+      const rows = report.states_summary.map(r => [r.name, r.code, r.region || '', r.sites_count, r.total_plants, r.working, r.breakdown, r.missing, r.scrap, r.unknown ?? 0]);
       utils.book_append_sheet(wb, makeSheet('STATES SUMMARY', headers, rows, [18, 8, 14, 8, 12, 10, 12, 12, 10, 10]), 'States');
     }
 
@@ -163,9 +162,9 @@ export default function ReportGeneratorPage() {
       const ftSet = new Set<string>();
       report.sites_breakdown.forEach(r => Object.keys(r.fleet_types).forEach(ft => ftSet.add(ft)));
       const ftNames = Array.from(ftSet).sort();
-      const headers = ['#', 'Site', 'State', 'Total Plants', 'Working', 'Breakdown', 'Under Repair', 'Standby', 'Missing', 'Scrap', ...ftNames];
+      const headers = ['#', 'Site', 'State', 'Total Plants', 'Working', 'Breakdown', 'Standby', 'Missing', 'Scrap', 'Unknown', ...ftNames];
       const dataRows = report.sites_breakdown.map((r, i) => [
-        i + 1, r.location_name, r.state_name, r.total_plants, r.working, r.breakdown, r.under_repair, r.standby, r.missing, r.scrap,
+        i + 1, r.location_name, r.state_name, r.total_plants, r.working, r.breakdown, r.standby, r.missing, r.scrap, r.unknown ?? 0,
         ...ftNames.map(ft => r.fleet_types[ft] || 0),
       ]);
       // Grand total row
@@ -380,7 +379,7 @@ export default function ReportGeneratorPage() {
             <KpiCard label="Total Plants" value={report.fleet_condition.total_plants} />
             <KpiCard label="Working" value={report.fleet_condition.working} color="text-emerald-600" />
             <KpiCard label="Breakdown" value={report.fleet_condition.breakdown} color="text-red-600" />
-            <KpiCard label="Under Repair" value={report.fleet_condition.under_repair} color="text-blue-600" />
+            <KpiCard label="Unknown" value={report.fleet_condition.unknown} color="text-slate-500" />
             <KpiCard label="Utilization" value={`${report.fleet_condition.utilization_rate}%`} color="text-primary" />
           </div>
 
@@ -399,7 +398,6 @@ export default function ReportGeneratorPage() {
                       <TableHead className="text-center">Working</TableHead>
                       <TableHead className="text-center">Standby</TableHead>
                       <TableHead className="text-center">Breakdown</TableHead>
-                      <TableHead className="text-center">Under Repair</TableHead>
                       <TableHead className="text-center">Other</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -411,7 +409,6 @@ export default function ReportGeneratorPage() {
                         <TableCell className="text-center text-emerald-600">{row.working || '-'}</TableCell>
                         <TableCell className="text-center">{row.standby || '-'}</TableCell>
                         <TableCell className="text-center text-red-600">{row.breakdown || '-'}</TableCell>
-                        <TableCell className="text-center text-blue-600">{row.under_repair || '-'}</TableCell>
                         <TableCell className="text-center text-muted-foreground">{row.other || '-'}</TableCell>
                       </TableRow>
                     ))}
@@ -453,8 +450,7 @@ export default function ReportGeneratorPage() {
                           <TableCell className="text-center font-semibold">{row.total_plants}</TableCell>
                           <TableCell className="text-center text-emerald-600">{row.working || '-'}</TableCell>
                           <TableCell className="text-center text-red-600">{row.breakdown || '-'}</TableCell>
-                          <TableCell className="text-center text-blue-600">{row.under_repair || '-'}</TableCell>
-                          <TableCell className="text-center text-orange-500">{row.missing || '-'}</TableCell>
+                            <TableCell className="text-center text-orange-500">{row.missing || '-'}</TableCell>
                           <TableCell className="text-center text-muted-foreground">{row.scrap || '-'}</TableCell>
                         </TableRow>
                       ))}
@@ -505,8 +501,7 @@ export default function ReportGeneratorPage() {
                             <TableCell className="text-center font-semibold">{row.total_plants}</TableCell>
                             <TableCell className="text-center text-emerald-600">{row.working || '-'}</TableCell>
                             <TableCell className="text-center text-red-600">{row.breakdown || '-'}</TableCell>
-                            <TableCell className="text-center text-blue-600">{row.under_repair || '-'}</TableCell>
-                            <TableCell className="text-center">{row.standby || '-'}</TableCell>
+                                <TableCell className="text-center">{row.standby || '-'}</TableCell>
                             <TableCell className="text-center text-orange-500">{row.missing || '-'}</TableCell>
                             <TableCell className="text-center text-muted-foreground">{row.scrap || '-'}</TableCell>
                             {fleetTypeNames.map(ft => (
@@ -745,7 +740,6 @@ function ConditionBadge({ condition }: { condition: string }) {
   const colors: Record<string, string> = {
     working: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300',
     breakdown: 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300',
-    under_repair: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300',
     missing: 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300',
     scrap: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
   };

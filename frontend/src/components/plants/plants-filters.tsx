@@ -43,14 +43,10 @@ export interface FiltersState {
 const CONDITIONS = [
   { value: 'working', label: 'Working' },
   { value: 'standby', label: 'Standby' },
-  { value: 'under_repair', label: 'Under Repair' },
   { value: 'breakdown', label: 'Breakdown' },
-  { value: 'faulty', label: 'Faulty' },
   { value: 'scrap', label: 'Scrap' },
   { value: 'missing', label: 'Missing' },
   { value: 'off_hire', label: 'Off Hire' },
-  { value: 'gpm_assessment', label: 'GPM Assessment' },
-  { value: 'unverified', label: 'Unverified' },
 ] as const;
 
 const CONDITION_MAP = new Map<string, string>(CONDITIONS.map((c) => [c.value, c.label]));

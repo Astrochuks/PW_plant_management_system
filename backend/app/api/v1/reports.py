@@ -762,18 +762,60 @@ async def generate_report(
     pr = _period_range(period, ref_date)
     d_from, d_to = pr["date_from"], pr["date_to"]
 
-    # ── Build dynamic WHERE fragments ────────────────────────────────
+    # ── As-of vs live fleet source ───────────────────────────────────
+    # A report for a PAST period must show the fleet as it was THEN:
+    # each plant's latest weekly snapshot on/before the period end
+    # (condition carries forward past unknown weeks; plants first seen
+    # after the period end did not exist yet). Reports covering today
+    # use live plants_master.
+    historical = d_to < date.today()
+    if historical:
+        # $1 in the fleet params is ALWAYS the as-of date
+        fleet_src = """
+            (WITH seen AS (
+                SELECT DISTINCT ON (r.plant_id) r.plant_id
+                FROM plant_weekly_records r
+                WHERE r.week_ending_date <= $1
+                ORDER BY r.plant_id, r.week_ending_date DESC
+            ), latest_cond AS (
+                SELECT DISTINCT ON (r.plant_id) r.plant_id, r.condition
+                FROM plant_weekly_records r
+                WHERE r.week_ending_date <= $1 AND r.condition IS NOT NULL
+                ORDER BY r.plant_id, r.week_ending_date DESC
+            ), latest_loc AS (
+                SELECT DISTINCT ON (r.plant_id) r.plant_id, r.location_id
+                FROM plant_weekly_records r
+                WHERE r.week_ending_date <= $1 AND r.location_id IS NOT NULL
+                ORDER BY r.plant_id, r.week_ending_date DESC
+            )
+            SELECT pm.id, pm.fleet_number, pm.description, pm.fleet_type,
+                   lc.condition, ll.location_id
+            FROM seen
+            JOIN plants_master pm ON pm.id = seen.plant_id
+            LEFT JOIN latest_cond lc ON lc.plant_id = seen.plant_id
+            LEFT JOIN latest_loc ll ON ll.plant_id = seen.plant_id)
+        """
+        fleet_base_params: list = [d_to]
+    else:
+        fleet_src = """
+            (SELECT pm.id, pm.fleet_number, pm.description, pm.fleet_type,
+                    pm.condition, pm.current_location_id AS location_id
+             FROM plants_master pm)
+        """
+        fleet_base_params = []
+
+    # ── Build dynamic WHERE fragments (over the fleet source `f`) ────
     plant_conds: list[str] = []
-    plant_params: list[Any] = []
+    plant_params: list[Any] = list(fleet_base_params)
     if location_id:
         plant_params.append(str(location_id))
-        plant_conds.append(f"pm.current_location_id = ${len(plant_params)}::uuid")
+        plant_conds.append(f"f.location_id = ${len(plant_params)}::uuid")
     if state_id:
         plant_params.append(str(state_id))
         plant_conds.append(f"l.state_id = ${len(plant_params)}::uuid")
     if fleet_type:
         plant_params.append(fleet_type)
-        plant_conds.append(f"pm.fleet_type = ${len(plant_params)}")
+        plant_conds.append(f"f.fleet_type = ${len(plant_params)}")
     pw = " AND ".join(plant_conds) if plant_conds else "TRUE"
 
     # Spare parts filter
@@ -805,83 +847,89 @@ async def generate_report(
     async def q_fleet_condition():
         return await fetchrow(
             f"""SELECT count(*)::int AS total_plants,
-                       count(*) FILTER (WHERE pm.condition = 'working')::int AS working,
-                       count(*) FILTER (WHERE pm.condition = 'standby')::int AS standby,
-                       count(*) FILTER (WHERE pm.condition = 'breakdown')::int AS breakdown,
-                       count(*) FILTER (WHERE pm.condition = 'under_repair')::int AS under_repair,
-                       count(*) FILTER (WHERE pm.condition = 'missing')::int AS missing,
-                       count(*) FILTER (WHERE pm.condition = 'scrap')::int AS scrap,
-                       count(*) FILTER (WHERE pm.condition = 'off_hire')::int AS off_hire,
-                       count(*) FILTER (WHERE pm.condition = 'faulty')::int AS faulty
-                FROM plants_master pm
-                LEFT JOIN locations l ON l.id = pm.current_location_id
+                       count(*) FILTER (WHERE f.condition = 'working')::int AS working,
+                       count(*) FILTER (WHERE f.condition = 'standby')::int AS standby,
+                       count(*) FILTER (WHERE f.condition = 'breakdown')::int AS breakdown,
+                       count(*) FILTER (WHERE f.condition = 'missing')::int AS missing,
+                       count(*) FILTER (WHERE f.condition = 'scrap')::int AS scrap,
+                       count(*) FILTER (WHERE f.condition = 'off_hire')::int AS off_hire,
+                       count(*) FILTER (WHERE f.condition IS NULL)::int AS unknown
+                FROM {fleet_src} f
+                LEFT JOIN locations l ON l.id = f.location_id
                 WHERE {pw}""",
             *plant_params,
         )
 
     async def q_fleet_by_type():
         return await fetch(
-            f"""SELECT COALESCE(pm.fleet_type, 'Unknown') AS fleet_type,
+            f"""SELECT COALESCE(f.fleet_type, 'Unknown') AS fleet_type,
                        count(*)::int AS total,
-                       count(*) FILTER (WHERE pm.condition = 'working')::int AS working,
-                       count(*) FILTER (WHERE pm.condition = 'standby')::int AS standby,
-                       count(*) FILTER (WHERE pm.condition = 'breakdown')::int AS breakdown,
-                       count(*) FILTER (WHERE pm.condition = 'under_repair')::int AS under_repair,
-                       count(*) FILTER (WHERE pm.condition NOT IN ('working','standby','breakdown','under_repair'))::int AS other
-                FROM plants_master pm
-                LEFT JOIN locations l ON l.id = pm.current_location_id
+                       count(*) FILTER (WHERE f.condition = 'working')::int AS working,
+                       count(*) FILTER (WHERE f.condition = 'standby')::int AS standby,
+                       count(*) FILTER (WHERE f.condition = 'breakdown')::int AS breakdown,
+                       count(*) FILTER (WHERE f.condition IS NULL
+                                        OR f.condition NOT IN ('working','standby','breakdown'))::int AS other
+                FROM {fleet_src} f
+                LEFT JOIN locations l ON l.id = f.location_id
                 WHERE {pw}
-                GROUP BY pm.fleet_type ORDER BY total DESC""",
+                GROUP BY f.fleet_type ORDER BY total DESC""",
             *plant_params,
         )
 
     async def q_states():
-        extra = ""
-        p = list(plant_params)
-        if state_id:
-            # Already in pw via l.state_id
-            pass
+        # COALESCE buckets keep every plant visible: no location and
+        # no state each get an explicit row so totals always tie out.
         return await fetch(
-            f"""SELECT s.name, s.code, s.region,
-                       count(DISTINCT l.id)::int AS sites_count,
-                       count(pm.id)::int AS total_plants,
-                       count(pm.id) FILTER (WHERE pm.condition = 'working')::int AS working,
-                       count(pm.id) FILTER (WHERE pm.condition = 'breakdown')::int AS breakdown,
-                       count(pm.id) FILTER (WHERE pm.condition = 'under_repair')::int AS under_repair,
-                       count(pm.id) FILTER (WHERE pm.condition = 'missing')::int AS missing,
-                       count(pm.id) FILTER (WHERE pm.condition = 'scrap')::int AS scrap
-                FROM states s
-                LEFT JOIN locations l ON l.state_id = s.id AND l.is_active = true
-                LEFT JOIN plants_master pm ON pm.current_location_id = l.id
-                    {"AND pm.fleet_type = $" + str(plant_params.index(fleet_type) + 1) if fleet_type else ""}
-                WHERE s.is_active = true
-                    {"AND s.id = $" + str(plant_params.index(str(state_id)) + 1) + "::uuid" if state_id else ""}
+            f"""SELECT COALESCE(s.name, '(No location)') AS name,
+                       COALESCE(s.code, '—') AS code,
+                       s.region,
+                       count(DISTINCT f.location_id)::int AS sites_count,
+                       count(f.id)::int AS total_plants,
+                       count(f.id) FILTER (WHERE f.condition = 'working')::int AS working,
+                       count(f.id) FILTER (WHERE f.condition = 'breakdown')::int AS breakdown,
+                       count(f.id) FILTER (WHERE f.condition = 'missing')::int AS missing,
+                       count(f.id) FILTER (WHERE f.condition = 'scrap')::int AS scrap,
+                       count(f.id) FILTER (WHERE f.condition IS NULL)::int AS unknown
+                FROM {fleet_src} f
+                LEFT JOIN locations l ON l.id = f.location_id
+                LEFT JOIN states s ON s.id = l.state_id
+                WHERE {pw}
                 GROUP BY s.name, s.code, s.region
-                HAVING count(pm.id) > 0
                 ORDER BY total_plants DESC""",
             *plant_params,
         )
 
     async def q_sites():
-        ft_join = f"AND pm.fleet_type = ${len(plant_params)}" if fleet_type else ""
         return await fetch(
-            f"""SELECT l.name AS location_name, s.name AS state_name, s.code AS state_code,
-                       count(pm.id)::int AS total_plants,
-                       count(pm.id) FILTER (WHERE pm.condition = 'working')::int AS working,
-                       count(pm.id) FILTER (WHERE pm.condition = 'breakdown')::int AS breakdown,
-                       count(pm.id) FILTER (WHERE pm.condition = 'under_repair')::int AS under_repair,
-                       count(pm.id) FILTER (WHERE pm.condition = 'standby')::int AS standby,
-                       count(pm.id) FILTER (WHERE pm.condition = 'missing')::int AS missing,
-                       count(pm.id) FILTER (WHERE pm.condition = 'scrap')::int AS scrap
-                FROM locations l
+            f"""SELECT COALESCE(l.name, '(No location)') AS location_name,
+                       s.name AS state_name, s.code AS state_code,
+                       count(f.id)::int AS total_plants,
+                       count(f.id) FILTER (WHERE f.condition = 'working')::int AS working,
+                       count(f.id) FILTER (WHERE f.condition = 'breakdown')::int AS breakdown,
+                       count(f.id) FILTER (WHERE f.condition = 'standby')::int AS standby,
+                       count(f.id) FILTER (WHERE f.condition = 'missing')::int AS missing,
+                       count(f.id) FILTER (WHERE f.condition = 'scrap')::int AS scrap,
+                       count(f.id) FILTER (WHERE f.condition IS NULL)::int AS unknown
+                FROM {fleet_src} f
+                LEFT JOIN locations l ON l.id = f.location_id
                 LEFT JOIN states s ON s.id = l.state_id
-                LEFT JOIN plants_master pm ON pm.current_location_id = l.id {ft_join}
-                WHERE l.is_active = true
-                    {"AND l.id = $" + str(plant_params.index(str(location_id)) + 1) + "::uuid" if location_id else ""}
-                    {"AND l.state_id = $" + str(plant_params.index(str(state_id)) + 1) + "::uuid" if state_id else ""}
+                WHERE {pw}
                 GROUP BY l.name, s.name, s.code
-                HAVING count(pm.id) > 0
                 ORDER BY total_plants DESC""",
+            *plant_params,
+        )
+
+    async def q_site_fleet_types():
+        """Fleet type distribution per site (as-of aware)."""
+        return await fetch(
+            f"""SELECT COALESCE(l.name, '(No location)') AS location_name,
+                       f.fleet_type,
+                       count(f.id)::int AS cnt
+                FROM {fleet_src} f
+                LEFT JOIN locations l ON l.id = f.location_id
+                WHERE {pw} AND f.fleet_type IS NOT NULL
+                GROUP BY l.name, f.fleet_type
+                ORDER BY l.name, cnt DESC""",
             *plant_params,
         )
 
@@ -954,6 +1002,39 @@ async def generate_report(
             *sp_params,
         )
 
+    async def q_unattributed_spend():
+        """Spend with no plant link (workshop/general stock) — shown as an
+        explicit row so the per-plant list ties out to the headline.
+        Skipped when a fleet-type filter is active (plant-scoped by definition)."""
+        if fleet_type:
+            return None
+        return await fetchrow(
+            f"""SELECT count(*)::int AS items_count,
+                       COALESCE(sum(sp.total_cost_ngn), 0)::float AS total_spend
+                FROM spare_parts sp
+                LEFT JOIN locations loc ON loc.id = sp.location_id
+                WHERE sp.replaced_date BETWEEN $1 AND $2 AND sp.plant_id IS NULL
+                    {"AND sp.location_id = $" + str(sp_params.index(str(location_id)) + 1) + "::uuid" if location_id else ""}
+                    {"AND loc.state_id = $" + str(sp_params.index(str(state_id)) + 1) + "::uuid" if state_id else ""}""",
+            *[a for a in sp_params if not (fleet_type and a == fleet_type)],
+        )
+
+    async def q_unlocated_spend():
+        """Spend with no location — explicit row for the site ranking.
+        Skipped when a location/state filter is active."""
+        if location_id or state_id:
+            return None
+        return await fetchrow(
+            f"""SELECT count(*)::int AS items_count,
+                       count(DISTINCT sp.purchase_order_number)::int AS po_count,
+                       COALESCE(sum(sp.total_cost_ngn), 0)::float AS total_spend
+                FROM spare_parts sp
+                {sp_join_pm}
+                WHERE sp.replaced_date BETWEEN $1 AND $2 AND sp.location_id IS NULL
+                    {"AND pm2.fleet_type = $" + str(sp_params.index(fleet_type) + 1) if fleet_type else ""}""",
+            *sp_params,
+        )
+
     async def q_transfer_details():
         return await fetch(
             f"""SELECT pm3.fleet_number, pm3.fleet_type, pm3.description,
@@ -969,29 +1050,10 @@ async def generate_report(
             *tr_params,
         )
 
-    async def q_site_fleet_types():
-        """Fleet type distribution per site."""
-        ft_filter = f"AND pm.fleet_type = ${len(plant_params)}" if fleet_type else ""
-        return await fetch(
-            f"""SELECT l.name AS location_name,
-                       pm.fleet_type,
-                       count(pm.id)::int AS cnt
-                FROM plants_master pm
-                JOIN locations l ON l.id = pm.current_location_id
-                LEFT JOIN states s ON s.id = l.state_id
-                WHERE l.is_active = true {ft_filter}
-                    {"AND l.id = $" + str(plant_params.index(str(location_id)) + 1) + "::uuid" if location_id else ""}
-                    {"AND l.state_id = $" + str(plant_params.index(str(state_id)) + 1) + "::uuid" if state_id else ""}
-                GROUP BY l.name, pm.fleet_type
-                HAVING count(pm.id) > 0
-                ORDER BY l.name, cnt DESC""",
-            *plant_params,
-        )
-
     # ── Execute all in parallel ──────────────────────────────────────
     (
         fc, fbt, states, sites, sp_sum, suppliers, hc_plants, site_spend,
-        tr_details, site_ft_rows,
+        tr_details, site_ft_rows, unattributed, unlocated,
     ) = await asyncio.gather(
         q_fleet_condition(),
         q_fleet_by_type(),
@@ -1003,7 +1065,32 @@ async def generate_report(
         q_sites_spend(),
         q_transfer_details(),
         q_site_fleet_types(),
+        q_unattributed_spend(),
+        q_unlocated_spend(),
     )
+
+    # ── Reconciliation rows: breakdowns must tie out to the headline ──
+    hc_plants = [dict(r) for r in hc_plants]
+    if unattributed and unattributed["items_count"]:
+        hc_plants.append({
+            "fleet_number": "—",
+            "description": "Workshop / general stock (not tied to a plant)",
+            "fleet_type": None,
+            "condition": None,
+            "location_name": None,
+            "parts_count": unattributed["items_count"],
+            "total_spend": unattributed["total_spend"],
+        })
+
+    site_spend = [dict(r) for r in site_spend]
+    if unlocated and unlocated["items_count"]:
+        site_spend.append({
+            "location_name": "(No location recorded)",
+            "state_name": None,
+            "total_spend": unlocated["total_spend"],
+            "items_count": unlocated["items_count"],
+            "po_count": unlocated["po_count"],
+        })
 
     # Build site fleet type map: { location_name: { fleet_type: count } }
     site_fleet_map: dict[str, dict[str, int]] = {}
@@ -1036,6 +1123,8 @@ async def generate_report(
                 "date_from": d_from.isoformat(),
                 "date_to": d_to.isoformat(),
                 "generated_at": date.today().isoformat(),
+                "as_of": d_to.isoformat() if historical else "live",
+                "historical": historical,
                 "filters": {
                     "location_name": filter_loc_name,
                     "state_name": filter_state_name,
@@ -1047,11 +1136,10 @@ async def generate_report(
                 "working": working,
                 "standby": fc["standby"] or 0,
                 "breakdown": fc["breakdown"] or 0,
-                "under_repair": fc["under_repair"] or 0,
                 "missing": fc["missing"] or 0,
                 "scrap": fc["scrap"] or 0,
                 "off_hire": fc["off_hire"] or 0,
-                "faulty": fc["faulty"] or 0,
+                "unknown": fc["unknown"] or 0,
                 "utilization_rate": round(working / total * 100, 1) if total else 0,
             },
             "fleet_by_type": fbt,

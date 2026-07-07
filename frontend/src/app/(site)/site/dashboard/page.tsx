@@ -61,10 +61,8 @@ const CONDITION_OPTIONS = [
   { value: 'working', label: 'Working' },
   { value: 'standby', label: 'Standby' },
   { value: 'breakdown', label: 'Breakdown' },
-  { value: 'faulty', label: 'Faulty' },
   { value: 'missing', label: 'Missing' },
   { value: 'off_hire', label: 'Off Hire' },
-  { value: 'unverified', label: 'Unverified' },
 ]
 
 export default function SiteDashboardPage() {

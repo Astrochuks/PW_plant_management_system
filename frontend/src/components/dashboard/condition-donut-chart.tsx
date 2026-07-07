@@ -11,14 +11,10 @@ import type { DashboardPlantStats } from '@/lib/api/dashboard'
 const CONDITIONS = [
   { key: 'working_plants', label: 'Working', color: '#10b981' },
   { key: 'standby_plants', label: 'Standby', color: '#fbbf24' },
-  { key: 'under_repair_plants', label: 'Under Repair', color: '#3b82f6' },
   { key: 'breakdown_plants', label: 'Breakdown', color: '#dc2626' },
-  { key: 'faulty_plants', label: 'Faulty', color: '#f97316' },
   { key: 'missing_plants', label: 'Missing', color: '#ef4444' },
   { key: 'scrap_plants', label: 'Scrap', color: '#9ca3af' },
   { key: 'off_hire_plants', label: 'Off Hire', color: '#64748b' },
-  { key: 'gpm_assessment_plants', label: 'GPM Assessment', color: '#8b5cf6' },
-  { key: 'unverified_condition_plants', label: 'Unverified', color: '#d1d5db' },
 ] as const
 
 interface ConditionDonutChartProps {

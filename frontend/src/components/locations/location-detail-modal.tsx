@@ -130,14 +130,10 @@ export function LocationDetailModal({ locationId, onClose }: LocationDetailModal
               <SelectItem value="all">All Conditions</SelectItem>
               <SelectItem value="working">Working</SelectItem>
               <SelectItem value="standby">Standby</SelectItem>
-              <SelectItem value="under_repair">Under Repair</SelectItem>
               <SelectItem value="breakdown">Breakdown</SelectItem>
-              <SelectItem value="faulty">Faulty</SelectItem>
               <SelectItem value="scrap">Scrap</SelectItem>
               <SelectItem value="missing">Missing</SelectItem>
               <SelectItem value="off_hire">Off Hire</SelectItem>
-              <SelectItem value="gpm_assessment">GPM Assessment</SelectItem>
-              <SelectItem value="unverified">Unverified</SelectItem>
             </SelectContent>
           </Select>
         </div>

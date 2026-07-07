@@ -16,14 +16,10 @@ import type { PlantFilteredStats } from '@/lib/api/plants';
 const CONDITIONS = [
   { key: 'working',        label: 'Working',        dotColor: 'bg-emerald-500',  activeBg: 'bg-emerald-50 dark:bg-emerald-950 border-emerald-300 dark:border-emerald-700' },
   { key: 'standby',        label: 'Standby',        dotColor: 'bg-amber-500',    activeBg: 'bg-amber-50 dark:bg-amber-950 border-amber-300 dark:border-amber-700' },
-  { key: 'under_repair',   label: 'Under Repair',   dotColor: 'bg-blue-500',     activeBg: 'bg-blue-50 dark:bg-blue-950 border-blue-300 dark:border-blue-700' },
   { key: 'breakdown',      label: 'Breakdown',      dotColor: 'bg-red-600',      activeBg: 'bg-red-50 dark:bg-red-950 border-red-300 dark:border-red-700' },
-  { key: 'faulty',         label: 'Faulty',         dotColor: 'bg-orange-500',   activeBg: 'bg-orange-50 dark:bg-orange-950 border-orange-300 dark:border-orange-700' },
   { key: 'missing',        label: 'Missing',        dotColor: 'bg-red-400',      activeBg: 'bg-red-50 dark:bg-red-950 border-red-300 dark:border-red-700' },
   { key: 'scrap',          label: 'Scrap',          dotColor: 'bg-gray-400',     activeBg: 'bg-gray-50 dark:bg-gray-900 border-gray-300 dark:border-gray-600' },
   { key: 'off_hire',       label: 'Off Hire',       dotColor: 'bg-slate-500',    activeBg: 'bg-slate-50 dark:bg-slate-900 border-slate-300 dark:border-slate-600' },
-  { key: 'gpm_assessment', label: 'GPM Assessment', dotColor: 'bg-purple-500',   activeBg: 'bg-purple-50 dark:bg-purple-950 border-purple-300 dark:border-purple-700' },
-  { key: 'unverified',     label: 'Unverified',     dotColor: 'bg-gray-300',     activeBg: 'bg-gray-50 dark:bg-gray-900 border-gray-300 dark:border-gray-600' },
 ] as const;
 
 // ---------------------------------------------------------------------------

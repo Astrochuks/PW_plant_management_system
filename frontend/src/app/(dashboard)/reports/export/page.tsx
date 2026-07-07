@@ -168,7 +168,6 @@ export default function ExportPage() {
                   <SelectItem value="working">Working</SelectItem>
                   <SelectItem value="standby">Standby</SelectItem>
                   <SelectItem value="breakdown">Breakdown</SelectItem>
-                  <SelectItem value="under_repair">Under Repair</SelectItem>
                   <SelectItem value="missing">Missing</SelectItem>
                   <SelectItem value="scrap">Scrap</SelectItem>
                 </SelectContent>

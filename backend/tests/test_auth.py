@@ -173,10 +173,14 @@ def test_concurrent_logins():
 
     def do_login(i):
         start = time.time()
+        # Generous timeout: 10 concurrent logins each round-trip to
+        # Supabase auth; this test asserts BEHAVIOR (status codes under
+        # concurrency), not a latency SLA — httpx's 5s default made it
+        # flake whenever the pooler was degraded.
         r = httpx.post(f"{BASE_URL}/auth/login", json={
             "email": f"concurrent{i}@test.com",
             "password": "wrongpassword123"
-        })
+        }, timeout=60.0)
         elapsed = (time.time() - start) * 1000
         return i, r.status_code, elapsed
 

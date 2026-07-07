@@ -38,7 +38,6 @@ const CONDITIONS = [
   { key: 'working' as const, name: 'Working', color: '#10b981' },
   { key: 'standby' as const, name: 'Standby', color: '#fbbf24' },
   { key: 'breakdown' as const, name: 'Breakdown', color: '#dc2626' },
-  { key: 'under_repair' as const, name: 'Under Repair', color: '#3b82f6' },
   { key: 'other' as const, name: 'Other', color: '#9ca3af' },
 ]
 
@@ -76,10 +75,8 @@ export function FleetTypeBarChart() {
         working: acc.working + row.working,
         standby: acc.standby + row.standby,
         breakdown: acc.breakdown + row.breakdown,
-        under_repair: acc.under_repair + row.under_repair,
         other: acc.other + row.other,
       }),
-      { total: 0, working: 0, standby: 0, breakdown: 0, under_repair: 0, other: 0 },
     )
   }, [sorted])
 

@@ -70,27 +70,19 @@ const PAGE_SIZE = 50;
 const CONDITION_LABELS: Record<string, string> = {
   working: 'Working',
   standby: 'Standby',
-  under_repair: 'Under Repair',
   breakdown: 'Breakdown',
-  faulty: 'Faulty',
   off_hire: 'Off Hire',
   scrap: 'Scrap',
   missing: 'Missing',
-  gpm_assessment: 'GPM Assessment',
-  unverified: 'Unverified',
 };
 
 const CONDITION_COLORS: Record<string, string> = {
   working: 'bg-emerald-100 text-emerald-800',
   standby: 'bg-blue-100 text-blue-800',
-  under_repair: 'bg-amber-100 text-amber-800',
   breakdown: 'bg-red-100 text-red-800',
-  faulty: 'bg-orange-100 text-orange-800',
   off_hire: 'bg-slate-100 text-slate-800',
   scrap: 'bg-gray-100 text-gray-800',
   missing: 'bg-purple-100 text-purple-800',
-  gpm_assessment: 'bg-orange-100 text-orange-800',
-  unverified: 'bg-yellow-100 text-yellow-800',
 };
 
 // ============================================================================

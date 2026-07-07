@@ -70,10 +70,8 @@ const CONDITIONS = [
   { value: 'standby', label: 'Standby' },
   { value: 'breakdown', label: 'Breakdown' },
   { value: 'missing', label: 'Missing' },
-  { value: 'faulty', label: 'Faulty' },
   { value: 'scrap', label: 'Scrap' },
   { value: 'off_hire', label: 'Off Hire' },
-  { value: 'unverified', label: 'Unverified' },
   { value: 'others', label: 'Others' },
 ]
 
