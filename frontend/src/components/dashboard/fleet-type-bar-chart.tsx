@@ -77,6 +77,7 @@ export function FleetTypeBarChart() {
         breakdown: acc.breakdown + row.breakdown,
         other: acc.other + row.other,
       }),
+      { total: 0, working: 0, standby: 0, breakdown: 0, other: 0 },
     )
   }, [sorted])
 

@@ -1,6 +1,6 @@
 'use client'
 
-import { useRouter, useParams } from 'next/navigation'
+import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { useState } from 'react'
 import {
@@ -23,6 +23,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { ProjectOperationsTab } from '@/components/projects/project-operations-tab'
 import { useProject, useDeleteProject } from '@/hooks/use-projects'
 import { useAuth } from '@/providers/auth-provider'
 import { ProjectMilestoneTimeline } from '@/components/projects/project-milestone-timeline'
@@ -86,9 +87,13 @@ export default function ProjectDetailPage() {
 
 function ProjectDetailContent({ projectId }: { projectId: string }) {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
-  const [activeTab, setActiveTab] = useState('overview')
+  const initialTab = ['overview', 'operations', 'timeline', 'financials'].includes(
+    searchParams.get('tab') ?? ''
+  ) ? (searchParams.get('tab') as string) : 'overview'
+  const [activeTab, setActiveTab] = useState(initialTab)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
   const { data: project, isLoading } = useProject(projectId)
@@ -178,11 +183,17 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
         {/* Left: Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList variant="line" className="w-full justify-start border-b">
+          <TabsList variant="line" className="w-full justify-start border-b overflow-x-auto">
             <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="operations">Operations</TabsTrigger>
             <TabsTrigger value="timeline">Timeline</TabsTrigger>
             <TabsTrigger value="financials">Financials</TabsTrigger>
           </TabsList>
+
+          {/* Operations Tab — weekly-report derived */}
+          <TabsContent value="operations" className="space-y-6 pt-4">
+            <ProjectOperationsTab projectId={projectId} />
+          </TabsContent>
 
           {/* OVERVIEW TAB */}
           <TabsContent value="overview" className="space-y-6 pt-4">

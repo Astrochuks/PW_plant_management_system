@@ -20,11 +20,10 @@ export interface FleetCondition {
   working: number;
   standby: number;
   breakdown: number;
-  under_repair: number;
   missing: number;
   scrap: number;
   off_hire: number;
-  faulty: number;
+  unknown: number;
   utilization_rate: number;
 }
 
@@ -34,7 +33,6 @@ export interface FleetByType {
   working: number;
   standby: number;
   breakdown: number;
-  under_repair: number;
   other: number;
 }
 
@@ -45,10 +43,12 @@ export interface StateSummaryRow {
   sites_count: number;
   total_plants: number;
   working: number;
+  standby: number;
   breakdown: number;
-  under_repair: number;
   missing: number;
   scrap: number;
+  off_hire: number;
+  unknown: number;
 }
 
 export interface SiteBreakdownRow {
@@ -57,11 +57,12 @@ export interface SiteBreakdownRow {
   state_code: string;
   total_plants: number;
   working: number;
-  breakdown: number;
-  under_repair: number;
   standby: number;
+  breakdown: number;
   missing: number;
   scrap: number;
+  off_hire: number;
+  unknown: number;
   fleet_types: Record<string, number>;
 }
 

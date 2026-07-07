@@ -505,3 +505,159 @@ export async function linkUnmappedFleetNumber(
   });
   return response.data.data;
 }
+
+// ── Operations (weekly-report derived) ──────────────────────────────────────
+
+export interface ProjectOperationsRow {
+  id: string;
+  short_name: string | null;
+  project_name: string;
+  status: ProjectStatus;
+  location_name: string | null;
+  weeks_received: number;
+  first_week: number;
+  last_week: number;
+  latest_year: number;
+  last_week_ending: string | null;
+  days_since_last_report: number | null;
+  hours_worked: number;
+  breakdown_hours: number;
+  standby_hours: number;
+  plant_cost_ngn: number;
+  fleet_count: number;
+  diesel_litres: number;
+  payments_net_ngn: number;
+  payments_count: number;
+  current_contract_amount: number | null;
+  works_certified: number | null;
+  beme_pct_complete: number | null;
+}
+
+const OPS_NUMERIC_KEYS = [
+  'weeks_received', 'first_week', 'last_week', 'latest_year',
+  'hours_worked', 'breakdown_hours', 'standby_hours', 'plant_cost_ngn',
+  'fleet_count', 'diesel_litres', 'payments_net_ngn', 'payments_count',
+] as const;
+
+function normalizeOpsRow<T extends Record<string, unknown>>(row: T): T {
+  const out: Record<string, unknown> = { ...row };
+  for (const k of OPS_NUMERIC_KEYS) {
+    if (k in out) out[k] = Number(out[k] ?? 0);
+  }
+  for (const k of ['current_contract_amount', 'works_certified',
+                   'beme_pct_complete', 'days_since_last_report']) {
+    if (k in out && out[k] != null) out[k] = Number(out[k]);
+  }
+  return out as T;
+}
+
+export async function getProjectOperations(): Promise<ProjectOperationsRow[]> {
+  const response = await apiClient.get('/projects/operations');
+  return (response.data.data ?? []).map(normalizeOpsRow);
+}
+
+export interface ProjectOperationsSummary {
+  project: {
+    id: string; short_name: string | null; project_name: string;
+    status: ProjectStatus; current_contract_sum: number | null;
+    location_name: string | null;
+  };
+  totals: {
+    weeks_received: number;
+    last_week_ending: string | null;
+    hours_worked: number;
+    breakdown_hours: number;
+    standby_hours: number;
+    plant_cost_ngn: number;
+    fleet_count: number;
+    diesel_litres: number;
+    payments_net_ngn: number;
+    payments_count: number;
+    certificates_count: number;
+    certificates_net_ngn: number;
+  };
+  latest_snapshot: {
+    year: number; week_number: number;
+    original_contract_amount: number | null;
+    current_contract_amount: number | null;
+    works_certified: number | null;
+    retention_held: number | null;
+    advance_unrecovered: number | null;
+  } | null;
+  latest_pct: { year: number; week_number: number; beme_pct_complete: number } | null;
+}
+
+export async function getProjectOperationsSummary(
+  projectId: string,
+): Promise<ProjectOperationsSummary> {
+  const response = await apiClient.get(`/projects/${projectId}/operations/summary`);
+  const d = response.data.data;
+  const numOrNull = (v: unknown) => (v == null ? null : Number(v));
+  return {
+    project: {
+      ...d.project,
+      current_contract_sum: numOrNull(d.project?.current_contract_sum),
+    },
+    totals: Object.fromEntries(
+      Object.entries(d.totals ?? {}).map(([k, v]) =>
+        [k, k === 'last_week_ending' ? v : Number(v ?? 0)],
+      ),
+    ) as ProjectOperationsSummary['totals'],
+    latest_snapshot: d.latest_snapshot
+      ? {
+          ...d.latest_snapshot,
+          original_contract_amount: numOrNull(d.latest_snapshot.original_contract_amount),
+          current_contract_amount: numOrNull(d.latest_snapshot.current_contract_amount),
+          works_certified: numOrNull(d.latest_snapshot.works_certified),
+          retention_held: numOrNull(d.latest_snapshot.retention_held),
+          advance_unrecovered: numOrNull(d.latest_snapshot.advance_unrecovered),
+        }
+      : null,
+    latest_pct: d.latest_pct
+      ? { ...d.latest_pct, beme_pct_complete: Number(d.latest_pct.beme_pct_complete) }
+      : null,
+  };
+}
+
+export interface ProjectOperationsWeekRow {
+  year: number;
+  week_number: number;
+  week_ending_date: string;
+  beme_pct_complete: number | null;
+  hours_worked: number;
+  breakdown_hours: number;
+  standby_hours: number;
+  plant_cost_ngn: number;
+  plants_on_site: number;
+  diesel_litres: number;
+  labour_total: number;
+  works_certified: number | null;
+}
+
+export interface ProjectOperationsMonthRow {
+  month: string;
+  weeks_in_month: number;
+  beme_pct_complete: number | null;
+  hours_worked: number;
+  breakdown_hours: number;
+  standby_hours: number;
+  plant_cost_ngn: number;
+  diesel_litres: number;
+  works_certified: number | null;
+}
+
+export async function getProjectOperationsSeries(
+  projectId: string, granularity: 'week' | 'month',
+): Promise<(ProjectOperationsWeekRow | ProjectOperationsMonthRow)[]> {
+  const response = await apiClient.get(
+    `/projects/${projectId}/operations/series`, { params: { granularity } },
+  );
+  return (response.data.data ?? []).map((row: Record<string, unknown>) => {
+    const out: Record<string, unknown> = { ...row };
+    for (const [k, v] of Object.entries(out)) {
+      if (k === 'week_ending_date' || k === 'month') continue;
+      if (v != null) out[k] = Number(v);
+    }
+    return out;
+  });
+}

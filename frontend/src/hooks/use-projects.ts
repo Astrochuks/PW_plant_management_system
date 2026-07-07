@@ -345,3 +345,66 @@ export function useLinkUnmappedFleetNumber() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: submissionKeys.unmapped() }),
   });
 }
+
+// ============================================================================
+// Operations (Phase 3) — recomputed weekly aggregates
+// ============================================================================
+
+import {
+  getProjectOperations,
+  getProjectOperationsSummary,
+  getProjectOperationsSeries,
+  type ProjectOperationsRow,
+  type ProjectOperationsSummary,
+  type ProjectOperationsWeekRow,
+  type ProjectOperationsMonthRow,
+} from '@/lib/api/projects';
+
+export type {
+  ProjectOperationsRow,
+  ProjectOperationsSummary,
+  ProjectOperationsWeekRow,
+  ProjectOperationsMonthRow,
+};
+
+export const operationsKeys = {
+  all: ['projects', 'operations'] as const,
+  portfolio: () => [...operationsKeys.all, 'portfolio'] as const,
+  summary: (id: string) => [...operationsKeys.all, 'summary', id] as const,
+  series: (id: string, g: 'week' | 'month') =>
+    [...operationsKeys.all, 'series', id, g] as const,
+};
+
+export function useProjectOperations() {
+  return useQuery({
+    queryKey: operationsKeys.portfolio(),
+    queryFn: getProjectOperations,
+    staleTime: 2 * 60 * 1000,
+    networkMode: 'always',
+    retry: 2,
+  });
+}
+
+export function useProjectOperationsSummary(projectId: string | undefined) {
+  return useQuery({
+    queryKey: operationsKeys.summary(projectId ?? ''),
+    queryFn: () => getProjectOperationsSummary(projectId!),
+    enabled: !!projectId,
+    staleTime: 2 * 60 * 1000,
+    networkMode: 'always',
+    retry: 2,
+  });
+}
+
+export function useProjectOperationsSeries(
+  projectId: string | undefined, granularity: 'week' | 'month',
+) {
+  return useQuery({
+    queryKey: operationsKeys.series(projectId ?? '', granularity),
+    queryFn: () => getProjectOperationsSeries(projectId!, granularity),
+    enabled: !!projectId,
+    staleTime: 2 * 60 * 1000,
+    networkMode: 'always',
+    retry: 2,
+  });
+}

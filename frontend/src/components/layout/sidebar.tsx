@@ -28,6 +28,7 @@ import {
   PanelLeft,
   PieChart,
   FolderKanban,
+  Activity,
   Lightbulb,
   AlertTriangle,
   BookOpen,
@@ -109,6 +110,11 @@ const projectNavItems = [
     title: 'Project Registry',
     href: '/projects',
     icon: FolderKanban,
+  },
+  {
+    title: 'Site Operations',
+    href: '/projects/operations',
+    icon: Activity,
   },
 ];
 
@@ -289,16 +295,24 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
         {showProjectItems && (
           <NavSection label="PROJECTS" collapsed={collapsed} separator>
-            {projectNavItems.map((item) => (
-              <NavItem
-                key={item.href}
-                href={item.href}
-                icon={item.icon}
-                title={item.title}
-                isActive={pathname === item.href || pathname.startsWith(item.href + '/')}
-                collapsed={collapsed}
-              />
-            ))}
+            {projectNavItems.map((item) => {
+              // Site Operations owns /projects/operations; Registry owns the rest
+              const isOps = item.href === '/projects/operations';
+              const active = isOps
+                ? pathname.startsWith('/projects/operations')
+                : pathname.startsWith('/projects') &&
+                  !pathname.startsWith('/projects/operations');
+              return (
+                <NavItem
+                  key={item.href}
+                  href={item.href}
+                  icon={item.icon}
+                  title={item.title}
+                  isActive={active}
+                  collapsed={collapsed}
+                />
+              );
+            })}
           </NavSection>
         )}
 

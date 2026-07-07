@@ -226,7 +226,29 @@ async def persist_weekly_report(
         counts["project_certificates"] = len(cert_rows)
 
         # ── payments: full ledger per report (readers use latest report) ─
-        pay_rows = sheet_rows("Payments Recieved")
+        # The sheet ends with subtotal/grand-total rows: no date, no type,
+        # no voucher — only amounts. Storing them double-counts every
+        # aggregate, so they are dropped and used as a cross-check instead.
+        # (Advance rows are real payments: undated but labelled by voucher.)
+        all_pay_rows = sheet_rows("Payments Recieved")
+        pay_rows = [
+            r for r in all_pay_rows
+            if r["payment_date"] is not None
+            or r["payment_type"] is not None
+            or r["voucher_number"] is not None
+        ]
+        total_rows = [r for r in all_pay_rows if r not in pay_rows]
+        if total_rows:
+            sheet_total = max(
+                (float(r["gross_amount"] or 0) for r in total_rows), default=0.0
+            )
+            recomputed = sum(float(r["gross_amount"] or 0) for r in pay_rows)
+            if sheet_total and abs(sheet_total - recomputed) > 1.0:
+                warnings.append(
+                    f"Payments sheet total ₦{sheet_total:,.2f} does not match "
+                    f"the sum of its rows ₦{recomputed:,.2f} — site arithmetic "
+                    f"error or unlabelled payment row"
+                )
         await conn.executemany(
             """INSERT INTO project_payments
                (weekly_report_id, project_id, payment_date, voucher_number,

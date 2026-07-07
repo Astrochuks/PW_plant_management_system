@@ -400,6 +400,296 @@ async def delete_project_submission(
                      "year": sub["year"], "week_number": sub["week_number"]}}
 
 
+# ============================================================================
+# Operations (weekly-report derived) — the MD/GPM view
+#
+# Every number here is RECOMPUTED from atomic weekly facts. The workbook's
+# own Previous/To-Date columns are never trusted (broken cross-workbook
+# links); totals are sums of stored this-week rows, and to-date figures
+# (works certified, payments) come from the latest report's ledger.
+# ============================================================================
+
+
+@router.get("/operations")
+async def list_project_operations(
+    current_user: Annotated[CurrentUser, Depends(require_projects_access)],
+) -> dict[str, Any]:
+    """Portfolio view: every project with ingested weekly data, with
+    recomputed headline totals. Weeks can arrive in any order — all
+    aggregates group over whatever (year, week) rows exist."""
+    rows = await fetch(
+        """
+        WITH wr AS (
+            SELECT project_id,
+                   count(*)::int                AS weeks_received,
+                   min(week_number)::int        AS first_week,
+                   max(week_number)::int        AS last_week,
+                   max(week_ending_date)        AS last_week_ending,
+                   max(year)::int               AS latest_year
+            FROM project_weekly_reports
+            GROUP BY project_id
+        ),
+        util AS (
+            SELECT project_id,
+                   COALESCE(sum(hours_worked), 0)    AS hours_worked,
+                   COALESCE(sum(breakdown_hours), 0) AS breakdown_hours,
+                   COALESCE(sum(standby_hours), 0)   AS standby_hours,
+                   COALESCE(sum(plant_cost), 0)      AS plant_cost_ngn,
+                   count(DISTINCT fleet_number_raw)::int AS fleet_count
+            FROM project_plant_utilization
+            GROUP BY project_id
+        ),
+        diesel AS (
+            SELECT project_id, COALESCE(sum(total_litres), 0) AS diesel_litres
+            FROM project_diesel_consumption
+            GROUP BY project_id
+        ),
+        latest_report AS (
+            SELECT DISTINCT ON (project_id) project_id, id
+            FROM project_weekly_reports
+            ORDER BY project_id, year DESC, week_number DESC
+        ),
+        pay AS (
+            -- payments are a per-report ledger: read the LATEST report only
+            SELECT p.project_id,
+                   COALESCE(sum(p.net_amount), 0) AS payments_net_ngn,
+                   count(*)::int                  AS payments_count
+            FROM project_payments p
+            JOIN latest_report lr ON lr.id = p.weekly_report_id
+            GROUP BY p.project_id
+        ),
+        snap AS (
+            SELECT DISTINCT ON (project_id) project_id,
+                   current_contract_amount, works_certified
+            FROM project_contract_summary_snapshot
+            ORDER BY project_id, year DESC, week_number DESC
+        ),
+        pct AS (
+            SELECT DISTINCT ON (project_id) project_id, beme_pct_complete
+            FROM project_weekly_reports
+            WHERE beme_pct_complete IS NOT NULL
+            ORDER BY project_id, year DESC, week_number DESC
+        )
+        SELECT p.id, p.short_name, p.project_name, p.status,
+               l.name AS location_name,
+               wr.weeks_received, wr.first_week, wr.last_week,
+               wr.latest_year, wr.last_week_ending,
+               (CURRENT_DATE - wr.last_week_ending)::int AS days_since_last_report,
+               util.hours_worked, util.breakdown_hours, util.standby_hours,
+               util.plant_cost_ngn, util.fleet_count,
+               diesel.diesel_litres,
+               pay.payments_net_ngn, pay.payments_count,
+               snap.current_contract_amount, snap.works_certified,
+               pct.beme_pct_complete
+        FROM wr
+        JOIN projects p ON p.id = wr.project_id
+        LEFT JOIN locations l ON l.id = p.location_id
+        LEFT JOIN util   ON util.project_id   = wr.project_id
+        LEFT JOIN diesel ON diesel.project_id = wr.project_id
+        LEFT JOIN pay    ON pay.project_id    = wr.project_id
+        LEFT JOIN snap   ON snap.project_id   = wr.project_id
+        LEFT JOIN pct    ON pct.project_id    = wr.project_id
+        ORDER BY wr.last_week_ending DESC
+        """
+    )
+    return {"success": True, "data": rows}
+
+
+@router.get("/{project_id}/operations/summary")
+async def get_project_operations_summary(
+    project_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(require_projects_access)],
+) -> dict[str, Any]:
+    """Drill-down headline for one project: recomputed totals + latest
+    contract snapshot + certificate/payment ledger summaries."""
+    pid = str(project_id)
+    project = await fetchrow(
+        """SELECT p.id, p.short_name, p.project_name, p.status,
+                  p.current_contract_sum, l.name AS location_name
+           FROM projects p LEFT JOIN locations l ON l.id = p.location_id
+           WHERE p.id = $1::uuid""",
+        pid,
+    )
+    if project is None:
+        raise NotFoundError("Project not found")
+
+    totals = await fetchrow(
+        """
+        WITH latest_report AS (
+            SELECT id FROM project_weekly_reports
+            WHERE project_id = $1::uuid
+            ORDER BY year DESC, week_number DESC LIMIT 1
+        )
+        SELECT
+          (SELECT count(*)::int FROM project_weekly_reports
+            WHERE project_id = $1::uuid)                       AS weeks_received,
+          (SELECT max(week_ending_date) FROM project_weekly_reports
+            WHERE project_id = $1::uuid)                       AS last_week_ending,
+          (SELECT COALESCE(sum(hours_worked), 0)
+             FROM project_plant_utilization
+            WHERE project_id = $1::uuid)                       AS hours_worked,
+          (SELECT COALESCE(sum(breakdown_hours), 0)
+             FROM project_plant_utilization
+            WHERE project_id = $1::uuid)                       AS breakdown_hours,
+          (SELECT COALESCE(sum(standby_hours), 0)
+             FROM project_plant_utilization
+            WHERE project_id = $1::uuid)                       AS standby_hours,
+          (SELECT COALESCE(sum(plant_cost), 0)
+             FROM project_plant_utilization
+            WHERE project_id = $1::uuid)                       AS plant_cost_ngn,
+          (SELECT count(DISTINCT fleet_number_raw)::int
+             FROM project_plant_utilization
+            WHERE project_id = $1::uuid)                       AS fleet_count,
+          (SELECT COALESCE(sum(total_litres), 0)
+             FROM project_diesel_consumption
+            WHERE project_id = $1::uuid)                       AS diesel_litres,
+          (SELECT COALESCE(sum(net_amount), 0) FROM project_payments
+            WHERE weekly_report_id IN (SELECT id FROM latest_report))
+                                                               AS payments_net_ngn,
+          (SELECT count(*)::int FROM project_payments
+            WHERE weekly_report_id IN (SELECT id FROM latest_report))
+                                                               AS payments_count,
+          (SELECT count(*)::int FROM project_certificates
+            WHERE project_id = $1::uuid)                       AS certificates_count,
+          -- total_net_payment is the sheet's CUMULATIVE running column:
+          -- the highest-numbered cert carries the to-date figure
+          (SELECT COALESCE(total_net_payment, 0)
+             FROM project_certificates
+            WHERE project_id = $1::uuid
+            ORDER BY NULLIF(regexp_replace(cert_number, '\D', '', 'g'), '')::int
+                     DESC NULLS LAST
+            LIMIT 1)                                           AS certificates_net_ngn
+        """,
+        pid,
+    )
+    snapshot = await fetchrow(
+        """SELECT year, week_number, original_contract_amount,
+                  current_contract_amount, works_certified, retention_held,
+                  advance_unrecovered
+           FROM project_contract_summary_snapshot
+           WHERE project_id = $1::uuid
+           ORDER BY year DESC, week_number DESC LIMIT 1""",
+        pid,
+    )
+    pct = await fetchrow(
+        """SELECT year, week_number, beme_pct_complete
+           FROM project_weekly_reports
+           WHERE project_id = $1::uuid AND beme_pct_complete IS NOT NULL
+           ORDER BY year DESC, week_number DESC LIMIT 1""",
+        pid,
+    )
+    return {"success": True, "data": {
+        "project": project,
+        "totals": totals,
+        "latest_snapshot": snapshot,
+        "latest_pct": pct,
+    }}
+
+
+@router.get("/{project_id}/operations/series")
+async def get_project_operations_series(
+    project_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(require_projects_access)],
+    granularity: str = Query("week", pattern=r"^(week|month)$"),
+) -> dict[str, Any]:
+    """Per-week or per-month series, recomputed from atomic rows.
+
+    Monthly buckets group weeks by the month of their week-ending date
+    (company weeks run Sat–Fri), so a month is the sum of the weeks that
+    END in it.
+    """
+    pid = str(project_id)
+    exists = await fetchval(
+        "SELECT 1 FROM projects WHERE id = $1::uuid", pid
+    )
+    if not exists:
+        raise NotFoundError("Project not found")
+
+    if granularity == "week":
+        rows = await fetch(
+            """
+            SELECT wr.year, wr.week_number, wr.week_ending_date,
+                   wr.beme_pct_complete,
+                   COALESCE(u.hours_worked, 0)     AS hours_worked,
+                   COALESCE(u.breakdown_hours, 0)  AS breakdown_hours,
+                   COALESCE(u.standby_hours, 0)    AS standby_hours,
+                   COALESCE(u.plant_cost_ngn, 0)   AS plant_cost_ngn,
+                   COALESCE(u.plants_on_site, 0)   AS plants_on_site,
+                   COALESCE(d.diesel_litres, 0)    AS diesel_litres,
+                   COALESCE(lab.labour_total, 0)   AS labour_total,
+                   snap.works_certified
+            FROM project_weekly_reports wr
+            LEFT JOIN (
+                SELECT weekly_report_id,
+                       sum(hours_worked)    AS hours_worked,
+                       sum(breakdown_hours) AS breakdown_hours,
+                       sum(standby_hours)   AS standby_hours,
+                       sum(plant_cost)      AS plant_cost_ngn,
+                       count(DISTINCT fleet_number_raw) AS plants_on_site
+                FROM project_plant_utilization
+                WHERE project_id = $1::uuid
+                GROUP BY weekly_report_id
+            ) u ON u.weekly_report_id = wr.id
+            LEFT JOIN (
+                SELECT weekly_report_id, sum(total_litres) AS diesel_litres
+                FROM project_diesel_consumption
+                WHERE project_id = $1::uuid
+                GROUP BY weekly_report_id
+            ) d ON d.weekly_report_id = wr.id
+            LEFT JOIN (
+                SELECT weekly_report_id, sum(manning_this_week) AS labour_total
+                FROM project_labour_strength
+                WHERE project_id = $1::uuid
+                GROUP BY weekly_report_id
+            ) lab ON lab.weekly_report_id = wr.id
+            LEFT JOIN project_contract_summary_snapshot snap
+                   ON snap.weekly_report_id = wr.id
+            WHERE wr.project_id = $1::uuid
+            ORDER BY wr.year, wr.week_number
+            """,
+            pid,
+        )
+    else:
+        rows = await fetch(
+            """
+            SELECT to_char(date_trunc('month', wr.week_ending_date),
+                           'YYYY-MM')                          AS month,
+                   count(*)::int                               AS weeks_in_month,
+                   max(wr.beme_pct_complete)                   AS beme_pct_complete,
+                   COALESCE(sum(u.hours_worked), 0)            AS hours_worked,
+                   COALESCE(sum(u.breakdown_hours), 0)         AS breakdown_hours,
+                   COALESCE(sum(u.standby_hours), 0)           AS standby_hours,
+                   COALESCE(sum(u.plant_cost_ngn), 0)          AS plant_cost_ngn,
+                   COALESCE(sum(d.diesel_litres), 0)           AS diesel_litres,
+                   max(snap.works_certified)                   AS works_certified
+            FROM project_weekly_reports wr
+            LEFT JOIN (
+                SELECT weekly_report_id,
+                       sum(hours_worked)    AS hours_worked,
+                       sum(breakdown_hours) AS breakdown_hours,
+                       sum(standby_hours)   AS standby_hours,
+                       sum(plant_cost)      AS plant_cost_ngn
+                FROM project_plant_utilization
+                WHERE project_id = $1::uuid
+                GROUP BY weekly_report_id
+            ) u ON u.weekly_report_id = wr.id
+            LEFT JOIN (
+                SELECT weekly_report_id, sum(total_litres) AS diesel_litres
+                FROM project_diesel_consumption
+                WHERE project_id = $1::uuid
+                GROUP BY weekly_report_id
+            ) d ON d.weekly_report_id = wr.id
+            LEFT JOIN project_contract_summary_snapshot snap
+                   ON snap.weekly_report_id = wr.id
+            WHERE wr.project_id = $1::uuid
+            GROUP BY date_trunc('month', wr.week_ending_date)
+            ORDER BY 1
+            """,
+            pid,
+        )
+    return {"success": True, "data": rows, "meta": {"granularity": granularity}}
+
+
 @router.get("/review-queue")
 async def get_review_queue(
     current_user: Annotated[CurrentUser, Depends(require_admin)],

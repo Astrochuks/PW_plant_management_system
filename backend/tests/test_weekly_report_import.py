@@ -82,7 +82,7 @@ class TestPersistWeek10:
             "project_diesel_consumption": 122,
             "project_cost_report": 78,
             "project_certificates": 13,
-            "project_payments": 19,
+            "project_payments": 17,  # 19 sheet rows − subtotal − grand total
             "project_beme_progress": distinct_beme,
             "project_subcontractors": 83,
             "project_labour_strength": 22,
@@ -145,6 +145,25 @@ class TestPersistWeek10:
             project_id,
         )
         assert items == distinct_beme
+
+    async def test_payments_totals_dropped_but_reconciled(self, db):
+        """Subtotal/grand-total sheet rows are never stored; the sum of the
+        stored rows equals the sheet's own grand total (net)."""
+        conn, _, project_id, stats = db
+        n_totals = await conn.fetchval(
+            """SELECT count(*) FROM project_payments
+               WHERE weekly_report_id = $1::uuid
+                 AND payment_date IS NULL AND payment_type IS NULL
+                 AND voucher_number IS NULL""",
+            stats["weekly_report_id"],
+        )
+        assert n_totals == 0
+        net = await conn.fetchval(
+            """SELECT sum(net_amount) FROM project_payments
+               WHERE weekly_report_id = $1::uuid""",
+            stats["weekly_report_id"],
+        )
+        assert float(net) == pytest.approx(12_039_846_565.61, abs=1.0)
 
     async def test_contract_snapshot(self, db):
         conn, _, project_id, _ = db
