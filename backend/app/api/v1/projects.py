@@ -13,6 +13,7 @@ from fastapi import (
     BackgroundTasks,
     Depends,
     File,
+    Form,
     HTTPException,
     Query,
     Request,
@@ -26,6 +27,7 @@ from app.core.security import (
     CurrentUser,
     get_current_user,
     require_admin,
+    require_management_or_admin,
 )
 from app.models.project import ProjectCreate, ProjectUpdate
 from app.core.events import broadcast
@@ -54,6 +56,171 @@ _UUID_FIELDS = {"state_id", "client_id", "location_id", "created_by", "updated_b
 # ============================================================================
 # Non-parametric routes (must come before /{project_id})
 # ============================================================================
+
+
+@router.post("/upload-weekly-report")
+async def upload_weekly_report(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+    file: UploadFile = File(...),
+    project_id: UUID = Form(...),
+    year: int = Form(...),
+    week_number: int = Form(...),
+) -> dict[str, Any]:
+    """Upload a 16-sheet project weekly report (admin). Mirrors the plant
+    upload PATTERN (pick project + week, drop file, poll submission) but
+    shares no tables or code with it."""
+    import hashlib
+
+    if not file.filename:
+        raise ValidationError("File name is required")
+    ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
+    if ext != "xlsx":
+        raise ValidationError("Only .xlsx weekly reports are accepted")
+    if not (1 <= week_number <= 53):
+        raise ValidationError("week_number must be 1–53")
+    if not (2020 <= year <= 2100):
+        raise ValidationError("year out of range")
+
+    file_content = await file.read()
+    if len(file_content) > 25 * 1024 * 1024:
+        raise ValidationError("File too large (max 25MB)")
+
+    project = await fetchrow(
+        "SELECT id, short_name FROM projects WHERE id = $1::uuid", str(project_id)
+    )
+    if project is None:
+        raise NotFoundError("Project not found")
+
+    # ── store the original file ─────────────────────────────────────────
+    from app.core.database import get_supabase_client
+
+    storage_path = (
+        f"weekly-reports/projects/{project_id}/"
+        f"{year}-W{week_number:02d}/{file.filename}"
+    )
+    client = get_supabase_client()
+    try:
+        client.storage.from_("reports").upload(
+            storage_path, file_content,
+            {"content-type":
+             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
+        )
+    except Exception as e:
+        if "already exists" in str(e).lower() or "duplicate" in str(e).lower():
+            client.storage.from_("reports").update(storage_path, file_content)
+        else:
+            raise
+
+    submission_id = await fetchval(
+        """INSERT INTO project_report_submissions
+           (project_id, year, week_number, file_name, file_hash, file_path,
+            file_size, source, status, uploaded_by)
+           VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, 'excel', 'queued', $8::uuid)
+           RETURNING id""",
+        str(project_id), year, week_number, file.filename,
+        hashlib.sha256(file_content).hexdigest(), storage_path,
+        len(file_content), current_user.id,
+    )
+
+    from app.workers.project_report_worker import process_project_weekly_report
+
+    background_tasks.add_task(process_project_weekly_report, str(submission_id))
+
+    background_tasks.add_task(
+        audit_service.log,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        action="create",
+        table_name="project_report_submissions",
+        record_id=str(submission_id),
+        new_values={"project": project["short_name"], "year": year,
+                    "week": week_number, "file": file.filename},
+        ip_address=get_client_ip(request),
+        description=f"Uploaded weekly report {year}-W{week_number} for {project['short_name']}",
+    )
+    return {
+        "success": True,
+        "data": {"submission_id": str(submission_id), "status": "queued"},
+    }
+
+
+@router.get("/submissions")
+async def list_project_submissions(
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+    status: str | None = Query(None, pattern="^(queued|parsing|success|partial|failed|deleted)$"),
+    project_id: UUID | None = None,
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+) -> dict[str, Any]:
+    conds, params = ["TRUE"], []
+    if status:
+        params.append(status)
+        conds.append(f"s.status = ${len(params)}")
+    if project_id:
+        params.append(str(project_id))
+        conds.append(f"s.project_id = ${len(params)}::uuid")
+    params += [limit, (page - 1) * limit]
+    rows = await fetch(
+        f"""SELECT s.*, p.short_name, p.project_name,
+                   count(*) OVER() AS _total_count
+            FROM project_report_submissions s
+            JOIN projects p ON p.id = s.project_id
+            WHERE {' AND '.join(conds)}
+            ORDER BY s.uploaded_at DESC
+            LIMIT ${len(params) - 1} OFFSET ${len(params)}""",
+        *params,
+    )
+    total = rows[0].pop("_total_count", 0) if rows else 0
+    for r in rows[1:]:
+        r.pop("_total_count", None)
+    return {"success": True, "data": rows,
+            "meta": {"page": page, "limit": limit, "total": total}}
+
+
+@router.get("/submissions/{submission_id}")
+async def get_project_submission(
+    submission_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+) -> dict[str, Any]:
+    row = await fetchrow(
+        """SELECT s.*, p.short_name, p.project_name
+           FROM project_report_submissions s
+           JOIN projects p ON p.id = s.project_id
+           WHERE s.id = $1::uuid""",
+        str(submission_id),
+    )
+    if row is None:
+        raise NotFoundError("Submission not found")
+    return {"success": True, "data": row}
+
+
+@router.post("/submissions/{submission_id}/retry")
+async def retry_project_submission(
+    submission_id: UUID,
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+) -> dict[str, Any]:
+    row = await fetchrow(
+        "SELECT id, status FROM project_report_submissions WHERE id = $1::uuid",
+        str(submission_id),
+    )
+    if row is None:
+        raise NotFoundError("Submission not found")
+    if row["status"] in ("queued", "parsing"):
+        raise ValidationError("Submission is already being processed")
+    await execute(
+        """UPDATE project_report_submissions
+           SET status = 'queued', error_message = NULL,
+               retry_count = retry_count + 1, updated_at = now()
+           WHERE id = $1::uuid""",
+        str(submission_id),
+    )
+    from app.workers.project_report_worker import process_project_weekly_report
+
+    background_tasks.add_task(process_project_weekly_report, str(submission_id))
+    return {"success": True, "data": {"status": "queued"}}
 
 
 @router.get("/review-queue")
