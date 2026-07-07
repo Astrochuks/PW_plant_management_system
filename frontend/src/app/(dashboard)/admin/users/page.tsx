@@ -10,7 +10,7 @@ import { useUsers } from '@/hooks/use-users'
 import { Plus } from 'lucide-react'
 
 function UsersPageContent() {
-  const [filters, setFilters] = useState<{ role?: 'admin' | 'management' | 'site_engineer'; is_active?: boolean }>({})
+  const [filters, setFilters] = useState<{ role?: 'admin' | 'management' | 'plant_officer' | 'site_engineer'; is_active?: boolean }>({})
   const { data: users, isLoading } = useUsers(filters)
 
   return (

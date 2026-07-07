@@ -133,7 +133,9 @@ export function UsersTable({ users, isLoading }: UsersTableProps) {
                     }
                     className={user.role === 'site_engineer' ? 'bg-blue-50 text-blue-700 border-blue-200' : ''}
                   >
-                    {user.role === 'site_engineer' ? 'Site Engineer' : user.role}
+                    {user.role === 'site_engineer' ? 'Site Engineer'
+                      : user.role === 'plant_officer' ? 'Plant Officer'
+                      : user.role}
                   </Badge>
                 </TableCell>
                 <TableCell className="text-sm text-muted-foreground">

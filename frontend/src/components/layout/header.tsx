@@ -118,7 +118,7 @@ export function Header({ sidebarCollapsed, onMenuClick }: HeaderProps) {
                     {user?.full_name || user?.email}
                   </span>
                   <span className="text-xs text-muted-foreground capitalize">
-                    {user?.role}
+                    {user?.role?.replace(/_/g, ' ')}
                   </span>
                 </div>
               </Button>

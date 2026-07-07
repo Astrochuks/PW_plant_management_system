@@ -737,7 +737,7 @@ class CreateUserRequest(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=6, description="Temporary password")
     full_name: str = Field(..., min_length=2, max_length=255)
-    role: Literal["admin", "management", "site_engineer"] = "management"
+    role: Literal["admin", "management", "plant_officer", "site_engineer"] = "management"
     location_id: UUID | None = None  # Required when role = site_engineer
 
     @field_validator("password")
@@ -750,7 +750,7 @@ class UpdateUserRequest(BaseModel):
     """Request body for updating a user."""
 
     full_name: str | None = None
-    role: Literal["admin", "management", "site_engineer"] | None = None
+    role: Literal["admin", "management", "plant_officer", "site_engineer"] | None = None
     is_active: bool | None = None
     location_id: UUID | None = None  # For assigning/changing site engineer location
     clear_location: bool = False  # Set True to explicitly unlink location
@@ -892,7 +892,7 @@ async def create_user(
 @router.get("/users")
 async def list_users(
     current_user: Annotated[CurrentUser, Depends(require_admin)],
-    role: str | None = Query(None, pattern="^(admin|management|site_engineer)$"),
+    role: str | None = Query(None, pattern="^(admin|management|plant_officer|site_engineer)$"),
     is_active: bool | None = None,
 ) -> dict[str, Any]:
     """List all users (Admin only)."""

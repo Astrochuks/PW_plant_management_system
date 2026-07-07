@@ -119,6 +119,18 @@ def management_user():
 
 
 @pytest.fixture
+def plant_officer_user():
+    """Mock plant officer — management-tier for plants, no projects access."""
+    return {
+        "id": "plant-officer-user-id",
+        "email": "officer@example.com",
+        "role": "plant_officer",
+        "full_name": "Test Plant Officer",
+        "is_active": True,
+    }
+
+
+@pytest.fixture
 def sample_plant():
     """Sample plant data for tests."""
     return {

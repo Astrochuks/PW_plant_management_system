@@ -219,7 +219,7 @@ class CurrentUser(BaseModel):
 
     id: str
     email: str
-    role: str  # 'admin', 'management', or 'site_engineer'
+    role: str  # 'admin', 'management' (MD/GPM), 'plant_officer', or 'site_engineer'
     full_name: str | None = None
     is_active: bool = True
     location_id: str | None = None  # Only set for site_engineer role
@@ -231,8 +231,13 @@ class CurrentUser(BaseModel):
 
     @property
     def is_management(self) -> bool:
-        """Check if user has management role."""
+        """Check if user has management role (MD / GPM)."""
         return self.role == "management"
+
+    @property
+    def is_plant_officer(self) -> bool:
+        """Management-tier for the plant module only — no projects access."""
+        return self.role == "plant_officer"
 
     @property
     def is_site_engineer(self) -> bool:
@@ -313,9 +318,26 @@ def require_admin(
 def require_management_or_admin(
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> CurrentUser:
-    """Require management or admin role for access."""
-    if not (current_user.is_admin or current_user.is_management):
+    """Require management-tier access (admin, MD/GPM, or plant officer).
+
+    Gates the PLANT module. The plant officer is management-tier here;
+    the projects module uses require_projects_access instead.
+    """
+    if not (current_user.is_admin or current_user.is_management
+            or current_user.is_plant_officer):
         raise AuthorizationError("Management or admin access required")
+    return current_user
+
+
+def require_projects_access(
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> CurrentUser:
+    """Require projects-module access: admin or management (MD/GPM).
+
+    The plant officer has no business with projects (decision 2026-07-07).
+    """
+    if not (current_user.is_admin or current_user.is_management):
+        raise AuthorizationError("Projects access requires management or admin role")
     return current_user
 
 

@@ -6,7 +6,12 @@ import { useAuth } from '@/providers/auth-provider'
 import { Skeleton } from '@/components/ui/skeleton'
 
 interface ProtectedRouteProps {
-  requiredRole: 'admin' | 'management' | 'both'
+  /**
+   * admin      — admins only
+   * management — management-tier: admin, MD/GPM, plant officer (plant module)
+   * projects   — projects module: admin or MD/GPM (no plant officer)
+   */
+  requiredRole: 'admin' | 'management' | 'projects' | 'both'
   children: React.ReactNode
 }
 
@@ -29,8 +34,17 @@ export function ProtectedRoute({ requiredRole, children }: ProtectedRouteProps) 
       return
     }
 
-    if (requiredRole === 'management' && !['admin', 'management'].includes(user.role)) {
-      // Management+ route, user doesn't have permission
+    if (
+      requiredRole === 'management' &&
+      !['admin', 'management', 'plant_officer'].includes(user.role)
+    ) {
+      // Management-tier route (plant module), user doesn't have permission
+      router.push('/access-denied')
+      return
+    }
+
+    if (requiredRole === 'projects' && !['admin', 'management'].includes(user.role)) {
+      // Projects module — the plant officer has no access here
       router.push('/access-denied')
       return
     }

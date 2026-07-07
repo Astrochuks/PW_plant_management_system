@@ -8,7 +8,7 @@ export interface User {
   id: string
   email: string
   full_name: string
-  role: 'admin' | 'management' | 'site_engineer'
+  role: 'admin' | 'management' | 'plant_officer' | 'site_engineer'
   is_active: boolean
   must_change_password: boolean
   last_login_at: string | null
@@ -22,13 +22,13 @@ export interface CreateUserRequest {
   email: string
   password: string
   full_name: string
-  role: 'admin' | 'management' | 'site_engineer'
+  role: 'admin' | 'management' | 'plant_officer' | 'site_engineer'
   location_id?: string | null
 }
 
 export interface UpdateUserRequest {
   full_name?: string
-  role?: 'admin' | 'management' | 'site_engineer'
+  role?: 'admin' | 'management' | 'plant_officer' | 'site_engineer'
   is_active?: boolean
   location_id?: string | null
   clear_location?: boolean
@@ -62,7 +62,7 @@ export async function createUser(data: CreateUserRequest): Promise<UserResponse>
  */
 export async function listUsers(
   filters?: {
-    role?: 'admin' | 'management' | 'site_engineer'
+    role?: 'admin' | 'management' | 'plant_officer' | 'site_engineer'
     is_active?: boolean
   }
 ): Promise<UserListResponse> {

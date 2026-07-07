@@ -25,9 +25,8 @@ from app.core.exceptions import NotFoundError, ValidationError
 from app.core.pool import fetch, fetchrow, fetchval, execute, get_pool
 from app.core.security import (
     CurrentUser,
-    get_current_user,
     require_admin,
-    require_management_or_admin,
+    require_projects_access,
 )
 from app.models.project import ProjectCreate, ProjectUpdate
 from app.core.events import broadcast
@@ -148,7 +147,7 @@ async def upload_weekly_report(
 
 @router.get("/submissions")
 async def list_project_submissions(
-    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+    current_user: Annotated[CurrentUser, Depends(require_projects_access)],
     status: str | None = Query(None, pattern="^(queued|parsing|success|partial|failed|deleted)$"),
     project_id: UUID | None = None,
     page: int = Query(1, ge=1),
@@ -182,7 +181,7 @@ async def list_project_submissions(
 @router.get("/submissions/{submission_id}")
 async def get_project_submission(
     submission_id: UUID,
-    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+    current_user: Annotated[CurrentUser, Depends(require_projects_access)],
 ) -> dict[str, Any]:
     row = await fetchrow(
         """SELECT s.*, p.short_name, p.project_name
@@ -225,7 +224,7 @@ async def retry_project_submission(
 
 @router.get("/unmapped-fleet-numbers")
 async def list_unmapped_fleet_numbers(
-    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+    current_user: Annotated[CurrentUser, Depends(require_projects_access)],
 ) -> dict[str, Any]:
     """Fleet numbers in project reports that don't match plants_master."""
     rows = await fetch(
@@ -504,7 +503,7 @@ async def bulk_dismiss_review_items(
 
 @router.get("/benchmarks")
 async def get_project_benchmarks(
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    current_user: Annotated[CurrentUser, Depends(require_projects_access)],
 ) -> dict[str, Any]:
     """Register benchmarks: per-type contract-value quartiles + actual
     award→completion delivery times (from v_project_benchmarks_by_type)."""
@@ -516,7 +515,7 @@ async def get_project_benchmarks(
 
 @router.get("/stats")
 async def get_project_stats(
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    current_user: Annotated[CurrentUser, Depends(require_projects_access)],
     is_legacy: bool | None = Query(None, description="Filter stats by legacy status"),
 ) -> dict[str, Any]:
     """Dashboard summary: counts by status, total contract value, top clients."""
@@ -564,7 +563,7 @@ async def get_project_stats(
 
 @router.get("/clients")
 async def list_clients(
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    current_user: Annotated[CurrentUser, Depends(require_projects_access)],
 ) -> dict[str, Any]:
     """List distinct client names for filter dropdowns."""
     rows = await fetch(
@@ -722,7 +721,7 @@ async def import_award_letters(
 
 @router.get("/linkable")
 async def list_linkable_projects(
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    current_user: Annotated[CurrentUser, Depends(require_projects_access)],
 ) -> dict[str, Any]:
     """List non-legacy projects that don't yet have a linked location."""
     rows = await fetch(
@@ -744,7 +743,7 @@ async def list_linkable_projects(
 
 @router.get("")
 async def list_projects(
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    current_user: Annotated[CurrentUser, Depends(require_projects_access)],
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     search: str | None = None,
@@ -841,7 +840,7 @@ async def list_projects(
 @router.get("/{project_id}")
 async def get_project(
     project_id: UUID,
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    current_user: Annotated[CurrentUser, Depends(require_projects_access)],
 ) -> dict[str, Any]:
     """Get a single project by ID."""
     row = await fetchrow(
@@ -858,7 +857,7 @@ async def get_project(
 @router.get("/{project_id}/milestones")
 async def get_project_milestones(
     project_id: UUID,
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    current_user: Annotated[CurrentUser, Depends(require_projects_access)],
 ) -> dict[str, Any]:
     """Get project milestone timeline data."""
     row = await fetchrow(

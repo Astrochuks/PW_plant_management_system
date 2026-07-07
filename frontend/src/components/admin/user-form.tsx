@@ -39,7 +39,7 @@ const userFormSchema = z.object({
     .optional()
     .or(z.literal('')),
   full_name: z.string().min(2, 'Full name must be at least 2 characters'),
-  role: z.enum(['admin', 'management', 'site_engineer']),
+  role: z.enum(['admin', 'management', 'plant_officer', 'site_engineer']),
   location_id: z.string().optional(),
 }).refine(
   (data) => data.role !== 'site_engineer' || !!data.location_id,
@@ -56,7 +56,8 @@ interface UserFormProps {
 
 const ROLE_DESCRIPTIONS: Record<string, string> = {
   admin: 'Full access to all features and user management',
-  management: 'Read access to plants, reports, and analytics',
+  management: 'MD / GPM — read access to plants, projects, reports, and analytics',
+  plant_officer: 'Plant module only — same plant access as management, no projects',
   site_engineer: 'Can fill and submit weekly reports for their assigned site',
 }
 
@@ -201,7 +202,8 @@ export function UserForm({ user, onSuccess, onCancel }: UserFormProps) {
                 </FormControl>
                 <SelectContent>
                   <SelectItem value="admin">Admin</SelectItem>
-                  <SelectItem value="management">Management</SelectItem>
+                  <SelectItem value="management">Management (MD / GPM)</SelectItem>
+                  <SelectItem value="plant_officer">Plant Officer</SelectItem>
                   <SelectItem value="site_engineer">Site Engineer</SelectItem>
                 </SelectContent>
               </Select>

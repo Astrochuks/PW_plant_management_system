@@ -167,7 +167,11 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const isManagement = user?.role === 'management';
-  const showManagementItems = isAdmin || isManagement;
+  const isPlantOfficer = user?.role === 'plant_officer';
+  // management-tier (plant module): admin, MD/GPM, plant officer
+  const showManagementItems = isAdmin || isManagement || isPlantOfficer;
+  // projects module: admin + MD/GPM only — the plant officer has no access
+  const showProjectItems = isAdmin || isManagement;
 
   // Track last visit to transfers page for badge count
   const TRANSFERS_LAST_SEEN_KEY = 'transfers_last_seen_at';
@@ -283,18 +287,20 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           </NavSection>
         )}
 
-        <NavSection label="PROJECTS" collapsed={collapsed} separator>
-          {projectNavItems.map((item) => (
-            <NavItem
-              key={item.href}
-              href={item.href}
-              icon={item.icon}
-              title={item.title}
-              isActive={pathname === item.href || pathname.startsWith(item.href + '/')}
-              collapsed={collapsed}
-            />
-          ))}
-        </NavSection>
+        {showProjectItems && (
+          <NavSection label="PROJECTS" collapsed={collapsed} separator>
+            {projectNavItems.map((item) => (
+              <NavItem
+                key={item.href}
+                href={item.href}
+                icon={item.icon}
+                title={item.title}
+                isActive={pathname === item.href || pathname.startsWith(item.href + '/')}
+                collapsed={collapsed}
+              />
+            ))}
+          </NavSection>
+        )}
 
         {/* SHARED — management + admin */}
         {showManagementItems && (

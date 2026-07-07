@@ -386,7 +386,7 @@ function SubmissionsContent() {
 
 export default function ProjectSubmissionsPage() {
   return (
-    <ProtectedRoute requiredRole="management">
+    <ProtectedRoute requiredRole="projects">
       <SubmissionsContent />
     </ProtectedRoute>
   )
