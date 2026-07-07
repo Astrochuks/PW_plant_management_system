@@ -92,7 +92,9 @@ function ProjectsPageInner() {
   }, [])
 
   const resultText = meta
-    ? `Showing ${((meta.page - 1) * meta.limit) + 1}–${Math.min(meta.page * meta.limit, meta.total)} of ${meta.total.toLocaleString()} projects`
+    ? meta.total === 0
+      ? 'No projects match the current filters'
+      : `Showing ${((meta.page - 1) * meta.limit) + 1}–${Math.min(meta.page * meta.limit, meta.total)} of ${meta.total.toLocaleString()} projects`
     : ''
 
   return (

@@ -783,8 +783,8 @@ async def list_projects(
             f"OR v.short_name ILIKE ${n})"
         )
     if client:
-        params.append(client.upper())
-        conds.append(f"v.client = ${len(params)}")
+        params.append(client)
+        conds.append(f"upper(v.client) = upper(${len(params)})")
     if state_id:
         params.append(str(state_id))
         conds.append(f"v.state_id = ${len(params)}::uuid")
