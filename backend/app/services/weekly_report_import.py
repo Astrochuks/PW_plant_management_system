@@ -1,25 +1,20 @@
-"""Persistence for project weekly reports (T2.15/T2.16).
+"""Weekly-report persistence v2 — the locked parse spec (2026-07-08).
 
-One transaction on a caller-supplied connection (endpoint AND tests run
-the identical path). Idempotent by construction: the (project, year,
-week) header row is deleted first and every child cascades, so a
-re-upload replaces cleanly.
+Facts stored:
+  - this-week rows per sheet (delete-header-cascade replace = idempotent)
+  - reported-previous per BEME item / cost row (baseline & gap inputs)
+  - ledger adjustments (baseline + gap) — RECOMPUTED from stored data
+    whenever the set of stored weeks changes, never frozen at ingest
+  - sheet flags: cross-checks, staleness, variances (powers preview + audit)
 
-Ledger sheets vs weekly facts:
-  - Certificates: the sheet re-lists the FULL cert ledger every week →
-    upserted by (project, cert_number), always reflecting the latest
-    report that mentioned each cert.
-  - Payments / Bill-1 payments: also full ledgers, but with no natural
-    unique key → stored per report; readers use the LATEST report's rows
-    (documented contract, enforced by the dashboard queries).
-  - Everything else (plant, diesel, costs, BEME progress, labour,
-    materials, precast, subs, hired, weekly summary, snapshot) is a
-    weekly fact tied to this report.
-
-Cross-checks never block the import — they surface as warnings
-(the site's own arithmetic being wrong is a finding, not a failure).
+Cross-check philosophy: the workbook's own totals are never data — we
+recompute everything and record agreement/disagreement as flags.
 """
 
+from __future__ import annotations
+
+import hashlib
+import json
 from typing import Any
 
 import asyncpg
@@ -34,11 +29,11 @@ async def _resolve_fleet(
     conn: asyncpg.Connection, raw_numbers: list[str]
 ) -> tuple[dict[str, str], list[str]]:
     """{raw → plant_id} via normalized fleet numbers; unresolved raws listed."""
-    normalized = {}
+    normalized: dict[str, list[str]] = {}
     for raw in raw_numbers:
         n = normalize_fleet_number(raw)
         if n:
-            normalized.setdefault(n, raw)
+            normalized.setdefault(n, []).append(raw)
     if not normalized:
         return {}, []
 
@@ -50,11 +45,12 @@ async def _resolve_fleet(
 
     resolved: dict[str, str] = {}
     unresolved: list[str] = []
-    for norm_num, raw in normalized.items():
-        if norm_num in by_norm:
-            resolved[raw] = by_norm[norm_num]
-        else:
-            unresolved.append(raw)
+    for norm_num, raws in normalized.items():
+        for raw in raws:  # every raw spelling maps, not just the first
+            if norm_num in by_norm:
+                resolved[raw] = by_norm[norm_num]
+            else:
+                unresolved.append(raw)
     return resolved, unresolved
 
 
@@ -70,6 +66,203 @@ def _pct_from_summary(parsed: dict) -> float | None:
     return None
 
 
+def _rows_hash(rows: Any) -> str:
+    """Stable content hash for stale-copy detection."""
+    return hashlib.sha256(
+        json.dumps(rows, sort_keys=True, default=str).encode()
+    ).hexdigest()
+
+
+def _item_key(r: dict) -> tuple:
+    return (r["bill_no"], r["item_code"] or "", r["description"], r.get("dup_seq", 0))
+
+
+def _cost_key(r: dict) -> str:
+    return f"{r.get('section') or ''}|{r.get('cost_category') or ''}|{r['description']}"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Adjustments: baseline + gap facts, recomputed from stored data
+# ═══════════════════════════════════════════════════════════════════════
+
+async def recompute_adjustments(
+    conn: asyncpg.Connection, project_id: str
+) -> dict[str, Any]:
+    """Derive baseline + gap facts for BEME and Cost ledgers from the
+    stored reported-previous columns. Pure function of stored weeks:
+    uploading a missing week later automatically dissolves its gap.
+
+    Also flags chain breaks: ADJACENT weeks whose reported-previous
+    disagrees with our cumulative (a site inconsistency, not a gap).
+    """
+    stats = {"baseline": 0, "gap": 0, "chain_breaks": 0}
+    await conn.execute(
+        "DELETE FROM project_ledger_adjustments WHERE project_id = $1::uuid",
+        project_id,
+    )
+
+    reports = await conn.fetch(
+        """SELECT id, year, week_number FROM project_weekly_reports
+           WHERE project_id = $1::uuid ORDER BY year, week_number""",
+        project_id,
+    )
+    if not reports:
+        return stats
+
+    def adjacent(prev, cur) -> bool:
+        return prev["year"] == cur["year"] and cur["week_number"] == prev["week_number"] + 1
+
+    chain_flags: list[tuple] = []
+
+    # ── BEME ledger ─────────────────────────────────────────────────────
+    prog = await conn.fetch(
+        """SELECT p.weekly_report_id, p.item_id, p.year, p.week_number,
+                  p.qty_this_week, p.amount_this_week,
+                  p.qty_previous_reported, p.amount_previous_reported
+           FROM project_beme_progress p
+           WHERE p.project_id = $1::uuid
+           ORDER BY p.year, p.week_number""",
+        project_id,
+    )
+    by_report: dict[str, list] = {}
+    for r in prog:
+        by_report.setdefault(str(r["weekly_report_id"]), []).append(r)
+
+    beme_adj: list[tuple] = []
+    cum: dict[str, tuple[float, float]] = {}  # item_id → (qty, amount)
+    prev_report = None
+    for rep in reports:
+        rid = str(rep["id"])
+        rows = by_report.get(rid, [])
+        if not rows:
+            prev_report = rep
+            continue
+        if prev_report is None or not cum:
+            # earliest stored week: its reported-previous IS the baseline
+            for r in rows:
+                q = float(r["qty_previous_reported"] or 0)
+                a = float(r["amount_previous_reported"] or 0)
+                if q or a:
+                    beme_adj.append((
+                        project_id, "beme", "baseline", str(r["item_id"]), None,
+                        None, None, rep["year"], rep["week_number"], q, a, rid,
+                    ))
+                cum[str(r["item_id"])] = (
+                    q + float(r["qty_this_week"] or 0),
+                    a + float(r["amount_this_week"] or 0),
+                )
+        else:
+            is_adj = adjacent(prev_report, rep)
+            for r in rows:
+                iid = str(r["item_id"])
+                got_q, got_a = cum.get(iid, (0.0, 0.0))
+                rep_q = float(r["qty_previous_reported"] or 0)
+                rep_a = float(r["amount_previous_reported"] or 0)
+                dq, da = rep_q - got_q, rep_a - got_a
+                if abs(da) > 1.0 or abs(dq) > 0.01:
+                    if is_adj:
+                        chain_flags.append((
+                            rid, project_id, "BEME & Works Completed Fd",
+                            "chain_break", "warning",
+                            f"item reported-previous ₦{rep_a:,.2f} != our "
+                            f"cumulative ₦{got_a:,.2f} with no missing weeks",
+                            json.dumps({"item_id": iid, "delta": round(da, 2)}),
+                        ))
+                        stats["chain_breaks"] += 1
+                    else:
+                        beme_adj.append((
+                            project_id, "beme", "gap", iid, None,
+                            prev_report["year"], prev_report["week_number"],
+                            rep["year"], rep["week_number"], dq, da, rid,
+                        ))
+                cum[iid] = (rep_q + float(r["qty_this_week"] or 0),
+                            rep_a + float(r["amount_this_week"] or 0))
+        prev_report = rep
+
+    # ── Cost ledger (amounts only) ──────────────────────────────────────
+    cost = await conn.fetch(
+        """SELECT weekly_report_id, year, week_number, section, cost_category,
+                  description, amount_previous_week, amount_this_week
+           FROM project_cost_report
+           WHERE project_id = $1::uuid
+           ORDER BY year, week_number""",
+        project_id,
+    )
+    cost_by_report: dict[str, list] = {}
+    for r in cost:
+        cost_by_report.setdefault(str(r["weekly_report_id"]), []).append(r)
+
+    cum_c: dict[str, float] = {}
+    prev_report = None
+    for rep in reports:
+        rid = str(rep["id"])
+        rows = cost_by_report.get(rid, [])
+        if not rows:
+            prev_report = rep
+            continue
+        first = prev_report is None or not cum_c
+        is_adj = prev_report is not None and adjacent(prev_report, rep)
+        for r in rows:
+            ck = _cost_key({"section": r["section"],
+                            "cost_category": r["cost_category"],
+                            "description": r["description"]})
+            rep_a = float(r["amount_previous_week"] or 0)
+            if first:
+                if rep_a:
+                    beme_adj.append((
+                        project_id, "cost", "baseline", None, ck,
+                        None, None, rep["year"], rep["week_number"], None, rep_a, rid,
+                    ))
+            else:
+                got_a = cum_c.get(ck, 0.0)
+                da = rep_a - got_a
+                if abs(da) > 1.0:
+                    if is_adj:
+                        chain_flags.append((
+                            rid, project_id, "Cost Report", "chain_break",
+                            "warning",
+                            f"{r['description'][:40]!r} reported-previous "
+                            f"₦{rep_a:,.2f} != our cumulative ₦{got_a:,.2f} "
+                            f"with no missing weeks",
+                            json.dumps({"cost_key": ck, "delta": round(da, 2)}),
+                        ))
+                        stats["chain_breaks"] += 1
+                    else:
+                        beme_adj.append((
+                            project_id, "cost", "gap", None, ck,
+                            prev_report["year"], prev_report["week_number"],
+                            rep["year"], rep["week_number"], None, da, rid,
+                        ))
+            cum_c[ck] = rep_a + float(r["amount_this_week"] or 0)
+        prev_report = rep
+
+    if beme_adj:
+        await conn.executemany(
+            """INSERT INTO project_ledger_adjustments
+               (project_id, ledger, kind, beme_item_id, cost_key,
+                covers_from_year, covers_from_week, covers_to_year,
+                covers_to_week, qty, amount, derived_from_report)
+               VALUES ($1::uuid, $2, $3, $4::uuid, $5, $6, $7, $8, $9, $10, $11,
+                       $12::uuid)""",
+            beme_adj, timeout=120,
+        )
+    if chain_flags:
+        await conn.executemany(
+            """INSERT INTO project_sheet_flags
+               (weekly_report_id, project_id, sheet_name, flag_type,
+                severity, message, detail)
+               VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7::jsonb)""",
+            chain_flags, timeout=60,
+        )
+    stats["baseline"] = sum(1 for a in beme_adj if a[2] == "baseline")
+    stats["gap"] = sum(1 for a in beme_adj if a[2] == "gap")
+    return stats
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Main persist
+# ═══════════════════════════════════════════════════════════════════════
+
 async def persist_weekly_report(
     conn: asyncpg.Connection,
     project_id: str,
@@ -82,9 +275,15 @@ async def persist_weekly_report(
     sheets = parsed["sheets"]
     warnings: list[str] = []
     counts: dict[str, int] = {}
+    flags: list[tuple] = []  # (sheet, flag_type, severity, message, detail)
 
     def sheet_rows(name: str) -> list[dict]:
         return sheets.get(name, {}).get("rows", []) or []
+
+    def flag(sheet: str, ftype: str, severity: str, message: str,
+             detail: dict | None = None) -> None:
+        flags.append((sheet, ftype, severity, message,
+                      json.dumps(detail) if detail else None))
 
     # Week-ending date: the workbook's own calendar is the authority
     week_endings = sheets.get("Lists", {}).get("week_endings", {}) or {}
@@ -92,13 +291,44 @@ async def persist_weekly_report(
     if week_ending is None:
         warnings.append(
             f"Lists calendar has no entry for {year}-W{week_number}; "
-            "using identity/period fallback"
+            "using computed fallback"
         )
         from datetime import date, timedelta
         jan1 = date(year, 1, 1)
         week_ending = jan1 + timedelta(days=(week_number * 7) - jan1.weekday() - 3)
 
+    plant_rows = sheet_rows("Plant Return")
+    diesel_rows = sheet_rows("Diesel Consumption")
+    cost_rows = sheet_rows("Cost Report")
+    beme_rows = sheet_rows("BEME & Works Completed Fd")
+
+    # sheet content hashes for stale-copy detection
+    day_cols = ("saturday_litres", "sunday_litres", "monday_litres",
+                "tuesday_litres", "wednesday_litres", "thursday_litres",
+                "friday_litres")
+    sheet_hashes = {
+        "Diesel Consumption": _rows_hash(
+            [(r["fleet_number_raw"], *(r[c] for c in day_cols)) for r in diesel_rows]
+        ),
+        "Plant Return:standby": _rows_hash(
+            [(r["fleet_number_raw"], r["standby_hours"]) for r in plant_rows]
+        ),
+        "Plant Return:breakdown": _rows_hash(
+            [(r["fleet_number_raw"], r["breakdown_hours"]) for r in plant_rows]
+        ),
+    }
+
     async with conn.transaction():
+        # ── previous stored week (for staleness comparison) — must be read
+        # BEFORE the delete below in case this is a re-upload of that week
+        prev_hashes_row = await conn.fetchrow(
+            """SELECT sheet_hashes, year, week_number FROM project_weekly_reports
+               WHERE project_id = $1::uuid
+                 AND (year, week_number) < ($2, $3)
+               ORDER BY year DESC, week_number DESC LIMIT 1""",
+            project_id, year, week_number,
+        )
+
         # ── idempotent replace: kill the previous header, cascade children
         await conn.execute(
             """DELETE FROM project_weekly_reports
@@ -106,34 +336,33 @@ async def persist_weekly_report(
             project_id, year, week_number,
         )
 
-        report_id = await conn.fetchval(
+        report_id = str(await conn.fetchval(
             """INSERT INTO project_weekly_reports
                (project_id, year, week_number, week_ending_date, status,
-                submitted_by, beme_pct_complete, sheets_processed)
-               VALUES ($1::uuid, $2, $3, $4, 'completed', $5::uuid, $6, $7::jsonb)
+                submitted_by, beme_pct_complete, sheets_processed, sheet_hashes)
+               VALUES ($1::uuid, $2, $3, $4, 'completed', $5::uuid, $6,
+                       $7::jsonb, $8::jsonb)
                RETURNING id""",
             project_id, year, week_number, week_ending, user_id,
             _pct_from_summary(parsed),
-            __import__("json").dumps(
-                {n: s["status"] for n, s in sheets.items()}
-            ),
-        )
-        report_id = str(report_id)
+            json.dumps({n: s["status"] for n, s in sheets.items()}),
+            json.dumps(sheet_hashes),
+        ))
 
         # ── fleet resolution across plant + diesel sheets ────────────────
-        plant_rows = sheet_rows("Plant Return")
-        diesel_rows = sheet_rows("Diesel Consumption")
-        all_fleet = [r["fleet_number_raw"] for r in plant_rows + diesel_rows]
+        all_fleet = [r["fleet_number_raw"] for r in plant_rows] + [
+            r["fleet_number_raw"] for r in diesel_rows if not r.get("is_cost_centre")
+        ]
         fleet_map, unresolved = await _resolve_fleet(conn, all_fleet)
         if unresolved:
             warnings.append(
-                f"{len(unresolved)} fleet numbers not in plants_master: "
+                f"{len(set(unresolved))} fleet numbers not in plants_master: "
                 + ", ".join(sorted(set(unresolved))[:10])
             )
 
         base = (report_id, project_id, year, week_number, week_ending)
 
-        # ── plant utilization ────────────────────────────────────────────
+        # ── plant utilization (full roster incl. idle) ───────────────────
         await conn.executemany(
             """INSERT INTO project_plant_utilization
                (weekly_report_id, project_id, year, week_number, week_ending_date,
@@ -154,44 +383,60 @@ async def persist_weekly_report(
         )
         counts["project_plant_utilization"] = len(plant_rows)
 
-        # ── diesel ───────────────────────────────────────────────────────
+        # ── diesel (fuel events only) ────────────────────────────────────
         await conn.executemany(
             """INSERT INTO project_diesel_consumption
                (weekly_report_id, project_id, year, week_number, week_ending_date,
                 fleet_number_raw, plant_id, description, plant_category,
                 saturday_litres, sunday_litres, monday_litres, tuesday_litres,
-                wednesday_litres, thursday_litres, friday_litres)
-               VALUES ($1::uuid, $2::uuid, $3, $4, $5,
-                       $6, $7::uuid, $8, $9, $10, $11, $12, $13, $14, $15, $16)""",
+                wednesday_litres, thursday_litres, friday_litres,
+                amount_ngn, is_cost_centre)
+               VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7::uuid, $8, $9,
+                       $10, $11, $12, $13, $14, $15, $16, $17, $18)""",
             [
-                (*base, r["fleet_number_raw"], fleet_map.get(r["fleet_number_raw"]),
+                (*base, r["fleet_number_raw"],
+                 None if r["is_cost_centre"] else fleet_map.get(r["fleet_number_raw"]),
                  r["description"], r["plant_category"],
                  r["saturday_litres"], r["sunday_litres"], r["monday_litres"],
                  r["tuesday_litres"], r["wednesday_litres"], r["thursday_litres"],
-                 r["friday_litres"])
+                 r["friday_litres"], r["amount_ngn"], r["is_cost_centre"])
                 for r in diesel_rows
             ],
             timeout=120,
         )
         counts["project_diesel_consumption"] = len(diesel_rows)
 
-        # ── cost report ──────────────────────────────────────────────────
-        cost_rows = sheet_rows("Cost Report")
+        # ── cost report (category rows; total row is a cross-check) ─────
         await conn.executemany(
             """INSERT INTO project_cost_report
                (weekly_report_id, project_id, year, week_number, week_ending_date,
                 section, description, cost_category, unit, quantity_this_week,
                 rate_ngn, amount_previous_week, amount_this_week)
-               VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, 0, $12)""",
+               VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10,
+                       $11, $12, $13)""",
             [
                 (*base, r["section"], r["description"], r["cost_category"],
                  r["unit"], r["quantity_this_week"], r["rate_ngn"],
-                 r["amount_this_week"])
+                 r["amount_previous_week"], r["amount_this_week"])
                 for r in cost_rows
             ],
             timeout=120,
         )
         counts["project_cost_report"] = len(cost_rows)
+
+        cost_sheet_total = sheets.get("Cost Report", {}).get("sheet_total") or {}
+        if cost_sheet_total.get("this_week") is not None:
+            ours = sum(float(r["amount_this_week"] or 0)
+                       for r in cost_rows if r["cost_category"])
+            delta = ours - float(cost_sheet_total["this_week"])
+            if abs(delta) > 1.0:
+                flag("Cost Report", "cross_check_fail", "error",
+                     f"our categorized sum ₦{ours:,.2f} != sheet total "
+                     f"₦{float(cost_sheet_total['this_week']):,.2f}",
+                     {"delta": round(delta, 2)})
+            else:
+                flag("Cost Report", "cross_check_pass", "info",
+                     f"cost total reconciles: ₦{ours:,.2f}")
 
         # ── certificates: ledger upsert by (project, cert_number) ────────
         cert_rows = sheet_rows("Certificate Status")
@@ -226,10 +471,6 @@ async def persist_weekly_report(
         counts["project_certificates"] = len(cert_rows)
 
         # ── payments: full ledger per report (readers use latest report) ─
-        # The sheet ends with subtotal/grand-total rows: no date, no type,
-        # no voucher — only amounts. Storing them double-counts every
-        # aggregate, so they are dropped and used as a cross-check instead.
-        # (Advance rows are real payments: undated but labelled by voucher.)
         all_pay_rows = sheet_rows("Payments Recieved")
         pay_rows = [
             r for r in all_pay_rows
@@ -244,11 +485,9 @@ async def persist_weekly_report(
             )
             recomputed = sum(float(r["gross_amount"] or 0) for r in pay_rows)
             if sheet_total and abs(sheet_total - recomputed) > 1.0:
-                warnings.append(
-                    f"Payments sheet total ₦{sheet_total:,.2f} does not match "
-                    f"the sum of its rows ₦{recomputed:,.2f} — site arithmetic "
-                    f"error or unlabelled payment row"
-                )
+                flag("Payments Recieved", "cross_check_fail", "warning",
+                     f"sheet total ₦{sheet_total:,.2f} != sum of rows "
+                     f"₦{recomputed:,.2f}")
         await conn.executemany(
             """INSERT INTO project_payments
                (weekly_report_id, project_id, payment_date, voucher_number,
@@ -267,197 +506,101 @@ async def persist_weekly_report(
         counts["project_payments"] = len(pay_rows)
 
         # ── BEME: bills + items upserted once; progress per report ───────
-        # item_code coalesced to '' (NULLs are distinct under UNIQUE →
-        # would duplicate on every re-upload). Duplicate identities within
-        # one sheet are merged (qty/amount summed) with a warning.
-        beme_rows = sheet_rows("BEME & Works Completed Fd")
-        distinct: dict[tuple, dict] = {}
-        for r in beme_rows:
-            key = (r["bill_no"], r["item_code"] or "", r["description"])
-            if key in distinct:
-                agg = distinct[key]
-                agg["qty_this_week"] = (
-                    ((agg["qty_this_week"] or 0) + (r["qty_this_week"] or 0)) or None
-                )
-                agg["amount_this_week"] = (
-                    ((agg["amount_this_week"] or 0) + (r["amount_this_week"] or 0)) or None
-                )
-                if r["pct_complete"] is not None:
-                    agg["pct_complete"] = r["pct_complete"]
-                warnings.append(
-                    f"BEME: duplicate item merged "
-                    f"({r['item_code']} {r['description'][:40]!r})"
-                )
-            else:
-                distinct[key] = dict(r)
-
+        beme_sheet = sheets.get("BEME & Works Completed Fd", {})
         bill_ids: dict[int, str] = {}
-        for bill_no in sorted({k[0] for k in distinct}):
+        for b in beme_sheet.get("bills", []) or []:
+            bill_ids[b["bill_no"]] = str(await conn.fetchval(
+                """INSERT INTO project_beme_bills (project_id, bill_no, name,
+                                                   contract_amount)
+                   VALUES ($1::uuid, $2, $3, $4)
+                   ON CONFLICT (project_id, bill_no) DO UPDATE SET
+                       name = COALESCE(EXCLUDED.name, project_beme_bills.name),
+                       contract_amount = COALESCE(EXCLUDED.contract_amount,
+                                                  project_beme_bills.contract_amount)
+                   RETURNING id""",
+                project_id, b["bill_no"], b["name"], b["sheet_total_contract"],
+            ))
+        # defensive: items referencing a bill without a header row
+        for bill_no in sorted({r["bill_no"] for r in beme_rows} - set(bill_ids)):
             bill_ids[bill_no] = str(await conn.fetchval(
                 """INSERT INTO project_beme_bills (project_id, bill_no)
                    VALUES ($1::uuid, $2)
-                   ON CONFLICT (project_id, bill_no) DO UPDATE SET bill_no = EXCLUDED.bill_no
+                   ON CONFLICT (project_id, bill_no) DO UPDATE SET
+                       bill_no = EXCLUDED.bill_no
                    RETURNING id""",
                 project_id, bill_no,
             ))
 
-        # ONE round trip for all item upserts, one more to read ids back
         await conn.executemany(
             """INSERT INTO project_beme_items
                (project_id, bill_id, item_code, description, unit,
-                contract_qty, rate, contract_amount)
-               VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8)
-               ON CONFLICT (bill_id, item_code, description) DO UPDATE SET
+                contract_qty, rate, contract_amount, dup_seq)
+               VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9)
+               ON CONFLICT (bill_id, item_code, description, dup_seq) DO UPDATE SET
                    contract_qty = COALESCE(EXCLUDED.contract_qty,
                                            project_beme_items.contract_qty),
                    rate = COALESCE(EXCLUDED.rate, project_beme_items.rate),
                    contract_amount = COALESCE(EXCLUDED.contract_amount,
                                               project_beme_items.contract_amount)""",
             [
-                (project_id, bill_ids[k[0]], k[1], k[2], r["unit"],
-                 r["contract_qty"], r["rate"], r["contract_amount"])
-                for k, r in distinct.items()
+                (project_id, bill_ids[r["bill_no"]], r["item_code"] or "",
+                 r["description"], r["unit"], r["contract_qty"], r["rate"],
+                 r["contract_amount"], r.get("dup_seq", 0))
+                for r in beme_rows
             ],
             timeout=120,
         )
         item_id_map = {
-            (r["bill_no"], r["item_code"], r["description"]): str(r["id"])
+            (r["bill_no"], r["item_code"], r["description"], r["dup_seq"]): str(r["id"])
             for r in await conn.fetch(
-                """SELECT i.id, b.bill_no, i.item_code, i.description
+                """SELECT i.id, b.bill_no, i.item_code, i.description, i.dup_seq
                    FROM project_beme_items i
                    JOIN project_beme_bills b ON b.id = i.bill_id
                    WHERE i.project_id = $1::uuid""",
                 project_id, timeout=60,
             )
         }
-        progress_args = [
-            (report_id, project_id, item_id_map[k], year, week_number,
-             week_ending, r["qty_this_week"], r["amount_this_week"],
-             r["pct_complete"])
-            for k, r in distinct.items()
-        ]
         await conn.executemany(
             """INSERT INTO project_beme_progress
                (weekly_report_id, project_id, item_id, year, week_number,
-                week_ending_date, qty_this_week, amount_this_week, pct_complete)
-               VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9)""",
-            progress_args, timeout=120,
-        )
-        counts["project_beme_progress"] = len(progress_args)
-
-        # ── Bill 1 ───────────────────────────────────────────────────────
-        for r in sheet_rows("Bill 1 Summary"):
-            await conn.execute(
-                """INSERT INTO project_bill1_items
-                   (project_id, item_code, description, unit, contract_qty,
-                    rate, contract_amount)
-                   VALUES ($1::uuid, $2, $3, $4, $5, $6, $7)
-                   ON CONFLICT (project_id, item_code, description) DO NOTHING""",
-                project_id, r["item_code"], r["description"], r["unit"],
-                r["contract_qty"], r["rate"], r["contract_amount"],
-            )
-        counts["project_bill1_items"] = len(sheet_rows("Bill 1 Summary"))
-
-        b1pay = sheet_rows("Bill 1 Payments")
-        await conn.executemany(
-            """INSERT INTO project_bill1_payments
-               (weekly_report_id, project_id, payment_date, description,
-                reference, amount)
-               VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6)""",
+                week_ending_date, qty_this_week, amount_this_week,
+                qty_previous_reported, amount_previous_reported)
+               VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $10)""",
             [
-                (report_id, project_id, r["payment_date"], r["description"],
-                 r["reference"], r["amount"])
-                for r in b1pay
-            ],
-            timeout=60,
-        )
-        counts["project_bill1_payments"] = len(b1pay)
-
-        # ── subcontractors / labour / materials / hired / precast ────────
-        sub_rows = sheet_rows("Subcontractors")
-        await conn.executemany(
-            """INSERT INTO project_subcontractors
-               (weekly_report_id, project_id, year, week_number, week_ending_date,
-                subcontractor_name, description, location, unit, agreed_rate,
-                assigned_qty, qty_this_week, amount_this_week)
-               VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)""",
-            [
-                (*base, r["subcontractor_name"], r["description"], r["location"],
-                 r["unit"], r["agreed_rate"], r["assigned_qty"],
-                 r["qty_this_week"], r["amount_this_week"])
-                for r in sub_rows
+                (report_id, project_id, item_id_map[_item_key(r)], year,
+                 week_number, week_ending, r["qty_this_week"],
+                 r["amount_this_week"], r["qty_previous_reported"],
+                 r["amount_previous_reported"])
+                for r in beme_rows
             ],
             timeout=120,
         )
-        counts["project_subcontractors"] = len(sub_rows)
+        counts["project_beme_progress"] = len(beme_rows)
 
-        lab_rows = sheet_rows("Labour Strength")
-        await conn.executemany(
-            """INSERT INTO project_labour_strength
-               (weekly_report_id, project_id, year, week_number, week_ending_date,
-                department, manning_this_week, manning_previous_week, movement, comment)
-               VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10)""",
-            [
-                (*base, r["department"], r["manning_this_week"],
-                 r["manning_previous_week"], r["movement"], r["comment"])
-                for r in lab_rows
-            ],
-            timeout=60,
+        # BEME cross-checks from the parser (broken sheet SUMs etc.)
+        for c in beme_sheet.get("cross_checks", []) or []:
+            flag("BEME & Works Completed Fd", "cross_check_fail", "warning",
+                 f"{c['check']}: our sum {c['ours']:,.2f} != sheet "
+                 f"{c['sheet']:,.2f}", c)
+
+        # works vs Weekly Summary (their own rollup) — verification only
+        works_ours = sum(float(r["amount_this_week"] or 0) for r in beme_rows)
+        ws_subtotal = next(
+            (r["value"] for r in sheet_rows("Weekly Summary")
+             if r["section"] == "Works Completed" and r["item"] == "SUB-TOTAL"
+             and r["metric"] == "this_week"),
+            None,
         )
-        counts["project_labour_strength"] = len(lab_rows)
+        if ws_subtotal is not None:
+            if abs(works_ours - float(ws_subtotal)) > 1.0:
+                flag("BEME & Works Completed Fd", "cross_check_fail", "warning",
+                     f"BEME works this week ₦{works_ours:,.2f} != Weekly "
+                     f"Summary ₦{float(ws_subtotal):,.2f}")
+            else:
+                flag("BEME & Works Completed Fd", "cross_check_pass", "info",
+                     f"works reconcile with Weekly Summary: ₦{works_ours:,.2f}")
 
-        mat_rows = sheet_rows("Materials & Civils")
-        await conn.executemany(
-            """INSERT INTO project_materials_stock
-               (weekly_report_id, project_id, year, week_number, week_ending_date,
-                sheet_source, material_name, unit, opening_stock, received,
-                used, closing_stock, unit_cost)
-               VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)""",
-            [
-                (*base, r["sheet_source"], r["material_name"], r["unit"],
-                 r["opening_stock"], r["received"], r["used"],
-                 r["closing_stock"], r["unit_cost"])
-                for r in mat_rows
-            ],
-            timeout=60,
-        )
-        counts["project_materials_stock"] = len(mat_rows)
-
-        hired_rows = sheet_rows("Hired Vehicles")
-        await conn.executemany(
-            """INSERT INTO project_hired_vehicles
-               (weekly_report_id, project_id, year, week_number, week_ending_date,
-                registration_no, description, section, owners, days_worked,
-                rate_ngn, amount_ngn, remarks)
-               VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)""",
-            [
-                (*base, r["registration_no"], r["description"], r["section"],
-                 r["owners"], r["days_worked"], r["rate_ngn"], r["amount_ngn"],
-                 r["remarks"])
-                for r in hired_rows
-            ],
-            timeout=60,
-        )
-        counts["project_hired_vehicles"] = len(hired_rows)
-
-        pre_rows = sheet_rows("Precast")
-        await conn.executemany(
-            """INSERT INTO project_precast
-               (weekly_report_id, project_id, year, week_number, week_ending_date,
-                description, size, uom, cast_this_week, used_this_week,
-                balance_available, closing_stock)
-               VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)""",
-            [
-                (*base, r["description"], r["size"], r["uom"],
-                 r["cast_this_week"], r["used_this_week"],
-                 r["balance_available"], r["closing_stock"])
-                for r in pre_rows
-            ],
-            timeout=60,
-        )
-        counts["project_precast"] = len(pre_rows)
-
-        # ── weekly summary (long rows) ───────────────────────────────────
+        # ── weekly summary (cross-check evidence, never a KPI source) ────
         ws_rows = sheet_rows("Weekly Summary")
         await conn.executemany(
             """INSERT INTO project_weekly_summary
@@ -473,18 +616,37 @@ async def persist_weekly_report(
         )
         counts["project_weekly_summary"] = len(ws_rows)
 
-        # ── contract snapshot ────────────────────────────────────────────
+        # ── contract snapshot (overview fields) ──────────────────────────
         snap = sheets.get("Contract Summary", {}).get("snapshot") or {}
         await conn.execute(
             """INSERT INTO project_contract_summary_snapshot
                (weekly_report_id, project_id, year, week_number, week_ending_date,
                 original_contract_amount, current_contract_amount,
-                works_certified, retention_held, advance_unrecovered, apg_expiry)
-               VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11)""",
+                works_certified, retention_held, advance_unrecovered, apg_expiry,
+                client_name, contract_name, short_name, award_date,
+                commencement_date, original_duration_months,
+                eot_requested_months, eot_granted_months,
+                revised_duration_months, overdue_weeks,
+                works_submitted_not_vetted, total_works_submitted,
+                retention_released, advance_recovered, gross_certified,
+                apg_amount, bill1_requested, bill1_paid, bill1_outstanding)
+               VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+                       $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22,
+                       $23, $24, $25, $26, $27, $28, $29, $30)""",
             *base, snap.get("original_contract_amount"),
             snap.get("current_contract_amount"), snap.get("works_certified"),
             snap.get("retention_held"), snap.get("advance_unrecovered"),
-            snap.get("apg_expiry"),
+            snap.get("apg_expiry"), snap.get("client_name"),
+            snap.get("contract_name"), snap.get("short_name"),
+            snap.get("award_date"), snap.get("commencement_date"),
+            snap.get("original_duration_months"),
+            snap.get("eot_requested_months"), snap.get("eot_granted_months"),
+            snap.get("revised_duration_months"), snap.get("overdue_weeks"),
+            snap.get("works_submitted_not_vetted"),
+            snap.get("total_works_submitted"), snap.get("retention_released"),
+            snap.get("advance_recovered"), snap.get("gross_certified"),
+            snap.get("apg_amount"), snap.get("bill1_requested"),
+            snap.get("bill1_paid"), snap.get("bill1_outstanding"),
         )
         counts["project_contract_summary_snapshot"] = 1
 
@@ -498,26 +660,90 @@ async def persist_weekly_report(
             timeout=60,
         )
 
-        # ── cross-checks: the site's own arithmetic, verified ────────────
-        gross_plant = sum(r["plant_cost"] or 0 for r in plant_rows)
+        # ── cross-sheet checks → flags ───────────────────────────────────
+        # 1. Plant Return footer → Cost Report "Plant Internal"
+        footer = sheets.get("Plant Return", {}).get("footer") or {}
         plant_internal = next(
-            (r["amount_this_week"] for r in cost_rows
+            (float(r["amount_this_week"] or 0) for r in cost_rows
              if r["description"] and "plant internal" in r["description"].lower()),
             None,
         )
-        if plant_internal is not None and gross_plant:
-            adjustment = gross_plant - plant_internal
-            if adjustment < 0 or adjustment > gross_plant * 0.5:
-                warnings.append(
-                    f"Plant cost check: raw plant cost ₦{gross_plant:,.0f} vs "
-                    f"Cost Report 'Plant Internal' ₦{plant_internal:,.0f} — "
-                    f"adjustment ₦{adjustment:,.0f} outside expected range"
-                )
+        if footer.get("total_all") is not None and plant_internal is not None:
+            adjustments = sum(float(a["amount"] or 0)
+                              for a in footer.get("adjustments", []))
+            net = float(footer["total_all"]) - adjustments
+            if abs(net - plant_internal) > 1.0:
+                flag("Plant Return", "cross_check_fail", "warning",
+                     f"footer net (₦{float(footer['total_all']):,.2f} − "
+                     f"consumables ₦{adjustments:,.2f} = ₦{net:,.2f}) != "
+                     f"Cost Report Plant Internal ₦{plant_internal:,.2f}")
+            else:
+                flag("Plant Return", "cross_check_pass", "info",
+                     f"footer reconciles with Cost Report Plant Internal: "
+                     f"₦{plant_internal:,.2f}")
 
-    # gather parser warnings too
-    for name, s in sheets.items():
-        for w in s.get("warnings", []):
-            warnings.append(w)
+        # 2. diesel variance: litres charged (Cost Report) vs logged (events)
+        ago_row = next(
+            (r for r in cost_rows
+             if r["description"] == "Diesel" and r["cost_category"] == "AGO"),
+            None,
+        )
+        logged = sum(
+            sum(float(r[c] or 0) for c in day_cols) for r in diesel_rows
+        )
+        if ago_row and ago_row.get("quantity_this_week") is not None:
+            charged = float(ago_row["quantity_this_week"])
+            if charged:
+                coverage = logged / charged * 100
+                flag("Diesel Consumption", "variance",
+                     "warning" if abs(charged - logged) > charged * 0.25 else "info",
+                     f"charged {charged:g}L (Cost Report) vs logged {logged:g}L "
+                     f"(consumption log) — attribution coverage {coverage:.0f}%",
+                     {"charged": charged, "logged": logged})
+
+        # 3. stale-copy detection vs previous stored week
+        if prev_hashes_row and prev_hashes_row["sheet_hashes"]:
+            prev_hashes = prev_hashes_row["sheet_hashes"]
+            if isinstance(prev_hashes, str):
+                prev_hashes = json.loads(prev_hashes)
+            prev_label = (f"{prev_hashes_row['year']}-W"
+                          f"{prev_hashes_row['week_number']:02d}")
+            if diesel_rows and prev_hashes.get("Diesel Consumption") == \
+                    sheet_hashes["Diesel Consumption"]:
+                flag("Diesel Consumption", "stale_copy", "warning",
+                     f"identical to {prev_label} — every plant, every day. "
+                     "The site appears to have copy-pasted the diesel log")
+            for col, label in (("Plant Return:standby", "standby hours"),
+                               ("Plant Return:breakdown", "breakdown hours")):
+                if plant_rows and prev_hashes.get(col) == sheet_hashes[col]:
+                    flag("Plant Return", "frozen_column", "warning",
+                         f"{label} identical to {prev_label} for every plant "
+                         "— column appears not to be updated")
+
+        # parser warnings → flags (and the flat warnings list)
+        for name, s in sheets.items():
+            for w in s.get("warnings", []):
+                flag(name, "qty_rate_violation" if "× rate" in w or "×" in w
+                     else "info", "warning", w)
+                warnings.append(w)
+
+        if flags:
+            await conn.executemany(
+                """INSERT INTO project_sheet_flags
+                   (weekly_report_id, project_id, sheet_name, flag_type,
+                    severity, message, detail)
+                   VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7::jsonb)""",
+                [(report_id, project_id, *f) for f in flags],
+                timeout=60,
+            )
+        counts["project_sheet_flags"] = len(flags)
+
+        # ── adjustments: recompute for the whole project ─────────────────
+        adj_stats = await recompute_adjustments(conn, project_id)
+
+    warnings.extend(
+        f"[flag:{f[1]}] {f[3]}" for f in flags if f[2] in ("warning", "error")
+    )
 
     return {
         "weekly_report_id": report_id,
@@ -525,5 +751,6 @@ async def persist_weekly_report(
         "row_counts": counts,
         "fleet_resolved": len(fleet_map),
         "fleet_unresolved": sorted(set(unresolved)),
+        "adjustments": adj_stats,
         "warnings": warnings,
     }

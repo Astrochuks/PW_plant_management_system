@@ -150,6 +150,108 @@ async def upload_weekly_report(
     }
 
 
+@router.post("/preview-weekly-report")
+async def preview_weekly_report(
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+    file: UploadFile = File(...),
+    project_id: UUID | None = Form(None),
+) -> dict[str, Any]:
+    """Parse a weekly report IN MEMORY — nothing is stored. Returns every
+    sheet for review: parsed sheets as structured tables with warnings and
+    cross-checks, stored-only sheets as a raw grid. The admin inspects,
+    then confirms via the normal upload endpoint."""
+    import io
+
+    import openpyxl
+
+    from app.services.weekly_report_sheets import (
+        STORED_ONLY_SHEETS,
+        parse_workbook,
+    )
+
+    if not file.filename or not file.filename.lower().endswith(".xlsx"):
+        raise ValidationError("Only .xlsx weekly reports are accepted")
+    content = await file.read()
+    if len(content) > 25 * 1024 * 1024:
+        raise ValidationError("File too large (max 25MB)")
+
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
+    except Exception as e:
+        raise ValidationError(f"Not a readable Excel workbook: {e}") from e
+
+    try:
+        parsed = parse_workbook(wb)
+    except Exception as e:
+        logger.error("Preview parse failed", error=f"{type(e).__name__}: {e}")
+        raise HTTPException(
+            status_code=422, detail=f"Workbook could not be parsed: {e}"
+        ) from e
+
+    # identity guard against the selected project (advisory)
+    identity_warning = None
+    if project_id:
+        sel = await fetchrow(
+            "SELECT short_name FROM projects WHERE id = $1::uuid", str(project_id))
+        if sel is None:
+            raise NotFoundError("Project not found")
+        wb_short = ((parsed.get("identity") or {}).get("short_name") or "").strip().upper()
+        sel_short = (sel["short_name"] or "").strip().upper()
+        if wb_short and sel_short and wb_short != sel_short:
+            identity_warning = (
+                f"Workbook says {wb_short!r} but you selected {sel_short!r} — "
+                "verify you picked the right project"
+            )
+
+    sheets_out: dict[str, Any] = {}
+    for name, s in parsed["sheets"].items():
+        entry: dict[str, Any] = {
+            "kind": "parsed",
+            "status": s.get("status"),
+            "warnings": s.get("warnings", []),
+        }
+        rows = s.get("rows")
+        if isinstance(rows, list):
+            entry["rows"] = rows[:80]
+            entry["total_rows"] = len(rows)
+        # sheet-specific extras the preview renders as summary panels
+        for extra in ("bills", "tail", "summary_table", "cross_checks",
+                      "footer", "stock", "sheet_totals", "sheet_total",
+                      "snapshot"):
+            if s.get(extra) is not None:
+                entry[extra] = s[extra]
+        if name == "Lists":
+            entry["rows"] = []
+            entry["total_rows"] = len(s.get("reference", []) or [])
+            entry["calendar_weeks"] = len(s.get("week_endings", {}) or {})
+        sheets_out[name] = entry
+
+    # stored-only sheets: raw grid so the admin can eyeball them
+    for name in STORED_ONLY_SHEETS:
+        target = next((n for n in wb.sheetnames
+                       if n.strip().lower() == name.strip().lower()), None)
+        if target is None:
+            sheets_out[name] = {"kind": "stored_only", "status": "missing",
+                                "warnings": [], "grid": []}
+            continue
+        ws = wb[target]
+        grid = []
+        for row in ws.iter_rows(min_row=1, max_row=30, max_col=12,
+                                values_only=True):
+            cells = ["" if v is None else str(v)[:60] for v in row]
+            if any(c for c in cells):
+                grid.append(cells)
+        sheets_out[name] = {"kind": "stored_only", "status": "stored",
+                            "warnings": [], "grid": grid}
+
+    return {"success": True, "data": {
+        "identity": parsed.get("identity"),
+        "identity_warning": identity_warning,
+        "drift": parsed["drift"],
+        "sheets": sheets_out,
+    }}
+
+
 @router.get("/submissions")
 async def list_project_submissions(
     current_user: Annotated[CurrentUser, Depends(require_projects_access)],

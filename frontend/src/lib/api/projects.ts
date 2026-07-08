@@ -762,3 +762,44 @@ export async function getProjectPlantRollups(projectId: string): Promise<Project
     diesel_litres: Number(r.diesel_litres ?? 0),
   }));
 }
+
+// ── Upload preview (parse in memory, nothing stored) ────────────────────────
+
+export interface SheetPreview {
+  kind: 'parsed' | 'stored_only';
+  status: string;
+  warnings: string[];
+  rows?: Record<string, unknown>[];
+  total_rows?: number;
+  grid?: string[][];
+  bills?: { bill_no: number; name: string; sheet_total_contract: number | null; sheet_total_this_week: number | null }[];
+  tail?: Record<string, { contract: number | null; this_week: number | null }>;
+  cross_checks?: { check: string; ours: number; sheet: number; delta: number }[];
+  footer?: { total_all?: number; pct_allocated?: number; adjustments?: { label: string; amount: number }[] };
+  stock?: Record<string, number | null>;
+  sheet_totals?: Record<string, number | null>;
+  sheet_total?: Record<string, number | null>;
+  snapshot?: Record<string, unknown>;
+  calendar_weeks?: number;
+}
+
+export interface ReportPreview {
+  identity: Record<string, unknown> | null;
+  identity_warning: string | null;
+  drift: { clean: boolean; missing: string[]; drifted: string[] };
+  sheets: Record<string, SheetPreview>;
+}
+
+export async function previewWeeklyReport(
+  file: File,
+  projectId?: string,
+): Promise<ReportPreview> {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (projectId) formData.append('project_id', projectId);
+  const response = await apiClient.post('/projects/preview-weekly-report', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 120000,
+  });
+  return response.data.data;
+}

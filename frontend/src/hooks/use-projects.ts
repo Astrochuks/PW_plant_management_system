@@ -440,3 +440,14 @@ export function useProjectPlantRollups(projectId: string | undefined) {
     retry: 2,
   });
 }
+
+import { previewWeeklyReport, type ReportPreview, type SheetPreview } from '@/lib/api/projects';
+
+export type { ReportPreview, SheetPreview };
+
+export function usePreviewWeeklyReport() {
+  return useMutation({
+    mutationFn: ({ file, projectId }: { file: File; projectId?: string }) =>
+      previewWeeklyReport(file, projectId),
+  });
+}
