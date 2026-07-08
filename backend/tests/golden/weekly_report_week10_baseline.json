@@ -19,1368 +19,1510 @@
  },
  "sheets": {
   "BEME & Works Completed Fd": {
+   "bills": [
+    {
+     "bill_no": 1,
+     "name": "PRELIMINARIES",
+     "sheet_total_contract": 311880000.0,
+     "sheet_total_this_week": 0.0
+    },
+    {
+     "bill_no": 2,
+     "name": "SITE CLEARANCE AND EARTHWORKS",
+     "sheet_total_contract": 1930547160.6,
+     "sheet_total_this_week": 0.0
+    },
+    {
+     "bill_no": 3,
+     "name": "CULVERTS AND DRAINS",
+     "sheet_total_contract": 816610932.0,
+     "sheet_total_this_week": 0.0
+    },
+    {
+     "bill_no": 4,
+     "name": "PAVEMENT AND SURFACING",
+     "sheet_total_contract": 17457775723.5,
+     "sheet_total_this_week": 294550350.0
+    },
+    {
+     "bill_no": 5,
+     "name": "PAVEMENT MARKINGS",
+     "sheet_total_contract": 6973621.875,
+     "sheet_total_this_week": 0.0
+    },
+    {
+     "bill_no": 6,
+     "name": "AIRFIELD LIGHTING SYSTEMS",
+     "sheet_total_contract": 498408386.25,
+     "sheet_total_this_week": 0.0
+    },
+    {
+     "bill_no": 7,
+     "name": "UNDERGROUND FUELING SYSTEM",
+     "sheet_total_contract": 408712500.0,
+     "sheet_total_this_week": 0.0
+    },
+    {
+     "bill_no": 8,
+     "name": "FIXED GROUND POWER SUPPLY SYSTEM",
+     "sheet_total_contract": 228034800.0,
+     "sheet_total_this_week": 0.0
+    }
+   ],
+   "cross_checks": [
+    {
+     "check": "bill_6_contract",
+     "delta": 111072750.0,
+     "ours": 609481136.25,
+     "sheet": 498408386.25
+    }
+   ],
    "rows": [
     {
+     "amount_previous_reported": 50000000.0,
      "amount_this_week": null,
-     "bill_no": 2,
+     "bill_no": 1,
      "contract_amount": 69000000.0,
      "contract_qty": 1.0,
      "description": "Allow for mobilization of contractor's equipment and personel to site including demobilization",
+     "dup_seq": 0,
      "item_code": "1.01",
-     "pct_complete": 0.7246376811594203,
+     "qty_previous_reported": null,
      "qty_this_week": null,
      "rate": 69000000.0,
      "unit": null
     },
     {
+     "amount_previous_reported": 11500000.0,
      "amount_this_week": null,
-     "bill_no": 2,
+     "bill_no": 1,
      "contract_amount": 13800000.0,
      "contract_qty": 1.0,
      "description": "Allow for Pavement testing, soil investigation and other laboratory testings",
+     "dup_seq": 0,
      "item_code": "1.02",
-     "pct_complete": 0.8333333333333334,
+     "qty_previous_reported": null,
      "qty_this_week": null,
      "rate": 13800000.0,
      "unit": null
     },
     {
+     "amount_previous_reported": 25000000.0,
      "amount_this_week": null,
-     "bill_no": 2,
+     "bill_no": 1,
      "contract_amount": 27600000.0,
      "contract_qty": 1.0,
      "description": "Allow for Survey and design",
+     "dup_seq": 0,
      "item_code": "1.03",
-     "pct_complete": 0.9057971014492754,
+     "qty_previous_reported": null,
      "qty_this_week": null,
      "rate": 27600000.0,
      "unit": null
     },
     {
+     "amount_previous_reported": 20000000.0,
      "amount_this_week": null,
-     "bill_no": 2,
+     "bill_no": 1,
      "contract_amount": 27600000.0,
      "contract_qty": 1.0,
      "description": "Allow for provision of work safety plan, manual and processing of NCAA Approval including training of project team members on safety requirements according to ICAO standards",
+     "dup_seq": 0,
      "item_code": "1.04",
-     "pct_complete": 0.7246376811594203,
+     "qty_previous_reported": null,
      "qty_this_week": null,
      "rate": 27600000000.0,
      "unit": null
     },
     {
+     "amount_previous_reported": 2000000.0,
      "amount_this_week": null,
-     "bill_no": 2,
+     "bill_no": 1,
      "contract_amount": 6900000.0,
      "contract_qty": 1.0,
      "description": "Allow for environment impact assessment",
+     "dup_seq": 0,
      "item_code": "1.05",
-     "pct_complete": 0.2898550724637681,
+     "qty_previous_reported": null,
      "qty_this_week": null,
      "rate": 6900000.0,
      "unit": null
     },
     {
+     "amount_previous_reported": 17680000.0,
      "amount_this_week": null,
-     "bill_no": 2,
+     "bill_no": 1,
      "contract_amount": 20700000.0,
      "contract_qty": 1.0,
      "description": "Allow for services for the Engineer's Representatives",
+     "dup_seq": 0,
      "item_code": "1.06",
-     "pct_complete": 0.8541062801932368,
+     "qty_previous_reported": null,
      "qty_this_week": null,
      "rate": 20700000.0,
      "unit": null
     },
     {
+     "amount_previous_reported": 18732900.25,
      "amount_this_week": null,
-     "bill_no": 2,
+     "bill_no": 1,
      "contract_amount": 20700000.0,
      "contract_qty": 1.0,
      "description": "Allow for provision of equipment, labour and assistance as may be required by Engineer's Represntative",
+     "dup_seq": 0,
      "item_code": "1.07",
-     "pct_complete": 0.9049710265700484,
+     "qty_previous_reported": null,
      "qty_this_week": null,
      "rate": 20700000.0,
      "unit": null
     },
     {
+     "amount_previous_reported": 8000000.0,
      "amount_this_week": null,
-     "bill_no": 2,
+     "bill_no": 1,
      "contract_amount": 11040000.0,
      "contract_qty": 1.0,
      "description": "Allow for insurance of work, equipment including security",
+     "dup_seq": 0,
      "item_code": "1.08",
-     "pct_complete": 0.7246376811594203,
+     "qty_previous_reported": null,
      "qty_this_week": null,
      "rate": 11040000.0,
      "unit": null
     },
     {
+     "amount_previous_reported": 78435661.0,
      "amount_this_week": null,
-     "bill_no": 2,
+     "bill_no": 1,
      "contract_amount": 82800000.0,
      "contract_qty": 1.0,
      "description": "Allow for provision of project vehicle, maintenance and running cost",
+     "dup_seq": 0,
      "item_code": "1.09",
-     "pct_complete": 0.9472905917874396,
+     "qty_previous_reported": null,
      "qty_this_week": null,
      "rate": 82800000.0,
      "unit": null
     },
     {
+     "amount_previous_reported": 8315000.0,
      "amount_this_week": null,
-     "bill_no": 2,
+     "bill_no": 1,
      "contract_amount": 13800000.0,
      "contract_qty": 1.0,
      "description": "Allow for removal and relocation of existing services.",
+     "dup_seq": 0,
      "item_code": "1.1",
-     "pct_complete": 0.6025362318840579,
+     "qty_previous_reported": null,
      "qty_this_week": null,
      "rate": 13800000.0,
      "unit": null
     },
     {
+     "amount_previous_reported": 8533850.0,
      "amount_this_week": null,
-     "bill_no": 2,
+     "bill_no": 1,
      "contract_amount": 13800000.0,
      "contract_qty": 1.0,
      "description": "Allow for site meetings and preparations",
+     "dup_seq": 0,
      "item_code": "1.11",
-     "pct_complete": 0.6183949275362319,
+     "qty_previous_reported": null,
      "qty_this_week": null,
      "rate": 13800000.0,
      "unit": null
     },
     {
+     "amount_previous_reported": 2657500.0,
      "amount_this_week": null,
-     "bill_no": 2,
+     "bill_no": 1,
      "contract_amount": 4140000.0,
      "contract_qty": 1.0,
      "description": "Allow for progress photographs",
+     "dup_seq": 0,
      "item_code": "1.12",
-     "pct_complete": 0.6419082125603864,
+     "qty_previous_reported": null,
      "qty_this_week": null,
      "rate": 4140000.0,
      "unit": null
     },
     {
+     "amount_previous_reported": 18978000.0,
      "amount_this_week": 0.0,
      "bill_no": 2,
      "contract_amount": 23400000.0,
      "contract_qty": 13.0,
      "description": "Clear site on either side of centre line of the proposed Apron up to the limit of construction width of all bushes, shrubs, grasses & trees",
+     "dup_seq": 0,
      "item_code": "2.01",
-     "pct_complete": 0.811025641025641,
+     "qty_previous_reported": 12.56,
      "qty_this_week": null,
      "rate": 1800000.0,
      "unit": "Ha"
     },
     {
+     "amount_previous_reported": 44636580.0,
      "amount_this_week": 0.0,
      "bill_no": 2,
      "contract_amount": 71838600.0,
      "contract_qty": 105645.0,
      "description": "Removal of top soil to a depth not exceeding 500mm",
+     "dup_seq": 0,
      "item_code": "2.02",
-     "pct_complete": 0.6213453491576951,
+     "qty_previous_reported": 108673.5,
      "qty_this_week": null,
      "rate": 680.0,
      "unit": "m2"
     },
     {
+     "amount_previous_reported": 602409461.05,
      "amount_this_week": 0.0,
      "bill_no": 2,
      "contract_amount": 1138769905.0,
      "contract_qty": 147223.0,
      "description": "Excavation for cuttings, material other than top soil, rock or artificial hard material, depth not exceeding 6m",
+     "dup_seq": 0,
      "item_code": "2.03",
-     "pct_complete": 0.5290001592112675,
+     "qty_previous_reported": 139670.5,
      "qty_this_week": null,
      "rate": 7735.0,
      "unit": "m3"
     },
     {
+     "amount_previous_reported": 48707235.0,
      "amount_this_week": 0.0,
      "bill_no": 2,
      "contract_amount": 48661650.0,
      "contract_qty": 6361.0,
      "description": "Excavate from approved borrow-pits, haul excavated materials any distance, deposit spread in 150mm layers and compact to 100% B. S compaction as filling for embankment and margin, shape formation and trim slopes to required cross section",
+     "dup_seq": 0,
      "item_code": "2.04",
-     "pct_complete": 1.0009367746469755,
+     "qty_previous_reported": 8986.33,
      "qty_this_week": null,
      "rate": 7650.0,
      "unit": "m3"
     },
     {
+     "amount_previous_reported": 4089150.0,
      "amount_this_week": 0.0,
      "bill_no": 2,
      "contract_amount": 7160400.0,
      "contract_qty": 2400.0,
      "description": "Scarify and pulverize existing bituminous surface, shape and compact to 100% B. S compaction as improved sub-base.",
+     "dup_seq": 0,
      "item_code": "2.05",
-     "pct_complete": 0.571078431372549,
+     "qty_previous_reported": 2330.0,
      "qty_this_week": null,
      "rate": 2983.5,
      "unit": "m2"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 2,
      "contract_amount": 61880000.0,
      "contract_qty": 17000.0,
      "description": "Dub in grass to slopes of embankment as specified and directed rate to include top-soil 100mm thick.",
+     "dup_seq": 0,
      "item_code": "2.06",
-     "pct_complete": 0.0,
+     "qty_previous_reported": 0.0,
      "qty_this_week": null,
      "rate": 3640.0,
      "unit": "m2"
     },
     {
+     "amount_previous_reported": 340659.0,
      "amount_this_week": 0.0,
      "bill_no": 2,
      "contract_amount": 150960000.0,
      "contract_qty": 8000.0,
      "description": "Provide and lay 100mm concrete slope protection to high embankment with BRC wire mesh.",
+     "dup_seq": 0,
      "item_code": "2.07",
-     "pct_complete": 0.0022566176470588234,
+     "qty_previous_reported": 30.69,
      "qty_this_week": null,
      "rate": 18870.0,
      "unit": "m2"
     },
     {
+     "amount_previous_reported": 2489520.0,
      "amount_this_week": 0.0,
      "bill_no": 2,
      "contract_amount": 6396000.0,
      "contract_qty": 1000.0,
      "description": "Clean and desilt culverts, side drains as directed.",
+     "dup_seq": 0,
      "item_code": "2.08",
-     "pct_complete": 0.3892307692307692,
+     "qty_previous_reported": 506.0,
      "qty_this_week": null,
      "rate": 6396.0,
      "unit": "m"
     },
     {
+     "amount_previous_reported": 153439701.35,
      "amount_this_week": 0.0,
      "bill_no": 2,
      "contract_amount": 260150605.60000002,
      "contract_qty": 101884.0,
      "description": "Excavate, Pulverise, lay and compact to shape, mixture of sharp sand and fill material at subgrade to a depth of 200mm",
+     "dup_seq": 0,
      "item_code": "2.09",
-     "pct_complete": 0.5898110480892917,
+     "qty_previous_reported": 99409.25,
      "qty_this_week": null,
      "rate": 2553.4,
      "unit": "m2"
     },
     {
+     "amount_previous_reported": 78621000.0,
      "amount_this_week": 0.0,
      "bill_no": 2,
      "contract_amount": 161330000.0,
      "contract_qty": 1300.0,
      "description": "Provide and install 200mm High Density Pressure pipes for underground drainage",
+     "dup_seq": 0,
      "item_code": "2.1",
-     "pct_complete": 0.48733031674208144,
+     "qty_previous_reported": 1077.0,
      "qty_this_week": null,
      "rate": 124100.0,
      "unit": "m"
     },
     {
+     "amount_previous_reported": 59090000.0,
      "amount_this_week": 0.0,
      "bill_no": 2,
      "contract_amount": null,
      "contract_qty": null,
      "description": "Provide and install 6 ways 150mm duct line for services, Rate to include Excavation, Blindind Casing and Pipe supply and installation",
+     "dup_seq": 0,
      "item_code": "2.11",
-     "pct_complete": null,
+     "qty_previous_reported": 500.0,
      "qty_this_week": null,
      "rate": 118180.0,
      "unit": "m"
     },
     {
+     "amount_previous_reported": 17254584.0,
      "amount_this_week": 0.0,
      "bill_no": 3,
      "contract_amount": 31529321.999999996,
      "contract_qty": 4338.4,
      "description": "Excavate for culvert and concrete line drain to any depth including backfilling to 100% B. S compaction and dispose of surplus materials as directed",
+     "dup_seq": 0,
      "item_code": "3.01",
-     "pct_complete": 0.5472551550585198,
+     "qty_previous_reported": 4036.16,
      "qty_this_week": null,
      "rate": 7267.5,
      "unit": "m3"
     },
     {
+     "amount_previous_reported": 4033890.0,
      "amount_this_week": 0.0,
      "bill_no": 3,
      "contract_amount": 20624400.0,
      "contract_qty": 85.0,
      "description": "Provide, mix and place concrete grade 30 in box culverts as specified inclusive of blinding & formwork. ( reinforcement measured seperately )",
+     "dup_seq": 0,
      "item_code": "3.02",
-     "pct_complete": 0.19558823529411765,
+     "qty_previous_reported": 33.25,
      "qty_this_week": null,
      "rate": 242640.0,
      "unit": "m3"
     },
     {
+     "amount_previous_reported": 54827850.0,
      "amount_this_week": 0.0,
      "bill_no": 3,
      "contract_amount": 110580000.0,
      "contract_qty": 388.0,
      "description": "Provide, mix and place concrete grade 40 in box culverts as specified inclusive of blinding & formwork. ( reinforcement measured seperately )",
+     "dup_seq": 0,
      "item_code": "3.02a",
-     "pct_complete": 0.4958206728160608,
+     "qty_previous_reported": 387.75,
      "qty_this_week": null,
      "rate": 285000.0,
      "unit": "m3"
     },
     {
+     "amount_previous_reported": 42114399.99999999,
      "amount_this_week": 0.0,
      "bill_no": 3,
      "contract_amount": 170400000.0,
      "contract_qty": 71.0,
      "description": "Provide and fix H.T. Reinforcement in box culverts, headwalls, wingwalls, aprons and toe beams.",
+     "dup_seq": 0,
      "item_code": "3.03",
-     "pct_complete": 0.247150234741784,
+     "qty_previous_reported": 69.03999999999999,
      "qty_this_week": null,
      "rate": 2400000.0,
      "unit": "Tons"
     },
     {
+     "amount_previous_reported": 69428250.0,
      "amount_this_week": 0.0,
      "bill_no": 3,
      "contract_amount": 149476500.0,
      "contract_qty": 563.0,
      "description": "Provide Concrete Lined drains 1.04 m x 0.83 m as specified and directed (Grade 30 concrete), Volume = 0.7525m3/m Rate to include blinding, shuttering and reinforcement",
+     "dup_seq": 0,
      "item_code": "3.04",
-     "pct_complete": 0.4644760213143872,
+     "qty_previous_reported": 523.0,
      "qty_this_week": null,
      "rate": 265500.0,
      "unit": "m"
     },
     {
+     "amount_previous_reported": 42116580.0,
      "amount_this_week": 0.0,
      "bill_no": 3,
      "contract_amount": 92339280.0,
      "contract_qty": 524.0,
      "description": "Provide Concrete Lined drains 1.2 m x 1.0 m as specified and directed (Grade 30 concrete), Volume = 0.525m3/m Rate to include shuttering and reinforcement",
+     "dup_seq": 0,
      "item_code": "3.04a",
-     "pct_complete": 0.45610687022900764,
+     "qty_previous_reported": 448.0,
      "qty_this_week": null,
      "rate": 176220.0,
      "unit": "m"
     },
     {
+     "amount_previous_reported": 36207000.0,
      "amount_this_week": 0.0,
      "bill_no": 3,
      "contract_amount": 48600000.0,
      "contract_qty": 400.0,
      "description": "Provide and lay 750mm diameter prcecast concrete pipes for underground storm water drainage Rate to include 150mm sharp sand bedding, concrete surround, shuttering and reinforcement",
+     "dup_seq": 0,
      "item_code": "3.05",
-     "pct_complete": 0.745,
+     "qty_previous_reported": 298.0,
      "qty_this_week": null,
      "rate": 121500.0,
      "unit": "m"
     },
     {
+     "amount_previous_reported": 13600000.0,
      "amount_this_week": 0.0,
      "bill_no": 3,
      "contract_amount": 23120000.0,
      "contract_qty": 16.0,
      "description": "Provide and install reinforced concrete chambers 1027mm x 650 mm internal width, 0.23m thick wall and fitted with 75mm x 75mm angle iron for cast iron grattings seating",
+     "dup_seq": 0,
      "item_code": "3.06",
-     "pct_complete": 0.5882352941176471,
+     "qty_previous_reported": 16.0,
      "qty_this_week": null,
      "rate": 1445000.0,
      "unit": "No"
     },
     {
+     "amount_previous_reported": 8550000.0,
      "amount_this_week": 0.0,
      "bill_no": 3,
      "contract_amount": 14535000.0,
      "contract_qty": 9.0,
      "description": "Provide and install reinforced concrete chambers 1027mm x 650 mm internal width, 0.23m thick wall and fitted with 75mm x 75mm angle iron for cast iron grattings seating",
+     "dup_seq": 0,
      "item_code": "3.06a",
-     "pct_complete": 0.5882352941176471,
+     "qty_previous_reported": 9.0,
      "qty_this_week": null,
      "rate": 1615000.0,
      "unit": "No"
     },
     {
+     "amount_previous_reported": 6000000.0,
      "amount_this_week": 0.0,
      "bill_no": 3,
      "contract_amount": 10200000.0,
      "contract_qty": 8.0,
      "description": "Provide and install cast iron grattings CHA 002 1027mm x 650mm manufactured by Nigerian Foundries according to BS EN 124 : 2015 international standard and test load 600KN",
+     "dup_seq": 0,
      "item_code": "3.07",
-     "pct_complete": 0.5882352941176471,
+     "qty_previous_reported": 8.0,
      "qty_this_week": null,
      "rate": 1275000.0,
      "unit": "No"
     },
     {
+     "amount_previous_reported": 30917900.0,
      "amount_this_week": 0.0,
      "bill_no": 3,
      "contract_amount": 52560430.0,
      "contract_qty": 17.0,
      "description": "Provide and install cast iron grattings CHA 002 1027mm x 650mm manufactured by Nigerian Foundries according to BS EN 124 : 2015 international standard and test load 600KN",
+     "dup_seq": 1,
      "item_code": "3.07",
-     "pct_complete": 0.5882352941176471,
+     "qty_previous_reported": 17.0,
      "qty_this_week": null,
      "rate": 3091790.0,
      "unit": "No"
     },
     {
+     "amount_previous_reported": 45934178.400000006,
      "amount_this_week": 0.0,
      "bill_no": 3,
      "contract_amount": 48528000.0,
      "contract_qty": 200.0,
      "description": "Provide and place G30 Concrete in Access Slabs and Cover to Drains",
+     "dup_seq": 0,
      "item_code": "3.08",
-     "pct_complete": 0.9465500000000001,
+     "qty_previous_reported": 249.89000000000001,
      "qty_this_week": null,
      "rate": 242640.0,
      "unit": "m3"
     },
     {
+     "amount_previous_reported": 113556300.0,
      "amount_this_week": 0.0,
      "bill_no": 3,
      "contract_amount": 43200000.0,
      "contract_qty": 18.0,
      "description": "Provide and fix H.T. Reinforcement in Cover Slab to drain",
+     "dup_seq": 0,
      "item_code": "3.09",
-     "pct_complete": 2.6286180555555556,
+     "qty_previous_reported": 57.63,
      "qty_this_week": null,
      "rate": 2400000.0,
      "unit": "Tons"
     },
     {
+     "amount_previous_reported": 540000.0,
      "amount_this_week": 0.0,
      "bill_no": 3,
      "contract_amount": 918000.0,
      "contract_qty": 4.0,
      "description": "Breaking of reinforced concrete manhole on the existing culvert, to be rebuilt to a smaller size of 1027mm x 650mm and reconstruction to be charged under bill nr 3.02",
+     "dup_seq": 0,
      "item_code": "3.1",
-     "pct_complete": 0.5882352941176471,
+     "qty_previous_reported": 4.0,
      "qty_this_week": null,
      "rate": 229500.0,
      "unit": "Nos"
     },
     {
+     "amount_previous_reported": 28347795.0,
      "amount_this_week": 0.0,
      "bill_no": 4,
      "contract_amount": 28663740.0,
      "contract_qty": 90996.0,
      "description": "Shape and compact formation in cutting to 100% B.S. compaction for the apron, fillets, transition areas and the shoulders",
+     "dup_seq": 0,
      "item_code": "4.01",
-     "pct_complete": 0.9889775374741747,
+     "qty_previous_reported": 89993.0,
      "qty_this_week": null,
      "rate": 315.0,
      "unit": "m2"
     },
     {
+     "amount_previous_reported": 941833700.5500002,
      "amount_this_week": 0.0,
      "bill_no": 4,
      "contract_amount": 1632467925.0,
      "contract_qty": 26345.0,
      "description": "Provide, spread, haul any distance, shape and compact approved crushed rock (wet or dry) in base of Apron, fillets, transition areas and shoulders as specified to a compacted thickness of 250mm of (Haulage inclusive)",
+     "dup_seq": 0,
      "item_code": "4.02",
-     "pct_complete": 0.5769385640762285,
+     "qty_previous_reported": 25173.58,
      "qty_this_week": null,
      "rate": 61965.0,
      "unit": "m3"
     },
     {
+     "amount_previous_reported": 1052239545.4499999,
      "amount_this_week": 0.0,
      "bill_no": 4,
      "contract_amount": 2014084350.0,
      "contract_qty": 15487.0,
      "description": "Provide and lay insitu dry lean concrete grade 15, 150mm thick in the apron, fillets and transition areas between the apron and taxiway, as may be directed.",
+     "dup_seq": 0,
      "item_code": "4.03",
-     "pct_complete": 0.5224406542109321,
+     "qty_previous_reported": 13657.64,
      "qty_this_week": null,
      "rate": 130050.0,
      "unit": "m3"
     },
     {
+     "amount_previous_reported": 8008591462.8,
      "amount_this_week": 259350000.0,
      "bill_no": 4,
      "contract_amount": 10804920000.0,
      "contract_qty": 37912.0,
      "description": "Provide and install insitu concrete grade 40, 400mm thick in Apron, fillet and transition areas, as may be directed.",
+     "dup_seq": 0,
      "item_code": "4.04",
-     "pct_complete": 0.765201543630124,
+     "qty_previous_reported": 29910.6,
      "qty_this_week": 910.0,
      "rate": 285000.0,
      "unit": "m3"
     },
     {
+     "amount_previous_reported": 245656015.20000002,
      "amount_this_week": 0.0,
      "bill_no": 4,
      "contract_amount": 409333680.0,
      "contract_qty": 1687.0,
      "description": "Provide and install insitu concrete grade 30, 200mm thick in the Apron shoulders, as may be directed.",
+     "dup_seq": 0,
      "item_code": "4.04a",
-     "pct_complete": 0.6001363366923533,
+     "qty_previous_reported": 1012.43,
      "qty_this_week": null,
      "rate": 242640.0,
      "unit": "m3"
     },
     {
+     "amount_previous_reported": 542177220.0,
      "amount_this_week": 18837000.0,
      "bill_no": 4,
      "contract_amount": 19126800.0,
      "contract_qty": 92.4,
      "description": "Provide and install 5.0m by 4.7 m Y8mm Mat, (0.096 ton/mat) bars to be spaced at 200mm centres bothways and installed at 50mm below the finished face of concrete in apron, fillets and transition areas as norminal reinforcement",
+     "dup_seq": 0,
      "item_code": "4.05",
-     "pct_complete": 29.33131626827279,
+     "qty_previous_reported": 3041.0,
      "qty_this_week": 91.0,
      "rate": 207000.0,
      "unit": "No"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 4,
      "contract_amount": 518918400.0,
      "contract_qty": 2640.0,
      "description": "Provide and install 5.0m by 4.45 m Y8mm Mat, (0.091 ton/mat) bars to be spaced at 200mm centres bothways and installed at 50mm below the finished face of concrete in apron, fillets and transition areas as norminal reinforcement",
+     "dup_seq": 0,
      "item_code": "4.05a",
-     "pct_complete": 0.0,
+     "qty_previous_reported": 0.0,
      "qty_this_week": null,
      "rate": 196560.0,
      "unit": "No"
     },
     {
+     "amount_previous_reported": 11901945.0,
      "amount_this_week": 0.0,
      "bill_no": 4,
      "contract_amount": 6238943.999999999,
      "contract_qty": 34.8,
      "description": "Provide and install 4.20m by 4.80 m Y8mm Mat, (0.0832 ton/mat) bars to be spaced at 200mm centres bothways and installed at 50mm below the finished face of concrete in apron, fillets and transition areas as norminal reinforcement",
+     "dup_seq": 0,
      "item_code": "4.05b",
-     "pct_complete": 1.9076858199079847,
+     "qty_previous_reported": 130.0,
      "qty_this_week": null,
      "rate": 179280.0,
      "unit": "No"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 4,
      "contract_amount": 230688000.0,
      "contract_qty": 1200.0,
      "description": "Provide and install 4.7m by 4.7 m Y8mm Mat, (0.089 ton/mat) bars to be spaced at 200mm centres bothways and installed at 50mm below the finished face of concrete in apron, fillets and transition areas as norminal reinforcement",
+     "dup_seq": 0,
      "item_code": "4.05c",
-     "pct_complete": 0.0,
+     "qty_previous_reported": 0.0,
      "qty_this_week": null,
      "rate": 192240.0,
      "unit": "No"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 4,
      "contract_amount": 11860992.0,
      "contract_qty": 62.4,
      "description": "Provide and install 4.5m by 4.8 m Y8mm Mat, (0.088 ton/mat) bars to be spaced at 200mm centres bothways and installed at 50mm below the finished face of concrete in apron, fillets and transition areas as norminal reinforcement",
+     "dup_seq": 0,
      "item_code": "4.05d",
-     "pct_complete": 0.0,
+     "qty_previous_reported": 0.0,
      "qty_this_week": null,
      "rate": 190080.0,
      "unit": "No"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 4,
      "contract_amount": 31104000.0,
      "contract_qty": 240.0,
      "description": "Provide and install 3.45m by 4.2m Y8mm Mat, (0.06 ton/mat) bars to be spaced at 200mm centres bothways and installed at 50mm below the finished face of concrete shoulder as norminal reinforcement",
+     "dup_seq": 0,
      "item_code": "4.05e",
-     "pct_complete": 0.0,
+     "qty_previous_reported": 0.0,
      "qty_this_week": null,
      "rate": 129600.0,
      "unit": "No"
     },
     {
+     "amount_previous_reported": 531160200.0,
      "amount_this_week": 16363350.0,
      "bill_no": 4,
      "contract_amount": 633420000.0,
      "contract_qty": 55200.0,
      "description": "Provide, paint with bitumen and install dowel bars 32mm diameter 600mm length 350mm centers at transverse contraction and longitudinal construction joints .",
+     "dup_seq": 0,
      "item_code": "4.06",
-     "pct_complete": 0.8643925831202046,
+     "qty_previous_reported": 47244.0,
      "qty_this_week": 1426.0,
      "rate": 11475.0,
      "unit": "No"
     },
     {
+     "amount_previous_reported": 33295500.0,
      "amount_this_week": 0.0,
      "bill_no": 4,
      "contract_amount": 293328000.0,
      "contract_qty": 3600.0,
      "description": "Provide and fix 20mm thick premolded joint filler board at isolation joints including provision of separation tape or backer rod and seal with self leveling silicone sealant dow coring 890 sl or approved equal",
+     "dup_seq": 0,
      "item_code": "4.07",
-     "pct_complete": 0.1135094501718213,
+     "qty_previous_reported": 755.0,
      "qty_this_week": null,
      "rate": 81480.0,
      "unit": "m"
     },
     {
+     "amount_previous_reported": 4289220.0,
      "amount_this_week": 0.0,
      "bill_no": 4,
      "contract_amount": 4380480.0,
      "contract_qty": 624.0,
      "description": "Provide and install 16 mm diameter ribbed bar as 780mm length and 780mm centers at longitudinal joint on the apron shoulders",
+     "dup_seq": 0,
      "item_code": "4.08",
-     "pct_complete": 0.9791666666666666,
+     "qty_previous_reported": 611.0,
      "qty_this_week": null,
      "rate": 7020.0,
      "unit": "No"
     },
     {
+     "amount_previous_reported": 41319936.0,
      "amount_this_week": 0.0,
      "bill_no": 4,
      "contract_amount": 352512000.0,
      "contract_qty": 18000.0,
      "description": "Provide longitudinal construction joints depth 400mm on apron and apron transition areas, paint first face of pilot bays with bitumen in compliance with BS 434, instal backer rod and seal joints with self leveling silicone sealant dow coring 890 sl or approved equal",
+     "dup_seq": 0,
      "item_code": "4.09",
-     "pct_complete": 0.1172156862745098,
+     "qty_previous_reported": 2562.0,
      "qty_this_week": null,
      "rate": 19584.0,
      "unit": "m"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 4,
      "contract_amount": 8445600.0,
      "contract_qty": 480.0,
      "description": "Provide longitudinal construction joints depth 200mm on apron and apron shoulder, paint first face of pilot bays with bitumen in compliance with BS 434, instal backer rod and seal joints with self leveling silicone sealant dow coring 890 sl or approved equal",
+     "dup_seq": 0,
      "item_code": "4.09a",
-     "pct_complete": 0.0,
+     "qty_previous_reported": 0.0,
      "qty_this_week": null,
      "rate": 17595.0,
      "unit": "m"
     },
     {
+     "amount_previous_reported": 60368490.0,
      "amount_this_week": 0.0,
      "bill_no": 4,
      "contract_amount": 440640000.0,
      "contract_qty": 19200.0,
      "description": "Provide transverse contraction joints 400mm depth on apron and apron transition areas, saw cut joints, instal backer rod and seal joints with self leveling silicone sealant dow coring 890 sl or approved equal",
+     "dup_seq": 0,
      "item_code": "4.1",
-     "pct_complete": 0.1370018382352941,
+     "qty_previous_reported": 3194.1,
      "qty_this_week": null,
      "rate": 22950.0,
      "unit": "m"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 4,
      "contract_amount": 17642812.5,
      "contract_qty": 922.5,
      "description": "Provide transverse contraction joints 200mm depth on apron shoulder, saw cut joints, instal backer rod and seal joints with self leveling silicone sealant dow coring 890 sl or approved equal",
+     "dup_seq": 0,
      "item_code": "4.10a",
-     "pct_complete": 0.0,
+     "qty_previous_reported": 0.0,
      "qty_this_week": null,
      "rate": 19125.0,
      "unit": "m"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 5,
      "contract_amount": 3164062.5,
      "contract_qty": 375.0,
      "description": "Taxiway Center Line Markings + lead in",
+     "dup_seq": 0,
      "item_code": "5.01",
-     "pct_complete": 0.0,
+     "qty_previous_reported": null,
      "qty_this_week": 0.0,
      "rate": 8437.5,
      "unit": "m2"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 5,
      "contract_amount": 2025000.0,
      "contract_qty": 240.0,
      "description": "Taxiway + Apron Edge Markings",
+     "dup_seq": 0,
      "item_code": "5.02",
-     "pct_complete": 0.0,
+     "qty_previous_reported": null,
      "qty_this_week": null,
      "rate": 8437.5,
      "unit": "m2"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 5,
      "contract_amount": 316406.25,
      "contract_qty": 37.5,
      "description": "Aircraft Stand lead in markings",
+     "dup_seq": 0,
      "item_code": "5.03",
-     "pct_complete": 0.0,
+     "qty_previous_reported": null,
      "qty_this_week": null,
      "rate": 8437.5,
      "unit": "m2"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 5,
      "contract_amount": 441703.125,
      "contract_qty": 45.0,
      "description": "Aircraft Stand Safety markings",
+     "dup_seq": 0,
      "item_code": "5.04",
-     "pct_complete": 0.0,
+     "qty_previous_reported": null,
      "qty_this_week": null,
      "rate": 9815.625,
      "unit": "m2"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 5,
      "contract_amount": 398250.0,
      "contract_qty": 40.0,
      "description": "Aircraft Stand Numbering",
+     "dup_seq": 0,
      "item_code": "5.05",
-     "pct_complete": 0.0,
+     "qty_previous_reported": null,
      "qty_this_week": null,
      "rate": 9956.25,
      "unit": "m2"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 5,
      "contract_amount": 628200.0,
      "contract_qty": 64.0,
      "description": "Tranverse Markings Taxiway",
+     "dup_seq": 0,
      "item_code": "5.06",
-     "pct_complete": 0.0,
+     "qty_previous_reported": null,
      "qty_this_week": null,
      "rate": 9815.625,
      "unit": "m2"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 6,
      "contract_amount": 58127250.0,
      "contract_qty": 50.0,
      "description": "Taxiway Center Line Lights g/y inset",
+     "dup_seq": 0,
      "item_code": "6.01",
-     "pct_complete": 0.0,
+     "qty_previous_reported": null,
      "qty_this_week": 0.0,
      "rate": 1162545.0,
      "unit": "pcs"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 6,
      "contract_amount": 209258100.0,
      "contract_qty": 180.0,
      "description": "Taxiway Center Line Lights g/g inset",
+     "dup_seq": 0,
      "item_code": "6.02",
-     "pct_complete": 0.0,
+     "qty_previous_reported": null,
      "qty_this_week": 0.0,
      "rate": 1162545.0,
      "unit": "pcs"
     },
     {
+     "amount_previous_reported": 9517500.0,
      "amount_this_week": 0.0,
      "bill_no": 6,
      "contract_amount": 9517500.0,
      "contract_qty": 20.0,
      "description": "Apron Edge Inset Lights",
+     "dup_seq": 0,
      "item_code": "6.03",
-     "pct_complete": 1.0,
+     "qty_previous_reported": 20.0,
      "qty_this_week": null,
      "rate": 475875.0,
      "unit": "pcs"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 6,
      "contract_amount": 9517500.0,
      "contract_qty": 20.0,
      "description": "Taxiway Edge Inset lights",
+     "dup_seq": 0,
      "item_code": "6.04",
-     "pct_complete": 0.0,
+     "qty_previous_reported": 0.0,
      "qty_this_week": null,
      "rate": 475875.0,
      "unit": "pcs"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 6,
      "contract_amount": 3666000.0,
      "contract_qty": 32.0,
      "description": "Transformer 20W",
+     "dup_seq": 0,
      "item_code": "6.05",
-     "pct_complete": 0.0,
+     "qty_previous_reported": 0.0,
      "qty_this_week": null,
      "rate": 114562.5,
      "unit": "pcs"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 6,
      "contract_amount": 27565500.0,
      "contract_qty": 230.0,
      "description": "Transformer 45W",
+     "dup_seq": 0,
      "item_code": "6.06",
-     "pct_complete": 0.0,
+     "qty_previous_reported": 0.0,
      "qty_this_week": null,
      "rate": 119850.0,
      "unit": "pcs"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 6,
      "contract_amount": 13483125.0,
      "contract_qty": 1.0,
      "description": "CCR 3KVA",
+     "dup_seq": 0,
      "item_code": "6.07",
-     "pct_complete": 0.0,
+     "qty_previous_reported": 0.0,
      "qty_this_week": null,
      "rate": 13483125.0,
      "unit": "pcs"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 6,
      "contract_amount": 14158779.375,
      "contract_qty": 1.0,
      "description": "CCR 4 KVA",
+     "dup_seq": 0,
      "item_code": "6.08",
-     "pct_complete": 0.0,
+     "qty_previous_reported": 0.0,
      "qty_this_week": null,
      "rate": 14158779.375,
      "unit": "pcs"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 6,
      "contract_amount": 57765937.5,
      "contract_qty": 17250.0,
      "description": "Secondary Power Cables 2x16mm",
+     "dup_seq": 0,
      "item_code": "6.09",
-     "pct_complete": 0.0,
+     "qty_previous_reported": 0.0,
      "qty_this_week": null,
      "rate": 3348.75,
      "unit": "m"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 6,
      "contract_amount": 951750.0,
      "contract_qty": 300.0,
      "description": "Secondary Power Cables 2x6mm flex",
+     "dup_seq": 0,
      "item_code": "6.1",
-     "pct_complete": 0.0,
+     "qty_previous_reported": 0.0,
      "qty_this_week": null,
      "rate": 3172.5,
      "unit": "m"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 6,
      "contract_amount": 18506250.0,
      "contract_qty": 6000.0,
      "description": "Primary Power Cables 5KVA - to switch room",
+     "dup_seq": 0,
      "item_code": "6.11",
-     "pct_complete": 0.0,
+     "qty_previous_reported": 0.0,
      "qty_this_week": null,
      "rate": 3084.375,
      "unit": "m"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 6,
      "contract_amount": 7685381.249999999,
      "contract_qty": 270.0,
      "description": "Secondary Connector Kits m/f",
+     "dup_seq": 0,
      "item_code": "6.12",
-     "pct_complete": 0.0,
+     "qty_previous_reported": 0.0,
      "qty_this_week": null,
      "rate": 28464.374999999996,
      "unit": "pcs"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 6,
      "contract_amount": 9532569.375,
      "contract_qty": 300.0,
      "description": "Primary Connector Kits KD 500",
+     "dup_seq": 0,
      "item_code": "6.13",
-     "pct_complete": 0.0,
+     "qty_previous_reported": 0.0,
      "qty_this_week": null,
      "rate": 31775.23125,
      "unit": "pcs"
     },
     {
+     "amount_previous_reported": 14741550.0,
      "amount_this_week": 0.0,
      "bill_no": 6,
      "contract_amount": 16584243.75,
      "contract_qty": 270.0,
      "description": "8\" Bases for inset Lights",
+     "dup_seq": 0,
      "item_code": "6.14",
-     "pct_complete": 0.8888888888888888,
+     "qty_previous_reported": 240.0,
      "qty_this_week": null,
      "rate": 61423.125,
      "unit": "pcs"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 6,
      "contract_amount": 20224687.5,
      "contract_qty": 1350.0,
      "description": "CDS Pouring Concrete for 8\" Bases",
+     "dup_seq": 0,
      "item_code": "6.15",
-     "pct_complete": 0.0,
+     "qty_previous_reported": 0.0,
      "qty_this_week": null,
      "rate": 14981.25,
      "unit": "kg"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 6,
      "contract_amount": 11817562.5,
      "contract_qty": 270.0,
      "description": "Coring for 8\" Bases",
+     "dup_seq": 0,
      "item_code": "6.16",
-     "pct_complete": 0.0,
+     "qty_previous_reported": 0.0,
      "qty_this_week": null,
      "rate": 43768.75,
      "unit": "pcs"
     },
     {
+     "amount_previous_reported": 10046250.0,
      "amount_this_week": 0.0,
      "bill_no": 6,
      "contract_amount": 10046250.0,
      "contract_qty": 3000.0,
      "description": "PVC Pipes for Secondary Power Cable ducts",
+     "dup_seq": 0,
      "item_code": "6.17",
-     "pct_complete": 1.0,
+     "qty_previous_reported": 3000.0,
      "qty_this_week": null,
      "rate": 3348.75,
      "unit": "m"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 6,
      "contract_amount": 0.0,
      "contract_qty": 0.0,
      "description": "4- way cable duct for primary power cables",
+     "dup_seq": 0,
      "item_code": "6.18",
-     "pct_complete": 0.0,
+     "qty_previous_reported": 0.0,
      "qty_this_week": null,
      "rate": 34368.75,
      "unit": "m"
     },
     {
+     "amount_previous_reported": 13489000.0,
      "amount_this_week": 0.0,
      "bill_no": 6,
      "contract_amount": 13489000.0,
      "contract_qty": 800.0,
      "description": "6- way cable duct for primary power cables",
+     "dup_seq": 0,
      "item_code": "6.19",
-     "pct_complete": null,
+     "qty_previous_reported": 800.0,
      "qty_this_week": null,
      "rate": 16861.25,
      "unit": "m"
     },
     {
+     "amount_previous_reported": 5023125.0,
      "amount_this_week": 0.0,
      "bill_no": 6,
      "contract_amount": 16743750.0,
      "contract_qty": 100.0,
      "description": "Transformer Pits - Type 1",
+     "dup_seq": 0,
      "item_code": "6.2",
-     "pct_complete": null,
+     "qty_previous_reported": 30.0,
      "qty_this_week": null,
      "rate": 167437.5,
      "unit": "pcs"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 6,
      "contract_amount": 24146250.0,
      "contract_qty": 3.0,
      "description": "Electrical Service Pits and Manholes - with Cover",
+     "dup_seq": 0,
      "item_code": "6.21",
-     "pct_complete": null,
+     "qty_previous_reported": null,
      "qty_this_week": 0.0,
      "rate": 8048750.0,
      "unit": "pcs"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 6,
      "contract_amount": 27318750.0,
      "contract_qty": 1.0,
      "description": "Electrical Installation / Project Management",
+     "dup_seq": 0,
      "item_code": "6.22",
-     "pct_complete": null,
+     "qty_previous_reported": null,
      "qty_this_week": 0.0,
      "rate": 27318750.0,
      "unit": "ls"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 6,
      "contract_amount": 0.0,
      "contract_qty": 0.0,
      "description": "Integration of new taxiway in tower remote control system",
+     "dup_seq": 0,
      "item_code": "6.23",
-     "pct_complete": null,
+     "qty_previous_reported": null,
      "qty_this_week": 0.0,
      "rate": 22031250.0,
      "unit": "ls"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 6,
      "contract_amount": 29375000.0,
      "contract_qty": 1.0,
      "description": "Design of the Airfield Lighting System",
-     "item_code": "6.23999999999999",
-     "pct_complete": null,
+     "dup_seq": 0,
+     "item_code": "6.24",
+     "qty_previous_reported": null,
      "qty_this_week": 0.0,
      "rate": 29375000.0,
      "unit": "pcs"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 7,
      "contract_amount": 227812500.0,
      "contract_qty": 4.0,
      "description": "A1 Fuel Tanks - 100,000 liter each - DIN 6608/2",
+     "dup_seq": 0,
      "item_code": "7.01",
-     "pct_complete": 0.0,
+     "qty_previous_reported": null,
      "qty_this_week": null,
      "rate": 56953125.0,
      "unit": "pcs"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 7,
      "contract_amount": 26493750.0,
      "contract_qty": 3000.0,
      "description": "Fuel Pipes from fuel depot to aircraft stands",
+     "dup_seq": 0,
      "item_code": "7.02",
-     "pct_complete": 0.0,
+     "qty_previous_reported": null,
      "qty_this_week": null,
      "rate": 8831.25,
      "unit": "m"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 7,
      "contract_amount": 98156250.0,
      "contract_qty": 1.0,
      "description": "Pumps / Pits / Accessories",
+     "dup_seq": 0,
      "item_code": "7.03",
-     "pct_complete": 0.0,
+     "qty_previous_reported": null,
      "qty_this_week": null,
      "rate": 98156250.0,
      "unit": "ls"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 7,
      "contract_amount": 39375000.0,
      "contract_qty": 1.0,
      "description": "Installation / Supervision",
+     "dup_seq": 0,
      "item_code": "7.04",
-     "pct_complete": 0.0,
+     "qty_previous_reported": null,
      "qty_this_week": null,
      "rate": 39375000.0,
      "unit": "ls"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 7,
      "contract_amount": 16875000.0,
      "contract_qty": 1.0,
      "description": "Lightning Protection",
+     "dup_seq": 0,
      "item_code": "7.05",
-     "pct_complete": 0.0,
+     "qty_previous_reported": null,
      "qty_this_week": null,
      "rate": 16875000.0,
      "unit": "ls"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 8,
      "contract_amount": 85429800.0,
      "contract_qty": 5.0,
      "description": "Power Pits 45kva to 180kva - ground flushing Maxium output power 2,500 Amps / 400 Hz",
+     "dup_seq": 0,
      "item_code": "8.01",
-     "pct_complete": 0.0,
+     "qty_previous_reported": null,
      "qty_this_week": 0.0,
      "rate": 17085960.0,
      "unit": "pcs"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 8,
      "contract_amount": 81855000.0,
      "contract_qty": 5.0,
      "description": "Power Inverters",
+     "dup_seq": 0,
      "item_code": "8.02",
-     "pct_complete": 0.0,
+     "qty_previous_reported": null,
      "qty_this_week": null,
      "rate": 16371000.0,
      "unit": "pcs"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 8,
      "contract_amount": 11250000.0,
      "contract_qty": 4000.0,
      "description": "PVC Pipes for Power Cables",
+     "dup_seq": 0,
      "item_code": "8.03",
-     "pct_complete": 0.0,
+     "qty_previous_reported": null,
      "qty_this_week": null,
      "rate": 2812.5,
      "unit": "m"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 8,
      "contract_amount": 29812500.0,
      "contract_qty": 2000.0,
      "description": "Power Cables from Main Supply to Pits",
+     "dup_seq": 0,
      "item_code": "8.04",
-     "pct_complete": 0.0,
+     "qty_previous_reported": null,
      "qty_this_week": null,
      "rate": 14906.25,
      "unit": "m"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 8,
      "contract_amount": 8437500.0,
      "contract_qty": 1.0,
      "description": "Accessories/Grounding System/Installation Materials",
+     "dup_seq": 0,
      "item_code": "8.05",
-     "pct_complete": 0.0,
+     "qty_previous_reported": null,
      "qty_this_week": null,
      "rate": 8437500.0,
      "unit": "pcs"
     },
     {
+     "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
      "bill_no": 8,
      "contract_amount": 11250000.0,
      "contract_qty": 1.0,
      "description": "Installation / Supervision",
+     "dup_seq": 0,
      "item_code": "8.06",
-     "pct_complete": 0.0,
+     "qty_previous_reported": null,
      "qty_this_week": null,
      "rate": 11250000.0,
      "unit": "pcs"
     },
     {
+     "amount_previous_reported": 1750750.0,
      "amount_this_week": 0.0,
      "bill_no": 8,
      "contract_amount": null,
      "contract_qty": null,
      "description": "4 - way ducts for remote parking stands",
+     "dup_seq": 0,
      "item_code": "7.09",
-     "pct_complete": null,
+     "qty_previous_reported": 40.0,
      "qty_this_week": null,
      "rate": 43768.75,
      "unit": "m"
-    },
-    {
-     "amount_this_week": 0.0,
-     "bill_no": 9,
-     "contract_amount": 541473578.105625,
-     "contract_qty": 1.0,
-     "description": "Add Contingencies @ 2.5%",
-     "item_code": null,
-     "pct_complete": 0.0,
-     "qty_this_week": null,
-     "rate": 541473578.105625,
-     "unit": null
-    },
-    {
-     "amount_this_week": 0.0,
-     "bill_no": 9,
-     "contract_amount": 541473578.105625,
-     "contract_qty": 1.0,
-     "description": "Add VOP @ 2.5%",
-     "item_code": null,
-     "pct_complete": 0.0,
-     "qty_this_week": null,
-     "rate": 541473578.105625,
-     "unit": null
-    },
-    {
-     "amount_this_week": 0.0,
-     "bill_no": 9,
-     "contract_amount": 311880000.0,
-     "contract_qty": null,
-     "description": "Preliminaries",
-     "item_code": "1",
-     "pct_complete": 0.8043315097152751,
-     "qty_this_week": null,
-     "rate": null,
-     "unit": null
-    },
-    {
-     "amount_this_week": 0.0,
-     "bill_no": 9,
-     "contract_amount": 1930547160.6,
-     "contract_qty": null,
-     "description": "Site Clearance and Earthwork",
-     "item_code": "2",
-     "pct_complete": 0.5246187853215815,
-     "qty_this_week": null,
-     "rate": null,
-     "unit": null
-    },
-    {
-     "amount_this_week": 0.0,
-     "bill_no": 9,
-     "contract_amount": 816610932.0,
-     "contract_qty": null,
-     "description": "Culverts and Drains",
-     "item_code": "3",
-     "pct_complete": 0.5940171915308133,
-     "qty_this_week": null,
-     "rate": null,
-     "unit": null
-    },
-    {
-     "amount_this_week": 294550350.0,
-     "bill_no": 9,
-     "contract_amount": 17457775723.5,
-     "contract_qty": null,
-     "description": "Pavement and Joints",
-     "item_code": "4",
-     "pct_complete": 0.6756720653778194,
-     "qty_this_week": null,
-     "rate": null,
-     "unit": null
-    },
-    {
-     "amount_this_week": 0.0,
-     "bill_no": 9,
-     "contract_amount": 6973621.875,
-     "contract_qty": null,
-     "description": "Pavement Markings",
-     "item_code": "5",
-     "pct_complete": 0.0,
-     "qty_this_week": null,
-     "rate": null,
-     "unit": null
-    },
-    {
-     "amount_this_week": 0.0,
-     "bill_no": 9,
-     "contract_amount": 498408386.25,
-     "contract_qty": null,
-     "description": "Airfield Lighting",
-     "item_code": "6",
-     "pct_complete": 0.1059721835689718,
-     "qty_this_week": null,
-     "rate": null,
-     "unit": null
-    },
-    {
-     "amount_this_week": 0.0,
-     "bill_no": 9,
-     "contract_amount": 408712500.0,
-     "contract_qty": null,
-     "description": "Underground Fueling System",
-     "item_code": "7",
-     "pct_complete": 0.0,
-     "qty_this_week": null,
-     "rate": null,
-     "unit": null
-    },
-    {
-     "amount_this_week": 0.0,
-     "bill_no": 9,
-     "contract_amount": 228034800.0,
-     "contract_qty": null,
-     "description": "Fixed Ground Power Supply System",
-     "item_code": "8",
-     "pct_complete": 0.0076775562326451925,
-     "qty_this_week": null,
-     "rate": null,
-     "unit": null
-    },
-    {
-     "amount_this_week": 294550350.0,
-     "bill_no": 9,
-     "contract_amount": 21658943124.225,
-     "contract_qty": null,
-     "description": "SUB – TOTAL",
-     "item_code": null,
-     "pct_complete": 0.6278716660851198,
-     "qty_this_week": null,
-     "rate": null,
-     "unit": null
-    },
-    {
-     "amount_this_week": 14727517.5,
-     "bill_no": 9,
-     "contract_amount": 1082947156.21125,
-     "contract_qty": null,
-     "description": "Contingency & VOP",
-     "item_code": null,
-     "pct_complete": 0.6278716660851198,
-     "qty_this_week": null,
-     "rate": null,
-     "unit": null
-    },
-    {
-     "amount_this_week": 309277867.5,
-     "bill_no": 9,
-     "contract_amount": 22741890280.43625,
-     "contract_qty": null,
-     "description": "SUB – TOTAL",
-     "item_code": null,
-     "pct_complete": 0.6278716660851198,
-     "qty_this_week": null,
-     "rate": null,
-     "unit": null
-    },
-    {
-     "amount_this_week": 23195840.0625,
-     "bill_no": 9,
-     "contract_amount": 1705641771.0327187,
-     "contract_qty": null,
-     "description": "Add VAT @ 7.5%",
-     "item_code": null,
-     "pct_complete": 0.6278716660851198,
-     "qty_this_week": null,
-     "rate": null,
-     "unit": null
-    },
-    {
-     "amount_this_week": 332473707.5625,
-     "bill_no": 9,
-     "contract_amount": 24447532051.468967,
-     "contract_qty": null,
-     "description": "TOTAL",
-     "item_code": null,
-     "pct_complete": 0.6278716660851198,
-     "qty_this_week": null,
-     "rate": null,
-     "unit": null
     }
    ],
-   "rows_parsed": 112,
-   "status": "ok",
-   "warnings": []
-  },
-  "Bill 1 Payments": {
-   "rows": [],
-   "rows_parsed": 0,
-   "status": "ok",
-   "warnings": []
-  },
-  "Bill 1 Summary": {
-   "rows": [],
-   "rows_parsed": 0,
+   "rows_parsed": 97,
    "status": "partial",
+   "summary_table": [
+    {
+     "bill_no": 1,
+     "contract": 311880000.0,
+     "name": "Preliminaries",
+     "this_week": 0.0
+    },
+    {
+     "bill_no": 2,
+     "contract": 1930547160.6,
+     "name": "Site Clearance and Earthwork",
+     "this_week": 0.0
+    },
+    {
+     "bill_no": 3,
+     "contract": 816610932.0,
+     "name": "Culverts and Drains",
+     "this_week": 0.0
+    },
+    {
+     "bill_no": 4,
+     "contract": 17457775723.5,
+     "name": "Pavement and Joints",
+     "this_week": 294550350.0
+    },
+    {
+     "bill_no": 5,
+     "contract": 6973621.875,
+     "name": "Pavement Markings",
+     "this_week": 0.0
+    },
+    {
+     "bill_no": 6,
+     "contract": 498408386.25,
+     "name": "Airfield Lighting",
+     "this_week": 0.0
+    },
+    {
+     "bill_no": 7,
+     "contract": 408712500.0,
+     "name": "Underground Fueling System",
+     "this_week": 0.0
+    },
+    {
+     "bill_no": 8,
+     "contract": 228034800.0,
+     "name": "Fixed Ground Power Supply System",
+     "this_week": 0.0
+    }
+   ],
+   "tail": {
+    "contingency": {
+     "contract": 541473578.105625,
+     "this_week": 0.0
+    },
+    "contingency_vop_total": {
+     "contract": 1082947156.21125,
+     "this_week": 0.0
+    },
+    "grand_total": {
+     "contract": 24447532051.468967,
+     "this_week": 332473707.5625
+    },
+    "subtotals": [
+     {
+      "contract": 21658943124.225,
+      "this_week": 294550350.0
+     },
+     {
+      "contract": 22741890280.43625,
+      "this_week": 309277867.5
+     }
+    ],
+    "vat": {
+     "contract": 1705641771.0327187,
+     "this_week": 23195840.0625
+    },
+    "vop": {
+     "contract": 541473578.105625,
+     "this_week": 0.0
+    }
+   },
    "warnings": [
-    "Bill 1 Summary: per-cert claims matrix deferred (v1)"
+    "BEME Bill 6 contract: our sum 609,481,136.25 != sheet total 498,408,386.25 — the sheet's own SUM range may be broken"
    ]
   },
   "Certificate Status": {
@@ -1562,12 +1704,31 @@
    },
    "rows_parsed": null,
    "snapshot": {
-    "advance_unrecovered": 0.0,
+    "advance_recovered": 0.0,
+    "advance_unrecovered": 1500000000.0,
+    "apg_amount": 1500000000.0,
     "apg_expiry": "2018-03-27",
+    "award_date": "2020-11-14",
+    "bill1_outstanding": 6576000.0,
+    "bill1_paid": 43357962.0,
+    "bill1_requested": 49933962.0,
+    "client_name": "Government of Akwa Ibom State, Ministry of Special Duties",
+    "commencement_date": "2020-12-18",
+    "contract_name": "CONSTRUCTION OF PROPOSED CONCRETE APRON FOR THE NEW TERMINAL BUILDING AT VICTOR ATTAH INTERNATIONAL AIRPORT UYO, AKWA IBOM STATE",
     "current_contract_amount": 10621359979.09,
+    "eot_granted_months": 0.0,
+    "eot_requested_months": 0.0,
+    "gross_certified": 2083112600.9511104,
     "original_contract_amount": 10621359979.09,
+    "original_duration_months": 12.0,
+    "overdue_weeks": -50.5972602739726,
     "retention_held": 203181862.59111106,
-    "works_certified": 1879930738.3599994
+    "retention_released": 0.0,
+    "revised_duration_months": 12.0,
+    "short_name": "AKWA IBOM AIRPORT APRON",
+    "total_works_submitted": 1879930738.3599994,
+    "works_certified": 1879930738.3599994,
+    "works_submitted_not_vetted": 0.0
    },
    "status": "ok",
    "warnings": []
@@ -1575,7 +1736,9 @@
   "Cost Report": {
    "rows": [
     {
+     "amount_previous_week": 810328330.0,
      "amount_this_week": 13753600.0,
+     "amount_to_date": 824081930.0,
      "cost_category": "AGO",
      "description": "Diesel",
      "quantity_this_week": 8596.0,
@@ -1584,7 +1747,9 @@
      "unit": "Litres"
     },
     {
+     "amount_previous_week": 0.0,
      "amount_this_week": 0,
+     "amount_to_date": 0.0,
      "cost_category": "AGO",
      "description": "Diesel (P.W. External Issues)",
      "quantity_this_week": null,
@@ -1593,7 +1758,9 @@
      "unit": "Litres"
     },
     {
+     "amount_previous_week": 636903036.0,
      "amount_this_week": 39801138.0,
+     "amount_to_date": 676704174.0,
      "cost_category": "Plant",
      "description": "Plant Internal",
      "quantity_this_week": null,
@@ -1602,7 +1769,9 @@
      "unit": "N/a"
     },
     {
+     "amount_previous_week": 22655699.720000006,
      "amount_this_week": 342000.0,
+     "amount_to_date": 22997699.720000006,
      "cost_category": "Plant",
      "description": "Hired Plant/Equipment/Vehicle",
      "quantity_this_week": null,
@@ -1611,7 +1780,9 @@
      "unit": "N/a"
     },
     {
+     "amount_previous_week": 25557813.4,
      "amount_this_week": 210600.0,
+     "amount_to_date": 25768413.4,
      "cost_category": "Plant",
      "description": "Petrol",
      "quantity_this_week": 162.0,
@@ -1620,7 +1791,9 @@
      "unit": "Litres"
     },
     {
+     "amount_previous_week": null,
      "amount_this_week": 0,
+     "amount_to_date": null,
      "cost_category": "Plant",
      "description": "Stores Cost",
      "quantity_this_week": null,
@@ -1629,7 +1802,9 @@
      "unit": "Various"
     },
     {
+     "amount_previous_week": 55460240.0,
      "amount_this_week": 1003500.0,
+     "amount_to_date": 56463740.0,
      "cost_category": "Plant",
      "description": "Engine Oil",
      "quantity_this_week": 223.0,
@@ -1638,7 +1813,9 @@
      "unit": "Litres"
     },
     {
+     "amount_previous_week": 4416444.0,
      "amount_this_week": 45000.0,
+     "amount_to_date": 4461444.0,
      "cost_category": "Plant",
      "description": "Gear oil",
      "quantity_this_week": 10.0,
@@ -1647,7 +1824,9 @@
      "unit": "Litres"
     },
     {
+     "amount_previous_week": 0.0,
      "amount_this_week": 0,
+     "amount_to_date": 0.0,
      "cost_category": "Plant",
      "description": "ATF 220 Oil",
      "quantity_this_week": 0.0,
@@ -1656,7 +1835,9 @@
      "unit": "Litres"
     },
     {
+     "amount_previous_week": 0.0,
      "amount_this_week": 0,
+     "amount_to_date": 0.0,
      "cost_category": "Plant",
      "description": "DTE 26 Oil",
      "quantity_this_week": 0.0,
@@ -1665,7 +1846,9 @@
      "unit": "Litres"
     },
     {
+     "amount_previous_week": 0.0,
      "amount_this_week": 0,
+     "amount_to_date": 0.0,
      "cost_category": "Plant",
      "description": "Rarius 427 Comp. Oil",
      "quantity_this_week": 0.0,
@@ -1674,7 +1857,9 @@
      "unit": "Litres"
     },
     {
+     "amount_previous_week": 0.0,
      "amount_this_week": 0,
+     "amount_to_date": 0.0,
      "cost_category": "Plant",
      "description": "Almo 529",
      "quantity_this_week": 0.0,
@@ -1683,7 +1868,9 @@
      "unit": "Litres"
     },
     {
+     "amount_previous_week": 1835200.0,
      "amount_this_week": 31000.0,
+     "amount_to_date": 1866200.0,
      "cost_category": "Plant",
      "description": "Grease",
      "quantity_this_week": 5.0,
@@ -1692,7 +1879,9 @@
      "unit": "Kg"
     },
     {
+     "amount_previous_week": 1808000.0,
      "amount_this_week": 0,
+     "amount_to_date": 1808000.0,
      "cost_category": "Plant",
      "description": "6440; Tyres",
      "quantity_this_week": null,
@@ -1701,187 +1890,196 @@
      "unit": "Each"
     },
     {
+     "amount_previous_week": 188791150.0,
      "amount_this_week": 0,
+     "amount_to_date": 188791150.0,
      "cost_category": "Materials",
      "description": "Cement",
      "quantity_this_week": 0.0,
      "rate_ngn": 9525.0,
-     "section": "PLANT DEPARTMENT",
+     "section": "MATERIALS",
      "unit": "Bags"
     },
     {
+     "amount_previous_week": 2170530065.0,
      "amount_this_week": 81217500.0,
+     "amount_to_date": 2251747565.0,
      "cost_category": "Materials",
      "description": "Cement (Bulk)",
      "quantity_this_week": 386.75,
      "rate_ngn": 210000.0,
-     "section": "PLANT DEPARTMENT",
+     "section": "MATERIALS",
      "unit": "Tonnes"
     },
     {
+     "amount_previous_week": 249759368.0,
      "amount_this_week": 8386560.000000001,
+     "amount_to_date": 258145928.0,
      "cost_category": "Materials",
      "description": "Reinforcement Y 8 (Local)",
      "quantity_this_week": 8.736,
      "rate_ngn": 960000.0,
-     "section": "PLANT DEPARTMENT",
+     "section": "MATERIALS",
      "unit": "Tonnes"
     },
     {
+     "amount_previous_week": 48021100.0,
      "amount_this_week": 0,
+     "amount_to_date": 48021100.0,
      "cost_category": "Materials",
      "description": "Reinforcement Y 12 (Local)",
      "quantity_this_week": 0.0,
      "rate_ngn": 900000.0,
-     "section": "PLANT DEPARTMENT",
+     "section": "MATERIALS",
      "unit": "Tonnes"
     },
     {
+     "amount_previous_week": 5661081.0,
      "amount_this_week": 0,
+     "amount_to_date": 5661081.0,
      "cost_category": "Materials",
      "description": "Reinforcement Y 16 (Local)",
      "quantity_this_week": 0.0,
      "rate_ngn": 960000.0,
-     "section": "PLANT DEPARTMENT",
+     "section": "MATERIALS",
      "unit": "Tonnes"
     },
     {
+     "amount_previous_week": 0.0,
      "amount_this_week": 0,
+     "amount_to_date": 0.0,
      "cost_category": "Materials",
      "description": "Reinforcement Y 12 (Foreign)",
      "quantity_this_week": 0.0,
      "rate_ngn": 295000.0,
-     "section": "PLANT DEPARTMENT",
+     "section": "MATERIALS",
      "unit": "Tonnes"
     },
     {
+     "amount_previous_week": 0.0,
      "amount_this_week": 0,
+     "amount_to_date": 0.0,
      "cost_category": "Materials",
      "description": "Reinforcement Y 20 (Foreign)",
      "quantity_this_week": 0.0,
      "rate_ngn": 295000.0,
-     "section": "PLANT DEPARTMENT",
+     "section": "MATERIALS",
      "unit": "Tonnes"
     },
     {
+     "amount_previous_week": 23171500.0,
      "amount_this_week": 0,
+     "amount_to_date": 23171500.0,
      "cost_category": "Materials",
      "description": "Reinforcement Y 24 (Foreign)",
      "quantity_this_week": 0.0,
      "rate_ngn": 550000.0,
-     "section": "PLANT DEPARTMENT",
+     "section": "MATERIALS",
      "unit": "Tonnes"
     },
     {
+     "amount_previous_week": 222844601.52480003,
      "amount_this_week": 11243994.028800001,
+     "amount_to_date": 234088595.55360004,
      "cost_category": "Materials",
      "description": "Reinforcement Y 32 (Foreign)",
      "quantity_this_week": 5.40576636,
      "rate_ngn": 2080000.0,
-     "section": "PLANT DEPARTMENT",
+     "section": "MATERIALS",
      "unit": "Tonnes"
     },
     {
+     "amount_previous_week": 0.0,
      "amount_this_week": 0,
+     "amount_to_date": 0.0,
      "cost_category": "Materials",
      "description": "Binding Wire",
      "quantity_this_week": 0.0,
      "rate_ngn": 6500.0,
-     "section": "PLANT DEPARTMENT",
+     "section": "MATERIALS",
      "unit": "Rolls"
     },
     {
+     "amount_previous_week": 0.0,
      "amount_this_week": 0,
+     "amount_to_date": 0.0,
      "cost_category": "Materials",
      "description": "Sharp Sand",
      "quantity_this_week": 0.0,
      "rate_ngn": 3250.0,
-     "section": "PLANT DEPARTMENT",
+     "section": "MATERIALS",
      "unit": "Tonnes"
     },
     {
+     "amount_previous_week": 0.0,
      "amount_this_week": 0,
+     "amount_to_date": 0.0,
      "cost_category": "Materials",
      "description": "Blocks 9\"",
      "quantity_this_week": 0.0,
      "rate_ngn": 500.0,
-     "section": "PLANT DEPARTMENT",
+     "section": "MATERIALS",
      "unit": "Each"
     },
     {
+     "amount_previous_week": 0.0,
      "amount_this_week": 0,
+     "amount_to_date": 0.0,
      "cost_category": "Materials",
      "description": "Geotextile",
      "quantity_this_week": 0.0,
      "rate_ngn": 1200000.0,
-     "section": "PLANT DEPARTMENT",
+     "section": "MATERIALS",
      "unit": "M2"
     },
     {
+     "amount_previous_week": 19375000.0,
      "amount_this_week": 0,
+     "amount_to_date": 19375000.0,
      "cost_category": "Materials",
      "description": "UPVC Pipe(300mm)",
      "quantity_this_week": null,
      "rate_ngn": 12500.0,
-     "section": "PLANT DEPARTMENT",
+     "section": "MATERIALS",
      "unit": "Each"
     },
     {
+     "amount_previous_week": 1950000.0,
      "amount_this_week": 0,
+     "amount_to_date": 1950000.0,
      "cost_category": "Materials",
      "description": "UPVC Pipe(100mm)",
      "quantity_this_week": null,
      "rate_ngn": 6500.0,
-     "section": "PLANT DEPARTMENT",
+     "section": "MATERIALS",
      "unit": "Each"
     },
     {
+     "amount_previous_week": 0.0,
      "amount_this_week": 0,
+     "amount_to_date": 0.0,
      "cost_category": "Materials",
      "description": "Interlocking Paving Stone",
      "quantity_this_week": 0.0,
      "rate_ngn": 3600.0,
-     "section": "PLANT DEPARTMENT",
+     "section": "MATERIALS",
      "unit": "m2"
     },
     {
+     "amount_previous_week": 0.0,
      "amount_this_week": 0,
+     "amount_to_date": 0.0,
      "cost_category": "Materials",
      "description": "Precast Units",
      "quantity_this_week": 0.0,
      "rate_ngn": 25000.0,
-     "section": "PLANT DEPARTMENT",
+     "section": "MATERIALS",
      "unit": "LM"
     },
     {
-     "amount_this_week": 0,
-     "cost_category": "Materials",
-     "description": "0",
-     "quantity_this_week": 0.0,
-     "rate_ngn": 0.0,
-     "section": "PLANT DEPARTMENT",
-     "unit": "0"
-    },
-    {
-     "amount_this_week": 0,
-     "cost_category": null,
-     "description": "0",
-     "quantity_this_week": 0.0,
-     "rate_ngn": 0.0,
-     "section": "PLANT DEPARTMENT",
-     "unit": "0"
-    },
-    {
-     "amount_this_week": 0,
-     "cost_category": null,
-     "description": "0",
-     "quantity_this_week": 0.0,
-     "rate_ngn": 0.0,
-     "section": "PLANT DEPARTMENT",
-     "unit": "0"
-    },
-    {
+     "amount_previous_week": 234302180.0,
      "amount_this_week": 7166500.0,
+     "amount_to_date": 241468680.0,
      "cost_category": "Materials",
      "description": "Sand",
      "quantity_this_week": 651.5,
@@ -1890,7 +2088,9 @@
      "unit": "Tonnes"
     },
     {
+     "amount_previous_week": 780230292.5,
      "amount_this_week": 19282900.0,
+     "amount_to_date": 799513192.5,
      "cost_category": "Materials",
      "description": "3/4\" Aggregates",
      "quantity_this_week": 1183.0,
@@ -1899,7 +2099,9 @@
      "unit": "Tonnes"
     },
     {
+     "amount_previous_week": 0.0,
      "amount_this_week": 0,
+     "amount_to_date": 0.0,
      "cost_category": "Materials",
      "description": "1/2\" Aggregates",
      "quantity_this_week": 0.0,
@@ -1908,7 +2110,9 @@
      "unit": "Tonnes"
     },
     {
+     "amount_previous_week": 0.0,
      "amount_this_week": 0,
+     "amount_to_date": 0.0,
      "cost_category": "Materials",
      "description": "3/8\" Aggregates",
      "quantity_this_week": 0.0,
@@ -1917,7 +2121,9 @@
      "unit": "Tonnes"
     },
     {
+     "amount_previous_week": 334367446.0,
      "amount_this_week": 0,
+     "amount_to_date": 334367446.0,
      "cost_category": "Materials",
      "description": "Stone Base",
      "quantity_this_week": 0.0,
@@ -1926,7 +2132,9 @@
      "unit": "Tonnes"
     },
     {
+     "amount_previous_week": 0.0,
      "amount_this_week": 0,
+     "amount_to_date": 0.0,
      "cost_category": "Materials",
      "description": "MC1",
      "quantity_this_week": 0.0,
@@ -1935,7 +2143,9 @@
      "unit": "Tonne"
     },
     {
+     "amount_previous_week": 0.0,
      "amount_this_week": 0,
+     "amount_to_date": 0.0,
      "cost_category": "Materials",
      "description": "Tack Coat (MC1)",
      "quantity_this_week": 0.0,
@@ -1944,7 +2154,9 @@
      "unit": "Litres"
     },
     {
+     "amount_previous_week": 0.0,
      "amount_this_week": 0,
+     "amount_to_date": 0.0,
      "cost_category": "Materials",
      "description": "S125",
      "quantity_this_week": 0.0,
@@ -1953,7 +2165,9 @@
      "unit": "Litres"
     },
     {
+     "amount_previous_week": 0.0,
      "amount_this_week": 0,
+     "amount_to_date": 0.0,
      "cost_category": "Materials",
      "description": "Wearing Course Asphalt",
      "quantity_this_week": 0.0,
@@ -1962,7 +2176,9 @@
      "unit": "Tonnes"
     },
     {
+     "amount_previous_week": 0.0,
      "amount_this_week": 0,
+     "amount_to_date": 0.0,
      "cost_category": "Materials",
      "description": "Binder Course Asphalt",
      "quantity_this_week": 0.0,
@@ -1971,7 +2187,9 @@
      "unit": "Tonnes"
     },
     {
+     "amount_previous_week": 0.0,
      "amount_this_week": 0,
+     "amount_to_date": 0.0,
      "cost_category": "Materials",
      "description": "Hardcore",
      "quantity_this_week": 0.0,
@@ -1980,7 +2198,9 @@
      "unit": "Tonne"
     },
     {
+     "amount_previous_week": 0.0,
      "amount_this_week": 0,
+     "amount_to_date": 0.0,
      "cost_category": "Materials",
      "description": "Borrow Pit",
      "quantity_this_week": 0.0,
@@ -1989,43 +2209,9 @@
      "unit": "m2"
     },
     {
-     "amount_this_week": 0,
-     "cost_category": "Materials",
-     "description": "0",
-     "quantity_this_week": 0.0,
-     "rate_ngn": 0.0,
-     "section": "QUARRY MATERIALS",
-     "unit": "0"
-    },
-    {
-     "amount_this_week": 0,
-     "cost_category": "Materials",
-     "description": "0",
-     "quantity_this_week": 0.0,
-     "rate_ngn": 0.0,
-     "section": "QUARRY MATERIALS",
-     "unit": "0"
-    },
-    {
-     "amount_this_week": 0,
-     "cost_category": "Materials",
-     "description": "0",
-     "quantity_this_week": 0.0,
-     "rate_ngn": 0.0,
-     "section": "QUARRY MATERIALS",
-     "unit": "0"
-    },
-    {
-     "amount_this_week": 0,
-     "cost_category": "Materials",
-     "description": "0",
-     "quantity_this_week": 0.0,
-     "rate_ngn": 0.0,
-     "section": "QUARRY MATERIALS",
-     "unit": "0"
-    },
-    {
+     "amount_previous_week": 662700.0,
      "amount_this_week": 256000.0,
+     "amount_to_date": 918700.0,
      "cost_category": "Materials",
      "description": "6400; Timber",
      "quantity_this_week": null,
@@ -2034,7 +2220,9 @@
      "unit": null
     },
     {
+     "amount_previous_week": 0.0,
      "amount_this_week": 0,
+     "amount_to_date": 0.0,
      "cost_category": "AGO",
      "description": "Diesel (P.W. External Issues)",
      "quantity_this_week": null,
@@ -2043,7 +2231,9 @@
      "unit": "Litre"
     },
     {
+     "amount_previous_week": 2820000.0,
      "amount_this_week": 0,
+     "amount_to_date": 2820000.0,
      "cost_category": "Sub Contractors",
      "description": "Sub-Contractor's Expenses",
      "quantity_this_week": null,
@@ -2052,7 +2242,9 @@
      "unit": null
     },
     {
+     "amount_previous_week": 275500000.0,
      "amount_this_week": 2440000.0,
+     "amount_to_date": 277940000.0,
      "cost_category": "Local Labour",
      "description": "Labour",
      "quantity_this_week": 61.0,
@@ -2061,7 +2253,9 @@
      "unit": "No."
     },
     {
+     "amount_previous_week": 64452980.0,
      "amount_this_week": 1667500.0,
+     "amount_to_date": 66120480.0,
      "cost_category": "Plant",
      "description": "6320; Spare Parts",
      "quantity_this_week": null,
@@ -2070,7 +2264,9 @@
      "unit": null
     },
     {
+     "amount_previous_week": 1956600.0,
      "amount_this_week": 0,
+     "amount_to_date": 1956600.0,
      "cost_category": "Site Level Expenses",
      "description": "1041; Building & Site Development",
      "quantity_this_week": null,
@@ -2079,7 +2275,9 @@
      "unit": null
     },
     {
+     "amount_previous_week": 62882200.0,
      "amount_this_week": 759100.0,
+     "amount_to_date": 63641300.0,
      "cost_category": "Materials",
      "description": "6021; P.W. Tippers (Haulage-fees)",
      "quantity_this_week": null,
@@ -2088,7 +2286,9 @@
      "unit": null
     },
     {
+     "amount_previous_week": 11736000.0,
      "amount_this_week": 0,
+     "amount_to_date": 11736000.0,
      "cost_category": "Site Level Expenses",
      "description": "6100; Compensation (Borrow Pit)",
      "quantity_this_week": null,
@@ -2097,7 +2297,9 @@
      "unit": null
     },
     {
+     "amount_previous_week": 2060000.0,
      "amount_this_week": 0,
+     "amount_to_date": 2060000.0,
      "cost_category": "Site Level Expenses",
      "description": "6230; Security Expenses",
      "quantity_this_week": null,
@@ -2106,7 +2308,9 @@
      "unit": null
     },
     {
+     "amount_previous_week": 10720320.0,
      "amount_this_week": 0,
+     "amount_to_date": 10720320.0,
      "cost_category": "Plant",
      "description": "6300; Steel Plate/Reinforcement",
      "quantity_this_week": null,
@@ -2115,7 +2319,9 @@
      "unit": null
     },
     {
+     "amount_previous_week": 18986583.0,
      "amount_this_week": 0,
+     "amount_to_date": 18986583.0,
      "cost_category": "Materials",
      "description": "6350; Materials Civil",
      "quantity_this_week": null,
@@ -2124,7 +2330,9 @@
      "unit": null
     },
     {
+     "amount_previous_week": 136294119.0,
      "amount_this_week": 2376325.0,
+     "amount_to_date": 138670444.0,
      "cost_category": "Site Level Expenses",
      "description": "6420; Tools and Consumables",
      "quantity_this_week": null,
@@ -2133,7 +2341,9 @@
      "unit": null
     },
     {
+     "amount_previous_week": 141680828.5,
      "amount_this_week": 3769320.0,
+     "amount_to_date": 145450148.5,
      "cost_category": "Local Labour",
      "description": "6220; External Labour",
      "quantity_this_week": null,
@@ -2142,7 +2352,9 @@
      "unit": null
     },
     {
+     "amount_previous_week": 68223510.0,
      "amount_this_week": 257800.0,
+     "amount_to_date": 68481310.0,
      "cost_category": "Site Level Expenses",
      "description": "6540; Sundry Expenses",
      "quantity_this_week": null,
@@ -2151,7 +2363,9 @@
      "unit": null
     },
     {
+     "amount_previous_week": 67547650.0,
      "amount_this_week": 0,
+     "amount_to_date": 67547650.0,
      "cost_category": "Site Level Expenses",
      "description": "7020; Miscellaneous Running Costs/Expenses",
      "quantity_this_week": null,
@@ -2160,7 +2374,9 @@
      "unit": null
     },
     {
+     "amount_previous_week": 38799298.0,
      "amount_this_week": 420000.0,
+     "amount_to_date": 39219298.0,
      "cost_category": "Site Level Expenses",
      "description": "7220; Expatriate Living Costs",
      "quantity_this_week": null,
@@ -2169,7 +2385,9 @@
      "unit": null
     },
     {
+     "amount_previous_week": 364600.0,
      "amount_this_week": 0,
+     "amount_to_date": 364600.0,
      "cost_category": "Site Level Expenses",
      "description": "7340; Office Equipment Maintenance",
      "quantity_this_week": null,
@@ -2178,7 +2396,9 @@
      "unit": null
     },
     {
+     "amount_previous_week": 697000.0,
      "amount_this_week": 9000.0,
+     "amount_to_date": 706000.0,
      "cost_category": "Site Level Expenses",
      "description": "7350; I.T. Costs - Internet",
      "quantity_this_week": null,
@@ -2187,7 +2407,9 @@
      "unit": null
     },
     {
+     "amount_previous_week": 69000.0,
      "amount_this_week": 0,
+     "amount_to_date": 69000.0,
      "cost_category": "Site Level Expenses",
      "description": "7351; I.T. Costs - Software / Maint. Costs",
      "quantity_this_week": null,
@@ -2196,7 +2418,9 @@
      "unit": null
     },
     {
+     "amount_previous_week": 6668790.0,
      "amount_this_week": 151369.0,
+     "amount_to_date": 6820159.0,
      "cost_category": "Site Level Expenses",
      "description": "7320; Medical Expenses",
      "quantity_this_week": null,
@@ -2205,7 +2429,9 @@
      "unit": null
     },
     {
+     "amount_previous_week": 3703500.0,
      "amount_this_week": 0,
+     "amount_to_date": 3703500.0,
      "cost_category": "Site Level Expenses",
      "description": "7460; Rent",
      "quantity_this_week": null,
@@ -2214,7 +2440,9 @@
      "unit": null
     },
     {
+     "amount_previous_week": 1524440.0,
      "amount_this_week": 0,
+     "amount_to_date": 1524440.0,
      "cost_category": "Site Level Expenses",
      "description": "7500; Stationary",
      "quantity_this_week": null,
@@ -2223,7 +2451,9 @@
      "unit": null
     },
     {
+     "amount_previous_week": 3823250.0,
      "amount_this_week": 18500.0,
+     "amount_to_date": 3841750.0,
      "cost_category": "Site Level Expenses",
      "description": "7560; Telephone",
      "quantity_this_week": null,
@@ -2232,7 +2462,9 @@
      "unit": null
     },
     {
+     "amount_previous_week": 19142881.0,
      "amount_this_week": 394000.0,
+     "amount_to_date": 19536881.0,
      "cost_category": "Site Level Expenses",
      "description": "7620; Travelling",
      "quantity_this_week": null,
@@ -2241,7 +2473,9 @@
      "unit": null
     },
     {
+     "amount_previous_week": 5379700.0,
      "amount_this_week": 6000.0,
+     "amount_to_date": 5385700.0,
      "cost_category": "Site Level Expenses",
      "description": "7622: Outstation",
      "quantity_this_week": null,
@@ -2250,7 +2484,9 @@
      "unit": null
     },
     {
+     "amount_previous_week": 2079258.6500000004,
      "amount_this_week": 0,
+     "amount_to_date": 2079258.6500000004,
      "cost_category": "Site Level Expenses",
      "description": "8020; Bank Charges",
      "quantity_this_week": null,
@@ -2259,34 +2495,34 @@
      "unit": null
     },
     {
+     "amount_previous_week": 113000000.0,
      "amount_this_week": 1000000.0,
+     "amount_to_date": 114000000.0,
      "cost_category": "Overheads",
      "description": "Administration",
      "quantity_this_week": 1.0,
      "rate_ngn": 1000000.0,
      "section": "OVERHEADS",
      "unit": "No."
-    },
-    {
-     "amount_this_week": 196009206.0288,
-     "cost_category": null,
-     "description": "Total",
-     "quantity_this_week": null,
-     "rate_ngn": null,
-     "section": "OVERHEADS",
-     "unit": null
     }
    ],
-   "rows_parsed": 78,
+   "rows_parsed": 70,
+   "sheet_total": {
+    "previous": 6898743755.2948,
+    "this_week": 196009206.0288,
+    "to_date": 7094752961.3236
+   },
    "status": "ok",
    "warnings": []
   },
   "Diesel Consumption": {
    "rows": [
     {
+     "amount_ngn": 96000.0,
      "description": "STATIC COMPRESSOR",
      "fleet_number_raw": "AC163",
      "friday_litres": 15.0,
+     "is_cost_centre": false,
      "monday_litres": 15.0,
      "plant_category": null,
      "saturday_litres": 0,
@@ -2296,33 +2532,11 @@
      "wednesday_litres": 10.0
     },
     {
-     "description": "MOBILE COMPRESSOR",
-     "fleet_number_raw": "AC175",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "BAR BENDER",
-     "fleet_number_raw": "BB4",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
+     "amount_ngn": 96000.0,
      "description": "Cement Blower",
      "fleet_number_raw": "CMB 4",
      "friday_litres": 0,
+     "is_cost_centre": false,
      "monday_litres": 0,
      "plant_category": null,
      "saturday_litres": 20.0,
@@ -2332,141 +2546,11 @@
      "wednesday_litres": 0
     },
     {
-     "description": "DRY BATCHER",
-     "fleet_number_raw": "BP6",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "DRY BATCHER",
-     "fleet_number_raw": "BP 9",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "BENCH SAW",
-     "fleet_number_raw": "BS20",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "COMPACTOR",
-     "fleet_number_raw": "C 13",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "DOZER",
-     "fleet_number_raw": "D67",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "DOZER",
-     "fleet_number_raw": "D70",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "DOZER",
-     "fleet_number_raw": "D69",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "EXCAVATOR",
-     "fleet_number_raw": "E 82",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "EXCAVATOR",
-     "fleet_number_raw": "E 87",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "EXCAVATOR",
-     "fleet_number_raw": "E 88",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "GENERATOR",
-     "fleet_number_raw": "EG 95",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
+     "amount_ngn": 880000.0,
      "description": "GENERATOR",
      "fleet_number_raw": "EG172",
      "friday_litres": 120.0,
+     "is_cost_centre": false,
      "monday_litres": 100.0,
      "plant_category": null,
      "saturday_litres": 50.0,
@@ -2476,9 +2560,11 @@
      "wednesday_litres": 100.0
     },
     {
+     "amount_ngn": 704000.0,
      "description": "GENERATOR",
      "fleet_number_raw": "EG177",
      "friday_litres": 70.0,
+     "is_cost_centre": false,
      "monday_litres": 70.0,
      "plant_category": null,
      "saturday_litres": 60.0,
@@ -2488,21 +2574,11 @@
      "wednesday_litres": 70.0
     },
     {
-     "description": "GENERATOR",
-     "fleet_number_raw": "EG207",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
+     "amount_ngn": 320000.0,
      "description": "GENERATOR",
      "fleet_number_raw": "EG261",
      "friday_litres": 0,
+     "is_cost_centre": false,
      "monday_litres": 200.0,
      "plant_category": null,
      "saturday_litres": 0,
@@ -2512,141 +2588,11 @@
      "wednesday_litres": 0
     },
     {
-     "description": "GENERATOR",
-     "fleet_number_raw": "EG236",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "GENERATOR",
-     "fleet_number_raw": "EG278",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "GENERATOR",
-     "fleet_number_raw": "EG286",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "FLAT BED TRAILER",
-     "fleet_number_raw": "FBT 3",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "FLAT BED TRAILER",
-     "fleet_number_raw": "FBT18",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "GRADER",
-     "fleet_number_raw": "G 38",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "GRADER",
-     "fleet_number_raw": "G 54",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "GRADER",
-     "fleet_number_raw": "G 56",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "IRON CUTTER",
-     "fleet_number_raw": "IC35",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "IRON CUTTER",
-     "fleet_number_raw": "IC36",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "PAY LOADER",
-     "fleet_number_raw": "L 48",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
+     "amount_ngn": 704000.0,
      "description": "PAY LOADER",
      "fleet_number_raw": "L 63",
      "friday_litres": 100.0,
+     "is_cost_centre": false,
      "monday_litres": 80.0,
      "plant_category": null,
      "saturday_litres": 30.0,
@@ -2656,105 +2602,11 @@
      "wednesday_litres": 90.0
     },
     {
-     "description": "PAY LOADER",
-     "fleet_number_raw": "L 68",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "LUXURIOUS TRAILER",
-     "fleet_number_raw": "LT 6",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "MOBILE CAR MIXER",
-     "fleet_number_raw": "MCM 10",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "MOBILE LIGHTING SET",
-     "fleet_number_raw": "MCM 14",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "MOBILE LIGHTING SET",
-     "fleet_number_raw": "MLS4",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "PICKUP",
-     "fleet_number_raw": "P351",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "PICKUP",
-     "fleet_number_raw": "P352",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "PICKUP",
-     "fleet_number_raw": "P403",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
+     "amount_ngn": 248000.0,
      "description": "PICKUP",
      "fleet_number_raw": "P405",
      "friday_litres": 0,
+     "is_cost_centre": false,
      "monday_litres": 0,
      "plant_category": null,
      "saturday_litres": 0,
@@ -2764,201 +2616,11 @@
      "wednesday_litres": 0
     },
     {
-     "description": "PICKUP",
-     "fleet_number_raw": "P431",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "PICKUP",
-     "fleet_number_raw": "P415",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "PICKUP",
-     "fleet_number_raw": "P369",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "PAJERO JEEP",
-     "fleet_number_raw": "PT162",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "GROVE CRANE",
-     "fleet_number_raw": "RT19",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "WATER TANKER",
-     "fleet_number_raw": "T228",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "WATER TANKER",
-     "fleet_number_raw": "T229",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "workers transport",
-     "fleet_number_raw": "T265",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "WATER TANKER",
-     "fleet_number_raw": "T273",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "TRACTOR UNIT",
-     "fleet_number_raw": "T344>LL12",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "TRACTOR UNIT",
-     "fleet_number_raw": "T551",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "WATER TANKER",
-     "fleet_number_raw": "T388",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "TIPPER",
-     "fleet_number_raw": "T343",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "TRUCK MIXER",
-     "fleet_number_raw": "T481",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "TIPPER",
-     "fleet_number_raw": "T438",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "TIPPER",
-     "fleet_number_raw": "T476",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
+     "amount_ngn": 336000.0,
      "description": "MERCEDES MAN CARRIER",
      "fleet_number_raw": "T482",
      "friday_litres": 30.0,
+     "is_cost_centre": false,
      "monday_litres": 30.0,
      "plant_category": null,
      "saturday_litres": 60.0,
@@ -2968,57 +2630,11 @@
      "wednesday_litres": 30.0
     },
     {
-     "description": "TIPPER",
-     "fleet_number_raw": "T481",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "TIPPER",
-     "fleet_number_raw": "T490",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "TIPPER",
-     "fleet_number_raw": "T500",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "TIPPER",
-     "fleet_number_raw": "T504",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
+     "amount_ngn": 192000.0,
      "description": "Water Tanker",
      "fleet_number_raw": "T507",
      "friday_litres": 20.0,
+     "is_cost_centre": false,
      "monday_litres": 20.0,
      "plant_category": null,
      "saturday_litres": 20.0,
@@ -3028,9 +2644,11 @@
      "wednesday_litres": 20.0
     },
     {
+     "amount_ngn": 128000.0,
      "description": "HIAB",
      "fleet_number_raw": "T514",
      "friday_litres": 20.0,
+     "is_cost_centre": false,
      "monday_litres": 20.0,
      "plant_category": null,
      "saturday_litres": 0,
@@ -3040,9 +2658,11 @@
      "wednesday_litres": 0
     },
     {
+     "amount_ngn": 352000.0,
      "description": "TRUCK MIXER",
      "fleet_number_raw": "T531",
      "friday_litres": 65.0,
+     "is_cost_centre": false,
      "monday_litres": 40.0,
      "plant_category": null,
      "saturday_litres": 0,
@@ -3052,33 +2672,11 @@
      "wednesday_litres": 50.0
     },
     {
-     "description": "TIPPER",
-     "fleet_number_raw": "T566",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "TRUCK MIXER",
-     "fleet_number_raw": "T577",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
+     "amount_ngn": 352000.0,
      "description": "TRUCK MIXER",
      "fleet_number_raw": "T579",
      "friday_litres": 65.0,
+     "is_cost_centre": false,
      "monday_litres": 40.0,
      "plant_category": null,
      "saturday_litres": 0,
@@ -3088,21 +2686,11 @@
      "wednesday_litres": 50.0
     },
     {
-     "description": "TRUCK MIXER",
-     "fleet_number_raw": "T580",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
+     "amount_ngn": 1080000.0,
      "description": "TIPPER",
      "fleet_number_raw": "T557",
      "friday_litres": 135.0,
+     "is_cost_centre": false,
      "monday_litres": 135.0,
      "plant_category": null,
      "saturday_litres": 0,
@@ -3112,9 +2700,11 @@
      "wednesday_litres": 135.0
     },
     {
+     "amount_ngn": 1080000.0,
      "description": "TIPPER",
      "fleet_number_raw": "T558",
      "friday_litres": 135.0,
+     "is_cost_centre": false,
      "monday_litres": 0,
      "plant_category": null,
      "saturday_litres": 0,
@@ -3124,9 +2714,11 @@
      "wednesday_litres": 135.0
     },
     {
+     "amount_ngn": 1080000.0,
      "description": "TIPPER",
      "fleet_number_raw": "T560",
      "friday_litres": 135.0,
+     "is_cost_centre": false,
      "monday_litres": 135.0,
      "plant_category": null,
      "saturday_litres": 0,
@@ -3136,33 +2728,11 @@
      "wednesday_litres": 135.0
     },
     {
-     "description": "TIPPER",
-     "fleet_number_raw": "T561",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "TIPPER",
-     "fleet_number_raw": "T565",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
+     "amount_ngn": 72000.0,
      "description": "FUEL BOWSER",
      "fleet_number_raw": "T571",
      "friday_litres": 0,
+     "is_cost_centre": false,
      "monday_litres": 0,
      "plant_category": null,
      "saturday_litres": 0,
@@ -3172,21 +2742,11 @@
      "wednesday_litres": 0
     },
     {
-     "description": "TIPPER",
-     "fleet_number_raw": "T589",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
+     "amount_ngn": 800000.0,
      "description": "TIPPER",
      "fleet_number_raw": "T603",
      "friday_litres": 0,
+     "is_cost_centre": false,
      "monday_litres": 125.0,
      "plant_category": null,
      "saturday_litres": 0,
@@ -3196,21 +2756,11 @@
      "wednesday_litres": 125.0
     },
     {
-     "description": "TIPPER",
-     "fleet_number_raw": "T604",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
+     "amount_ngn": 800000.0,
      "description": "TIPPER",
      "fleet_number_raw": "T609",
      "friday_litres": 0,
+     "is_cost_centre": false,
      "monday_litres": 125.0,
      "plant_category": null,
      "saturday_litres": 0,
@@ -3220,237 +2770,11 @@
      "wednesday_litres": 125.0
     },
     {
-     "description": "TIPPER",
-     "fleet_number_raw": "T610",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "TIPPING TRAILER",
-     "fleet_number_raw": "TT43",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "TIPPING TRAILER",
-     "fleet_number_raw": "TT44",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "TIPPING TRAILER",
-     "fleet_number_raw": "TT52",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "VIBRATING PORKER ENGINE",
-     "fleet_number_raw": "VPE180",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "VIBRATING PORKER ENGINE",
-     "fleet_number_raw": "VPE 204",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "VIBRATING PORKER ENGINE",
-     "fleet_number_raw": "VPE251",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "VIBRATING PORKER ENGINE",
-     "fleet_number_raw": "VPE261",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "VIBRATING PORKER ENGINE",
-     "fleet_number_raw": "VPE272",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "VIBRATING PORKER ENGINE",
-     "fleet_number_raw": "VPE273",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "VIBRATING PORKER ENGINE",
-     "fleet_number_raw": "VPE293",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "VIBRATING ROLLER",
-     "fleet_number_raw": "VR 81",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "VIBRATING ROLLER",
-     "fleet_number_raw": "VR125",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "VIBRATING ROLLER",
-     "fleet_number_raw": "VR122",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "VIBRATING ROLLER",
-     "fleet_number_raw": "VR131",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "VIBRATING ROLLER",
-     "fleet_number_raw": "VR132",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "VIBRATING ROLLER",
-     "fleet_number_raw": "VR143",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "WELDER",
-     "fleet_number_raw": "W 74",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "WELDER",
-     "fleet_number_raw": "W109",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
+     "amount_ngn": 96000.0,
      "description": "WELDER",
      "fleet_number_raw": "W150",
      "friday_litres": 10.0,
+     "is_cost_centre": false,
      "monday_litres": 10.0,
      "plant_category": null,
      "saturday_litres": 10.0,
@@ -3460,105 +2784,11 @@
      "wednesday_litres": 10.0
     },
     {
-     "description": "WASHING MACHINE",
-     "fleet_number_raw": "WM 96",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "WATER PUMP",
-     "fleet_number_raw": "WP109",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "WATER PUMP",
-     "fleet_number_raw": "Wm96",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "WATER PUMP",
-     "fleet_number_raw": "WP260",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "WATER PUMP",
-     "fleet_number_raw": "WP432",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "2'' WATER PUMP",
-     "fleet_number_raw": "WP419",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "WATER PUMP",
-     "fleet_number_raw": "WP",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": null,
-     "fleet_number_raw": "OTHER DIESEL USAGE",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
+     "amount_ngn": 80000.0,
      "description": null,
      "fleet_number_raw": "AE 926 HER",
      "friday_litres": 0,
+     "is_cost_centre": false,
      "monday_litres": 0,
      "plant_category": null,
      "saturday_litres": 0,
@@ -3568,57 +2798,11 @@
      "wednesday_litres": 50.0
     },
     {
-     "description": null,
-     "fleet_number_raw": "T615",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": null,
-     "fleet_number_raw": "T369",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": null,
-     "fleet_number_raw": "CIVIL",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": null,
-     "fleet_number_raw": "T 345",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
+     "amount_ngn": 12800.0,
      "description": null,
      "fleet_number_raw": "MECHANICS",
      "friday_litres": 0,
+     "is_cost_centre": true,
      "monday_litres": 2.0,
      "plant_category": null,
      "saturday_litres": 0,
@@ -3628,93 +2812,11 @@
      "wednesday_litres": 0
     },
     {
-     "description": null,
-     "fleet_number_raw": "BUA",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": null,
-     "fleet_number_raw": "BUA",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": null,
-     "fleet_number_raw": "DRUM",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": null,
-     "fleet_number_raw": "BUA",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": "`",
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": "PICKUP ABUJA",
-     "fleet_number_raw": "P369",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": null,
-     "fleet_number_raw": "HIRED CRANE",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": null,
-     "fleet_number_raw": "T600",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
+     "amount_ngn": 180800.0,
      "description": null,
      "fleet_number_raw": "LAB/PRECAST",
      "friday_litres": 0,
+     "is_cost_centre": true,
      "monday_litres": 10.0,
      "plant_category": null,
      "saturday_litres": 13.0,
@@ -3722,264 +2824,20 @@
      "thursday_litres": 30.0,
      "tuesday_litres": 25.0,
      "wednesday_litres": 5.0
-    },
-    {
-     "description": "LOW LOADER TO ABUJA",
-     "fleet_number_raw": "T600/LL16",
-     "friday_litres": 0,
-     "monday_litres": 0,
-     "plant_category": null,
-     "saturday_litres": 0,
-     "sunday_litres": 0,
-     "thursday_litres": 0,
-     "tuesday_litres": 0,
-     "wednesday_litres": 0
-    },
-    {
-     "description": null,
-     "fleet_number_raw": "Sub Total Other Used",
-     "friday_litres": 0,
-     "monday_litres": 12.0,
-     "plant_category": null,
-     "saturday_litres": 13.0,
-     "sunday_litres": 30.0,
-     "thursday_litres": 30.0,
-     "tuesday_litres": 31.0,
-     "wednesday_litres": 55.0
-    }
-   ],
-   "rows_parsed": 122,
-   "status": "partial",
-   "warnings": [
-    "Diesel: parsed total 6227L != sheet 'Used This Week' 6056L"
-   ]
-  },
-  "Hired Vehicles": {
-   "rows": [
-    {
-     "amount_ngn": 0,
-     "days_worked": 0.0,
-     "description": "Car",
-     "owners": "engr.",
-     "rate_ngn": 4000.0,
-     "registration_no": null,
-     "remarks": null,
-     "section": "Engineer"
-    },
-    {
-     "amount_ngn": 180000.0,
-     "days_worked": 6.0,
-     "description": "Bus",
-     "owners": "engr.",
-     "rate_ngn": 30000.0,
-     "registration_no": null,
-     "remarks": null,
-     "section": "Engineer"
-    },
-    {
-     "amount_ngn": 102000.0,
-     "days_worked": 6.0,
-     "description": "Bus",
-     "owners": null,
-     "rate_ngn": 17000.0,
-     "registration_no": null,
-     "remarks": null,
-     "section": "Workers"
-    },
-    {
-     "amount_ngn": 0,
-     "days_worked": 0.0,
-     "description": "Crane",
-     "owners": "Frekon Engineering",
-     "rate_ngn": 1000000.0,
-     "registration_no": null,
-     "remarks": null,
-     "section": "Plant"
-    },
-    {
-     "amount_ngn": 60000.0,
-     "days_worked": 6.0,
-     "description": "Pick Up",
-     "owners": "Mechanic",
-     "rate_ngn": 10000.0,
-     "registration_no": null,
-     "remarks": null,
-     "section": "Mechanic"
-    },
-    {
-     "amount_ngn": 342000.0,
-     "days_worked": null,
-     "description": null,
-     "owners": "Total",
-     "rate_ngn": null,
-     "registration_no": null,
-     "remarks": null,
-     "section": null
-    }
-   ],
-   "rows_parsed": 6,
-   "status": "ok",
-   "warnings": []
-  },
-  "Labour Strength": {
-   "rows": [
-    {
-     "comment": null,
-     "department": "Senior Staff",
-     "manning_previous_week": 1,
-     "manning_this_week": 1,
-     "movement": 0
-    },
-    {
-     "comment": null,
-     "department": "Civil Engineers",
-     "manning_previous_week": 2,
-     "manning_this_week": 2,
-     "movement": 0
-    },
-    {
-     "comment": null,
-     "department": "Civil - Surveyors",
-     "manning_previous_week": 3,
-     "manning_this_week": 3,
-     "movement": 0
-    },
-    {
-     "comment": null,
-     "department": "Administration",
-     "manning_previous_week": 5,
-     "manning_this_week": 5,
-     "movement": 0
-    },
-    {
-     "comment": null,
-     "department": "Lab",
-     "manning_previous_week": 4,
-     "manning_this_week": 4,
-     "movement": 0
-    },
-    {
-     "comment": null,
-     "department": "Domestics",
-     "manning_previous_week": 2,
-     "manning_this_week": 2,
-     "movement": 0
-    },
-    {
-     "comment": null,
-     "department": "Security",
-     "manning_previous_week": 2,
-     "manning_this_week": 2,
-     "movement": 0
-    },
-    {
-     "comment": null,
-     "department": "Plant",
-     "manning_previous_week": 15,
-     "manning_this_week": 15,
-     "movement": 0
-    },
-    {
-     "comment": null,
-     "department": "Transport",
-     "manning_previous_week": 12,
-     "manning_this_week": 12,
-     "movement": 0
-    },
-    {
-     "comment": null,
-     "department": "Earthworks",
-     "manning_previous_week": 4,
-     "manning_this_week": 4,
-     "movement": 0
-    },
-    {
-     "comment": null,
-     "department": "Quarry",
-     "manning_previous_week": 0,
-     "manning_this_week": 0,
-     "movement": 0
-    },
-    {
-     "comment": null,
-     "department": "Asphalt",
-     "manning_previous_week": 0,
-     "manning_this_week": 0,
-     "movement": 0
-    },
-    {
-     "comment": null,
-     "department": "Marini",
-     "manning_previous_week": 0,
-     "manning_this_week": 0,
-     "movement": 0
-    },
-    {
-     "comment": null,
-     "department": "Civil",
-     "manning_previous_week": 11,
-     "manning_this_week": 11,
-     "movement": 0
-    },
-    {
-     "comment": null,
-     "department": "Electrical",
-     "manning_previous_week": 0,
-     "manning_this_week": 0,
-     "movement": 0
-    },
-    {
-     "comment": "Comment",
-     "department": "Department",
-     "manning_previous_week": 0,
-     "manning_this_week": 0,
-     "movement": 0
-    },
-    {
-     "comment": null,
-     "department": "Transport & Earthworks",
-     "manning_previous_week": 0,
-     "manning_this_week": 0,
-     "movement": 0
-    },
-    {
-     "comment": null,
-     "department": "Engr, Survey, civil store & Batching plant",
-     "manning_previous_week": 0,
-     "manning_this_week": 0,
-     "movement": 0
-    },
-    {
-     "comment": null,
-     "department": "Security",
-     "manning_previous_week": 0,
-     "manning_this_week": 0,
-     "movement": 0
-    },
-    {
-     "comment": null,
-     "department": "Lab",
-     "manning_previous_week": 0,
-     "manning_this_week": 0,
-     "movement": 0
-    },
-    {
-     "comment": null,
-     "department": "Quarry",
-     "manning_previous_week": 0,
-     "manning_this_week": 0,
-     "movement": 0
-    },
-    {
-     "comment": null,
-     "department": "Civil",
-     "manning_previous_week": 0,
-     "manning_this_week": 0,
-     "movement": 0
     }
    ],
    "rows_parsed": 22,
+   "sheet_totals": {
+    "all_used": 6056.0,
+    "other_used": 171.0
+   },
    "status": "ok",
+   "stock": {
+    "closing": -6056.0,
+    "opening": 0.0,
+    "received": 0.0,
+    "used": 6056.0
+   },
    "warnings": []
   },
   "Lists": {
@@ -5899,293 +4757,6 @@
     "(2031, 9)": "2031-03-01"
    }
   },
-  "Materials & Civils": {
-   "rows": [
-    {
-     "closing_stock": null,
-     "material_name": "Cement (Bags)",
-     "opening_stock": 0.0,
-     "received": null,
-     "sheet_source": "materials",
-     "unit": "Bags",
-     "unit_cost": 4750.0,
-     "used": 0.0
-    },
-    {
-     "closing_stock": null,
-     "material_name": "Cement (Bulk)",
-     "opening_stock": 12.925,
-     "received": 352.06,
-     "sheet_source": "materials",
-     "unit": "Tonne",
-     "unit_cost": 75000.0,
-     "used": 0.0
-    },
-    {
-     "closing_stock": null,
-     "material_name": "Rebar (8mm) Local",
-     "opening_stock": 0.0,
-     "received": null,
-     "sheet_source": "materials",
-     "unit": "Tonne",
-     "unit_cost": 425000.0,
-     "used": 8.736
-    },
-    {
-     "closing_stock": null,
-     "material_name": "Rebar (12mm) Local",
-     "opening_stock": null,
-     "received": null,
-     "sheet_source": "materials",
-     "unit": "Tonne",
-     "unit_cost": 425000.0,
-     "used": 0.0
-    },
-    {
-     "closing_stock": null,
-     "material_name": "Rebar (16mm) Local",
-     "opening_stock": null,
-     "received": null,
-     "sheet_source": "materials",
-     "unit": "Tonne",
-     "unit_cost": 425000.0,
-     "used": 0.0
-    },
-    {
-     "closing_stock": 0.0,
-     "material_name": "Rebar (12mm) Imported",
-     "opening_stock": null,
-     "received": null,
-     "sheet_source": "materials",
-     "unit": "Tonne",
-     "unit_cost": 475000.0,
-     "used": 0.0
-    },
-    {
-     "closing_stock": null,
-     "material_name": "Rebar (16mm) Imported",
-     "opening_stock": null,
-     "received": null,
-     "sheet_source": "materials",
-     "unit": "Tonne",
-     "unit_cost": 475000.0,
-     "used": 0.0
-    },
-    {
-     "closing_stock": null,
-     "material_name": "Rebar (20mm) Imported",
-     "opening_stock": null,
-     "received": null,
-     "sheet_source": "materials",
-     "unit": "Tonne",
-     "unit_cost": 475000.0,
-     "used": 0.0
-    },
-    {
-     "closing_stock": null,
-     "material_name": "Rebar (25mm) Imported",
-     "opening_stock": null,
-     "received": null,
-     "sheet_source": "materials",
-     "unit": "Tonne",
-     "unit_cost": 475000.0,
-     "used": 0.0
-    },
-    {
-     "closing_stock": null,
-     "material_name": "Rebar (32mm) Imported",
-     "opening_stock": 0.0,
-     "received": null,
-     "sheet_source": "materials",
-     "unit": "Tonne",
-     "unit_cost": 475000.0,
-     "used": 5.40576636
-    },
-    {
-     "closing_stock": null,
-     "material_name": "Binding Wire",
-     "opening_stock": 0.0,
-     "received": null,
-     "sheet_source": "materials",
-     "unit": "Roll",
-     "unit_cost": 4500.0,
-     "used": 0.0
-    },
-    {
-     "closing_stock": null,
-     "material_name": "Sharp Sand",
-     "opening_stock": 0.0,
-     "received": null,
-     "sheet_source": "materials",
-     "unit": "Tonne",
-     "unit_cost": 5500.0,
-     "used": 0.0
-    },
-    {
-     "closing_stock": null,
-     "material_name": "Blocks 9\"",
-     "opening_stock": 0.0,
-     "received": null,
-     "sheet_source": "materials",
-     "unit": "Each",
-     "unit_cost": 300.0,
-     "used": 0.0
-    },
-    {
-     "closing_stock": null,
-     "material_name": "Blocks 6\"",
-     "opening_stock": 0.0,
-     "received": null,
-     "sheet_source": "materials",
-     "unit": "Each",
-     "unit_cost": 300.0,
-     "used": 0.0
-    },
-    {
-     "closing_stock": null,
-     "material_name": "3/4\"",
-     "opening_stock": null,
-     "received": null,
-     "sheet_source": "materials",
-     "unit": "Tonne",
-     "unit_cost": 16300.0,
-     "used": 1183.0
-    },
-    {
-     "closing_stock": 0.0,
-     "material_name": "1/2''",
-     "opening_stock": 0.0,
-     "received": null,
-     "sheet_source": "materials",
-     "unit": "Tonne",
-     "unit_cost": 16300.0,
-     "used": 0.0
-    },
-    {
-     "closing_stock": 0.0,
-     "material_name": "sand",
-     "opening_stock": null,
-     "received": null,
-     "sheet_source": "materials",
-     "unit": "Tonne",
-     "unit_cost": 11000.0,
-     "used": 651.5
-    },
-    {
-     "closing_stock": null,
-     "material_name": "3/8\"",
-     "opening_stock": 0.0,
-     "received": null,
-     "sheet_source": "materials",
-     "unit": "Tonne",
-     "unit_cost": 10800.0,
-     "used": 0.0
-    },
-    {
-     "closing_stock": 0.0,
-     "material_name": "Stonebase",
-     "opening_stock": null,
-     "received": 0.0,
-     "sheet_source": "materials",
-     "unit": "Tonne",
-     "unit_cost": 13300.0,
-     "used": 0.0
-    },
-    {
-     "closing_stock": null,
-     "material_name": "Hardcore",
-     "opening_stock": 0.0,
-     "received": null,
-     "sheet_source": "materials",
-     "unit": "Tonne",
-     "unit_cost": 6500.0,
-     "used": 0.0
-    },
-    {
-     "closing_stock": null,
-     "material_name": "MC1 Priming",
-     "opening_stock": 0.0,
-     "received": null,
-     "sheet_source": "materials",
-     "unit": "Tonne",
-     "unit_cost": 341200.0,
-     "used": 0.0
-    },
-    {
-     "closing_stock": null,
-     "material_name": "S125 Surface Dressing",
-     "opening_stock": 0.0,
-     "received": null,
-     "sheet_source": "materials",
-     "unit": "Tonne",
-     "unit_cost": 346200.0,
-     "used": 0.0
-    },
-    {
-     "closing_stock": null,
-     "material_name": "RSII Colas Tack Coat",
-     "opening_stock": 0.0,
-     "received": null,
-     "sheet_source": "materials",
-     "unit": "Tonne",
-     "unit_cost": 329200.0,
-     "used": 0.0
-    },
-    {
-     "closing_stock": null,
-     "material_name": "Crack Relief Layer CRL",
-     "opening_stock": 0.0,
-     "received": null,
-     "sheet_source": "materials",
-     "unit": "Tonne",
-     "unit_cost": 0.0,
-     "used": 0.0
-    },
-    {
-     "closing_stock": null,
-     "material_name": "Asphalt Binder Course",
-     "opening_stock": 0.0,
-     "received": null,
-     "sheet_source": "materials",
-     "unit": "Tonne",
-     "unit_cost": 0.0,
-     "used": 0.0
-    },
-    {
-     "closing_stock": null,
-     "material_name": "Asphalt Wearing Course",
-     "opening_stock": 0.0,
-     "received": null,
-     "sheet_source": "materials",
-     "unit": "Tonne",
-     "unit_cost": 0.0,
-     "used": 0.0
-    },
-    {
-     "closing_stock": null,
-     "material_name": "60/70 Bitumen",
-     "opening_stock": 0.0,
-     "received": null,
-     "sheet_source": "materials",
-     "unit": "Tonne",
-     "unit_cost": 384709.0,
-     "used": 0.0
-    },
-    {
-     "closing_stock": null,
-     "material_name": "Kerosine",
-     "opening_stock": 0.0,
-     "received": null,
-     "sheet_source": "materials",
-     "unit": "Litres",
-     "unit_cost": null,
-     "used": 0.0
-    }
-   ],
-   "rows_parsed": 28,
-   "status": "ok",
-   "warnings": []
-  },
   "Payments Recieved": {
    "rows": [
     {
@@ -6422,6 +4993,57 @@
    "warnings": []
   },
   "Plant Return": {
+   "footer": {
+    "adjustments": [
+     {
+      "amount": 1003500.0,
+      "label": "Engine Oil"
+     },
+     {
+      "amount": 45000.0,
+      "label": "Gear oil"
+     },
+     {
+      "amount": 0.0,
+      "label": "ATF 220 Oil"
+     },
+     {
+      "amount": 0.0,
+      "label": "DTE 26 Oil"
+     },
+     {
+      "amount": 0.0,
+      "label": "Rarius 427 Comp. Oil"
+     },
+     {
+      "amount": 0.0,
+      "label": "Almo 529"
+     },
+     {
+      "amount": 31000.0,
+      "label": "Grease"
+     },
+     {
+      "amount": 0.0,
+      "label": "6440; Tyres"
+     },
+     {
+      "amount": 1667500.0,
+      "label": "6320; Spare Parts"
+     },
+     {
+      "amount": 2747000.0,
+      "label": "Tota All Adjusted"
+     },
+     {
+      "amount": 39801138.0,
+      "label": "Net Plant Cost Cost Report"
+     }
+    ],
+    "pct_allocated": 1.0,
+    "total_all": 42548138.0,
+    "total_allocated": 42548138.0
+   },
    "rows": [
     {
      "breakdown_hours": 63.0,
@@ -8063,859 +6685,6 @@
     }
    ],
    "rows_parsed": 126,
-   "status": "ok",
-   "warnings": []
-  },
-  "Precast": {
-   "rows": [
-    {
-     "balance_available": 0.0,
-     "cast_this_week": null,
-     "closing_stock": 0.0,
-     "description": "Drain Unit",
-     "size": null,
-     "uom": null,
-     "used_this_week": 0.0
-    }
-   ],
-   "rows_parsed": 1,
-   "status": "ok",
-   "warnings": []
-  },
-  "Subcontractors": {
-   "rows": [
-    {
-     "agreed_rate": 130.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "CASTING, PACKING & LOADING OF 9'' SANDCRETE BLOCKS",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "PASCHAL GENERAL CONTRACTOR",
-     "unit": null
-    },
-    {
-     "agreed_rate": 15000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "CUT, BEND & FIX REBAR",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "PASCHAL GENERAL CONTRACTOR",
-     "unit": null
-    },
-    {
-     "agreed_rate": 1000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "REINFORCED CONCRETE CASTING",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "PASCHAL GENERAL CONTRACTOR",
-     "unit": null
-    },
-    {
-     "agreed_rate": 750.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "FORMWORK",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "PASCHAL GENERAL CONTRACTOR",
-     "unit": null
-    },
-    {
-     "agreed_rate": 700.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "BLOCK LAYING",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "PASCHAL GENERAL CONTRACTOR",
-     "unit": null
-    },
-    {
-     "agreed_rate": 1000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "BLOCK LAYING & INFILL",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "PASCHAL GENERAL CONTRACTOR",
-     "unit": null
-    },
-    {
-     "agreed_rate": 300.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "ROOFING",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "PASCHAL GENERAL CONTRACTOR",
-     "unit": null
-    },
-    {
-     "agreed_rate": 2000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "DAY WORKS (3 No LABOUR) BY 90 DAY)",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "PASCHAL GENERAL CONTRACTOR",
-     "unit": null
-    },
-    {
-     "agreed_rate": 3000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "DAY WORK (FOREMAN)",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "PASCHAL GENERAL CONTRACTOR",
-     "unit": null
-    },
-    {
-     "agreed_rate": 1700.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "DOOR FIXING",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "PASCHAL GENERAL CONTRACTOR",
-     "unit": null
-    },
-    {
-     "agreed_rate": 1000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "WINDOW FIXING",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "PASCHAL GENERAL CONTRACTOR",
-     "unit": null
-    },
-    {
-     "agreed_rate": 750.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "FORMWORK IN ST1 to ST8 PAD FOUNDATION BLINDING",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "JIDE MOMOH",
-     "unit": null
-    },
-    {
-     "agreed_rate": 250.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "GRADE 15 CONCRETE BLINDING IN ST1 to ST8 PAD FOUNDATION",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "JIDE MOMOH",
-     "unit": null
-    },
-    {
-     "agreed_rate": 1000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "BLOCK LAYING & INFILL WITH CONCRETE IN ST1 to ST8 PAD FOUNDATION BASE",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "JIDE MOMOH",
-     "unit": null
-    },
-    {
-     "agreed_rate": 750.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "FORMWORK IN GROUND BOTTOM BEAM FOUNDATION BLINDING",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "JIDE MOMOH",
-     "unit": null
-    },
-    {
-     "agreed_rate": 250.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "GRADE 15 CONCRETE BLINDING IN GROUND BOTTOM BEAM FOUNDATION",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "JIDE MOMOH",
-     "unit": null
-    },
-    {
-     "agreed_rate": 1000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "BLOCK LAYING & INFILL WITH CONCRETE IN GROUND BOTTOM BEAM FOUNDATION",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "JIDE MOMOH",
-     "unit": null
-    },
-    {
-     "agreed_rate": 750.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "FORMWORK IN DRUM DRYER FOUNDATION BLINDING",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "JIDE MOMOH",
-     "unit": null
-    },
-    {
-     "agreed_rate": 250.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "GRADE 15 CONCRETE BLINDING IN DRUM DRYER FOUNDATION",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "JIDE MOMOH",
-     "unit": null
-    },
-    {
-     "agreed_rate": 1000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "BLOCK LAYING & INFILL WITH CONCRETE IN DRUM DRYER FOUNDATION",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "JIDE MOMOH",
-     "unit": null
-    },
-    {
-     "agreed_rate": 1000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "BLOCK LAYING & INFILL WITH CONCRETE IN PERIMETER WALL",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "JIDE MOMOH",
-     "unit": null
-    },
-    {
-     "agreed_rate": 750.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "PLASTERING IN PERIMETER WALL",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "JIDE MOMOH",
-     "unit": null
-    },
-    {
-     "agreed_rate": 15.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "OFFLOADING OF CEMENT (STORE TO SILO)",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "JIDE MOMOH",
-     "unit": null
-    },
-    {
-     "agreed_rate": 30.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "BATCHING OF CEMENT",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "JIDE MOMOH",
-     "unit": null
-    },
-    {
-     "agreed_rate": 2000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "DAYWORK - 2 LABOUR BY 30 DAYS",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "JIDE MOMOH",
-     "unit": null
-    },
-    {
-     "agreed_rate": 3000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "DAYWORK - FOREMAN",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "JIDE MOMOH",
-     "unit": null
-    },
-    {
-     "agreed_rate": 500.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "GRADE 15 CONCRETE CASTING IN BATCHING PLANT",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "ABBAS GLOBAL",
-     "unit": null
-    },
-    {
-     "agreed_rate": 1000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "GRADE 30 REINFORCED CONCRETE CASTING IN BATCHING PLANT",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "ABBAS GLOBAL",
-     "unit": null
-    },
-    {
-     "agreed_rate": 5.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "CONCRETE BISCUIT",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "ABBAS GLOBAL",
-     "unit": null
-    },
-    {
-     "agreed_rate": 750.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "FORMWORK",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "ABBAS GLOBAL",
-     "unit": null
-    },
-    {
-     "agreed_rate": 700.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "BLOCK LAYING",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "ABBAS GLOBAL",
-     "unit": null
-    },
-    {
-     "agreed_rate": 1000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "BLOCK LAYING & INFILL",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "ABBAS GLOBAL",
-     "unit": null
-    },
-    {
-     "agreed_rate": 300.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "ROOFING",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "ABBAS GLOBAL",
-     "unit": null
-    },
-    {
-     "agreed_rate": 2500.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "DAY WORKS (3 No WORKMEN) BY 4 DAY)",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "ABBAS GLOBAL",
-     "unit": null
-    },
-    {
-     "agreed_rate": 3000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "DAY WORK (FOREMAN)",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "ABBAS GLOBAL",
-     "unit": null
-    },
-    {
-     "agreed_rate": 1700.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "LAYING OF PRECAST UNIT",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "ABBAS GLOBAL",
-     "unit": null
-    },
-    {
-     "agreed_rate": 400.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "PRECAST DRAIN UNIT",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "ABBAS GLOBAL",
-     "unit": null
-    },
-    {
-     "agreed_rate": 750.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "PRECAST SLAB",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "ABBAS GLOBAL",
-     "unit": null
-    },
-    {
-     "agreed_rate": 600.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "PLACE PRECAST SLAB",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "ABBAS GLOBAL",
-     "unit": null
-    },
-    {
-     "agreed_rate": 1000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "REIN. CONCRETE IN PLANT WORKSHOP & STAFF CANTEEN",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "ABBAS GLOBAL",
-     "unit": null
-    },
-    {
-     "agreed_rate": 750.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "PLASTERING IN PLANT WORKSHOP & STAFF CANTEEN",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "ABBAS GLOBAL",
-     "unit": null
-    },
-    {
-     "agreed_rate": 11000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "CUT & BEND REBAR",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "Godwin",
-     "unit": null
-    },
-    {
-     "agreed_rate": 8000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "FIX REBAR",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "Godwin",
-     "unit": null
-    },
-    {
-     "agreed_rate": 9000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "CUT & BEND REBAR IN ST2 (7) PAD FOUNDATION",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "Godwin",
-     "unit": null
-    },
-    {
-     "agreed_rate": 6000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "FIX REBAR IN ST2 (7) PAD FOUNDATION",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "Godwin",
-     "unit": null
-    },
-    {
-     "agreed_rate": 9000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "CUT & BEND REBAR IN ST3 (11) PAD FOUNDATION",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "Godwin",
-     "unit": null
-    },
-    {
-     "agreed_rate": 6000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "FIX REBAR IN ST3 (11) PAD FOUNDATION",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "Godwin",
-     "unit": null
-    },
-    {
-     "agreed_rate": 9000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "CUT & BEND REBAR IN ST4 (2) PAD FOUNDATION",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "Godwin",
-     "unit": null
-    },
-    {
-     "agreed_rate": 6000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "FIX REBAR IN ST4 (2) PAD FOUNDATION",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "Godwin",
-     "unit": null
-    },
-    {
-     "agreed_rate": 9000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "CUT & BEND REBAR IN ST5 (5) PAD FOUNDATION",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "Godwin",
-     "unit": null
-    },
-    {
-     "agreed_rate": 6000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "FIX REBAR IN ST5 (5) PAD FOUNDATION",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "Godwin",
-     "unit": null
-    },
-    {
-     "agreed_rate": 9000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "CUT & BEND REBAR IN ST6 (2) PAD FOUNDATION",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "Godwin",
-     "unit": null
-    },
-    {
-     "agreed_rate": 6000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "FIX REBAR IN ST6 (2) PAD FOUNDATION",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "Godwin",
-     "unit": null
-    },
-    {
-     "agreed_rate": 1000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "GRADE 30 REINFORCED CONCRETE IN ST1 (5) PAD FOUNDATION BASE & COLUMN",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "DOMNIC",
-     "unit": null
-    },
-    {
-     "agreed_rate": 1000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "GRADE 30 REINFORCED CONCRETE IN ST2 (7) PAD FOUNDATION BASE & COLUMN",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "DOMNIC",
-     "unit": null
-    },
-    {
-     "agreed_rate": 1000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "GRADE 30 REINFORCED CONCRETE IN ST3 (11) PAD FOUNDATION BASE & COLUMN",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "DOMNIC",
-     "unit": null
-    },
-    {
-     "agreed_rate": 1000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "GRADE 30 REINFORCED CONCRETE IN ST4 (2) PAD FOUNDATION BASE",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "DOMNIC",
-     "unit": null
-    },
-    {
-     "agreed_rate": 1000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "GRADE 30 REINFORCED CONCRETE IN ST5 (5) PAD FOUNDATION BASE",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "DOMNIC",
-     "unit": null
-    },
-    {
-     "agreed_rate": 1000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "GRADE 30 REINFORCED CONCRETE IN ST6 (2) PAD FOUNDATION BASE",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "DOMNIC",
-     "unit": null
-    },
-    {
-     "agreed_rate": 1000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "GRADE 30 REINFORCED CONCRETE IN ST7 (6) PAD FOUNDATION BASE",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "DOMNIC",
-     "unit": null
-    },
-    {
-     "agreed_rate": 1000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "GRADE 30 REINFORCED CONCRETE IN ST8 (4) PAD FOUNDATION BASE",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "DOMNIC",
-     "unit": null
-    },
-    {
-     "agreed_rate": 1000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "GRADE 30 REINFORCED CONCRETE IN GROUND BOTTOM BEAM",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "DOMNIC",
-     "unit": null
-    },
-    {
-     "agreed_rate": 1000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "GRADE 30 REINFORCED CONCRETE IN GROUND TOP BEAM",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "DOMNIC",
-     "unit": null
-    },
-    {
-     "agreed_rate": 1001.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "GRADE 30 REINFORCED CONCRETE IN DRYER BASE",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "DOMNIC",
-     "unit": null
-    },
-    {
-     "agreed_rate": null,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "Fixing of anchor bolts, Engineering details refers (Fix Only)",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "DOMNIC",
-     "unit": null
-    },
-    {
-     "agreed_rate": 200.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "Pad Foundation ST1 and columns",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "DOMNIC",
-     "unit": null
-    },
-    {
-     "agreed_rate": 200.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "Pad Foundation ST2 and columns",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "DOMNIC",
-     "unit": null
-    },
-    {
-     "agreed_rate": 200.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "Pad Foundation ST3 and columns",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "DOMNIC",
-     "unit": null
-    },
-    {
-     "agreed_rate": 200.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "Pad Foundation ST4 and columns",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "DOMNIC",
-     "unit": null
-    },
-    {
-     "agreed_rate": 200.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "Pad Foundation ST5 and columns",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "DOMNIC",
-     "unit": null
-    },
-    {
-     "agreed_rate": 200.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "Pad Foundation ST6 and columns",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "DOMNIC",
-     "unit": null
-    },
-    {
-     "agreed_rate": 200.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "Pad Foundation ST7 and columns",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "DOMNIC",
-     "unit": null
-    },
-    {
-     "agreed_rate": null,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "FORMWORK",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "DOMNIC",
-     "unit": null
-    },
-    {
-     "agreed_rate": 750.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "Pad Foundation ST1 and columns",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "DOMNIC",
-     "unit": null
-    },
-    {
-     "agreed_rate": 750.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "Pad Foundation ST2 and columns",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "DOMNIC",
-     "unit": null
-    },
-    {
-     "agreed_rate": 750.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "Pad Foundation ST3 and columns",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "DOMNIC",
-     "unit": null
-    },
-    {
-     "agreed_rate": 750.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "Pad Foundation ST4 and columns",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "DOMNIC",
-     "unit": null
-    },
-    {
-     "agreed_rate": 750.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "Pad Foundation ST5 and columns",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "DOMNIC",
-     "unit": null
-    },
-    {
-     "agreed_rate": 750.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "Pad Foundation ST6 and columns",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "DOMNIC",
-     "unit": null
-    },
-    {
-     "agreed_rate": 750.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "Pad Foundation ST7 and columns",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "DOMNIC",
-     "unit": null
-    },
-    {
-     "agreed_rate": 750.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "Pad Foundation ST8 and columns",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "DOMNIC",
-     "unit": null
-    },
-    {
-     "agreed_rate": 2000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "DAY WORKS (4 No LABOUR) BY 90 DAY)",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "DOMNIC",
-     "unit": null
-    },
-    {
-     "agreed_rate": 3000.0,
-     "amount_this_week": 0.0,
-     "assigned_qty": null,
-     "description": "DAY WORK (FOREMAN)",
-     "location": null,
-     "qty_this_week": null,
-     "subcontractor_name": "DOMNIC",
-     "unit": null
-    }
-   ],
-   "rows_parsed": 83,
    "status": "ok",
    "warnings": []
   },

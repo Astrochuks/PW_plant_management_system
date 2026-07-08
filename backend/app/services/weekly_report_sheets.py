@@ -108,16 +108,59 @@ def parse_contract_summary(ws) -> dict[str, Any]:
     snapshot = {
         "original_contract_amount": identity["original_contract_amount"],
         "current_contract_amount": identity["current_contract_amount"],
+        "client_name": identity["client_raw"],
+        "contract_name": identity["project_name"],
+        "short_name": identity["short_name"],
+        "award_date": identity["award_date"],
+        "commencement_date": identity["commencement_date"],
+        "original_duration_months": identity["original_duration_months"],
+        "eot_requested_months": cell_number(
+            find_label_value(ws, r"extension of time requested")
+        ),
+        "eot_granted_months": identity["extension_of_time_months"],
+        "revised_duration_months": cell_number(
+            find_label_value(ws, r"^revised contract duration")
+        ),
+        "overdue_weeks": cell_number(
+            find_label_value(ws, r"overdue to revised completion")
+        ),
         "works_certified": cell_number(
             find_label_value(ws, r"works vetted & certified|works vetted and certified")
+        ),
+        "works_submitted_not_vetted": cell_number(
+            find_label_value(ws, r"works submitted and not yet vetted")
+        ),
+        "total_works_submitted": cell_number(
+            find_label_value(ws, r"total value of works submitted")
+        ),
+        "gross_certified": cell_number(
+            find_label_value(ws, r"total gross value of works completed")
         ),
         "retention_held": cell_number(
             find_label_value(ws, r"retention money - deducted")
         ),
+        "retention_released": cell_number(
+            find_label_value(ws, r"retention money - released")
+        ),
+        "advance_recovered": cell_number(
+            find_label_value(ws, r"advance payment recovered")
+        ),
+        "apg_amount": cell_number(
+            find_label_value(ws, r"advance payment guarantee")
+        ),
         "advance_unrecovered": cell_number(
-            find_label_value(ws, r"advance payment (yet to be recovered|r)")
+            find_label_value(ws, r"advance payment yet to be recovered")
         ),
         "apg_expiry": cell_date(find_label_value(ws, r"apg.*expir")),
+        "bill1_requested": cell_number(
+            find_label_value(ws, r"total bill 1 requested")
+        ),
+        "bill1_paid": cell_number(
+            find_label_value(ws, r"total paid out by pw")
+        ),
+        "bill1_outstanding": cell_number(
+            find_label_value(ws, r"amount outstanding from amounts requested")
+        ),
     }
     return {"identity": identity, "snapshot": snapshot, "warnings": warnings}
 
@@ -213,18 +256,23 @@ class _window:
 # ---------------------------------------------------------------------------
 
 def parse_plant_return(ws) -> dict[str, Any]:
+    """Full roster including idle plants (all-zero rows are the 'on site,
+    idle' signal). Footer captured: TOTAL All, % allocated, and the
+    'Internal Plant Cost Adjusted for' consumable lines — the deduction
+    that becomes the Cost Report's Plant Internal figure."""
     warnings: list[str] = []
     hit = find_header_row(ws, ["fleet no", "description", "hours worked"])
     if hit is None:
-        return {"rows": [], "warnings": ["Plant Return: header row not found"]}
+        return {"rows": [], "footer": {}, "warnings": ["Plant Return: header row not found"]}
     hrow, cols = hit
 
     rows = []
+    last_excel_row = hrow
     for r in iter_table_rows(ws, hrow, cols):
         fleet = _txt(r, "fleet no")
         if not fleet or _NOISE_ROWS.match(fleet):
             continue
-        rows.append({
+        row = {
             "fleet_number_raw": fleet,
             "description": _txt(r, "description"),
             "plant_category": _txt(r, "plant category"),
@@ -236,53 +284,133 @@ def parse_plant_return(ws) -> dict[str, Any]:
             "transferred_from": _txt(r, "transfered from", "transferred from"),
             "current_location": _txt(r, "current location"),
             "remarks": _txt(r, "remarks"),
-        })
+        }
+        rows.append(row)
+        last_excel_row = r["_row"]
+        # validation: plant cost = hours worked × rate (standby/BD never charged)
+        if row["rate_ngn"] and row["plant_cost"] is not None \
+                and abs(row["hours_worked"] * row["rate_ngn"] - row["plant_cost"]) > 1.0:
+            warnings.append(
+                f"Plant Return {fleet}: hours {row['hours_worked']:g} × rate "
+                f"{row['rate_ngn']:g} != cost {row['plant_cost']:,.2f}"
+            )
+
+    # ── footer: total / % allocated / consumable adjustments ───────────
+    footer: dict[str, Any] = {"adjustments": []}
+    in_adjustments = False
+    for r in range(last_excel_row + 1, min(last_excel_row + 30, ws.max_row + 1)):
+        label = None
+        for c in range(1, 8):
+            t = cell_text(ws.cell(row=r, column=c).value)
+            if t:
+                label = t
+                break
+        if not label:
+            continue
+        nums = [cell_number(ws.cell(row=r, column=c).value)
+                for c in range(2, 14)]
+        nums = [n for n in nums if n is not None]
+        lu = label.upper()
+        if lu.startswith("TOTAL ALL"):
+            footer["total_all"] = nums[-1] if nums else None
+        elif "% ALLOCATED" in lu:
+            footer["pct_allocated"] = nums[-1] if nums else None
+        elif "COST ALLOCATED" in lu:
+            footer["total_allocated"] = nums[-1] if nums else None
+        elif "ADJUSTED FOR" in lu:
+            in_adjustments = True
+        elif in_adjustments and nums:
+            footer["adjustments"].append({"label": label, "amount": nums[-1]})
+        elif in_adjustments and not nums:
+            # end of adjustment block unless it's a spacer label
+            if "NET" in lu or "TOTAL" in lu:
+                in_adjustments = False
+
     if not rows:
         warnings.append("Plant Return: no fleet rows parsed")
-    return {"rows": rows, "warnings": warnings}
+    if footer.get("total_all") is not None:
+        ours = sum(float(x["plant_cost"] or 0) for x in rows)
+        if abs(ours - float(footer["total_all"])) > 1.0:
+            warnings.append(
+                f"Plant Return: our cost sum {ours:,.2f} != footer TOTAL All "
+                f"{float(footer['total_all']):,.2f}"
+            )
+    return {"rows": rows, "footer": footer, "warnings": warnings}
 
 
 # ---------------------------------------------------------------------------
 # T2.7 — Diesel Consumption
 # ---------------------------------------------------------------------------
 
+_COST_CENTRE_RX = re.compile(r"^[A-Z][A-Z /&.-]{2,}$")  # no digits, len>2
+
+
 def parse_diesel(ws) -> dict[str, Any]:
+    """Fuel EVENTS only — rows with fuel taken > 0. Zero rows are unused
+    template lines, not idle declarations (that's Plant Return's job).
+    Recipients without digits (MECHANICS, CIVIL, LAB/PRECAST) are marked
+    cost-centres. The stock header line and the sheet's subtotal/total
+    rows are captured for cross-checks."""
     warnings: list[str] = []
     hit = find_header_row(ws, ["fleet no", "description", "total fuel"], min_matches=2)
     if hit is None:
-        return {"rows": [], "warnings": ["Diesel: header row not found"]}
+        return {"rows": [], "stock": {}, "sheet_totals": {},
+                "warnings": ["Diesel: header row not found"]}
     hrow, cols = hit
+
+    stock = {
+        "opening": cell_number(find_label_value(ws, r"^opening stock")),
+        "received": cell_number(find_label_value(ws, r"^received this week")),
+        "used": cell_number(find_label_value(ws, r"^used this week")),
+        "closing": cell_number(find_label_value(ws, r"^closing stock")),
+    }
 
     day_keys = ("saturday", "sunday", "monday", "tuesday", "wednesday",
                 "thursday", "friday")
     rows = []
+    sheet_totals: dict[str, Any] = {}
     for r in iter_table_rows(ws, hrow, cols):
         fleet = _txt(r, "fleet no")
-        if not fleet or _NOISE_ROWS.match(fleet):
+        if not fleet:
             continue
-        day_values = {f"{d}_litres": (_num(r, d) or 0) for d in day_keys}
         total_claimed = _num(r, "total fuel")
+        fu = fleet.upper()
+        if fu.startswith("SUB TOTAL OTHER"):
+            sheet_totals["other_used"] = total_claimed
+            continue
+        if fu.startswith("TOTAL ALL DIESEL"):
+            sheet_totals["all_used"] = total_claimed
+            continue
+        if _NOISE_ROWS.match(fleet):
+            continue
+
+        day_values = {f"{d}_litres": (_num(r, d) or 0) for d in day_keys}
         day_sum = sum(day_values.values())
+        litres = total_claimed if total_claimed is not None else day_sum
+        if not litres:  # unused template line, not an event
+            continue
         if total_claimed is not None and abs(day_sum - total_claimed) > 0.01:
             warnings.append(
-                f"Diesel {fleet}: day sum {day_sum:g} != sheet total {total_claimed:g}"
+                f"Diesel {fleet}: day sum {day_sum:g} != row total {total_claimed:g}"
             )
         rows.append({
             "fleet_number_raw": fleet,
             "description": _txt(r, "description"),
             "plant_category": _txt(r, "plant category"),
             **day_values,
+            "amount_ngn": _num(r, "usage value"),
+            "is_cost_centre": bool(_COST_CENTRE_RX.fullmatch(fu)),
         })
 
-    used_this_week = cell_number(find_label_value(ws, r"^used this week"))
-    total_parsed = sum(sum(v for k, v in row.items() if k.endswith("_litres"))
-                       for row in rows)
-    if used_this_week is not None and abs(total_parsed - used_this_week) > 0.01:
+    # events must sum to the sheet's own total
+    total_parsed = sum(sum(row[f"{d}_litres"] for d in day_keys) for row in rows)
+    target = sheet_totals.get("all_used", stock.get("used"))
+    if target is not None and abs(total_parsed - float(target)) > 0.01:
         warnings.append(
-            f"Diesel: parsed total {total_parsed:g}L != sheet 'Used This Week' "
-            f"{used_this_week:g}L"
+            f"Diesel: parsed events {total_parsed:g}L != sheet total {float(target):g}L"
         )
-    return {"rows": rows, "warnings": warnings}
+    return {"rows": rows, "stock": stock, "sheet_totals": sheet_totals,
+            "warnings": warnings}
 
 
 # ---------------------------------------------------------------------------
@@ -290,53 +418,104 @@ def parse_diesel(ws) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 def parse_cost_report(ws) -> dict[str, Any]:
+    """Category rows only become data. The sheet's Total row and its
+    internal arithmetic (qty × rate, to-date = previous + this-week)
+    become cross-checks. Reported-previous is captured per row for
+    baseline/gap derivation."""
     warnings: list[str] = []
     hit = find_header_row(
         ws, ["description", "cost category", "amount"], min_matches=2
     )
     if hit is None:
-        return {"rows": [], "warnings": ["Cost Report: header row not found"]}
+        return {"rows": [], "sheet_total": None,
+                "warnings": ["Cost Report: header row not found"]}
     hrow, cols = hit
 
-    this_week_col = next(
-        (col for name, col in cols.items()
-         if name.startswith("amount") and "this week" in name),
-        None,
-    )
-    rows = []
+    def col_for(*fragments: str) -> int | None:
+        for name, col in cols.items():
+            if all(f in name for f in fragments):
+                return col
+        return None
+
+    this_week_col = col_for("amount", "this week")
+    prev_col = col_for("amount", "previous")
+    todate_col = col_for("amount", "up to date") or col_for("amount", "to date")
+
+    rows: list[dict[str, Any]] = []
+    sheet_total: dict[str, Any] | None = None
     section = None
     for r in iter_table_rows(ws, hrow, cols, stop_after_blank=15):
         desc = _txt(r, "description")
         category = _txt(r, "cost category")
-        amount_this_week = (
-            cell_number(ws.cell(row=r["_row"], column=this_week_col).value)
-            if this_week_col else _num(r, "amount this week")
-        )
-        # Section banners ("PLANT DEPARTMENT", "MATERIALS") sit in the
-        # S/No column with no numbers anywhere on the row
+        excel_row = r["_row"]
+        amount_this_week = (cell_number(ws.cell(row=excel_row, column=this_week_col).value)
+                            if this_week_col else _num(r, "amount this week"))
+        amount_previous = (cell_number(ws.cell(row=excel_row, column=prev_col).value)
+                           if prev_col else None)
+        amount_to_date = (cell_number(ws.cell(row=excel_row, column=todate_col).value)
+                          if todate_col else None)
+
+        # the grand-total row: pure cross-check, never data
+        if desc == "Total":
+            sheet_total = {"previous": amount_previous,
+                           "this_week": amount_this_week,
+                           "to_date": amount_to_date}
+            continue
+
+        # Section banners ("PLANT DEPARTMENT") sit in the S/No column
         sno = _txt(r, "s/no")
         banner = next(
             (t for t in (sno, desc)
              if t and t.isupper() and len(t) > 3 and not t.replace(" ", "").isdigit()),
             None,
         )
-        if banner and category is None and amount_this_week is None                 and _num(r, "rate") is None:
+        if banner and category is None and _num(r, "rate") is None:
             section = banner
             continue
-        if not desc:
+        # unused template slots carry literal '0' descriptions
+        if not desc or desc == "0":
             continue
-        rows.append({
+
+        qty = _num(r, "quantity this week")
+        rate = _num(r, "rate")
+        row = {
             "section": section,
             "description": desc,
             "cost_category": category,
             "unit": _txt(r, "unit"),
-            "quantity_this_week": _num(r, "quantity this week"),
-            "rate_ngn": _num(r, "rate"),
+            "quantity_this_week": qty,
+            "rate_ngn": rate,
+            "amount_previous_week": amount_previous,
             "amount_this_week": amount_this_week or 0,
-        })
+            "amount_to_date": amount_to_date,
+        }
+        rows.append(row)
+
+        # per-row arithmetic validation
+        if qty and rate and amount_this_week is not None \
+                and abs(qty * rate - amount_this_week) > 1.0:
+            warnings.append(
+                f"Cost Report {desc[:40]!r}: qty {qty:g} × rate {rate:g} = "
+                f"{qty*rate:,.2f} but sheet says {amount_this_week:,.2f}"
+            )
+        if amount_previous is not None and amount_to_date is not None \
+                and abs((amount_previous + (amount_this_week or 0)) - amount_to_date) > 1.0:
+            warnings.append(
+                f"Cost Report {desc[:40]!r}: previous + this-week != up-to-date"
+            )
+
+    # total cross-check: categorized rows must sum to the sheet's Total
+    if sheet_total and sheet_total.get("this_week") is not None:
+        ours = sum(float(x["amount_this_week"] or 0)
+                   for x in rows if x["cost_category"])
+        if abs(ours - float(sheet_total["this_week"])) > 1.0:
+            warnings.append(
+                f"Cost Report: our categorized sum {ours:,.2f} != sheet total "
+                f"{float(sheet_total['this_week']):,.2f}"
+            )
     if not rows:
         warnings.append("Cost Report: no rows parsed")
-    return {"rows": rows, "warnings": warnings}
+    return {"rows": rows, "sheet_total": sheet_total, "warnings": warnings}
 
 
 # ---------------------------------------------------------------------------
@@ -422,256 +601,166 @@ def parse_payments(ws) -> dict[str, Any]:
 # T2.10 — BEME (bills + items + this-week progress)
 # ---------------------------------------------------------------------------
 
+_ITEM_CODE_RX = re.compile(r"^\d+\.\d+[a-z]?$")
+_BILL_TOTAL_RX = re.compile(r"^total bill no\.?\s*(\d+)", re.IGNORECASE)
+
+
+def _normalize_item_code(raw: str | None) -> str | None:
+    """'6.23999999999999' (Excel float corruption) → '6.24'; '1.1' stays."""
+    if raw is None:
+        return None
+    code = raw.strip()
+    if re.fullmatch(r"\d+\.\d{4,}", code):
+        try:
+            return f"{round(float(code), 2):g}"
+        except ValueError:
+            return code
+    return code
+
+
 def parse_beme(ws) -> dict[str, Any]:
+    """Classify every row: bill header / real item (incl. letter variants)
+    / bill-total / tail (contingency, VOP, VAT) / summary table. Only real
+    items become data; the sheet's own totals become cross-checks.
+
+    Emits reported-previous per item — the baseline/gap inputs.
+    """
     warnings: list[str] = []
     hit = find_header_row(
         ws, ["item", "description", "rate", "this week qty"], min_matches=3
     )
     if hit is None:
-        return {"rows": [], "warnings": ["BEME: header row not found"]}
+        return {"rows": [], "bills": [], "tail": {}, "summary_table": [],
+                "warnings": ["BEME: header row not found"]}
     hrow, cols = hit
 
-    bill_total_rx = re.compile(r"total bill no\.?\s*(\d+)", re.IGNORECASE)
-    rows = []
-    current_bill = 1
+    rows: list[dict[str, Any]] = []
+    bills: list[dict[str, Any]] = []
+    tail: dict[str, Any] = {}
+    summary_table: list[dict[str, Any]] = []
+    current_bill: dict[str, Any] | None = None
+    in_summary_table = False
+
     for r in iter_table_rows(ws, hrow, cols, stop_after_blank=25, max_rows=2000):
         desc = _txt(r, "description")
-        code = _txt(r, "item")
-
-        # Bill boundary markers ("Total Bill No. 1 Carried ...") — appear in
-        # either the item or description column
-        marker = bill_total_rx.search(f"{code or ''} {desc or ''}")
-        if marker:
-            current_bill = int(marker.group(1)) + 1
-            continue
-        # Repeated header rows inside the sheet
-        if code and norm(code) == "item":
-            continue
-        if not desc:
-            continue
-
-        rate = _num(r, "rate")
+        code = _normalize_item_code(_txt(r, "item"))
         contract_amount = _num(r, "contract amount")
-        this_week_qty = _num(r, "this week qty")
         this_week_amount = _num(r, "this week amount")
-        pct = _num(r, "% of work completed", "%")
 
-        # Group headings (e.g. "1 | PRELIMINARIES") carry no money columns
-        if rate is None and contract_amount is None and this_week_qty is None \
-                and this_week_amount is None:
+        code_s = code or ""
+        desc_s = desc or ""
+        desc_u = desc_s.upper()
+
+        # ── bill total rows: "Total Bill No.X Carried to Summary" ──────
+        marker = _BILL_TOTAL_RX.search(code_s) or _BILL_TOTAL_RX.search(desc_s)
+        if marker:
+            if current_bill is not None:
+                current_bill["sheet_total_contract"] = contract_amount
+                current_bill["sheet_total_this_week"] = this_week_amount
             continue
 
-        rows.append({
-            "bill_no": current_bill,
-            "item_code": code,
-            "description": desc,
-            "unit": _txt(r, "unit"),
-            "contract_qty": _num(r, "contract qty"),
-            "rate": rate,
-            "contract_amount": contract_amount,
-            "qty_this_week": this_week_qty,
-            "amount_this_week": this_week_amount,
-            "pct_complete": pct,
-        })
+        # ── tail rows (after all bills) ─────────────────────────────────
+        if desc_u.startswith("ADD CONTINGENC"):
+            tail["contingency"] = {"contract": contract_amount,
+                                   "this_week": this_week_amount}
+            in_summary_table = True  # everything below is summary/markup
+            continue
+        if desc_u.startswith("ADD VOP"):
+            tail["vop"] = {"contract": contract_amount,
+                           "this_week": this_week_amount}
+            continue
+        if desc_u.startswith("ADD VAT"):
+            tail["vat"] = {"contract": contract_amount,
+                           "this_week": this_week_amount}
+            continue
+        if desc_u.startswith(("SUB – TOTAL", "SUB - TOTAL", "SUB-TOTAL", "SUB –TOTAL")):
+            tail.setdefault("subtotals", []).append(
+                {"contract": contract_amount, "this_week": this_week_amount})
+            continue
+        if desc_u == "TOTAL" or "GRAND TOTAL" in desc_u:
+            tail["grand_total"] = {"contract": contract_amount,
+                                   "this_week": this_week_amount}
+            continue
+        if code_s.startswith("Total Contingency"):
+            tail["contingency_vop_total"] = {"contract": contract_amount,
+                                             "this_week": this_week_amount}
+            continue
+
+        # ── bill headers: integer code + ALL-CAPS name ─────────────────
+        if re.fullmatch(r"\d+", code_s) and desc_s and desc_s == desc_u:
+            if in_summary_table:
+                continue  # defensive: summary uses Title Case, but be safe
+            current_bill = {"bill_no": int(code_s), "name": desc_s,
+                            "sheet_total_contract": None,
+                            "sheet_total_this_week": None}
+            bills.append(current_bill)
+            continue
+
+        # ── summary-table restatement (codes 1..8, Title Case names) ───
+        if re.fullmatch(r"\d+", code_s) and desc_s:
+            summary_table.append({"bill_no": int(code_s), "name": desc_s,
+                                  "contract": contract_amount,
+                                  "this_week": this_week_amount})
+            continue
+
+        # ── real items: n.nn or n.nna codes ─────────────────────────────
+        if _ITEM_CODE_RX.fullmatch(code_s) and desc_s and current_bill is not None \
+                and not in_summary_table:
+            rows.append({
+                "bill_no": current_bill["bill_no"],
+                "item_code": code_s,
+                "description": desc_s,
+                "unit": _txt(r, "unit"),
+                "contract_qty": _num(r, "contract qty"),
+                "rate": _num(r, "rate"),
+                "contract_amount": contract_amount,
+                "qty_previous_reported": _num(r, "previous qty"),
+                "amount_previous_reported": _num(r, "previous amount"),
+                "qty_this_week": _num(r, "this week qty"),
+                "amount_this_week": this_week_amount,
+            })
+            continue
+        # anything else (blank codes, prose, repeated headers) is ignored
+
+    # ── duplicate identities: the site reused 3.07 for two different
+    # rows — dup_seq (occurrence index) keeps both as distinct items ────
+    seen_ids: dict[tuple, int] = {}
+    for item in rows:
+        key = (item["bill_no"], item["item_code"], item["description"])
+        item["dup_seq"] = seen_ids.get(key, 0)
+        seen_ids[key] = item["dup_seq"] + 1
+
+    # ── arithmetic cross-checks (also power the upload preview) ────────
+    checks: list[dict[str, Any]] = []
+    for b in bills:
+        mine_c = sum(float(i["contract_amount"] or 0)
+                     for i in rows if i["bill_no"] == b["bill_no"])
+        mine_w = sum(float(i["amount_this_week"] or 0)
+                     for i in rows if i["bill_no"] == b["bill_no"])
+        for label, mine, sheet in (("contract", mine_c, b["sheet_total_contract"]),
+                                   ("this_week", mine_w, b["sheet_total_this_week"])):
+            if sheet is not None and abs(mine - float(sheet)) > 1.0:
+                checks.append({
+                    "check": f"bill_{b['bill_no']}_{label}",
+                    "ours": round(mine, 2), "sheet": float(sheet),
+                    "delta": round(mine - float(sheet), 2),
+                })
+                warnings.append(
+                    f"BEME Bill {b['bill_no']} {label}: our sum "
+                    f"{mine:,.2f} != sheet total {float(sheet):,.2f} — the "
+                    f"sheet's own SUM range may be broken"
+                )
     if not rows:
         warnings.append("BEME: no item rows parsed")
-    return {"rows": rows, "warnings": warnings}
+    if not bills:
+        warnings.append("BEME: no bill headers found")
+    return {"rows": rows, "bills": bills, "tail": tail,
+            "summary_table": summary_table, "cross_checks": checks,
+            "warnings": warnings}
 
 
 # ---------------------------------------------------------------------------
-# T2.11 — Bill 1 (items from Summary; payments)
-# ---------------------------------------------------------------------------
-
-def parse_bill1_summary(ws) -> dict[str, Any]:
-    """v1 ingests Bill 1 ITEMS (schedule); the per-cert claims matrix has
-    dynamic columns and is deferred — flagged in warnings, never silent."""
-    warnings: list[str] = ["Bill 1 Summary: per-cert claims matrix deferred (v1)"]
-    hit = find_header_row(ws, ["description"], min_matches=1)
-    if hit is None:
-        return {"rows": [], "warnings": ["Bill 1 Summary: header row not found"]}
-    hrow, cols = hit
-
-    rows = []
-    for r in iter_table_rows(ws, hrow, cols, stop_after_blank=15):
-        desc = _txt(r, "description")
-        if not desc or _NOISE_ROWS.match(desc):
-            continue
-        rows.append({
-            "item_code": _txt(r, "item"),
-            "description": desc,
-            "unit": _txt(r, "unit"),
-            "contract_qty": _num(r, "qty", "contract qty"),
-            "rate": _num(r, "rate"),
-            "contract_amount": _num(r, "amount", "contract amount"),
-        })
-    return {"rows": rows, "warnings": warnings}
-
-
-def parse_bill1_payments(ws) -> dict[str, Any]:
-    warnings: list[str] = []
-    hit = find_header_row(ws, ["payee", "amount"], min_matches=2)
-    if hit is None:
-        return {"rows": [], "warnings": ["Bill 1 Payments: header row not found"]}
-    hrow, cols = hit
-
-    rows = []
-    for r in iter_table_rows(ws, hrow, cols):
-        payee = _txt(r, "payee")
-        amount = _num(r, "amount")
-        if payee is None and amount is None:
-            continue
-        rows.append({
-            "payment_date": _dt(r, "date"),
-            "description": " — ".join(
-                x for x in (payee, _txt(r, "bill 1 item")) if x
-            ) or None,
-            "reference": _txt(r, "chq no"),
-            "amount": amount,
-        })
-    return {"rows": rows, "warnings": warnings}
-
-
-# ---------------------------------------------------------------------------
-# T2.12 — Subcontractors, Labour, Materials, Hired Vehicles, Precast
-# ---------------------------------------------------------------------------
-
-def parse_subcontractors(ws) -> dict[str, Any]:
-    warnings: list[str] = []
-    hit = find_header_row(
-        ws, ["subcontractor", "description", "agreed rate"], min_matches=2
-    )
-    if hit is None:
-        return {"rows": [], "warnings": ["Subcontractors: header row not found"]}
-    hrow, cols = hit
-
-    rows = []
-    last_sub = None
-    for r in iter_table_rows(ws, hrow, cols):
-        sub = _txt(r, "subcontractor")
-        desc = _txt(r, "description")
-        if sub:
-            last_sub = sub
-        if not desc:
-            continue
-        rows.append({
-            "subcontractor_name": sub or last_sub,
-            "description": desc,
-            "location": _txt(r, "location"),
-            "unit": _txt(r, "unit"),
-            "agreed_rate": _num(r, "agreed rate"),
-            "assigned_qty": _num(r, "assigned qty"),
-            "qty_this_week": _num(r, "qty executed for week"),
-            "amount_this_week": _num(r, "value completed this wee"),
-        })
-    return {"rows": rows, "warnings": warnings}
-
-
-def parse_labour(ws) -> dict[str, Any]:
-    warnings: list[str] = []
-    hit = find_header_row(ws, ["department", "manning this week"])
-    if hit is None:
-        return {"rows": [], "warnings": ["Labour: header row not found"]}
-    hrow, cols = hit
-
-    rows = []
-    for r in iter_table_rows(ws, hrow, cols):
-        dept = _txt(r, "department")
-        if not dept or _NOISE_ROWS.match(dept):
-            continue
-        manning = _num(r, "manning this week")
-        rows.append({
-            "department": dept,
-            "manning_this_week": int(manning) if manning is not None else 0,
-            "manning_previous_week": int(_num(r, "manning previous week") or 0),
-            "movement": int(_num(r, "movement") or 0),
-            "comment": _txt(r, "comment"),
-        })
-    return {"rows": rows, "warnings": warnings}
-
-
-def parse_materials(ws) -> dict[str, Any]:
-    warnings: list[str] = []
-    hit = find_header_row(
-        ws, ["description", "opening stock", "closing stock"], min_matches=2
-    )
-    if hit is None:
-        return {"rows": [], "warnings": ["Materials: header row not found"]}
-    hrow, cols = hit
-
-    rows = []
-    for r in iter_table_rows(ws, hrow, cols):
-        desc = _txt(r, "description")
-        if not desc or _NOISE_ROWS.match(desc):
-            continue
-        rows.append({
-            "sheet_source": "materials",
-            "material_name": desc,
-            "unit": _txt(r, "unit"),
-            "unit_cost": _num(r, "current price"),
-            "opening_stock": _num(r, "opening stock"),
-            "received": _num(r, "received"),
-            "used": _num(r, "total used"),
-            "closing_stock": _num(r, "closing stock"),
-        })
-    return {"rows": rows, "warnings": warnings}
-
-
-def parse_hired_vehicles(ws) -> dict[str, Any]:
-    warnings: list[str] = []
-    hit = find_header_row(ws, ["description", "days worked", "rate"], min_matches=2)
-    if hit is None:
-        return {"rows": [], "warnings": ["Hired Vehicles: header row not found"]}
-    hrow, cols = hit
-
-    rows = []
-    for r in iter_table_rows(ws, hrow, cols):
-        desc = _txt(r, "description")
-        owners = _txt(r, "owners")
-        amount = _num(r, "amount")
-        days = _num(r, "days worked")
-        if desc is None and owners is None:
-            continue
-        if not any(v for v in (desc, days, amount)):
-            continue
-        rows.append({
-            "registration_no": _txt(r, "reg. no", "reg no"),
-            "description": desc,
-            "section": _txt(r, "section"),
-            "owners": owners,
-            "days_worked": days,
-            "rate_ngn": _num(r, "rate"),
-            "amount_ngn": amount or 0,
-            "remarks": _txt(r, "remarks"),
-        })
-    return {"rows": rows, "warnings": warnings}
-
-
-def parse_precast(ws) -> dict[str, Any]:
-    warnings: list[str] = []
-    hit = find_header_row(ws, ["description", "cast this week"], min_matches=1)
-    if hit is None:
-        return {"rows": [], "warnings": ["Precast: header row not found"]}
-    hrow, cols = hit
-
-    rows = []
-    for r in iter_table_rows(ws, hrow, cols):
-        desc = _txt(r, "description")
-        if not desc or _NOISE_ROWS.match(desc):
-            continue
-        rows.append({
-            "description": desc,
-            "size": _txt(r, "size"),
-            "uom": _txt(r, "uom"),
-            "cast_this_week": _num(r, "cast this week"),
-            "used_this_week": _num(r, "used this week"),
-            "balance_available": _num(r, "balance available"),
-            "closing_stock": _num(r, "closing stock"),
-        })
-    return {"rows": rows, "warnings": warnings}
-
-
-# ---------------------------------------------------------------------------
-# T2.13 — Lists (reference data + week calendar validation map)
+# Lists (master data — company calendar + reference lists)
 # ---------------------------------------------------------------------------
 
 def parse_lists(ws) -> dict[str, Any]:
@@ -725,22 +814,22 @@ def parse_lists(ws) -> dict[str, Any]:
 
 _SHEET_PARSERS = {
     "Contract Summary": parse_contract_summary,
-    "Weekly Summary": parse_weekly_summary,
+    "Weekly Summary": parse_weekly_summary,        # cross-check only
     "Plant Return": parse_plant_return,
     "Diesel Consumption": parse_diesel,
     "Cost Report": parse_cost_report,
     "Certificate Status": parse_certificates,
     "Payments Recieved": parse_payments,
     "BEME & Works Completed Fd": parse_beme,
-    "Bill 1 Summary": parse_bill1_summary,
-    "Bill 1 Payments": parse_bill1_payments,
-    "Subcontractors": parse_subcontractors,
-    "Labour Strength": parse_labour,
-    "Materials & Civils": parse_materials,
-    "Hired Vehicles": parse_hired_vehicles,
-    "Precast": parse_precast,
     "Lists": parse_lists,
 }
+
+# Sheets we deliberately do NOT parse — stored in Storage, shown raw in
+# the upload preview. Their money already auto-posts into the Cost Report.
+STORED_ONLY_SHEETS = (
+    "Bill 1 Summary", "Bill 1 Payments", "Subcontractors",
+    "Labour Strength", "Materials & Civils", "Hired Vehicles", "Precast",
+)
 
 
 def parse_workbook(wb: Workbook) -> dict[str, Any]:
