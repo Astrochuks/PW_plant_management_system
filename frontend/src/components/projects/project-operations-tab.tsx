@@ -25,6 +25,7 @@ import {
   useProjectOperationsSeries,
   useProjectOperationsSummary,
   useProjectPlantRollups,
+  type FinancialWeek,
   type ProjectOperationsMonthRow,
   type ProjectOperationsWeekRow,
 } from '@/hooks/use-projects'
@@ -327,9 +328,14 @@ function FinancialsSection({ projectId }: { projectId: string }) {
         <StatCard
           icon={Droplets} label="Diesel cost (AGO)"
           value={ngn(t.diesel_cost)}
-          hint={`${num(Math.round(t.diesel_litres))} litres`}
+          hint={`${num(Math.round(t.diesel_litres))} L charged${
+            data.weeks.at(-1)?.diesel_rate
+              ? ` · latest ₦${num(data.weeks.at(-1)!.diesel_rate!)}/L` : ''}`}
         />
       </div>
+
+      {/* Data quality — what the system caught in the workbooks */}
+      <DataQualityPanel weeks={data.weeks} />
 
       {/* Weekly earnings vs cost */}
       <Card>
@@ -355,9 +361,17 @@ function FinancialsSection({ projectId }: { projectId: string }) {
                 return (
                   <TableRow key={`${w.year}-${w.week_number}`}>
                     <TableCell className="whitespace-nowrap font-medium">
-                      W{String(w.week_number).padStart(2, '0')} · {new Date(
-                        w.week_ending_date,
-                      ).toLocaleDateString('en-NG', { day: '2-digit', month: 'short' })}
+                      <span className="flex items-center gap-1.5">
+                        W{String(w.week_number).padStart(2, '0')} · {new Date(
+                          w.week_ending_date,
+                        ).toLocaleDateString('en-NG', { day: '2-digit', month: 'short' })}
+                        {w.flags.some((f) => f.severity !== 'info') && (
+                          <AlertCircle
+                            className="h-3.5 w-3.5 text-amber-500"
+                            aria-label="data-quality flags"
+                          />
+                        )}
+                      </span>
                     </TableCell>
                     <TableCell className="tabular-nums">{ngn(w.earnings)}</TableCell>
                     <TableCell className="tabular-nums">{ngn(w.cost_total)}</TableCell>
@@ -551,6 +565,47 @@ function PlantsSection({ projectId }: { projectId: string }) {
             ))}
           </TableBody>
         </Table>
+      </CardContent>
+    </Card>
+  )
+}
+
+
+function DataQualityPanel({ weeks }: { weeks: FinancialWeek[] }) {
+  const items = useMemo(() => {
+    const out: { key: string; weeks: number[]; message: string; type: string }[] = []
+    const by = new Map<string, { weeks: number[]; message: string; type: string }>()
+    for (const w of weeks) {
+      for (const f of w.flags) {
+        if (f.severity === 'info') continue
+        const key = `${f.sheet}|${f.type}`
+        const cur = by.get(key) ?? { weeks: [], message: f.message, type: f.type }
+        cur.weeks.push(w.week_number)
+        by.set(key, cur)
+      }
+    }
+    for (const [key, v] of by) out.push({ key, ...v })
+    return out
+  }, [weeks])
+
+  if (!items.length) return null
+  return (
+    <Card className="border-amber-300/60">
+      <CardHeader className="pb-2">
+        <CardTitle className="flex items-center gap-2 text-sm">
+          <AlertCircle className="h-4 w-4 text-amber-500" />
+          Data quality — caught automatically in the site&apos;s workbooks
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-1.5">
+        {items.map((it) => (
+          <p key={it.key} className="text-xs">
+            <Badge variant="outline" className="mr-1.5 border-amber-300 px-1 py-0 text-[10px] text-amber-700">
+              {it.type.replace(/_/g, ' ')} · W{it.weeks.join(', W')}
+            </Badge>
+            <span className="text-muted-foreground">{it.message}</span>
+          </p>
+        ))}
       </CardContent>
     </Card>
   )

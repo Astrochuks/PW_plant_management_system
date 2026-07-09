@@ -664,6 +664,13 @@ export async function getProjectOperationsSeries(
 
 // ── Financials + per-plant rollups ──────────────────────────────────────────
 
+export interface WeekFlag {
+  sheet: string;
+  type: string;
+  severity: 'info' | 'warning' | 'error';
+  message: string;
+}
+
 export interface FinancialWeek {
   year: number;
   week_number: number;
@@ -674,10 +681,13 @@ export interface FinancialWeek {
   cost_total: number;
   cost_by_category: Record<string, number>;
   diesel_cost: number;
-  diesel_litres: number;
+  diesel_rate: number | null;
+  diesel_litres: number;          // charged (Cost Report AGO — money truth)
+  diesel_logged_litres: number;   // attribution log (may be stale copy)
   net: number;
   cumulative_net: number;
   sheet_net: number | null;
+  flags: WeekFlag[];
 }
 
 export interface ProjectFinancials {
@@ -710,10 +720,13 @@ export async function getProjectFinancials(projectId: string): Promise<ProjectFi
       cost_total: Number(w.cost_total ?? 0),
       cost_by_category: numRec(w.cost_by_category as Record<string, unknown>),
       diesel_cost: Number(w.diesel_cost ?? 0),
+      diesel_rate: w.diesel_rate == null ? null : Number(w.diesel_rate),
       diesel_litres: Number(w.diesel_litres ?? 0),
+      diesel_logged_litres: Number(w.diesel_logged_litres ?? 0),
       net: Number(w.net ?? 0),
       cumulative_net: Number(w.cumulative_net ?? 0),
       sheet_net: w.sheet_net == null ? null : Number(w.sheet_net),
+      flags: (w.flags ?? []) as WeekFlag[],
     })),
     totals: {
       ...d.totals,

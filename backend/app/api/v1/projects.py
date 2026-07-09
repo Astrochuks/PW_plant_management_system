@@ -527,10 +527,11 @@ async def list_project_operations(
     rows = await fetch(
         """
         WITH wr AS (
+            -- first/last must be year-aware: W43 2025 precedes W2 2026
             SELECT project_id,
                    count(*)::int                AS weeks_received,
-                   min(week_number)::int        AS first_week,
-                   max(week_number)::int        AS last_week,
+                   (min(year * 100 + week_number) % 100)::int AS first_week,
+                   (max(year * 100 + week_number) % 100)::int AS last_week,
                    max(week_ending_date)        AS last_week_ending,
                    max(year)::int               AS latest_year
             FROM project_weekly_reports
@@ -816,23 +817,22 @@ async def get_project_operations_financials(
     rows = await fetch(
         """
         SELECT wr.year, wr.week_number, wr.week_ending_date,
-               ws_works.value                                   AS works_value,
+               COALESCE(beme.works, 0)                          AS works_value,
                cost.by_category                                 AS cost_by_category,
                COALESCE(cost.total, 0)                          AS cost_total,
-               ws_cost.value                                    AS sheet_cost_total,
                ws_net.value                                     AS sheet_net,
-               COALESCE(d.litres, 0)                            AS diesel_litres
+               ago.qty                                          AS diesel_charged_litres,
+               ago.rate                                         AS diesel_rate,
+               ago.amount                                       AS diesel_cost,
+               COALESCE(d.litres, 0)                            AS diesel_logged_litres,
+               fl.flags                                         AS flags
         FROM project_weekly_reports wr
+        -- earnings: recomputed from atomic BEME item movement, never
+        -- from the sheet's own rollup (that is a cross-check now)
         LEFT JOIN LATERAL (
-            SELECT value FROM project_weekly_summary
-            WHERE weekly_report_id = wr.id AND section = 'Works Completed'
-              AND item = 'SUB-TOTAL' AND metric = 'this_week' LIMIT 1
-        ) ws_works ON TRUE
-        LEFT JOIN LATERAL (
-            SELECT value FROM project_weekly_summary
-            WHERE weekly_report_id = wr.id AND section = 'Costs to Date'
-              AND item = 'Total Costs to Date' AND metric = 'this_week' LIMIT 1
-        ) ws_cost ON TRUE
+            SELECT sum(amount_this_week) AS works
+            FROM project_beme_progress WHERE weekly_report_id = wr.id
+        ) beme ON TRUE
         LEFT JOIN LATERAL (
             SELECT value FROM project_weekly_summary
             WHERE weekly_report_id = wr.id AND section = 'Costs to Date'
@@ -848,10 +848,30 @@ async def get_project_operations_financials(
                 GROUP BY cost_category
             ) c
         ) cost ON TRUE
+        -- diesel money truth: the Cost Report AGO row (litres charged @ rate)
+        LEFT JOIN LATERAL (
+            SELECT quantity_this_week AS qty, rate_ngn AS rate,
+                   amount_this_week AS amount
+            FROM project_cost_report
+            WHERE weekly_report_id = wr.id AND description = 'Diesel'
+              AND cost_category = 'AGO'
+            ORDER BY amount_this_week DESC NULLS LAST LIMIT 1
+        ) ago ON TRUE
+        -- attribution log (may be a stale copy — see flags)
         LEFT JOIN LATERAL (
             SELECT sum(total_litres) AS litres
             FROM project_diesel_consumption WHERE weekly_report_id = wr.id
         ) d ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT jsonb_agg(jsonb_build_object(
+                       'sheet', sheet_name, 'type', flag_type,
+                       'severity', severity, 'message', message)
+                   ORDER BY severity DESC) AS flags
+            FROM project_sheet_flags
+            WHERE weekly_report_id = wr.id
+              AND flag_type IN ('stale_copy', 'frozen_column',
+                                'cross_check_fail', 'chain_break')
+        ) fl ON TRUE
         WHERE wr.project_id = $1::uuid
         ORDER BY wr.year, wr.week_number
         """,
@@ -869,13 +889,7 @@ async def get_project_operations_financials(
         net = earnings - cost_total
         cum_net += net
 
-        # cross-checks against the sheet's own arithmetic
-        sheet_cost = r["sheet_cost_total"]
-        if sheet_cost is not None and abs(float(sheet_cost) - cost_total) > 1.0:
-            warnings.append(
-                f"W{r['week_number']}: recomputed cost ₦{cost_total:,.2f} ≠ "
-                f"sheet total ₦{float(sheet_cost):,.2f}"
-            )
+        # cross-check: our BEME-computed net vs the sheet's Net Earnings
         sheet_net = r["sheet_net"]
         if sheet_net is not None and abs(float(sheet_net) - net) > 1.0:
             warnings.append(
@@ -884,6 +898,8 @@ async def get_project_operations_financials(
             )
 
         by_cat = r["cost_by_category"] or {}
+        charged = float(r["diesel_charged_litres"] or 0)
+        logged = float(r["diesel_logged_litres"] or 0)
         weeks.append({
             "year": r["year"],
             "week_number": r["week_number"],
@@ -893,11 +909,14 @@ async def get_project_operations_financials(
             "earnings": earnings,
             "cost_total": cost_total,
             "cost_by_category": by_cat,
-            "diesel_cost": float(by_cat.get("AGO") or 0),
-            "diesel_litres": float(r["diesel_litres"] or 0),
+            "diesel_cost": float(r["diesel_cost"] or 0),
+            "diesel_rate": float(r["diesel_rate"] or 0) or None,
+            "diesel_litres": charged,          # the money truth (charged)
+            "diesel_logged_litres": logged,    # attribution log
             "net": net,
             "cumulative_net": round(cum_net, 2),
             "sheet_net": float(sheet_net) if sheet_net is not None else None,
+            "flags": r["flags"] or [],
         })
 
     totals = {

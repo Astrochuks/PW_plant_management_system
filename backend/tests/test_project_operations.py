@@ -1,7 +1,7 @@
 """Operations endpoints (Phase 3) — recomputed weekly aggregates.
 
-Runs against the live dev DB, which holds all 9 Akwa Ibom weeks
-(2026 W2–W10). Read-only; skips cleanly if the DB is unreachable.
+Runs against the live dev DB, which holds all 10 Akwa Ibom weeks
+(2025 W43 + 2026 W2–W10). Read-only; skips cleanly if the DB is unreachable.
 """
 
 import pytest
@@ -44,8 +44,8 @@ class TestPortfolio:
         rows = r.json()["data"]
         assert len(rows) >= 1
         akwa = rows[0]
-        assert akwa["weeks_received"] == 9
-        assert akwa["first_week"] == 2 and akwa["last_week"] == 10
+        assert akwa["weeks_received"] == 10
+        assert akwa["first_week"] == 43 and akwa["last_week"] == 10  # W43 2025 first
         # the numbers quoted to the GPM
         assert 15000 < float(akwa["hours_worked"]) < 17000
         assert 50000 < float(akwa["diesel_litres"]) < 60000
@@ -62,7 +62,7 @@ class TestSummary:
         r = client.get(f"/api/v1/projects/{pid}/operations/summary")
         assert r.status_code == 200
         d = r.json()["data"]
-        assert d["totals"]["weeks_received"] == 9
+        assert d["totals"]["weeks_received"] == 10
         assert d["latest_snapshot"] is not None
         assert float(d["latest_snapshot"]["current_contract_amount"]) == pytest.approx(
             10621359979.09
@@ -83,8 +83,8 @@ class TestSeries:
         weekly = client.get(
             f"/api/v1/projects/{pid}/operations/series?granularity=week"
         ).json()["data"]
-        assert len(weekly) == 9
-        assert [w["week_number"] for w in weekly] == list(range(2, 11))
+        assert len(weekly) == 10
+        assert [w["week_number"] for w in weekly] == [43] + list(range(2, 11))
 
         summary = client.get(
             f"/api/v1/projects/{pid}/operations/summary"
@@ -100,8 +100,8 @@ class TestSeries:
         monthly = client.get(
             f"/api/v1/projects/{pid}/operations/series?granularity=month"
         ).json()["data"]
-        assert 1 <= len(monthly) <= 4
-        assert sum(m["weeks_in_month"] for m in monthly) == 9
+        assert 1 <= len(monthly) <= 5
+        assert sum(m["weeks_in_month"] for m in monthly) == 10
 
         summary = client.get(
             f"/api/v1/projects/{pid}/operations/summary"
@@ -124,7 +124,7 @@ class TestFinancials:
         r = client.get(f"/api/v1/projects/{pid}/operations/financials")
         assert r.status_code == 200
         d = r.json()["data"]
-        assert len(d["weeks"]) == 9
+        assert len(d["weeks"]) == 10
         assert d["cross_check_warnings"] == []
 
         w10 = next(w for w in d["weeks"] if w["week_number"] == 10)
@@ -149,7 +149,7 @@ class TestFinancials:
         t = d["totals"]
         assert t["net"] == pytest.approx(
             sum(w["net"] for w in d["weeks"]), abs=0.5)
-        assert t["weeks_gaining"] + t["weeks_losing"] <= 9
+        assert t["weeks_gaining"] + t["weeks_losing"] <= 10
         assert t["diesel_cost"] > 0 and t["diesel_litres"] > 50_000
         assert "AGO" in t["cost_by_category"]
         assert len(d["bills"]) >= 5  # BEME bills with % complete
@@ -180,4 +180,4 @@ class TestPlantsRollup:
         ac163 = next(p for p in rows if p["fleet_number_raw"] == "AC163")
         assert ac163["fleet_number"] == "AC163"
         assert ac163["condition"] is not None
-        assert ac163["weeks_seen"] == 9
+        assert ac163["weeks_seen"] == 10

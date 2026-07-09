@@ -32,12 +32,15 @@ import {
 } from '@/components/ui/table'
 import {
   useDeleteProjectSubmission,
+  usePreviewWeeklyReport,
   useProjects,
   useProjectSubmissions,
   useRetryProjectSubmission,
   useUploadWeeklyReport,
   type ProjectSubmission,
+  type ReportPreview,
 } from '@/hooks/use-projects'
+import { ReportPreviewDialog } from '@/components/projects/report-preview-dialog'
 
 const STATUS_BADGE: Record<string, { label: string; className: string }> = {
   queued: { label: 'Queued', className: 'bg-slate-100 text-slate-700' },
@@ -54,11 +57,33 @@ function UploadDialog() {
   const [projectId, setProjectId] = useState('')
   const [year, setYear] = useState(new Date().getFullYear())
   const [week, setWeek] = useState(1)
+  const [preview, setPreview] = useState<ReportPreview | null>(null)
+  const [previewOpen, setPreviewOpen] = useState(false)
   const upload = useUploadWeeklyReport()
+  const previewMutation = usePreviewWeeklyReport()
 
   const { data: projectsData } = useProjects({ is_legacy: false, limit: 100 })
   const projects = projectsData?.data ?? []
 
+  // Step 1: parse in memory and show every sheet — nothing stored yet
+  const runPreview = () => {
+    if (!file || !projectId) return
+    previewMutation.mutate(
+      { file, projectId },
+      {
+        onSuccess: (data) => {
+          setPreview(data)
+          setPreviewOpen(true)
+        },
+        onError: (err: Error) =>
+          toast.error('Could not preview the workbook', {
+            description: err.message, duration: 12000,
+          }),
+      },
+    )
+  }
+
+  // Step 2: the admin has reviewed the sheets — ingest for real
   const submit = () => {
     if (!file || !projectId) return
     upload.mutate(
@@ -68,8 +93,10 @@ function UploadDialog() {
           toast.success('Report queued for processing', {
             description: `${year} · Week ${week} — watch the table below`,
           })
+          setPreviewOpen(false)
           setOpen(false)
           setFile(null)
+          setPreview(null)
         },
         onError: (err: Error) =>
           toast.error('Upload failed', { description: err.message, duration: 12000 }),
@@ -133,15 +160,27 @@ function UploadDialog() {
           </div>
           <Button
             className="w-full"
-            disabled={!file || !projectId || upload.isPending}
-            onClick={submit}
+            disabled={!file || !projectId || previewMutation.isPending}
+            onClick={runPreview}
           >
-            {upload.isPending
-              ? <Loader2 className="h-4 w-4 animate-spin" />
-              : 'Upload & Process'}
+            {previewMutation.isPending
+              ? <><Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> Parsing all 16 sheets…</>
+              : 'Preview Sheets'}
           </Button>
+          <p className="text-muted-foreground text-xs">
+            Every sheet is parsed and shown for review first — nothing is
+            saved until you confirm.
+          </p>
         </div>
       </DialogContent>
+      <ReportPreviewDialog
+        preview={preview}
+        fileName={file?.name ?? ''}
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        onConfirm={submit}
+        confirming={upload.isPending}
+      />
     </Dialog>
   )
 }
