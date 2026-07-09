@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -135,6 +136,40 @@ def create_application() -> FastAPI:
                 "success": False,
                 "error": {
                     **exc.to_dict(),
+                    "request_id": getattr(request.state, "request_id", None),
+                },
+            },
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_handler(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        """422s must be diagnosable from the logs: which fields, why."""
+        errors = [
+            {
+                "field": ".".join(str(loc) for loc in e.get("loc", [])[1:]),
+                "message": e.get("msg"),
+                "input": str(e.get("input"))[:80],
+            }
+            for e in exc.errors()
+        ]
+        logger.warning(
+            "Request validation failed",
+            path=request.url.path,
+            method=request.method,
+            errors=errors,
+        )
+        return JSONResponse(
+            status_code=422,
+            content={
+                "success": False,
+                "error": {
+                    "code": "VALIDATION_ERROR",
+                    "message": "; ".join(
+                        f"{e['field']}: {e['message']}" for e in errors
+                    ) or "Invalid request",
+                    "details": errors,
                     "request_id": getattr(request.state, "request_id", None),
                 },
             },
