@@ -66,7 +66,7 @@ export function LocationCard({ location, onClick }: LocationCardProps) {
           </div>
           <div className="flex items-center gap-1 text-muted-foreground">
             <CheckCircle className="h-3 w-3" />
-            Unverified: <span className="font-medium text-foreground">{location.unverified_plants}</span>
+            Unknown: <span className="font-medium text-foreground">{location.unknown_condition_plants}</span>
           </div>
         </div>
       </CardContent>

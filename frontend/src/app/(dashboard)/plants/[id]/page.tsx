@@ -68,18 +68,15 @@ const CONDITION_STYLES: Record<
 > = {
   working: { label: 'Working', variant: 'default', className: 'bg-emerald-600 hover:bg-emerald-600 text-white' },
   standby: { label: 'Standby', variant: 'secondary', className: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200' },
-  under_repair: { label: 'Under Repair', variant: 'secondary', className: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' },
   breakdown: { label: 'Breakdown', variant: 'destructive' },
-  faulty: { label: 'Faulty', variant: 'secondary', className: 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200' },
   scrap: { label: 'Scrap', variant: 'secondary', className: 'bg-gray-200 text-gray-600 dark:bg-gray-800 dark:text-gray-400' },
   missing: { label: 'Missing', variant: 'destructive', className: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' },
   off_hire: { label: 'Off Hire', variant: 'outline' },
-  gpm_assessment: { label: 'GPM Assessment', variant: 'secondary', className: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200' },
-  unverified: { label: 'Unverified', variant: 'outline', className: 'text-muted-foreground' },
+  unknown: { label: 'Unknown', variant: 'outline', className: 'text-muted-foreground' },
 }
 
 function ConditionBadge({ condition }: { condition: PlantCondition | null }) {
-  const style = CONDITION_STYLES[condition || 'unverified'] || CONDITION_STYLES.unverified
+  const style = CONDITION_STYLES[condition || 'unknown'] || CONDITION_STYLES.unknown
   return (
     <Badge variant={style.variant} className={style.className}>
       {style.label}

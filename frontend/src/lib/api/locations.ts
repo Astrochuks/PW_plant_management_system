@@ -26,14 +26,11 @@ export interface LocationStats {
   total_plants: number;
   working_plants: number;
   standby_plants: number;
-  under_repair_plants: number;
   breakdown_plants: number;
-  faulty_plants: number;
   missing_plants: number;
   scrap_plants: number;
   off_hire_plants: number;
-  gpm_assessment_plants: number;
-  unverified_plants: number;
+  unknown_condition_plants: number;
   is_active: boolean;
 }
 

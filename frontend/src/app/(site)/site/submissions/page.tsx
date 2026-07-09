@@ -40,7 +40,7 @@ const STATUS_STYLES: Record<string, { label: string; className: string; icon: Re
 
 const CONDITION_LABELS: Record<string, string> = {
   working: 'Working', standby: 'Standby', breakdown: 'Breakdown',
-  missing: 'Missing', faulty: 'Faulty', scrap: 'Scrap',
+  missing: 'Missing', scrap: 'Scrap',
   off_hire: 'Off Hire', unverified: 'Unverified', others: 'Others',
 }
 

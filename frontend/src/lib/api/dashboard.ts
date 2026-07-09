@@ -11,14 +11,11 @@ export interface DashboardPlantStats {
   total_plants: number;
   working_plants: number;
   standby_plants: number;
-  under_repair_plants: number;
   breakdown_plants: number;
-  faulty_plants: number;
   missing_plants: number;
   scrap_plants: number;
   off_hire_plants: number;
-  gpm_assessment_plants: number;
-  unverified_condition_plants: number;
+  unknown_condition_plants: number;
   verified_plants: number;
   unverified_plants: number;
 }
@@ -33,14 +30,11 @@ export interface LocationStat {
   total_plants: number;
   working_plants: number;
   standby_plants: number;
-  under_repair_plants: number;
   breakdown_plants: number;
-  faulty_plants: number;
   missing_plants: number;
   scrap_plants: number;
   off_hire_plants: number;
-  gpm_assessment_plants: number;
-  unverified_plants: number;
+  unknown_condition_plants: number;
 }
 
 export interface RecentSubmission {
@@ -72,7 +66,6 @@ export interface FleetSummaryItem {
   working: number;
   standby: number;
   breakdown: number;
-  under_repair: number;
   other: number;
 }
 
@@ -136,7 +129,6 @@ export async function getFleetSummary(locationId?: string): Promise<FleetSummary
     working: Number(row.working ?? 0),
     standby: Number(row.standby ?? 0),
     breakdown: Number(row.breakdown ?? 0),
-    under_repair: Number(row.under_repair ?? 0),
     other: Number(row.other ?? 0),
   }));
 }
@@ -194,7 +186,7 @@ export interface StateSummary {
   total_plants: number;
   working_plants: number;
   breakdown_plants: number;
-  under_repair_plants: number;
+  standby_plants: number;
   missing_plants: number;
   scrap_plants: number;
 }
@@ -214,7 +206,7 @@ export async function getStatesSummary(fleetType?: string): Promise<StateSummary
     total_plants: Number(row.total_plants ?? 0),
     working_plants: Number(row.working_plants ?? 0),
     breakdown_plants: Number(row.breakdown_plants ?? 0),
-    under_repair_plants: Number(row.under_repair_plants ?? 0),
+    standby_plants: Number(row.standby_plants ?? 0),
     missing_plants: Number(row.missing_plants ?? 0),
     scrap_plants: Number(row.scrap_plants ?? 0),
   }));

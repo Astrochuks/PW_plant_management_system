@@ -78,14 +78,10 @@ import { locationsKeys } from '@/hooks/use-locations'
 const CONDITION_STYLES: Record<string, { label: string; className: string }> = {
   working: { label: 'Working', className: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200' },
   standby: { label: 'Standby', className: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200' },
-  under_repair: { label: 'Under Repair', className: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' },
   breakdown: { label: 'Breakdown', className: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' },
-  faulty: { label: 'Faulty', className: 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200' },
   scrap: { label: 'Scrap', className: 'bg-gray-200 text-gray-600 dark:bg-gray-800 dark:text-gray-400' },
   missing: { label: 'Missing', className: 'bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300' },
   off_hire: { label: 'Off Hire', className: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300' },
-  gpm_assessment: { label: 'GPM Assessment', className: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200' },
-  unverified: { label: 'Unverified', className: 'bg-muted text-muted-foreground' },
 }
 
 const CURRENT_YEAR = new Date().getFullYear()
@@ -916,7 +912,7 @@ function UsageCard({ label, value, color }: { label: string; value: string; colo
 }
 
 function ConditionBadge({ condition }: { condition: PlantCondition | null }) {
-  const style = CONDITION_STYLES[condition || 'unverified'] || CONDITION_STYLES.unverified
+  const style = CONDITION_STYLES[condition || 'unknown'] || CONDITION_STYLES.unknown
   return (
     <Badge variant="secondary" className={`text-xs ${style.className}`}>
       {style.label}

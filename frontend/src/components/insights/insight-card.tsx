@@ -211,8 +211,7 @@ function _renderDataPreview(insight: Insight) {
     const segments = [
       { label: 'Working', count: data.working as number, color: 'bg-emerald-500' },
       { label: 'Standby', count: data.standby as number, color: 'bg-blue-400' },
-      { label: 'Under Repair', count: data.under_repair as number, color: 'bg-amber-400' },
-      { label: 'Breakdown/Faulty', count: data.breakdown_faulty as number, color: 'bg-red-500' },
+      { label: 'Breakdown', count: (data.breakdown ?? data.breakdown_faulty) as number, color: 'bg-red-500' },
       { label: 'Missing', count: data.missing as number, color: 'bg-purple-500' },
       { label: 'Scrap', count: data.scrap as number, color: 'bg-gray-400' },
     ]

@@ -194,7 +194,7 @@ async def _generate_condition_change_insights(
 
     if degraded:
         severity = "critical" if len(degraded) >= 5 else "warning"
-        breakdown_count = sum(1 for c in degraded if c["curr_condition"] in ("breakdown", "faulty"))
+        breakdown_count = sum(1 for c in degraded if c["curr_condition"] == "breakdown")
         examples = degraded[:5]
         example_text = ", ".join(
             f"{c['fleet_number']} ({c['prev_condition']}\u2192{c['curr_condition']})" for c in examples
@@ -637,17 +637,13 @@ async def _generate_fleet_overview_insight(
 
     working = int(row["working_plants"])
     standby = int(row["standby_plants"])
-    under_repair = int(row["under_repair_plants"])
     breakdown = int(row["breakdown_plants"])
-    faulty = int(row["faulty_plants"])
     missing = int(row["missing_plants"])
     scrap = int(row["scrap_plants"])
     off_hire = int(row["off_hire_plants"])
-    gpm_assessment = int(row["gpm_assessment_plants"])
-    unverified_condition = int(row["unverified_condition_plants"])
+    unknown_condition = int(row["unknown_condition_plants"])
 
     working_pct = round(100.0 * working / total, 1)
-    breakdown_faulty = breakdown + faulty
 
     # Severity based on working percentage
     if working_pct < 50:
@@ -660,21 +656,20 @@ async def _generate_fleet_overview_insight(
     description = (
         f"Only {working_pct}% of the fleet is currently working. "
         f"Out of {total:,} plants: {working:,} working, {standby:,} standby, "
-        f"{under_repair:,} under repair, {breakdown_faulty:,} breakdown/faulty, "
-        f"{missing:,} missing, {scrap:,} scrap."
+        f"{breakdown:,} breakdown, {missing:,} missing, {scrap:,} scrap."
     )
     if off_hire:
         description += f" {off_hire:,} off-hire."
-    if gpm_assessment:
-        description += f" {gpm_assessment:,} awaiting GPM assessment."
+    if unknown_condition:
+        description += f" {unknown_condition:,} with no condition recorded yet."
 
     parts = []
     if missing >= 10:
         parts.append(f"Audit {missing:,} missing plants with physical verification")
     if standby >= 20:
         parts.append(f"Evaluate {standby:,} standby plants for redeployment to active sites")
-    if breakdown_faulty >= 10:
-        parts.append(f"Prioritize repairs for {breakdown_faulty:,} breakdown/faulty plants")
+    if breakdown >= 10:
+        parts.append(f"Prioritize repairs for {breakdown:,} breakdown plants")
     if scrap >= 10:
         parts.append(f"Review {scrap:,} scrap plants for disposal or write-off")
     if not parts:
@@ -692,15 +687,11 @@ async def _generate_fleet_overview_insight(
             "working": working,
             "working_pct": working_pct,
             "standby": standby,
-            "under_repair": under_repair,
             "breakdown": breakdown,
-            "faulty": faulty,
-            "breakdown_faulty": breakdown_faulty,
             "missing": missing,
             "scrap": scrap,
             "off_hire": off_hire,
-            "gpm_assessment": gpm_assessment,
-            "unverified_condition": unverified_condition,
+            "unknown_condition": unknown_condition,
         },
         week_ending_date=week_ending_date,
         year=year,
@@ -715,15 +706,17 @@ async def _generate_fleet_overview_insight(
 
 
 CONDITION_SEVERITY = {
+    # six-value taxonomy (migration 012); retired aliases kept for any
+    # pre-relabel rows still flowing through historical comparisons
     "working": 0,
     "standby": 1,
-    "under_repair": 2,
-    "faulty": 3,
+    "off_hire": 1,
     "breakdown": 4,
     "missing": 5,
     "scrap": 6,
-    "off_hire": 1,
-    "gpm_assessment": 2,
+    "under_repair": 4,
+    "faulty": 4,
+    "gpm_assessment": 4,
     "unverified": 1,
 }
 

@@ -50,7 +50,6 @@ const CONDITION_STYLES: Record<string, { label: string; className: string }> = {
   standby: { label: 'Standby', className: 'bg-amber-100 text-amber-800' },
   breakdown: { label: 'Breakdown', className: 'bg-red-100 text-red-800' },
   missing: { label: 'Missing', className: 'bg-purple-100 text-purple-800' },
-  faulty: { label: 'Faulty', className: 'bg-orange-100 text-orange-800' },
   scrap: { label: 'Scrap', className: 'bg-gray-100 text-gray-800' },
   off_hire: { label: 'Off Hire', className: 'bg-gray-100 text-gray-600' },
   unverified: { label: 'Unverified', className: 'bg-blue-100 text-blue-800' },
@@ -141,7 +140,6 @@ export default function SiteDashboardPage() {
             <StatCard label="Working" value={stats?.working ?? 0} color="emerald" icon={Zap} />
             <StatCard label="Standby" value={stats?.standby ?? 0} color="amber" icon={Clock} />
             <StatCard label="Breakdown" value={stats?.breakdown ?? 0} color="red" icon={Wrench} />
-            <StatCard label="Faulty" value={stats?.faulty ?? 0} color="orange" icon={AlertTriangle} />
             <StatCard label="Missing" value={stats?.missing ?? 0} color="purple" icon={HelpCircle} />
             <StatCard label="Off Hire" value={stats?.off_hire ?? 0} color="gray" icon={null} />
             <StatCard label="Unverified" value={stats?.unverified ?? 0} color="blue" icon={null} />

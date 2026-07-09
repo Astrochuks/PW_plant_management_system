@@ -197,7 +197,7 @@ async def acknowledge_event(
 async def search_plants(
     query: str,
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
-    condition: str | None = Query(None, pattern="^(working|standby|breakdown|scrap|missing|off_hire)$"),
+    condition: str | None = Query(None, pattern="^(working|standby|breakdown|scrap|missing|off_hire|unknown)$"),
     location_id: UUID | None = None,
     fleet_type: str | None = Query(None, description="Filter by fleet type name"),
     limit: int = Query(20, ge=1, le=100),
@@ -327,7 +327,7 @@ async def get_fleet_utilization(
     limit: int = Query(20, ge=1, le=100),
     location_id: UUID | None = None,
     fleet_type: str | None = Query(None, description="Filter by fleet type name"),
-    condition: str | None = Query(None, pattern="^(working|standby|breakdown|scrap|missing|off_hire)$", description="Filter by condition"),
+    condition: str | None = Query(None, pattern="^(working|standby|breakdown|scrap|missing|off_hire|unknown)$", description="Filter by condition"),
     search: str | None = None,
 ) -> dict[str, Any]:
     """Get fleet utilization view with comprehensive stats.
@@ -354,8 +354,11 @@ async def get_fleet_utilization(
         params.append(f"%{fleet_type}%")
         conditions.append(f"fleet_type ILIKE ${len(params)}")
     if condition:
-        params.append(condition)
-        conditions.append(f"condition = ${len(params)}")
+        if condition == "unknown":
+            conditions.append("condition IS NULL")
+        else:
+            params.append(condition)
+            conditions.append(f"condition = ${len(params)}")
     if search:
         params.append(f"%{search}%")
         n = len(params)
@@ -1215,7 +1218,7 @@ async def update_plant(
     purchase_site: str | None = Query(None, description="Site/location where the plant was purchased"),
     components: str | None = Query(None, description="JSON array of components, e.g. [{\"name\":\"Mixer\",\"model\":\"XY1\"}]"),
     current_location_id: UUID | None = Query(None, description="Current location UUID"),
-    condition: str | None = Query(None, pattern="^(working|standby|breakdown|scrap|missing|off_hire)$", description="Plant condition"),
+    condition: str | None = Query(None, pattern="^(working|standby|breakdown|scrap|missing|off_hire|unknown)$", description="Plant condition"),
     physical_verification: bool | None = Query(None, description="Has been physically verified"),
     division: str | None = Query(None, pattern="^(mining|civil)$", description="Division: mining or civil"),
 ) -> dict[str, Any]:
@@ -1271,7 +1274,8 @@ async def update_plant(
     if current_location_id is not None:
         update_data["current_location_id"] = str(current_location_id)
     if condition is not None:
-        update_data["condition"] = condition
+        # 'unknown' is the UI label for NULL (no condition recorded)
+        update_data["condition"] = None if condition == "unknown" else condition
     if physical_verification is not None:
         update_data["physical_verification"] = physical_verification
     if division is not None:

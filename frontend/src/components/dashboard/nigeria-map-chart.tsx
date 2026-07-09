@@ -160,7 +160,7 @@ export function NigeriaMapChart() {
 
           return [
             `<strong style="font-size:13px">${p.name}</strong>`,
-            `<span style="color:#10b981">Working: ${state.working_plants}</span> · <span style="color:#dc2626">B/Down: ${state.breakdown_plants}</span> · <span style="color:#3b82f6">Repair: ${state.under_repair_plants}</span>`,
+            `<span style="color:#10b981">Working: ${state.working_plants}</span> · <span style="color:#dc2626">B/Down: ${state.breakdown_plants}</span> · <span style="color:#3b82f6">Standby: ${state.standby_plants}</span>`,
             `<hr style="margin:4px 0;border-color:${isDark ? '#333' : '#e4e4e7'}"/>`,
             `<strong>${state.sites_count} site${state.sites_count > 1 ? 's' : ''} · ${state.total_plants} plants</strong>`,
             siteLines,

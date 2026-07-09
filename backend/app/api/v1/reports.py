@@ -68,14 +68,11 @@ async def get_dashboard_summary(
                     count(*)::int AS total_plants,
                     count(*) FILTER (WHERE pm.condition = 'working')::int AS working_plants,
                     count(*) FILTER (WHERE pm.condition = 'standby')::int AS standby_plants,
-                    count(*) FILTER (WHERE pm.condition = 'under_repair')::int AS under_repair_plants,
                     count(*) FILTER (WHERE pm.condition = 'breakdown')::int AS breakdown_plants,
-                    count(*) FILTER (WHERE pm.condition = 'faulty')::int AS faulty_plants,
                     count(*) FILTER (WHERE pm.condition = 'missing')::int AS missing_plants,
                     count(*) FILTER (WHERE pm.condition = 'scrap')::int AS scrap_plants,
                     count(*) FILTER (WHERE pm.condition = 'off_hire')::int AS off_hire_plants,
-                    count(*) FILTER (WHERE pm.condition = 'gpm_assessment')::int AS gpm_assessment_plants,
-                    count(*) FILTER (WHERE pm.condition = 'unverified')::int AS unverified_condition_plants,
+                    count(*) FILTER (WHERE pm.condition IS NULL)::int AS unknown_condition_plants,
                     count(*) FILTER (WHERE pm.last_verified_date IS NOT NULL)::int AS verified_plants,
                     count(*) FILTER (WHERE pm.last_verified_date IS NULL)::int AS unverified_plants
                 FROM plants_master pm
@@ -604,8 +601,8 @@ async def get_states_summary(
                       count(DISTINCT l.id)::int AS sites_count,
                       count(pm.id)::int AS total_plants,
                       count(pm.id) FILTER (WHERE pm.condition = 'working')::int AS working_plants,
+                      count(pm.id) FILTER (WHERE pm.condition = 'standby')::int AS standby_plants,
                       count(pm.id) FILTER (WHERE pm.condition = 'breakdown')::int AS breakdown_plants,
-                      count(pm.id) FILTER (WHERE pm.condition = 'under_repair')::int AS under_repair_plants,
                       count(pm.id) FILTER (WHERE pm.condition = 'missing')::int AS missing_plants,
                       count(pm.id) FILTER (WHERE pm.condition = 'scrap')::int AS scrap_plants
                FROM states s
@@ -623,8 +620,8 @@ async def get_states_summary(
                       count(DISTINCT l.id)::int AS sites_count,
                       coalesce(sum(ls.total_plants), 0)::int AS total_plants,
                       coalesce(sum(ls.working_plants), 0)::int AS working_plants,
+                      coalesce(sum(ls.standby_plants), 0)::int AS standby_plants,
                       coalesce(sum(ls.breakdown_plants), 0)::int AS breakdown_plants,
-                      coalesce(sum(ls.under_repair_plants), 0)::int AS under_repair_plants,
                       coalesce(sum(ls.missing_plants), 0)::int AS missing_plants,
                       coalesce(sum(ls.scrap_plants), 0)::int AS scrap_plants
                FROM states s

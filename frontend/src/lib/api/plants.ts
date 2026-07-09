@@ -12,14 +12,11 @@ import apiClient from './client';
 export type PlantCondition =
   | 'working'
   | 'standby'
-  | 'under_repair'
   | 'breakdown'
-  | 'faulty'
   | 'scrap'
   | 'missing'
   | 'off_hire'
-  | 'gpm_assessment'
-  | 'unverified';
+  | 'unknown'; // UI label for NULL — no condition recorded yet
 
 export interface PlantSummary {
   id: string;
@@ -71,14 +68,11 @@ export interface Location {
   total_plants: number;
   working_plants: number;
   standby_plants: number;
-  under_repair_plants: number;
   breakdown_plants: number;
-  faulty_plants: number;
   missing_plants: number;
   scrap_plants: number;
   off_hire_plants: number;
-  gpm_assessment_plants: number;
-  unverified_plants: number;
+  unknown_condition_plants: number;
 }
 
 export interface FleetType {

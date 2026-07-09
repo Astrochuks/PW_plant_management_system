@@ -28,8 +28,8 @@ import { ProtectedRoute } from '@/components/protected-route'
 import { useStateDetail, useStatePlants } from '@/hooks/use-states'
 
 const STATUS_OPTIONS = [
-  'working', 'standby', 'under_repair', 'breakdown',
-  'faulty', 'scrap', 'missing', 'off_hire', 'gpm_assessment',
+  'working', 'standby', 'breakdown',
+  'scrap', 'missing', 'off_hire',
 ]
 
 function StateDetailContent() {
