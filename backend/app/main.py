@@ -129,7 +129,17 @@ def create_application() -> FastAPI:
     # Exception handlers
     @app.exception_handler(AppException)
     async def app_exception_handler(request: Request, exc: AppException) -> JSONResponse:
-        """Handle application-specific exceptions."""
+        """Handle application-specific exceptions (logged so every 4xx is
+        diagnosable from the server logs, not just the client toast)."""
+        if 400 <= exc.status_code < 500:
+            logger.warning(
+                "Request rejected",
+                path=request.url.path,
+                method=request.method,
+                status_code=exc.status_code,
+                code=exc.code,
+                message=exc.message,
+            )
         return JSONResponse(
             status_code=exc.status_code,
             content={
