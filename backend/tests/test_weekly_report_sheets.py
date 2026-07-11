@@ -248,16 +248,61 @@ class TestContractSummaryOverview:
 
 
 class TestCertificatesAndPayments:
-    def test_certificates(self, week10):
+    """Locked 2026-07-11: cert rows are CUMULATIVE valuations; retention
+    is 5% of cumulative gross; the ledgers are append-only."""
+
+    def test_certificates_cumulative(self, week10):
         rows = week10["sheets"]["Certificate Status"]["rows"]
         assert len(rows) == 13
         cert1 = next(r for r in rows if r["cert_number"] == "1")
         assert cert1["gross_value_works_done"] == pytest.approx(292_876_150)
+        cert13 = next(r for r in rows if r["cert_number"] == "13")
+        assert cert13["gross_value_works_done"] == pytest.approx(12_741_757_149.69)
+        # cumulative: monotonically non-decreasing
+        grosses = [r["gross_value_works_done"] for r in rows]
+        assert grosses == sorted(grosses)
+
+    def test_retention_is_5pct_everywhere(self, week10):
+        rows = week10["sheets"]["Certificate Status"]["rows"]
+        for r in rows:
+            assert r["total_retention_held"] == pytest.approx(
+                r["gross_value_works_done"] * 0.05, abs=1.0), r["cert_number"]
+        # so no retention warnings fire
+        warns = week10["sheets"]["Certificate Status"]["warnings"]
+        assert not [w for w in warns if "retention" in w]
+
+    def test_commercial_columns_captured(self, week10):
+        rows = week10["sheets"]["Certificate Status"]["rows"]
+        cert1 = next(r for r in rows if r["cert_number"] == "1")
+        assert cert1["contingency_used"] == pytest.approx(135_841_394.5)
+        assert cert1["total_works_executed"] == pytest.approx(750_609_887.25)
+        cert13 = next(r for r in rows if r["cert_number"] == "13")
+        assert cert13["retention_released"] in (None, 0)  # released col is N cumulative
+        assert cert13["fluctuation_materials"] == pytest.approx(294_597_606.16)
+
+    def test_zero_increment_cert12_flagged(self, week10):
+        warns = week10["sheets"]["Certificate Status"]["warnings"]
+        assert any("cert 12" in w and "zero increment" in w for w in warns)
+
+    def test_ledger_append_only_w43_to_w10(self, week43, week10):
+        c43 = {r["cert_number"]: r["gross_value_works_done"]
+               for r in week43["sheets"]["Certificate Status"]["rows"]}
+        c10 = {r["cert_number"]: r["gross_value_works_done"]
+               for r in week10["sheets"]["Certificate Status"]["rows"]}
+        assert set(c10) - set(c43) == {"11", "12", "13"}
+        for k, v in c43.items():
+            assert c10[k] == pytest.approx(v), f"cert {k} changed retroactively"
 
     def test_payments_reconcile(self, week10):
         sheet = week10["sheets"]["Payments Recieved"]
-        assert len(sheet["rows"]) == 19
+        rows = sheet["rows"]
         assert not [w for w in sheet["warnings"] if "gross-deductions" in w]
+        # real payment rows: 2 advances + 15 cert payments (no total rows)
+        real = [r for r in rows if r["voucher_number"]]
+        assert len(real) == 17
+        advances = [r for r in real if "advance" in (r["payment_type"] or "").lower()]
+        assert sum(r["gross_amount"] for r in advances) == pytest.approx(
+            2_655_339_994.77)
 
 
 class TestStoredOnlySheets:

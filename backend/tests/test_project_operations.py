@@ -181,3 +181,24 @@ class TestPlantsRollup:
         assert ac163["fleet_number"] == "AC163"
         assert ac163["condition"] is not None
         assert ac163["weeks_seen"] == 10
+
+
+class TestCommercialPosition:
+    """Locked 2026-07-11: certified/paid/outstanding come from the cert +
+    payments LEDGERS — Contract Summary's client position is frozen ~2023."""
+
+    def test_commercial_from_ledgers(self, client, as_management):
+        pid = _akwa_project_id(client)
+        r = client.get(f"/api/v1/projects/{pid}/operations/summary")
+        assert r.status_code == 200
+        c = r.json()["data"]["commercial"]
+        assert float(c["certified_cumulative"]) == pytest.approx(12_741_757_149.69)
+        assert float(c["retention_held"]) == pytest.approx(637_087_857.48, abs=0.01)
+        assert float(c["advances_gross"]) == pytest.approx(2_655_339_994.77)
+        assert float(c["cert_payments_gross"]) == pytest.approx(10_944_513_399.44)
+        # the MD number: certified but unpaid
+        assert float(c["certified_unpaid"]) == pytest.approx(1_797_243_750.25)
+        # and it must NOT equal the frozen snapshot figure
+        snap = r.json()["data"]["latest_snapshot"]
+        assert float(snap["works_certified"]) != pytest.approx(
+            float(c["certified_cumulative"]))

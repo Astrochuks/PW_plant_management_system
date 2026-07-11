@@ -447,8 +447,12 @@ async def persist_weekly_report(
                     gross_value_works_done, add_materials_on_site,
                     less_materials_on_site, general_bill_1,
                     total_value_of_work_done, value_of_works_per_cert,
-                    total_retention_held, total_net_payment)
-                   VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                    total_retention_held, total_net_payment,
+                    retention_released, contingency_used, contingency_deducted,
+                    fluctuation_materials, advance_received,
+                    total_works_executed, advance_recovery)
+                   VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10,
+                           $11, $12, $13, $14, $15, $16, $17, $18, $19)
                    ON CONFLICT (project_id, cert_number) DO UPDATE SET
                        weekly_report_id = EXCLUDED.weekly_report_id,
                        date_submitted = COALESCE(EXCLUDED.date_submitted,
@@ -461,14 +465,44 @@ async def persist_weekly_report(
                        value_of_works_per_cert = EXCLUDED.value_of_works_per_cert,
                        total_retention_held = EXCLUDED.total_retention_held,
                        total_net_payment = EXCLUDED.total_net_payment,
+                       retention_released = EXCLUDED.retention_released,
+                       contingency_used = EXCLUDED.contingency_used,
+                       contingency_deducted = EXCLUDED.contingency_deducted,
+                       fluctuation_materials = EXCLUDED.fluctuation_materials,
+                       advance_received = EXCLUDED.advance_received,
+                       total_works_executed = EXCLUDED.total_works_executed,
+                       advance_recovery = EXCLUDED.advance_recovery,
                        updated_at = now()""",
                 report_id, project_id, r["cert_number"], r["date_submitted"],
                 r["gross_value_works_done"], r["add_materials_on_site"],
                 r["less_materials_on_site"], r["general_bill_1"],
                 r["total_value_of_work_done"], r["value_of_works_per_cert"],
                 r["total_retention_held"], r["total_net_payment"],
+                r.get("retention_released"), r.get("contingency_used"),
+                r.get("contingency_deducted"), r.get("fluctuation_materials"),
+                r.get("advance_received"), r.get("total_works_executed"),
+                r.get("advance_recovery"),
             )
         counts["project_certificates"] = len(cert_rows)
+
+        # Contract Summary's client-position block is frozen (~2023) — flag
+        # whenever its certified figure disagrees with the cert ledger
+        if cert_rows:
+            ledger_certified = max(
+                float(r["gross_value_works_done"] or 0) for r in cert_rows)
+            snap = (parsed["sheets"].get("Contract Summary", {})
+                    .get("snapshot") or {})
+            snap_certified = snap.get("works_certified")
+            if snap_certified is not None and ledger_certified > 0:
+                drift = abs(float(snap_certified) - ledger_certified)
+                if drift > ledger_certified * 0.05:
+                    flag("Contract Summary", "cross_check_fail", "warning",
+                         f"client-position block appears STALE: works "
+                         f"certified ₦{float(snap_certified):,.2f} vs cert "
+                         f"ledger cumulative ₦{ledger_certified:,.2f} — "
+                         f"overview uses the ledger",
+                         {"snapshot": float(snap_certified),
+                          "ledger": ledger_certified})
 
         # ── payments: full ledger per report (readers use latest report) ─
         all_pay_rows = sheet_rows("Payments Recieved")

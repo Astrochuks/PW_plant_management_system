@@ -532,12 +532,13 @@ def parse_certificates(ws) -> dict[str, Any]:
     hrow, cols = hit
 
     rows = []
+    prev_gross = 0.0
     for r in iter_table_rows(ws, hrow, cols):
         cert_no = _txt(r, "cert number")
         gross = _num(r, "gross value of works don")
         if cert_no is None or gross is None:
             continue
-        rows.append({
+        row = {
             "cert_number": cert_no,
             "date_submitted": _dt(r, "date submitted"),
             "gross_value_works_done": gross,
@@ -548,7 +549,35 @@ def parse_certificates(ws) -> dict[str, Any]:
             "value_of_works_per_cert": _num(r, "value of works per cert"),
             "total_retention_held": _num(r, "total retention held"),
             "total_net_payment": _num(r, "total net payment"),
-        })
+            # commercial columns L..Q (locked 2026-07-11)
+            "retention_released": _num(r, "add release of retention"),
+            "contingency_used": _num(r, "add value of contingency used"),
+            "contingency_deducted": _num(r, "less value of contingency"),
+            "fluctuation_materials": _num(r, "add fluctuation on materials"),
+            "advance_received": _num(r, "add advance received"),
+            "total_works_executed": _num(r, "total value of works executed"),
+            "advance_recovery": _num(r, "deduct advance recovery"),
+        }
+        rows.append(row)
+
+        # gross is CUMULATIVE: retention must be 5% of it, increments >= 0
+        ret = row["total_retention_held"]
+        if ret is not None and gross and abs(ret - gross * 0.05) > 1.0:
+            warnings.append(
+                f"Certificates cert {cert_no}: retention {ret:,.2f} != 5% of "
+                f"cumulative gross ({gross * 0.05:,.2f})"
+            )
+        if gross < prev_gross - 1.0:
+            warnings.append(
+                f"Certificates cert {cert_no}: cumulative gross DECREASED "
+                f"({prev_gross:,.2f} -> {gross:,.2f})"
+            )
+        elif abs(gross - prev_gross) <= 1.0 and prev_gross > 0:
+            warnings.append(
+                f"Certificates cert {cert_no}: zero increment (same cumulative "
+                f"gross as previous cert — resubmission?)"
+            )
+        prev_gross = gross
     if not rows:
         warnings.append("Certificates: no cert rows parsed")
     return {"rows": rows, "warnings": warnings}

@@ -686,11 +686,51 @@ async def get_project_operations_summary(
            ORDER BY year DESC, week_number DESC LIMIT 1""",
         pid,
     )
+
+    # ── commercial position from the LEDGERS (locked 2026-07-11) ────────
+    # Contract Summary's client-position block is frozen (~2023); certified
+    # and paid figures must come from the cert + payments ledgers.
+    commercial = await fetchrow(
+        """
+        WITH latest_cert AS (
+            SELECT gross_value_works_done, total_retention_held,
+                   retention_released, advance_recovery
+            FROM v_project_certificates
+            WHERE project_id = $1::uuid
+            ORDER BY cert_sort DESC NULLS LAST LIMIT 1
+        ),
+        pay AS (
+            SELECT
+                COALESCE(sum(gross_amount) FILTER
+                    (WHERE payment_type ILIKE '%advance%'), 0) AS advances_gross,
+                COALESCE(sum(gross_amount) FILTER
+                    (WHERE payment_type NOT ILIKE '%advance%'
+                        OR payment_type IS NULL), 0)           AS cert_payments_gross,
+                COALESCE(sum(net_amount), 0)                   AS payments_net,
+                max(payment_date)                              AS last_payment_date
+            FROM v_project_payments_latest
+            WHERE project_id = $1::uuid
+        )
+        SELECT lc.gross_value_works_done      AS certified_cumulative,
+               lc.total_retention_held        AS retention_held,
+               lc.retention_released,
+               p.advances_gross,
+               p.cert_payments_gross,
+               p.payments_net,
+               p.last_payment_date,
+               lc.gross_value_works_done - p.cert_payments_gross
+                                              AS certified_unpaid
+        FROM latest_cert lc, pay p
+        """,
+        pid,
+    )
+
     return {"success": True, "data": {
         "project": project,
         "totals": totals,
         "latest_snapshot": snapshot,
         "latest_pct": pct,
+        "commercial": commercial,
     }}
 
 
