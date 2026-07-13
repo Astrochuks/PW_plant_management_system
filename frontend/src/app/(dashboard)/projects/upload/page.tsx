@@ -848,8 +848,11 @@ function BemeTable({ sheet }: { sheet: SheetPreview }) {
               ...items.map((r, i) => {
                 const pQ = r.qty_previous_reported == null ? null : num(r.qty_previous_reported)
                 const wQ = r.qty_this_week == null ? null : num(r.qty_this_week)
-                const totQ = pQ === null && wQ === null ? null : num(pQ) + num(wQ)
                 const cQ = r.contract_qty == null ? null : num(r.contract_qty)
+                // the workbook's own convention: empty qty counts as 0, so
+                // lump-sum items (Bill 1) still show Total 0 / Outstanding = contract
+                const totQ = pQ === null && wQ === null && cQ === null
+                  ? null : num(pQ) + num(wQ)
                 const outQ = cQ !== null && totQ !== null ? cQ - totQ : null
                 const pA = num(r.amount_previous_reported)
                 const wA = num(r.amount_this_week)
