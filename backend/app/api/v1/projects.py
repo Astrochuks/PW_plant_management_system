@@ -247,6 +247,27 @@ async def preview_weekly_report(
         sheets_out[name] = {"kind": "stored_only", "status": "stored",
                             "warnings": [], "grid": grid}
 
+    # ── detect-and-confirm: the workbook is the truth, the form is a
+    # claim. Match its short name against the register and read its own
+    # week declaration (consensus of 11+ sheet headers).
+    declared = parsed.get("declared") or {}
+    wb_short = ((parsed.get("identity") or {}).get("short_name") or "").strip()
+    matched_project = None
+    if wb_short:
+        matched_project = await fetchrow(
+            """SELECT id, short_name, project_name FROM projects
+               WHERE upper(trim(short_name)) = upper($1) AND is_legacy = false
+               LIMIT 1""",
+            wb_short,
+        )
+    already_ingested = False
+    if matched_project and declared.get("week_number") and declared.get("year"):
+        already_ingested = bool(await fetchval(
+            """SELECT 1 FROM project_weekly_reports
+               WHERE project_id = $1::uuid AND year = $2 AND week_number = $3""",
+            str(matched_project["id"]), declared["year"], declared["week_number"],
+        ))
+
     return {"success": True, "data": {
         "identity": parsed.get("identity"),
         "identity_warning": identity_warning,
@@ -255,6 +276,9 @@ async def preview_weekly_report(
         "parse_ms": parse_ms,
         "file_name": file.filename,
         "file_size": len(content),
+        "declared": declared,
+        "matched_project": matched_project,
+        "already_ingested": already_ingested,
     }}
 
 

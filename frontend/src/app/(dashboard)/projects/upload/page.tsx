@@ -55,6 +55,16 @@ interface PreviewData {
   parse_ms: number
   file_name: string
   file_size: number
+  declared: {
+    week_number: number | null
+    year: number | null
+    week_ending_date: string | null
+    consistent: boolean
+    votes: number
+    disagreements: { sheet: string; week: number; date: string }[]
+  }
+  matched_project: { id: string; short_name: string; project_name: string } | null
+  already_ingested: boolean
 }
 
 const SHEET_ORDER = [
@@ -132,13 +142,14 @@ export default function UploadWeeklyReportPage() {
   const { data: projectsData } = useProjects({ is_legacy: false, limit: 100 })
   const projects = projectsData?.data ?? []
 
-  const [projectId, setProjectId] = useState('')
-  const [yearStr, setYearStr] = useState(String(new Date().getFullYear()))
-  const [weekStr, setWeekStr] = useState('')
-  const year = Number(yearStr) || 0
-  const week = Number(weekStr) || 0
   const [file, setFile] = useState<File | null>(null)
   const [dragOver, setDragOver] = useState(false)
+  // detection overrides (only for the rare unmatched / mislabeled cases)
+  const [overrideProjectId, setOverrideProjectId] = useState('')
+  const [overrideAck, setOverrideAck] = useState(false)
+  const [manualWeek, setManualWeek] = useState(false)
+  const [manualWeekStr, setManualWeekStr] = useState('')
+  const [manualYearStr, setManualYearStr] = useState('')
 
   const [previewing, setPreviewing] = useState(false)
   const [elapsed, setElapsed] = useState(0)
@@ -147,7 +158,7 @@ export default function UploadWeeklyReportPage() {
   const [accepting, setAccepting] = useState(false)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const runPreview = useCallback(async (f: File, pid: string) => {
+  const runPreview = useCallback(async (f: File) => {
     setPreviewing(true)
     setPreview(null)
     setElapsed(0)
@@ -157,12 +168,14 @@ export default function UploadWeeklyReportPage() {
     try {
       const form = new FormData()
       form.append('file', f)
-      if (pid) form.append('project_id', pid)
       const res = await apiClient.post('/projects/preview-weekly-report', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
         timeout: 120_000,
       })
       setPreview(res.data.data)
+      setOverrideProjectId('')
+      setOverrideAck(false)
+      setManualWeek(false)
       setActiveSheet('BEME & Works Completed Fd')
     } catch (err) {
       toast.error('Could not read this workbook', {
@@ -185,17 +198,9 @@ export default function UploadWeeklyReportPage() {
       toast.error('Only .xlsx weekly reports are accepted')
       return
     }
-    if (!projectId) {
-      toast.error('Pick the project first — the workbook is checked against it')
-      return
-    }
-    if (week < 1 || week > 53) {
-      toast.error('Enter the week number (1–53) before dropping the file')
-      return
-    }
     setFile(f)
-    void runPreview(f, projectId)
-  }, [projectId, week, runPreview])
+    void runPreview(f)
+  }, [runPreview])
 
   const warnCount = useMemo(() => {
     if (!preview) return 0
@@ -204,14 +209,26 @@ export default function UploadWeeklyReportPage() {
       + (preview.identity_warning ? 1 : 0)
   }, [preview])
 
+  const resolvedProjectId = preview?.matched_project?.id ?? overrideProjectId
+  const projectResolved = !!preview?.matched_project ||
+    (!!overrideProjectId && overrideAck)
+  const effYear = manualWeek
+    ? Number(manualYearStr) || 0 : preview?.declared.year ?? 0
+  const effWeek = manualWeek
+    ? Number(manualWeekStr) || 0 : preview?.declared.week_number ?? 0
+  const weekResolved = manualWeek
+    ? effWeek >= 1 && effWeek <= 53 && effYear >= 2020
+    : !!preview?.declared.consistent && !!preview?.declared.week_number
+  const canAccept = projectResolved && weekResolved && !accepting
+
   const accept = async () => {
-    if (!file || !projectId) return
+    if (!file || !resolvedProjectId) return
     setAccepting(true)
     upload.mutate(
-      { file, projectId, year, weekNumber: week },
+      { file, projectId: resolvedProjectId, year: effYear, weekNumber: effWeek },
       {
         onSuccess: () => {
-          toast.success(`${year} · Week ${week} accepted — saving to the database`)
+          toast.success(`${effYear} · Week ${effWeek} accepted — saving to the database`)
           router.push('/projects/submissions')
         },
         onError: (err: Error) => {
@@ -243,35 +260,6 @@ export default function UploadWeeklyReportPage() {
           </div>
         )}
       </div>
-
-      {/* step 1: context + drop zone */}
-      <Card>
-        <CardContent className="grid gap-4 p-5 sm:grid-cols-[1fr_130px_130px]">
-          <div className="space-y-1.5">
-            <Label>Project</Label>
-            <Select value={projectId} onValueChange={setProjectId} disabled={!!preview}>
-              <SelectTrigger><SelectValue placeholder="Select active project" /></SelectTrigger>
-              <SelectContent>
-                {projects.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.short_name || p.project_name.slice(0, 50)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label>Year</Label>
-            <Input inputMode="numeric" value={yearStr} disabled={!!preview}
-                   onChange={(e) => setYearStr(e.target.value.replace(/\D/g, '').slice(0, 4))} />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Week</Label>
-            <Input inputMode="numeric" placeholder="1–53" value={weekStr} disabled={!!preview}
-                   onChange={(e) => setWeekStr(e.target.value.replace(/\D/g, '').slice(0, 2))} />
-          </div>
-        </CardContent>
-      </Card>
 
       {!preview && !previewing && (
         <button
@@ -311,9 +299,9 @@ export default function UploadWeeklyReportPage() {
       {/* step 2: the Silver preview */}
       {preview && (
         <>
-          {/* verdict strip */}
+          {/* detection card — the workbook is the truth */}
           <Card>
-            <CardContent className="space-y-3 p-5">
+            <CardContent className="space-y-4 p-5">
               <div className="flex flex-wrap items-center gap-2">
                 <FileSpreadsheet className="text-muted-foreground h-4 w-4" />
                 <span className="font-medium">{preview.file_name}</span>
@@ -329,31 +317,118 @@ export default function UploadWeeklyReportPage() {
                     sheets missing: {preview.drift.missing.join(', ') || '—'}
                   </Badge>
                 )}
-                {preview.identity_warning ? (
-                  <Badge variant="secondary" className="bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200">
-                    <CircleAlert className="mr-1 h-3 w-3" /> identity mismatch
-                  </Badge>
-                ) : (
-                  <Badge variant="secondary" className="bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200">
-                    <CheckCircle2 className="mr-1 h-3 w-3" /> matches selected project
-                  </Badge>
-                )}
                 <Badge variant="outline">
                   {warnCount === 0 ? 'no notes' : `${warnCount} note${warnCount > 1 ? 's' : ''}`}
                 </Badge>
               </div>
-              <div className="text-muted-foreground flex flex-wrap gap-x-6 gap-y-1 text-sm">
-                <span>Workbook says: <b className="text-foreground">{String(idy.short_name ?? '—')}</b></span>
-                <span>Client: <b className="text-foreground">{String(idy.client_raw ?? '—')}</b></span>
-                {idy.original_contract_amount != null && (
-                  <span>Contract: <b className="text-foreground tabular-nums">₦{fmtN(idy.original_contract_amount)}</b></span>
-                )}
-              </div>
-              {preview.identity_warning && (
-                <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200">
-                  {preview.identity_warning}
+
+              {/* what the workbook says it is */}
+              <div className="rounded-lg border p-4">
+                <p className="text-lg font-semibold">
+                  {String(idy.short_name ?? 'Unknown project')}
+                  <span className="text-muted-foreground font-normal">
+                    {' '}— Week {preview.declared.week_number ?? '?'},{' '}
+                    {preview.declared.year ?? '?'}
+                    {preview.declared.week_ending_date &&
+                      ` (week ending ${new Date(preview.declared.week_ending_date)
+                        .toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' })})`}
+                  </span>
                 </p>
-              )}
+                <p className="text-muted-foreground mt-0.5 text-sm">
+                  Client {String(idy.client_raw ?? '—')}
+                  {idy.original_contract_amount != null &&
+                    <> · Contract <b className="text-foreground tabular-nums">₦{fmtN(idy.original_contract_amount)}</b></>}
+                  {' '}· {preview.declared.votes} sheets declare this week
+                  {preview.declared.consistent ? ' unanimously' : ''}
+                </p>
+
+                <div className="mt-3 space-y-2">
+                  {/* project resolution */}
+                  {preview.matched_project ? (
+                    <p className="flex items-center gap-2 text-sm text-emerald-700 dark:text-emerald-400">
+                      <CheckCircle2 className="h-4 w-4" />
+                      Matched in your register — saves to{' '}
+                      <b>{preview.matched_project.short_name}</b>
+                    </p>
+                  ) : (
+                    <div className="space-y-2 rounded-md bg-amber-50 p-3 dark:bg-amber-950">
+                      <p className="text-sm font-medium text-amber-900 dark:text-amber-200">
+                        This project isn&apos;t in your register yet.
+                      </p>
+                      <p className="text-sm text-amber-900/80 dark:text-amber-200/80">
+                        <Link href="/projects/create" className="underline">Create it</Link>{' '}
+                        (recommended — use the short name above), or save against an existing project:
+                      </p>
+                      <Select value={overrideProjectId} onValueChange={setOverrideProjectId}>
+                        <SelectTrigger className="bg-background max-w-sm">
+                          <SelectValue placeholder="Select a project (override)" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {projects.map((p) => (
+                            <SelectItem key={p.id} value={p.id}>
+                              {p.short_name || p.project_name.slice(0, 50)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {overrideProjectId && (
+                        <label className="flex items-start gap-2 text-sm text-amber-900 dark:text-amber-200">
+                          <input type="checkbox" className="mt-0.5" checked={overrideAck}
+                                 onChange={(e) => setOverrideAck(e.target.checked)} />
+                          I understand the workbook says{' '}
+                          <b>{String(idy.short_name ?? '?')}</b> and I&apos;m saving it
+                          against a different project.
+                        </label>
+                      )}
+                    </div>
+                  )}
+
+                  {/* week resolution */}
+                  {!preview.declared.consistent && preview.declared.votes > 0 && (
+                    <div className="rounded-md bg-red-50 p-3 text-sm text-red-900 dark:bg-red-950 dark:text-red-200">
+                      <p className="font-medium">The sheets disagree about which week this is — saving is blocked.</p>
+                      <ul className="mt-1 list-inside list-disc">
+                        {preview.declared.disagreements.slice(0, 5).map((d) => (
+                          <li key={d.sheet}>{d.sheet}: week {d.week}, {d.date}</li>
+                        ))}
+                      </ul>
+                      <p className="mt-1">Ask the site which week this file is — it looks assembled from different weeks.</p>
+                    </div>
+                  )}
+                  {preview.already_ingested && (
+                    <p className="flex items-center gap-2 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+                      <CircleAlert className="h-4 w-4" />
+                      Week {preview.declared.week_number}, {preview.declared.year} is already in the
+                      database — accepting <b>replaces</b> it with this file.
+                    </p>
+                  )}
+
+                  {/* manual adjust (rare) */}
+                  {!manualWeek ? (
+                    <button className="text-muted-foreground text-xs underline"
+                            onClick={() => setManualWeek(true)}>
+                      The workbook mislabels its week? Adjust manually
+                    </button>
+                  ) : (
+                    <div className="flex flex-wrap items-end gap-2 rounded-md bg-amber-50 p-3 dark:bg-amber-950">
+                      <div>
+                        <Label className="text-xs">Year</Label>
+                        <Input inputMode="numeric" className="bg-background h-8 w-24" value={manualYearStr}
+                               onChange={(e) => setManualYearStr(e.target.value.replace(/\D/g, '').slice(0, 4))} />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Week</Label>
+                        <Input inputMode="numeric" placeholder="1–53" className="bg-background h-8 w-20" value={manualWeekStr}
+                               onChange={(e) => setManualWeekStr(e.target.value.replace(/\D/g, '').slice(0, 2))} />
+                      </div>
+                      <button className="text-muted-foreground pb-2 text-xs underline"
+                              onClick={() => setManualWeek(false)}>
+                        use the workbook&apos;s own week instead
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
             </CardContent>
           </Card>
 
@@ -387,18 +462,23 @@ export default function UploadWeeklyReportPage() {
           {/* accept bar */}
           <div className="bg-background/95 sticky bottom-0 -mx-2 flex flex-wrap items-center justify-between gap-3 border-t px-2 py-3 backdrop-blur">
             <p className="text-muted-foreground text-sm">
-              Accepting saves the cleaned data for{' '}
-              <b className="text-foreground">
-                {projects.find((p) => p.id === projectId)?.short_name} · {year} W{String(week).padStart(2, '0')}
-              </b>{' '}
-              and keeps the original file forever.
+              {projectResolved && weekResolved ? (
+                <>Accepting saves{' '}
+                  <b className="text-foreground">
+                    {preview.matched_project?.short_name
+                      ?? projects.find((p) => p.id === overrideProjectId)?.short_name}
+                    {' '}· {effYear} W{String(effWeek).padStart(2, '0')}
+                  </b>{' '}and keeps the original file forever.</>
+              ) : (
+                <>Resolve the {!projectResolved ? 'project' : 'week'} above to enable saving.</>
+              )}
             </p>
             <div className="flex gap-2">
               <Button variant="outline" disabled={accepting}
                       onClick={() => { setPreview(null); setFile(null) }}>
                 <X className="mr-1.5 h-4 w-4" /> Discard
               </Button>
-              <Button onClick={accept} disabled={accepting}>
+              <Button onClick={accept} disabled={!canAccept}>
                 {accepting
                   ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
                   : <CheckCircle2 className="mr-1.5 h-4 w-4" />}

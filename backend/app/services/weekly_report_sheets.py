@@ -1150,6 +1150,65 @@ STORED_ONLY_SHEETS = (
 )
 
 
+
+def _extract_declaration(wb: Workbook) -> dict[str, Any]:
+    """The workbook declares its own week: 11+ sheets carry 'Week No:'
+    and 'Date:' headers. Consensus across sheets beats any typed form;
+    disagreement between sheets is a hard integrity problem (a workbook
+    assembled from different weeks' sheets)."""
+    from collections import Counter
+    from datetime import date as _date, datetime as _dt
+
+    votes: list[tuple[str, int, Any]] = []  # (sheet, week, date)
+    for name in wb.sheetnames:
+        ws = wb[name]
+        wk = None
+        dt = None
+        for r in range(1, 5):
+            for c in range(1, 22):
+                v = ws.cell(r, c).value
+                if not isinstance(v, str):
+                    continue
+                label = v.strip().rstrip(":").lower()
+                if label == "week no":
+                    nxt = ws.cell(r, c + 1).value
+                    if isinstance(nxt, (int, float)) and 1 <= int(nxt) <= 53:
+                        wk = int(nxt)
+                elif label == "date":
+                    nxt = ws.cell(r, c + 1).value
+                    if isinstance(nxt, (_dt, _date)):
+                        dt = nxt.date() if isinstance(nxt, _dt) else nxt
+        if wk is not None and dt is not None:
+            votes.append((name, wk, dt))
+
+    if not votes:
+        return {"week_number": None, "year": None, "week_ending_date": None,
+                "consistent": False, "votes": 0, "disagreements": []}
+
+    week_counts = Counter(w for _, w, _ in votes)
+    date_counts = Counter(d for _, _, d in votes)
+    week, _ = week_counts.most_common(1)[0]
+    wdate, _ = date_counts.most_common(1)[0]
+    disagreements = [
+        {"sheet": n, "week": w, "date": d.isoformat()}
+        for n, w, d in votes if w != week or d != wdate
+    ]
+    # year of the report-week (Dec/Jan boundary guard)
+    year = wdate.year
+    if week >= 50 and wdate.month == 1:
+        year -= 1
+    elif week == 1 and wdate.month == 12:
+        year += 1
+    return {
+        "week_number": week,
+        "year": year,
+        "week_ending_date": wdate,
+        "consistent": not disagreements,
+        "votes": len(votes),
+        "disagreements": disagreements,
+    }
+
+
 def parse_workbook(wb: Workbook) -> dict[str, Any]:
     """Parse all 16 sheets. One failing sheet never sinks the rest:
     each gets status ok | partial (parsed with warnings) | failed."""
@@ -1193,4 +1252,5 @@ def parse_workbook(wb: Workbook) -> dict[str, Any]:
             "drifted": drift.drifted,
         },
         "identity": sheets.get("Contract Summary", {}).get("identity"),
+        "declared": _extract_declaration(wb),
     }

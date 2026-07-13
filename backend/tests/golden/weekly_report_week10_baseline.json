@@ -1,4 +1,12 @@
 {
+ "declared": {
+  "consistent": true,
+  "disagreements": [],
+  "votes": 11,
+  "week_ending_date": "2026-03-06",
+  "week_number": 10,
+  "year": 2026
+ },
  "drift": {
   "clean": true,
   "drifted": {},
