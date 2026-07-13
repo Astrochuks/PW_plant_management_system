@@ -215,7 +215,7 @@ async def preview_weekly_report(
         }
         rows = s.get("rows")
         if isinstance(rows, list):
-            entry["rows"] = rows[:80]
+            entry["rows"] = rows          # full sheet — they are small
             entry["total_rows"] = len(rows)
         # sheet-specific extras the preview renders as summary panels
         for extra in ("bills", "tail", "summary_table", "cross_checks",

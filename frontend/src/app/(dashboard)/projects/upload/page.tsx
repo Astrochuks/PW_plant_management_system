@@ -41,7 +41,7 @@ interface SheetPreview {
   total_rows?: number
   grid?: string[][]
   cross_checks?: { check: string; ours: number; sheet: number; delta: number }[]
-  bills?: { bill_code: string; name: string }[]
+  bills?: { bill_code: string; name: string; sheet_total_contract?: number | null; sheet_total_this_week?: number | null }[]
   totals?: Record<string, number>
   stock_maintained?: boolean
   sheet_total?: number | null
@@ -547,35 +547,9 @@ function SheetPanel({ name, sheet }: { name: string; sheet?: SheetPreview }) {
         )}
 
         {sheet.kind === 'parsed' && sheet.rows && sheet.rows.length > 0 && (
-          <div className="overflow-x-auto rounded-md border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  {Object.keys(sheet.rows[0]).slice(0, 10).map((k) => (
-                    <TableHead key={k} className="whitespace-nowrap text-xs">
-                      {k.replace(/_/g, ' ')}
-                    </TableHead>
-                  ))}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {sheet.rows.slice(0, 40).map((r, i) => (
-                  <TableRow key={i}>
-                    {Object.entries(r).slice(0, 10).map(([k, v]) => (
-                      <TableCell key={k} className="max-w-[220px] truncate whitespace-nowrap text-xs tabular-nums">
-                        {typeof v === 'number' ? fmtN(v) : String(v ?? '—')}
-                      </TableCell>
-                    ))}
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-            {(sheet.total_rows ?? 0) > 40 && (
-              <p className="text-muted-foreground border-t px-3 py-2 text-xs">
-                Showing 40 of {sheet.total_rows} rows — all {sheet.total_rows} are saved on Accept.
-              </p>
-            )}
-          </div>
+          name === 'BEME & Works Completed Fd'
+            ? <BemeTable sheet={sheet} />
+            : <GenericTable sheet={sheet} />
         )}
 
         {sheet.kind === 'stored_only' && (sheet.grid?.length ?? 0) > 0 && (
@@ -600,5 +574,126 @@ function SheetPanel({ name, sheet }: { name: string; sheet?: SheetPreview }) {
         )}
       </CardContent>
     </Card>
+  )
+}
+
+
+const HIDDEN_COLS = new Set(['bill_code', 'bill_no', 'dup_seq', 'stock_maintained'])
+
+function num(v: unknown): number { return Number(v) || 0 }
+
+function GenericTable({ sheet }: { sheet: SheetPreview }) {
+  const rows = sheet.rows!
+  const cols = Object.keys(rows[0]).filter((k) => !HIDDEN_COLS.has(k))
+  return (
+    <div className="overflow-x-auto rounded-md border">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            {cols.map((k) => (
+              <TableHead key={k} className="whitespace-nowrap text-xs">
+                {k.replace(/_/g, ' ')}
+              </TableHead>
+            ))}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((r, i) => (
+            <TableRow key={i}>
+              {cols.map((k) => {
+                const v = r[k]
+                const isNum = typeof v === 'number'
+                return (
+                  <TableCell key={k}
+                    className={`max-w-[260px] truncate whitespace-nowrap text-xs tabular-nums ${isNum ? 'text-right' : ''}`}>
+                    {isNum ? fmtN(v) : String(v ?? '—')}
+                  </TableCell>
+                )
+              })}
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+      <p className="text-muted-foreground border-t px-3 py-2 text-xs">
+        All {rows.length} rows shown — saved on Accept.
+      </p>
+    </div>
+  )
+}
+
+function BemeTable({ sheet }: { sheet: SheetPreview }) {
+  const rows = sheet.rows!
+  const bills = sheet.bills ?? []
+  return (
+    <div className="overflow-x-auto rounded-md border">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="text-xs">item</TableHead>
+            <TableHead className="min-w-[260px] text-xs">description</TableHead>
+            <TableHead className="text-xs">unit</TableHead>
+            <TableHead className="text-right text-xs">contract qty</TableHead>
+            <TableHead className="text-right text-xs">rate</TableHead>
+            <TableHead className="text-right text-xs">contract ₦</TableHead>
+            <TableHead className="text-right text-xs">done before ₦</TableHead>
+            <TableHead className="text-right text-xs">this week qty</TableHead>
+            <TableHead className="text-right text-xs">this week ₦</TableHead>
+            <TableHead className="text-right text-xs">% so far</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {bills.map((b) => {
+            const items = rows.filter((r) => r.bill_code === b.bill_code)
+            const sumC = items.reduce((a, r) => a + num(r.contract_amount), 0)
+            const sumW = items.reduce((a, r) => a + num(r.amount_this_week), 0)
+            const sumDone = items.reduce((a, r) =>
+              a + num(r.amount_previous_reported) + num(r.amount_this_week), 0)
+            const pct = sumC > 0 ? (sumDone / sumC) * 100 : null
+            return [
+              <TableRow key={b.bill_code} className="bg-muted/60 hover:bg-muted/60">
+                <TableCell className="text-xs font-bold whitespace-nowrap">{b.bill_code}</TableCell>
+                <TableCell className="text-xs font-bold" colSpan={4}>
+                  {b.name} <span className="text-muted-foreground font-normal">· {items.length} items</span>
+                </TableCell>
+                <TableCell className="text-right text-xs font-bold tabular-nums">{fmtN(sumC)}</TableCell>
+                <TableCell className="text-right text-xs font-bold tabular-nums">{fmtN(items.reduce((a, r) => a + num(r.amount_previous_reported), 0))}</TableCell>
+                <TableCell />
+                <TableCell className="text-right text-xs font-bold tabular-nums">{fmtN(sumW)}</TableCell>
+                <TableCell className="text-right text-xs font-bold tabular-nums">
+                  {pct !== null ? `${pct.toFixed(1)}%` : '—'}
+                </TableCell>
+              </TableRow>,
+              ...items.map((r, i) => {
+                const done = num(r.amount_previous_reported) + num(r.amount_this_week)
+                const cAmt = num(r.contract_amount)
+                const ipct = cAmt > 0 ? (done / cAmt) * 100 : null
+                return (
+                  <TableRow key={`${b.bill_code}-${i}`}>
+                    <TableCell className="text-xs whitespace-nowrap">{String(r.item_code)}</TableCell>
+                    <TableCell className="max-w-[340px] truncate text-xs" title={String(r.description)}>
+                      {String(r.description)}
+                    </TableCell>
+                    <TableCell className="text-xs">{String(r.unit ?? '—')}</TableCell>
+                    <TableCell className="text-right text-xs tabular-nums">{r.contract_qty == null ? '—' : fmtN(r.contract_qty)}</TableCell>
+                    <TableCell className="text-right text-xs tabular-nums">{r.rate == null ? '—' : fmtN(r.rate)}</TableCell>
+                    <TableCell className="text-right text-xs tabular-nums">{cAmt ? fmtN(cAmt) : '—'}</TableCell>
+                    <TableCell className="text-right text-xs tabular-nums">{fmtN(num(r.amount_previous_reported))}</TableCell>
+                    <TableCell className="text-right text-xs tabular-nums">{r.qty_this_week == null ? '—' : fmtN(r.qty_this_week)}</TableCell>
+                    <TableCell className="text-right text-xs tabular-nums">{fmtN(num(r.amount_this_week))}</TableCell>
+                    <TableCell className={`text-right text-xs tabular-nums ${ipct !== null && ipct > 100.1 ? 'font-semibold text-red-600 dark:text-red-400' : ''}`}>
+                      {ipct !== null ? `${ipct.toFixed(1)}%` : '—'}
+                    </TableCell>
+                  </TableRow>
+                )
+              }),
+            ]
+          })}
+        </TableBody>
+      </Table>
+      <p className="text-muted-foreground border-t px-3 py-2 text-xs">
+        All {rows.length} items across {bills.length} bills — % computed from
+        reported-previous + this week ÷ contract (over-runs shown red, uncapped).
+      </p>
+    </div>
   )
 }
