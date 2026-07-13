@@ -304,7 +304,7 @@ export default function UploadWeeklyReportPage() {
             <CardContent className="space-y-4 p-5">
               <div className="flex flex-wrap items-center gap-2">
                 <FileSpreadsheet className="text-muted-foreground h-4 w-4" />
-                <span className="font-medium">{preview.file_name}</span>
+                <span className="font-medium break-all">{preview.file_name}</span>
                 <span className="text-muted-foreground text-xs">
                   {(preview.file_size / 1024 / 1024).toFixed(1)} MB
                 </span>
@@ -313,14 +313,27 @@ export default function UploadWeeklyReportPage() {
                     <ShieldCheck className="mr-1 h-3 w-3" /> all 16 sheets present
                   </Badge>
                 ) : (
-                  <Badge variant="secondary" className="bg-red-100 text-red-800">
-                    sheets missing: {preview.drift.missing.join(', ') || '—'}
+                  <Badge variant="secondary" className="bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200">
+                    {preview.drift.missing.length} of 16 sheets missing
                   </Badge>
                 )}
                 <Badge variant="outline">
                   {warnCount === 0 ? 'no notes' : `${warnCount} note${warnCount > 1 ? 's' : ''}`}
                 </Badge>
               </div>
+
+              {preview.drift.missing.length >= 8 && (
+                <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-900 dark:bg-red-950 dark:text-red-200">
+                  This doesn&apos;t look like the company&apos;s 16-sheet weekly report —
+                  check you picked the right file. Missing:{' '}
+                  <span className="break-words">{preview.drift.missing.join(', ')}</span>
+                </p>
+              )}
+              {!preview.drift.clean && preview.drift.missing.length < 8 && (
+                <p className="rounded-md bg-red-50 px-3 py-2 text-sm break-words text-red-900 dark:bg-red-950 dark:text-red-200">
+                  Missing sheets: {preview.drift.missing.join(', ')}
+                </p>
+              )}
 
               {/* what the workbook says it is */}
               <div className="rounded-lg border p-4">
