@@ -656,6 +656,88 @@ async def persist_weekly_report(
         )
         counts["project_weekly_summary"] = len(ws_rows)
 
+        # ── promotions (dossiers 9-13): hired / labour / subs / materials ─
+        hv_rows = sheet_rows("Hired Vehicles")
+        await conn.executemany(
+            """INSERT INTO project_hired_vehicles
+               (weekly_report_id, project_id, year, week_number, week_ending_date,
+                registration_no, description, section, owners, days_worked,
+                rate_ngn, amount_ngn, remarks)
+               VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10,
+                       $11, $12, $13)""",
+            [
+                (*base, r["registration_no"], r["description"], r["section"],
+                 r["owners"], r["days_worked"], r["rate_ngn"], r["amount_ngn"],
+                 r["remarks"])
+                for r in hv_rows
+            ],
+            timeout=60,
+        )
+        counts["project_hired_vehicles"] = len(hv_rows)
+
+        lab_rows = sheet_rows("Labour Strength")
+        await conn.executemany(
+            """INSERT INTO project_labour_strength
+               (weekly_report_id, project_id, year, week_number, week_ending_date,
+                block, dept_slot, department, manning_this_week,
+                manning_previous_week, movement, comment)
+               VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10,
+                       $11, $12)""",
+            [
+                (*base, r["block"], r["dept_slot"], r["department"],
+                 r["manning_this_week"], r["manning_previous_week"],
+                 r["movement"], r["comment"])
+                for r in lab_rows
+            ],
+            timeout=60,
+        )
+        counts["project_labour_strength"] = len(lab_rows)
+
+        sub_rows = sheet_rows("Subcontractors")
+        await conn.executemany(
+            """INSERT INTO project_subcontractors
+               (weekly_report_id, project_id, year, week_number, week_ending_date,
+                subcontractor_name, description, location, unit, agreed_rate,
+                assigned_qty, previous_qty, qty_this_week, qty_to_date,
+                amount_this_week, value_previous, amount_to_date,
+                balance_remaining, value_to_completion, remarks)
+               VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10,
+                       $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)""",
+            [
+                (*base, r["subcontractor_name"], r["description"], r["location"],
+                 r["unit"], r["agreed_rate"], r["assigned_qty"],
+                 r["previous_qty"], r["qty_this_week"], r["qty_to_date"],
+                 r["amount_this_week"], r["value_previous"], r["amount_to_date"],
+                 r["balance_remaining"], r["value_to_completion"], r["remarks"])
+                for r in sub_rows
+            ],
+            timeout=60,
+        )
+        counts["project_subcontractors"] = len(sub_rows)
+
+        mat_rows = sheet_rows("Materials & Civils")
+        await conn.executemany(
+            """INSERT INTO project_materials_stock
+               (weekly_report_id, project_id, year, week_number, week_ending_date,
+                sheet_source, material_name, unit, unit_cost, opening_stock,
+                received, closing_stock, available_for_use, used_works,
+                used_precast, used_mobilisation, used, discrepancy_qty,
+                discrepancy_value, stock_maintained, remarks)
+               VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10,
+                       $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)""",
+            [
+                (*base, r["sheet_source"], r["material_name"], r["unit"],
+                 r["unit_cost"], r["opening_stock"], r["received"],
+                 r["closing_stock"], r["available_for_use"], r["used_works"],
+                 r["used_precast"], r["used_mobilisation"], r["used"],
+                 r["discrepancy_qty"], r["discrepancy_value"],
+                 r["stock_maintained"], r["remarks"])
+                for r in mat_rows
+            ],
+            timeout=60,
+        )
+        counts["project_materials_stock"] = len(mat_rows)
+
         # ── contract snapshot (overview fields) ──────────────────────────
         snap = sheets.get("Contract Summary", {}).get("snapshot") or {}
         await conn.execute(

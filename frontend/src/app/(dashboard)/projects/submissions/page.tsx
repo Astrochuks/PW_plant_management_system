@@ -359,7 +359,12 @@ function SubmissionsContent() {
               sheet by sheet. {hasActive && 'Refreshing automatically…'}
             </p>
           </div>
-          {isAdmin && <UploadDialog />}
+          {isAdmin && <Button size="sm" asChild>
+            <Link href="/projects/upload">
+              <UploadCloud className="h-4 w-4 mr-2" />
+              Upload Weekly Report
+            </Link>
+          </Button>}
         </div>
       </div>
 

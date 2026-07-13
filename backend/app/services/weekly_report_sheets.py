@@ -838,6 +838,242 @@ def parse_beme(ws) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Promotions (dossiers 9-13, locked 2026-07-13)
+# ---------------------------------------------------------------------------
+
+def parse_hired_vehicles(ws) -> dict[str, Any]:
+    """Content rows only — INCLUDING zero-day rows that carry a rate
+    (standing hire arrangements, e.g. the ₦1M/day crane). Total row is a
+    cross-check against the Cost Report's Hired Plant figure."""
+    warnings: list[str] = []
+    hit = find_header_row(ws, ["description", "owners", "days worked", "rate"],
+                          min_matches=2)
+    if hit is None:
+        return {"rows": [], "sheet_total": None,
+                "warnings": ["Hired Vehicles: header row not found"]}
+    hrow, cols = hit
+
+    rows: list[dict[str, Any]] = []
+    sheet_total = None
+    for r in iter_table_rows(ws, hrow, cols):
+        desc = _txt(r, "description")
+        owner = _txt(r, "owners")
+        rate = _num(r, "rate")
+        amount = _num(r, "amount")
+        if owner and norm(owner) == "total":
+            sheet_total = amount
+            continue
+        if not (desc or owner or rate):
+            continue  # numbered template line
+        days = _num(r, "days worked") or 0
+        row = {
+            "registration_no": _txt(r, "reg"),
+            "description": desc,
+            "section": _txt(r, "section"),
+            "owners": owner,
+            "days_worked": days,
+            "rate_ngn": rate,
+            "amount_ngn": amount if amount is not None else 0,
+            "remarks": _txt(r, "remarks"),
+        }
+        rows.append(row)
+        if rate and abs(days * rate - (amount or 0)) > 1.0:
+            warnings.append(
+                f"Hired Vehicles {desc or owner}: days {days:g} × rate "
+                f"{rate:g} != amount {(amount or 0):,.2f}"
+            )
+    if sheet_total is not None:
+        ours = sum(float(x["amount_ngn"] or 0) for x in rows)
+        if abs(ours - float(sheet_total)) > 1.0:
+            warnings.append(
+                f"Hired Vehicles: our sum {ours:,.2f} != sheet total "
+                f"{float(sheet_total):,.2f}"
+            )
+    return {"rows": rows, "sheet_total": sheet_total, "warnings": warnings}
+
+
+def parse_labour(ws) -> dict[str, Any]:
+    """Two blocks (permanent / CASUAL STAFF), departments keyed by their
+    fixed template slot. Totals + movement are validators, never data."""
+    warnings: list[str] = []
+    hit = find_header_row(ws, ["department", "manning this week"], min_matches=2)
+    if hit is None:
+        return {"rows": [], "totals": {},
+                "warnings": ["Labour Strength: header row not found"]}
+    hrow, cols = hit
+
+    rows: list[dict[str, Any]] = []
+    totals: dict[str, Any] = {}
+    block = "permanent"
+    for r in iter_table_rows(ws, hrow, cols, stop_after_blank=10):
+        slot = _txt(r, "s/no")
+        dept = _txt(r, "department")
+        this_w = _num(r, "manning this week")
+        prev_w = _num(r, "manning previous")
+        move = _num(r, "movement")
+        if slot and norm(slot) == "casual staff":
+            block = "casual"
+            continue
+        if dept and norm(dept).startswith("total"):
+            totals[block] = this_w
+            continue
+        if slot and norm(slot) == "s/no":
+            continue  # repeated casual-block header
+        if not dept:
+            continue
+        rows.append({
+            "block": block,
+            "dept_slot": int(float(slot)) if slot and slot.replace(".", "").isdigit() else None,
+            "department": dept,
+            "manning_this_week": this_w if this_w is not None else 0,
+            "manning_previous_week": prev_w,
+            "movement": move,
+            "comment": _txt(r, "comment"),
+        })
+        if (this_w is not None and prev_w is not None and move is not None
+                and abs((this_w - prev_w) - move) > 0.01):
+            warnings.append(
+                f"Labour {dept}: movement {move:g} != this-week {this_w:g} "
+                f"- previous {prev_w:g}"
+            )
+    for blk, sheet_total in totals.items():
+        if sheet_total is None:
+            continue
+        ours = sum(x["manning_this_week"] for x in rows if x["block"] == blk)
+        if abs(ours - float(sheet_total)) > 0.01:
+            warnings.append(
+                f"Labour {blk}: our head count {ours:g} != sheet total "
+                f"{float(sheet_total):g}"
+            )
+    if not rows:
+        warnings.append("Labour Strength: no department rows parsed")
+    return {"rows": rows, "totals": totals, "warnings": warnings}
+
+
+def parse_subcontractors(ws) -> dict[str, Any]:
+    """Per-report ledger (read latest, like payments). Names carry forward
+    from their group row; work items = rows with a description + rate.
+    Zero-quantity rate-card rows are kept — standing agreements."""
+    warnings: list[str] = []
+    hit = find_header_row(ws, ["subcontractor", "description", "agreed rate"],
+                          min_matches=2)
+    if hit is None:
+        return {"rows": [], "warnings": ["Subcontractors: header row not found"]}
+    hrow, cols = hit
+
+    rows: list[dict[str, Any]] = []
+    current_sub: str | None = None
+    for r in iter_table_rows(ws, hrow, cols, stop_after_blank=12):
+        sub = _txt(r, "subcontractor")
+        desc = _txt(r, "description")
+        rate = _num(r, "agreed rate")
+        if sub:
+            current_sub = sub
+        if not desc or rate is None:
+            continue
+        prev_q = _num(r, "previous qty")
+        week_q = _num(r, "qty executed for week")
+        total_q = _num(r, "total qty executed")
+        row = {
+            "subcontractor_name": current_sub,
+            "description": desc,
+            "location": _txt(r, "location"),
+            "unit": _txt(r, "unit"),
+            "agreed_rate": rate,
+            "assigned_qty": _num(r, "assigned qty"),
+            "previous_qty": prev_q,
+            "qty_this_week": week_q,
+            "qty_to_date": total_q,
+            "amount_this_week": _num(r, "value completed this week"),
+            "value_previous": _num(r, "previous value completed"),
+            "amount_to_date": _num(r, "total value completed"),
+            "balance_remaining": _num(r, "balance to complete"),
+            "value_to_completion": _num(r, "value to completion"),
+            "remarks": _txt(r, "remarks"),
+        }
+        rows.append(row)
+        if (prev_q is not None and total_q is not None
+                and abs((prev_q + (week_q or 0)) - total_q) > 0.01):
+            warnings.append(
+                f"Subcontractors {desc[:36]!r}: previous + this-week != total qty"
+            )
+    if not rows:
+        warnings.append("Subcontractors: no work items parsed")
+    return {"rows": rows, "warnings": warnings}
+
+
+def parse_materials(ws) -> dict[str, Any]:
+    """Stock cycle + usage split + the sheet's own loss detector.
+    stock_maintained tells the truth about whether the site keeps the
+    ledger (Kaduna: yes, zero discrepancies; Akwa: usage only)."""
+    warnings: list[str] = []
+    hit = find_header_row(ws, ["description", "opening stock", "received"],
+                          min_matches=2)
+    if hit is None:
+        return {"rows": [], "sheet_total": None, "stock_maintained": None,
+                "warnings": ["Materials & Civils: header row not found"]}
+    hrow, cols = hit
+
+    rows: list[dict[str, Any]] = []
+    sheet_total = None
+    section = "materials"
+    for r in iter_table_rows(ws, hrow, cols, stop_after_blank=10):
+        slot = _txt(r, "#") or _txt(r, "s/no")
+        desc = _txt(r, "description")
+        if slot and slot.isupper() and not slot.replace(" ", "").isdigit()                 and len(slot) > 3:
+            # "QUARRY MATERIALS" banner rides the # column → canonical value
+            section = "quarry" if "QUARRY" in slot else "materials"
+            continue
+        if desc and norm(desc).startswith("total all"):
+            sheet_total = _num(r, "total used") or _num(r, "used")
+            continue
+        if not desc:
+            continue
+        rows.append({
+            "sheet_source": section,
+            "material_name": " ".join(desc.split()),  # strip nbsp padding
+            "unit": _txt(r, "unit"),
+            "unit_cost": _num(r, "current price"),
+            "opening_stock": _num(r, "opening stock"),
+            "received": _num(r, "received"),
+            "closing_stock": _num(r, "closing stock"),
+            "available_for_use": _num(r, "available for use"),
+            "used_works": _num(r, "on site works"),
+            "used_precast": _num(r, "precast"),
+            "used_mobilisation": _num(r, "mobil"),
+            "used": _num(r, "total used"),
+            "discrepancy_qty": None,   # computed below
+            "discrepancy_value": None,
+            "remarks": _txt(r, "remarks"),
+        })
+
+    # the site maintains stock only if closings are actually entered
+    stock_maintained = any(x["closing_stock"] not in (None, 0) for x in rows)
+    for x in rows:
+        o, rcv, c = x["opening_stock"], x["received"], x["closing_stock"]
+        used = x["used"]
+        if stock_maintained and o is not None and c is not None:
+            avail = (o or 0) + (rcv or 0) - (c or 0)
+            x["discrepancy_qty"] = round(avail - (used or 0), 3)
+            if x["unit_cost"]:
+                x["discrepancy_value"] = round(
+                    x["discrepancy_qty"] * x["unit_cost"], 2)
+            if abs(x["discrepancy_qty"]) > 0.01:
+                warnings.append(
+                    f"Materials {x['material_name'][:30]}: stock discrepancy "
+                    f"{x['discrepancy_qty']:g} {x['unit'] or ''}"
+                )
+        x["stock_maintained"] = stock_maintained
+    if not stock_maintained and rows:
+        warnings.append(
+            "Materials: stock side not maintained (openings/closings empty) "
+            "— usage recorded, loss detection unavailable"
+        )
+    return {"rows": rows, "sheet_total": sheet_total,
+            "stock_maintained": stock_maintained, "warnings": warnings}
+
+
+# ---------------------------------------------------------------------------
 # Lists (master data — company calendar + reference lists)
 # ---------------------------------------------------------------------------
 
@@ -899,14 +1135,18 @@ _SHEET_PARSERS = {
     "Certificate Status": parse_certificates,
     "Payments Recieved": parse_payments,
     "BEME & Works Completed Fd": parse_beme,
+    "Hired Vehicles": parse_hired_vehicles,
+    "Labour Strength": parse_labour,
+    "Subcontractors": parse_subcontractors,
+    "Materials & Civils": parse_materials,
     "Lists": parse_lists,
 }
 
 # Sheets we deliberately do NOT parse — stored in Storage, shown raw in
 # the upload preview. Their money already auto-posts into the Cost Report.
+# Dormant sheets: stored in Storage, raw-previewed, watched for life.
 STORED_ONLY_SHEETS = (
-    "Bill 1 Summary", "Bill 1 Payments", "Subcontractors",
-    "Labour Strength", "Materials & Civils", "Hired Vehicles", "Precast",
+    "Bill 1 Summary", "Bill 1 Payments", "Precast",
 )
 
 

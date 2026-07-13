@@ -180,6 +180,8 @@ async def preview_weekly_report(
     except Exception as e:
         raise ValidationError(f"Not a readable Excel workbook: {e}") from e
 
+    import time as _time
+    _t0 = _time.monotonic()
     try:
         parsed = parse_workbook(wb)
     except Exception as e:
@@ -187,6 +189,7 @@ async def preview_weekly_report(
         raise HTTPException(
             status_code=422, detail=f"Workbook could not be parsed: {e}"
         ) from e
+    parse_ms = int((_time.monotonic() - _t0) * 1000)
 
     # identity guard against the selected project (advisory)
     identity_warning = None
@@ -217,7 +220,7 @@ async def preview_weekly_report(
         # sheet-specific extras the preview renders as summary panels
         for extra in ("bills", "tail", "summary_table", "cross_checks",
                       "footer", "stock", "sheet_totals", "sheet_total",
-                      "snapshot"):
+                      "snapshot", "stock_maintained", "totals"):
             if s.get(extra) is not None:
                 entry[extra] = s[extra]
         if name == "Lists":
@@ -249,6 +252,9 @@ async def preview_weekly_report(
         "identity_warning": identity_warning,
         "drift": parsed["drift"],
         "sheets": sheets_out,
+        "parse_ms": parse_ms,
+        "file_name": file.filename,
+        "file_size": len(content),
     }}
 
 

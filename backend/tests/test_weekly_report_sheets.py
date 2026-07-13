@@ -431,3 +431,75 @@ class TestOutOfPlaceItem:
         assert i709["bill_code"] == "7"
         assert any("7.09" in w and "assigned to Bill 7" in w
                    for w in b["warnings"])
+
+
+class TestPromotions:
+    """Dossiers 9-13: the four promoted sheets, both projects."""
+
+    def test_hired_vehicles_akwa(self, week10):
+        hv = week10["sheets"]["Hired Vehicles"]
+        assert hv["sheet_total"] == pytest.approx(342_000)
+        assert sum(r["amount_ngn"] for r in hv["rows"]) == pytest.approx(342_000)
+        crane = next(r for r in hv["rows"] if (r["description"] or "") == "Crane")
+        assert crane["rate_ngn"] == pytest.approx(1_000_000)
+        assert crane["days_worked"] == 0  # standing arrangement kept
+
+    def test_labour_akwa_reconciles(self, week10):
+        lab = week10["sheets"]["Labour Strength"]
+        assert lab["totals"]["permanent"] == 61
+        perm = [r for r in lab["rows"] if r["block"] == "permanent"]
+        assert sum(r["manning_this_week"] for r in perm) == 61
+        plant = next(r for r in perm if r["department"] == "Plant")
+        assert plant["manning_this_week"] == 15
+        assert not [w for w in lab["warnings"] if "head count" in w]
+
+    def test_labour_kaduna(self, kaduna9):
+        lab = kaduna9["sheets"]["Labour Strength"]
+        assert lab["totals"]["permanent"] == 51
+        plant = next(r for r in lab["rows"]
+                     if r["block"] == "permanent" and r["department"] == "Plant")
+        assert plant["manning_this_week"] == 17
+
+    def test_subcontractors_kaduna_live_ledger(self, kaduna9):
+        subs = kaduna9["sheets"]["Subcontractors"]["rows"]
+        names = {r["subcontractor_name"] for r in subs}
+        assert "DOMINIC ANI GLOBAL NIG" in " / ".join(n for n in names if n)
+        exc = next(r for r in subs if r["description"] == "Excavation")
+        assert exc["agreed_rate"] == pytest.approx(1100)
+        assert exc["value_previous"] == pytest.approx(71_068.80)
+    def test_subcontractors_akwa_mostly_dormant(self, week10):
+        """Akwa: large rate card + a small live tail (ABBAS GLOBAL's
+        precast work — the Precast sheet's story living here)."""
+        subs = week10["sheets"]["Subcontractors"]["rows"]
+        assert len(subs) > 50
+        active = [r for r in subs if (r["qty_to_date"] or 0) != 0]
+        assert len(active) >= 9
+        assert any("PRECAST" in (r["description"] or "")
+                   for r in active if r["subcontractor_name"] == "ABBAS GLOBAL")
+
+    def test_materials_kaduna_stock_clean(self, kaduna9):
+        mat = kaduna9["sheets"]["Materials & Civils"]
+        assert mat["stock_maintained"] is True
+        cement = next(r for r in mat["rows"]
+                      if r["material_name"] == "Cement (Bags)")
+        # opening 934 + received 900 - closing 1366 = 468 used, zero loss
+        assert cement["used"] == pytest.approx(468)
+        assert cement["discrepancy_qty"] == pytest.approx(0)
+        assert not [w for w in mat["warnings"] if "discrepancy" in w]
+
+    def test_materials_akwa_honest_flag(self, week10):
+        mat = week10["sheets"]["Materials & Civils"]
+        assert mat["stock_maintained"] is False
+        assert any("stock side not maintained" in w for w in mat["warnings"])
+        bulk = next(r for r in mat["rows"]
+                    if r["material_name"] == "Cement (Bulk)")
+        assert bulk["used_works"] == pytest.approx(386.75)  # = Cost Report qty
+
+    def test_price_map_across_projects(self, week10, kaduna9):
+        """The regional price intelligence: same material, two prices."""
+        def price(out, name):
+            return next(r["unit_cost"] for r in
+                        out["sheets"]["Materials & Civils"]["rows"]
+                        if r["material_name"] == name)
+        assert price(week10, "Cement (Bags)") == pytest.approx(4_750)
+        assert price(kaduna9, "Cement (Bags)") == pytest.approx(6_700)
