@@ -624,62 +624,79 @@ function GenericTable({ sheet }: { sheet: SheetPreview }) {
 function BemeTable({ sheet }: { sheet: SheetPreview }) {
   const rows = sheet.rows!
   const bills = sheet.bills ?? []
+  // the workbook's own 14 columns, its own names; cumulative ones computed
+  const H = ['Item', 'Description', 'Unit', 'Contract Qty', 'Previous Qty',
+             'This Week Qty', 'Total Qty Completed', 'Qty Outstanding',
+             'Rate ₦', 'Contract Amount', 'Previous Amount',
+             'This Week Amount', 'Total Amount', '% of Work Completed']
   return (
     <div className="overflow-x-auto rounded-md border">
-      <Table>
+      <Table className="min-w-[1280px]">
         <TableHeader>
           <TableRow>
-            <TableHead className="text-xs">item</TableHead>
-            <TableHead className="min-w-[260px] text-xs">description</TableHead>
-            <TableHead className="text-xs">unit</TableHead>
-            <TableHead className="text-right text-xs">contract qty</TableHead>
-            <TableHead className="text-right text-xs">rate</TableHead>
-            <TableHead className="text-right text-xs">contract ₦</TableHead>
-            <TableHead className="text-right text-xs">done before ₦</TableHead>
-            <TableHead className="text-right text-xs">this week qty</TableHead>
-            <TableHead className="text-right text-xs">this week ₦</TableHead>
-            <TableHead className="text-right text-xs">% so far</TableHead>
+            {H.map((h, i) => (
+              <TableHead key={h}
+                className={`whitespace-nowrap text-xs ${i >= 3 && i !== 1 && i !== 2 ? 'text-right' : ''} ${h === 'Description' ? 'min-w-[240px]' : ''}`}>
+                {h}
+              </TableHead>
+            ))}
           </TableRow>
         </TableHeader>
         <TableBody>
           {bills.map((b) => {
             const items = rows.filter((r) => r.bill_code === b.bill_code)
             const sumC = items.reduce((a, r) => a + num(r.contract_amount), 0)
+            const sumP = items.reduce((a, r) => a + num(r.amount_previous_reported), 0)
             const sumW = items.reduce((a, r) => a + num(r.amount_this_week), 0)
-            const sumDone = items.reduce((a, r) =>
-              a + num(r.amount_previous_reported) + num(r.amount_this_week), 0)
-            const pct = sumC > 0 ? (sumDone / sumC) * 100 : null
+            const sumT = sumP + sumW
+            const pct = sumC > 0 ? (sumT / sumC) * 100 : null
             return [
               <TableRow key={b.bill_code} className="bg-muted/60 hover:bg-muted/60">
                 <TableCell className="text-xs font-bold whitespace-nowrap">{b.bill_code}</TableCell>
-                <TableCell className="text-xs font-bold" colSpan={4}>
+                <TableCell className="text-xs font-bold" colSpan={8}>
                   {b.name} <span className="text-muted-foreground font-normal">· {items.length} items</span>
                 </TableCell>
                 <TableCell className="text-right text-xs font-bold tabular-nums">{fmtN(sumC)}</TableCell>
-                <TableCell className="text-right text-xs font-bold tabular-nums">{fmtN(items.reduce((a, r) => a + num(r.amount_previous_reported), 0))}</TableCell>
-                <TableCell />
+                <TableCell className="text-right text-xs font-bold tabular-nums">{fmtN(sumP)}</TableCell>
                 <TableCell className="text-right text-xs font-bold tabular-nums">{fmtN(sumW)}</TableCell>
+                <TableCell className="text-right text-xs font-bold tabular-nums">{fmtN(sumT)}</TableCell>
                 <TableCell className="text-right text-xs font-bold tabular-nums">
                   {pct !== null ? `${pct.toFixed(1)}%` : '—'}
                 </TableCell>
               </TableRow>,
               ...items.map((r, i) => {
-                const done = num(r.amount_previous_reported) + num(r.amount_this_week)
-                const cAmt = num(r.contract_amount)
-                const ipct = cAmt > 0 ? (done / cAmt) * 100 : null
+                const pQ = r.qty_previous_reported == null ? null : num(r.qty_previous_reported)
+                const wQ = r.qty_this_week == null ? null : num(r.qty_this_week)
+                const totQ = pQ === null && wQ === null ? null : num(pQ) + num(wQ)
+                const cQ = r.contract_qty == null ? null : num(r.contract_qty)
+                const outQ = cQ !== null && totQ !== null ? cQ - totQ : null
+                const pA = num(r.amount_previous_reported)
+                const wA = num(r.amount_this_week)
+                const totA = pA + wA
+                const cA = num(r.contract_amount)
+                const ipct = cA > 0 ? (totA / cA) * 100 : null
+                const cell = (v: unknown, extra = '') => (
+                  <TableCell className={`text-right text-xs whitespace-nowrap tabular-nums ${extra}`}>
+                    {v === null || v === undefined ? '—' : fmtN(v)}
+                  </TableCell>
+                )
                 return (
                   <TableRow key={`${b.bill_code}-${i}`}>
                     <TableCell className="text-xs whitespace-nowrap">{String(r.item_code)}</TableCell>
-                    <TableCell className="max-w-[340px] truncate text-xs" title={String(r.description)}>
+                    <TableCell className="max-w-[320px] truncate text-xs" title={String(r.description)}>
                       {String(r.description)}
                     </TableCell>
                     <TableCell className="text-xs">{String(r.unit ?? '—')}</TableCell>
-                    <TableCell className="text-right text-xs tabular-nums">{r.contract_qty == null ? '—' : fmtN(r.contract_qty)}</TableCell>
-                    <TableCell className="text-right text-xs tabular-nums">{r.rate == null ? '—' : fmtN(r.rate)}</TableCell>
-                    <TableCell className="text-right text-xs tabular-nums">{cAmt ? fmtN(cAmt) : '—'}</TableCell>
-                    <TableCell className="text-right text-xs tabular-nums">{fmtN(num(r.amount_previous_reported))}</TableCell>
-                    <TableCell className="text-right text-xs tabular-nums">{r.qty_this_week == null ? '—' : fmtN(r.qty_this_week)}</TableCell>
-                    <TableCell className="text-right text-xs tabular-nums">{fmtN(num(r.amount_this_week))}</TableCell>
+                    {cell(cQ)}
+                    {cell(pQ)}
+                    {cell(wQ)}
+                    {cell(totQ)}
+                    {cell(outQ, outQ !== null && outQ < 0 ? 'text-red-600 dark:text-red-400' : '')}
+                    {cell(r.rate == null ? null : num(r.rate))}
+                    {cell(cA || null)}
+                    {cell(pA || (r.amount_previous_reported == null ? null : 0))}
+                    {cell(wA || (r.amount_this_week == null ? null : 0))}
+                    {cell(totA || null)}
                     <TableCell className={`text-right text-xs tabular-nums ${ipct !== null && ipct > 100.1 ? 'font-semibold text-red-600 dark:text-red-400' : ''}`}>
                       {ipct !== null ? `${ipct.toFixed(1)}%` : '—'}
                     </TableCell>
@@ -691,8 +708,9 @@ function BemeTable({ sheet }: { sheet: SheetPreview }) {
         </TableBody>
       </Table>
       <p className="text-muted-foreground border-t px-3 py-2 text-xs">
-        All {rows.length} items across {bills.length} bills — % computed from
-        reported-previous + this week ÷ contract (over-runs shown red, uncapped).
+        All {rows.length} items across {bills.length} bills — the workbook&apos;s own
+        columns; Total, Outstanding and % are recomputed live (never copied),
+        over-runs shown red and uncapped.
       </p>
     </div>
   )
