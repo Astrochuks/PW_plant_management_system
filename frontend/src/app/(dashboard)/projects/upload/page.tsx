@@ -581,6 +581,11 @@ function SheetPanel({ name, sheet }: { name: string; sheet?: SheetPreview }) {
 const HIDDEN_COLS = new Set(['bill_code', 'bill_no', 'dup_seq', 'stock_maintained'])
 
 function num(v: unknown): number { return Number(v) || 0 }
+// 0.025 → '2.5%' (the workbook stores rate cells as fractions, displays %)
+function pct(v: unknown): string | null {
+  if (v === null || v === undefined || v === '') return null
+  return `${Math.round(Number(v) * 10000) / 100}%`
+}
 
 type Col = { key: string; label: string; compute?: (r: Record<string, unknown>) => unknown }
 
@@ -640,14 +645,18 @@ const SHEET_COLUMNS: Record<string, { cols: Col[]; groupBy?: string; groupLabel?
       { key: 'less_materials_on_site', label: 'Less Materials on Site' },
       { key: 'general_bill_1', label: 'General Bill 1' },
       { key: 'total_value_of_work_done', label: 'Total Value of Work Done' },
+      { key: 'value_of_works_per_cert', label: 'Value of works per Cert' },
       { key: 'total_retention_held', label: 'Total Retention Held' },
-      { key: 'total_net_payment', label: 'Total Net Payment' },
+      { key: 'total_net_payment', label: 'Total Net Payment in Respect of works' },
       { key: 'retention_released', label: 'Add Release of Retention' },
       { key: 'contingency_used', label: 'Add Value of Contingency Used' },
+      { key: 'contingency_deducted', label: 'Less Value of Contingency' },
       { key: 'fluctuation_materials', label: 'Add Fluctuation on Materials' },
       { key: 'advance_received', label: 'Add Advance Received to date' },
       { key: 'total_works_executed', label: 'Total Value of Works Executed' },
       { key: 'advance_recovery', label: 'Deduct Advance Recovery' },
+      { key: 'new_total', label: 'New Total' },
+      { key: 'less_previously_certified', label: 'Less Previously Certified without VAT' },
     ],
   },
   'Payments Recieved': {
@@ -655,13 +664,18 @@ const SHEET_COLUMNS: Record<string, { cols: Col[]; groupBy?: string; groupLabel?
       { key: 'payment_date', label: 'Date' },
       { key: 'voucher_number', label: 'Voucher Number' },
       { key: 'payment_type', label: 'Payment Type' },
-      { key: 'gross_amount', label: 'Gross Amount' },
+      { key: 'gross_amount', label: 'Gross Amount (Including VAT)' },
       { key: 'wht', label: 'WHT' },
       { key: 'vat', label: 'VAT' },
       { key: 'vetting_fee', label: 'Vetting Fee' },
       { key: 'stamp_duty', label: 'Stamp Duty' },
       { key: 'other_deductions', label: 'Other' },
       { key: 'net_amount', label: 'Net Amount Payable' },
+      { key: 'rate_vat', label: 'VAT %', compute: (r) => pct(r.rate_vat) },
+      { key: 'rate_wht', label: 'WHT %', compute: (r) => pct(r.rate_wht) },
+      { key: 'rate_state_levy', label: 'State Levy %', compute: (r) => pct(r.rate_state_levy) },
+      { key: 'rate_stamp_duty', label: 'Stamp Duty %', compute: (r) => pct(r.rate_stamp_duty) },
+      { key: 'rate_other', label: 'Other %', compute: (r) => pct(r.rate_other) },
     ],
   },
   'Hired Vehicles': {
@@ -719,9 +733,11 @@ const SHEET_COLUMNS: Record<string, { cols: Col[]; groupBy?: string; groupLabel?
       { key: 'used_works', label: 'On Site Works' },
       { key: 'used_precast', label: 'Precast' },
       { key: 'used_mobilisation', label: 'Mobilsation' },
+      { key: 'used_other', label: 'Other Uses' },
       { key: 'used', label: 'Total Used' },
-      { key: 'discrepancy_qty', label: 'Discrepancy' },
-      { key: 'discrepancy_value', label: 'Discrepancy Value' },
+      { key: 'variance_qty', label: 'Variance Qty' },
+      { key: 'variance_value', label: 'Variance Value' },
+      { key: 'remarks', label: 'Comments' },
     ],
     groupLabel: (v) => v === 'quarry' ? 'QUARRY MATERIALS' : 'MATERIALS',
   },

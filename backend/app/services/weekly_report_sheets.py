@@ -557,6 +557,8 @@ def parse_certificates(ws) -> dict[str, Any]:
             "advance_received": _num(r, "add advance received"),
             "total_works_executed": _num(r, "total value of works executed"),
             "advance_recovery": _num(r, "deduct advance recovery"),
+            "new_total": _num(r, "new total"),
+            "less_previously_certified": _num(r, "less previously certified"),
         }
         rows.append(row)
 
@@ -608,6 +610,12 @@ def parse_payments(ws) -> dict[str, Any]:
             "stamp_duty": _num(r, "stamp duty") or 0,
             "other_deductions": _num(r, "other") or 0,
             "net_amount": _num(r, "net amount"),
+            # deduction-rate columns L..P (constants per row, shown verbatim)
+            "rate_vat": _num(r, "vat %"),
+            "rate_wht": _num(r, "wht %"),
+            "rate_state_levy": _num(r, "state levy %"),
+            "rate_stamp_duty": _num(r, "stamp duty %"),
+            "rate_other": _num(r, "other %"),
         }
         if not (row["gross_amount"] or 0) and not (row["net_amount"] or 0):
             continue  # template placeholder (young project, no money moved)
@@ -1046,10 +1054,14 @@ def parse_materials(ws) -> dict[str, Any]:
             "used_works": _num(r, "on site works"),
             "used_precast": _num(r, "precast"),
             "used_mobilisation": _num(r, "mobil"),
+            "used_other": _num(r, "other uses"),
             "used": _num(r, "total used"),
+            # the sheet's own loss detector, verbatim (cols O/P)
+            "variance_qty": _num(r, "variance qty"),
+            "variance_value": _num(r, "variance value"),
             "discrepancy_qty": None,   # computed below
             "discrepancy_value": None,
-            "remarks": _txt(r, "remarks"),
+            "remarks": _txt(r, "comments", "remarks"),
         })
 
     # the site maintains stock only if closings are actually entered

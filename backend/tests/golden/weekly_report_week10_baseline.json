@@ -1689,6 +1689,8 @@
      "general_bill_1": 126536150.25,
      "gross_value_works_done": 292876150.0,
      "less_materials_on_site": null,
+     "less_previously_certified": null,
+     "new_total": null,
      "retention_released": null,
      "total_net_payment": 614768492.75,
      "total_retention_held": 14643807.5,
@@ -1708,6 +1710,8 @@
      "general_bill_1": 167136150.25,
      "gross_value_works_done": 1304376463.35,
      "less_materials_on_site": 210000000.0,
+     "less_previously_certified": 2343183884.11,
+     "new_total": 3530565785.7525,
      "retention_released": null,
      "total_net_payment": 1406293790.4325,
      "total_retention_held": 65218823.1675,
@@ -1727,6 +1731,8 @@
      "general_bill_1": 170136150.25,
      "gross_value_works_done": 2386215683.0,
      "less_materials_on_site": 210000000.0,
+     "less_previously_certified": 3530565786.25,
+     "new_total": 4595933760.24,
      "retention_released": null,
      "total_net_payment": 2437041049.1,
      "total_retention_held": 119310784.15,
@@ -1746,6 +1752,8 @@
      "general_bill_1": 218332411.25,
      "gross_value_works_done": 3240181777.0,
      "less_materials_on_site": null,
+     "less_previously_certified": 4595933760.24,
+     "new_total": 5534686410.540001,
      "retention_released": null,
      "total_net_payment": 3078172688.15,
      "total_retention_held": 162009088.85000002,
@@ -1765,6 +1773,8 @@
      "general_bill_1": 250854911.25,
      "gross_value_works_done": 3970958517.2,
      "less_materials_on_site": null,
+     "less_previously_certified": 5534686410.73,
+     "new_total": 6255889705.089,
      "retention_released": null,
      "total_net_payment": 3772410591.3399997,
      "total_retention_held": 198547925.86,
@@ -1784,6 +1794,8 @@
      "general_bill_1": 250854911.25,
      "gross_value_works_done": 4190024367.2,
      "less_materials_on_site": null,
+     "less_previously_certified": 6255889705.09,
+     "new_total": 6464002262.589,
      "retention_released": null,
      "total_net_payment": 3980523148.8399997,
      "total_retention_held": 209501218.36,
@@ -1803,6 +1815,8 @@
      "general_bill_1": 250854911.25,
      "gross_value_works_done": 5561644626.0,
      "less_materials_on_site": null,
+     "less_previously_certified": 6464002262.59,
+     "new_total": 8052520426.879999,
      "retention_released": null,
      "total_net_payment": 5283562394.7,
      "total_retention_held": 278082231.3,
@@ -1822,6 +1836,8 @@
      "general_bill_1": 250854911.25,
      "gross_value_works_done": 6987125226.0,
      "less_materials_on_site": null,
+     "less_previously_certified": 8052520427.03,
+     "new_total": 9287653454.508,
      "retention_released": null,
      "total_net_payment": 6637768964.7,
      "total_retention_held": 349356261.3,
@@ -1841,6 +1857,8 @@
      "general_bill_1": 250854911.25,
      "gross_value_works_done": 8387605119.65,
      "less_materials_on_site": 150000000.0,
+     "less_previously_certified": 9287653454.67,
+     "new_total": 10110888726.38,
      "retention_released": null,
      "total_net_payment": 7968224863.67,
      "total_retention_held": 419380255.98,
@@ -1860,6 +1878,8 @@
      "general_bill_1": 250854911.25,
      "gross_value_works_done": 9974307555.411951,
      "less_materials_on_site": 250000000.0,
+     "less_previously_certified": 10110888726.38,
+     "new_total": 11223633033.983353,
      "retention_released": null,
      "total_net_payment": 9475592177.641354,
      "total_retention_held": 498715377.7705976,
@@ -1879,6 +1899,8 @@
      "general_bill_1": 250854911.25,
      "gross_value_works_done": 11016180110.29,
      "less_materials_on_site": 500000000.0,
+     "less_previously_certified": 11223633033.98,
+     "new_total": 11963411961.1175,
      "retention_released": null,
      "total_net_payment": 10465371104.775501,
      "total_retention_held": 550809005.5145,
@@ -1898,6 +1920,8 @@
      "general_bill_1": 250854911.25,
      "gross_value_works_done": 11016180110.29,
      "less_materials_on_site": null,
+     "less_previously_certified": 11963411961.1175,
+     "new_total": 14754109635.5375,
      "retention_released": null,
      "total_net_payment": 10465371104.775501,
      "total_retention_held": 550809005.5145,
@@ -1917,6 +1941,8 @@
      "general_bill_1": 250854911.25,
      "gross_value_works_done": 12741757149.69,
      "less_materials_on_site": null,
+     "less_previously_certified": 14754109635.5375,
+     "new_total": 16274334280.600998,
      "retention_released": null,
      "total_net_payment": 12104669292.2055,
      "total_retention_held": 637087857.4845,
@@ -5305,8 +5331,11 @@
      "unit_cost": 4750.0,
      "used": 0.0,
      "used_mobilisation": null,
+     "used_other": null,
      "used_precast": null,
-     "used_works": 0.0
+     "used_works": 0.0,
+     "variance_qty": 0.0,
+     "variance_value": 0.0
     },
     {
      "available_for_use": 123.16,
@@ -5323,8 +5352,11 @@
      "unit_cost": 75000.0,
      "used": 0.0,
      "used_mobilisation": null,
+     "used_other": null,
      "used_precast": null,
-     "used_works": 386.75
+     "used_works": 386.75,
+     "variance_qty": 123.16,
+     "variance_value": 9237000.0
     },
     {
      "available_for_use": 0.0,
@@ -5341,8 +5373,11 @@
      "unit_cost": 425000.0,
      "used": 8.736,
      "used_mobilisation": null,
+     "used_other": null,
      "used_precast": null,
-     "used_works": 8.736
+     "used_works": 8.736,
+     "variance_qty": -8.736,
+     "variance_value": -3712800.0000000005
     },
     {
      "available_for_use": null,
@@ -5359,8 +5394,11 @@
      "unit_cost": 425000.0,
      "used": 0.0,
      "used_mobilisation": null,
+     "used_other": null,
      "used_precast": null,
-     "used_works": null
+     "used_works": null,
+     "variance_qty": 0.0,
+     "variance_value": 0.0
     },
     {
      "available_for_use": 0.0,
@@ -5377,8 +5415,11 @@
      "unit_cost": 425000.0,
      "used": 0.0,
      "used_mobilisation": null,
+     "used_other": null,
      "used_precast": null,
-     "used_works": null
+     "used_works": null,
+     "variance_qty": 0.0,
+     "variance_value": 0.0
     },
     {
      "available_for_use": 0.0,
@@ -5395,8 +5436,11 @@
      "unit_cost": 475000.0,
      "used": 0.0,
      "used_mobilisation": null,
+     "used_other": null,
      "used_precast": null,
-     "used_works": null
+     "used_works": null,
+     "variance_qty": 0.0,
+     "variance_value": 0.0
     },
     {
      "available_for_use": 0.0,
@@ -5413,8 +5457,11 @@
      "unit_cost": 475000.0,
      "used": 0.0,
      "used_mobilisation": null,
+     "used_other": null,
      "used_precast": null,
-     "used_works": null
+     "used_works": null,
+     "variance_qty": 0.0,
+     "variance_value": 0.0
     },
     {
      "available_for_use": 0.0,
@@ -5431,8 +5478,11 @@
      "unit_cost": 475000.0,
      "used": 0.0,
      "used_mobilisation": null,
+     "used_other": null,
      "used_precast": null,
-     "used_works": null
+     "used_works": null,
+     "variance_qty": 0.0,
+     "variance_value": 0.0
     },
     {
      "available_for_use": 0.0,
@@ -5449,8 +5499,11 @@
      "unit_cost": 475000.0,
      "used": 0.0,
      "used_mobilisation": null,
+     "used_other": null,
      "used_precast": null,
-     "used_works": null
+     "used_works": null,
+     "variance_qty": 0.0,
+     "variance_value": 0.0
     },
     {
      "available_for_use": 0.0,
@@ -5467,8 +5520,11 @@
      "unit_cost": 475000.0,
      "used": 5.40576636,
      "used_mobilisation": null,
+     "used_other": null,
      "used_precast": null,
-     "used_works": 5.40576636
+     "used_works": 5.40576636,
+     "variance_qty": -5.40576636,
+     "variance_value": -2567739.021
     },
     {
      "available_for_use": 0.0,
@@ -5485,8 +5541,11 @@
      "unit_cost": 4500.0,
      "used": 0.0,
      "used_mobilisation": null,
+     "used_other": null,
      "used_precast": null,
-     "used_works": null
+     "used_works": null,
+     "variance_qty": 0.0,
+     "variance_value": 0.0
     },
     {
      "available_for_use": 0.0,
@@ -5503,8 +5562,11 @@
      "unit_cost": 5500.0,
      "used": 0.0,
      "used_mobilisation": null,
+     "used_other": null,
      "used_precast": null,
-     "used_works": null
+     "used_works": null,
+     "variance_qty": 0.0,
+     "variance_value": 0.0
     },
     {
      "available_for_use": 0.0,
@@ -5521,8 +5583,11 @@
      "unit_cost": 300.0,
      "used": 0.0,
      "used_mobilisation": null,
+     "used_other": null,
      "used_precast": null,
-     "used_works": null
+     "used_works": null,
+     "variance_qty": 0.0,
+     "variance_value": 0.0
     },
     {
      "available_for_use": 0.0,
@@ -5539,8 +5604,11 @@
      "unit_cost": 300.0,
      "used": 0.0,
      "used_mobilisation": null,
+     "used_other": null,
      "used_precast": null,
-     "used_works": null
+     "used_works": null,
+     "variance_qty": 0.0,
+     "variance_value": 0.0
     },
     {
      "available_for_use": null,
@@ -5557,8 +5625,11 @@
      "unit_cost": 16300.0,
      "used": 1183.0,
      "used_mobilisation": null,
+     "used_other": null,
      "used_precast": null,
-     "used_works": 1183.0
+     "used_works": 1183.0,
+     "variance_qty": -1183.0,
+     "variance_value": -19282900.0
     },
     {
      "available_for_use": 0.0,
@@ -5575,8 +5646,11 @@
      "unit_cost": 16300.0,
      "used": 0.0,
      "used_mobilisation": null,
+     "used_other": null,
      "used_precast": null,
-     "used_works": null
+     "used_works": null,
+     "variance_qty": 0.0,
+     "variance_value": 0.0
     },
     {
      "available_for_use": null,
@@ -5593,8 +5667,11 @@
      "unit_cost": 11000.0,
      "used": 651.5,
      "used_mobilisation": null,
+     "used_other": null,
      "used_precast": null,
-     "used_works": 651.5
+     "used_works": 651.5,
+     "variance_qty": -651.5,
+     "variance_value": -7166500.0
     },
     {
      "available_for_use": 0.0,
@@ -5611,8 +5688,11 @@
      "unit_cost": 10800.0,
      "used": 0.0,
      "used_mobilisation": null,
+     "used_other": null,
      "used_precast": null,
-     "used_works": null
+     "used_works": null,
+     "variance_qty": 0.0,
+     "variance_value": 0.0
     },
     {
      "available_for_use": 0.0,
@@ -5629,8 +5709,11 @@
      "unit_cost": 13300.0,
      "used": 0.0,
      "used_mobilisation": null,
+     "used_other": null,
      "used_precast": null,
-     "used_works": null
+     "used_works": null,
+     "variance_qty": 0.0,
+     "variance_value": 0.0
     },
     {
      "available_for_use": 0.0,
@@ -5647,8 +5730,11 @@
      "unit_cost": 6500.0,
      "used": 0.0,
      "used_mobilisation": null,
+     "used_other": null,
      "used_precast": null,
-     "used_works": null
+     "used_works": null,
+     "variance_qty": 0.0,
+     "variance_value": 0.0
     },
     {
      "available_for_use": 0.0,
@@ -5665,8 +5751,11 @@
      "unit_cost": 341200.0,
      "used": 0.0,
      "used_mobilisation": null,
+     "used_other": null,
      "used_precast": null,
-     "used_works": null
+     "used_works": null,
+     "variance_qty": 0.0,
+     "variance_value": 0.0
     },
     {
      "available_for_use": 0.0,
@@ -5683,8 +5772,11 @@
      "unit_cost": 346200.0,
      "used": 0.0,
      "used_mobilisation": null,
+     "used_other": null,
      "used_precast": null,
-     "used_works": null
+     "used_works": null,
+     "variance_qty": 0.0,
+     "variance_value": 0.0
     },
     {
      "available_for_use": 0.0,
@@ -5701,8 +5793,11 @@
      "unit_cost": 329200.0,
      "used": 0.0,
      "used_mobilisation": null,
+     "used_other": null,
      "used_precast": null,
-     "used_works": null
+     "used_works": null,
+     "variance_qty": 0.0,
+     "variance_value": 0.0
     },
     {
      "available_for_use": 0.0,
@@ -5719,8 +5814,11 @@
      "unit_cost": 0.0,
      "used": 0.0,
      "used_mobilisation": null,
+     "used_other": null,
      "used_precast": null,
-     "used_works": null
+     "used_works": null,
+     "variance_qty": 0.0,
+     "variance_value": 0.0
     },
     {
      "available_for_use": 0.0,
@@ -5737,8 +5835,11 @@
      "unit_cost": 0.0,
      "used": 0.0,
      "used_mobilisation": null,
+     "used_other": null,
      "used_precast": null,
-     "used_works": null
+     "used_works": null,
+     "variance_qty": 0.0,
+     "variance_value": 0.0
     },
     {
      "available_for_use": 0.0,
@@ -5755,8 +5856,11 @@
      "unit_cost": 0.0,
      "used": 0.0,
      "used_mobilisation": null,
+     "used_other": null,
      "used_precast": null,
-     "used_works": null
+     "used_works": null,
+     "variance_qty": 0.0,
+     "variance_value": 0.0
     },
     {
      "available_for_use": 0.0,
@@ -5773,8 +5877,11 @@
      "unit_cost": 384709.0,
      "used": 0.0,
      "used_mobilisation": null,
+     "used_other": null,
      "used_precast": null,
-     "used_works": null
+     "used_works": null,
+     "variance_qty": 0.0,
+     "variance_value": 0.0
     },
     {
      "available_for_use": 0.0,
@@ -5791,8 +5898,11 @@
      "unit_cost": null,
      "used": 0.0,
      "used_mobilisation": null,
+     "used_other": null,
      "used_precast": null,
-     "used_works": null
+     "used_works": null,
+     "variance_qty": 0.0,
+     "variance_value": 0.0
     }
    ],
    "rows_parsed": 28,
@@ -5811,6 +5921,11 @@
      "other_deductions": 0,
      "payment_date": null,
      "payment_type": "Advance",
+     "rate_other": 0.0,
+     "rate_stamp_duty": 0.01,
+     "rate_state_levy": 0.005,
+     "rate_vat": 0.025,
+     "rate_wht": 0.075,
      "stamp_duty": 15932039.9686,
      "vat": 119490299.76449999,
      "vetting_fee": 7966019.9843,
@@ -5823,6 +5938,11 @@
      "other_deductions": 0,
      "payment_date": "2022-08-15",
      "payment_type": "Cert",
+     "rate_other": 0.0,
+     "rate_stamp_duty": 0.01,
+     "rate_state_levy": 0.005,
+     "rate_vat": 0.025,
+     "rate_wht": 0.075,
      "stamp_duty": 8294239.254112497,
      "vat": 62206794.40584372,
      "vetting_fee": 4147119.6270562485,
@@ -5835,6 +5955,11 @@
      "other_deductions": 0,
      "payment_date": null,
      "payment_type": "Advance",
+     "rate_other": 0.0,
+     "rate_stamp_duty": 0.01,
+     "rate_state_levy": 0.005,
+     "rate_vat": 0.025,
+     "rate_wht": 0.075,
      "stamp_duty": 10621359.9791,
      "vat": 79660199.84324999,
      "vetting_fee": 5310679.98955,
@@ -5847,6 +5972,11 @@
      "other_deductions": 0,
      "payment_date": "2023-01-26",
      "payment_type": "Cert",
+     "rate_other": 0.0,
+     "rate_stamp_duty": 0.01,
+     "rate_state_levy": 0.005,
+     "rate_vat": 0.025,
+     "rate_wht": 0.075,
      "stamp_duty": 10000000.0,
      "vat": 75000000.0,
      "vetting_fee": 5000000.0,
@@ -5859,6 +5989,11 @@
      "other_deductions": 0,
      "payment_date": "2023-04-20",
      "payment_type": "Cert",
+     "rate_other": 0.0,
+     "rate_stamp_duty": 0.01,
+     "rate_state_levy": 0.005,
+     "rate_vat": 0.025,
+     "rate_wht": 0.075,
      "stamp_duty": 2764356.44,
      "vat": 20732673.3,
      "vetting_fee": 1382178.22,
@@ -5871,6 +6006,11 @@
      "other_deductions": 0,
      "payment_date": "2023-05-18",
      "payment_type": "Cert",
+     "rate_other": 0.0,
+     "rate_stamp_duty": 0.01,
+     "rate_state_levy": 0.005,
+     "rate_vat": 0.025,
+     "rate_wht": 0.075,
      "stamp_duty": 5000000.0,
      "vat": 37500000.0,
      "vetting_fee": 2500000.0,
@@ -5883,6 +6023,11 @@
      "other_deductions": 0,
      "payment_date": "2023-09-18",
      "payment_type": "Cert",
+     "rate_other": 0.0,
+     "rate_stamp_duty": 0.01,
+     "rate_state_levy": 0.005,
+     "rate_vat": 0.025,
+     "rate_wht": 0.075,
      "stamp_duty": 5000000.0,
      "vat": 37500000.0,
      "vetting_fee": 2500000.0,
@@ -5895,6 +6040,11 @@
      "other_deductions": 0,
      "payment_date": "2023-11-18",
      "payment_type": "Cert",
+     "rate_other": 0.0,
+     "rate_stamp_duty": 0.01,
+     "rate_state_levy": 0.005,
+     "rate_vat": 0.025,
+     "rate_wht": 0.075,
      "stamp_duty": 5000000.0,
      "vat": 37500000.0,
      "vetting_fee": 2500000.0,
@@ -5907,6 +6057,11 @@
      "other_deductions": 0,
      "payment_date": "2024-05-07",
      "payment_type": "Cert",
+     "rate_other": 0.0,
+     "rate_stamp_duty": 0.01,
+     "rate_state_levy": 0.005,
+     "rate_vat": 0.025,
+     "rate_wht": 0.075,
      "stamp_duty": 5000000.0,
      "vat": 37500000.0,
      "vetting_fee": 2500000.0,
@@ -5919,6 +6074,11 @@
      "other_deductions": 0,
      "payment_date": "2024-05-10",
      "payment_type": "Cert",
+     "rate_other": 0.0,
+     "rate_stamp_duty": 0.01,
+     "rate_state_levy": 0.005,
+     "rate_vat": 0.025,
+     "rate_wht": 0.075,
      "stamp_duty": 575000.0,
      "vat": 4312500.0,
      "vetting_fee": 287500.0,
@@ -5931,6 +6091,11 @@
      "other_deductions": 0,
      "payment_date": "2024-09-17",
      "payment_type": "Cert",
+     "rate_other": 0.0,
+     "rate_stamp_duty": 0.010000000000000002,
+     "rate_state_levy": 0.005000000000000001,
+     "rate_vat": 0.025,
+     "rate_wht": 0.075,
      "stamp_duty": 8692884.040000001,
      "vat": 65196630.3,
      "vetting_fee": 4346442.0200000005,
@@ -5943,6 +6108,11 @@
      "other_deductions": 0,
      "payment_date": "2024-11-08",
      "payment_type": "Cert",
+     "rate_other": 0.0,
+     "rate_stamp_duty": 0.01,
+     "rate_state_levy": 0.005,
+     "rate_vat": 0.025,
+     "rate_wht": 0.075,
      "stamp_duty": 1307115.96,
      "vat": 9803369.7,
      "vetting_fee": 653557.98,
@@ -5955,6 +6125,11 @@
      "other_deductions": 0,
      "payment_date": "2024-12-09",
      "payment_type": "Cert",
+     "rate_other": 0.0,
+     "rate_stamp_duty": 0.01,
+     "rate_state_levy": 0.005,
+     "rate_vat": 0.024999999999999998,
+     "rate_wht": 0.075,
      "stamp_duty": 15769454.311300002,
      "vat": 118270907.33475001,
      "vetting_fee": 7884727.155650001,
@@ -5967,6 +6142,11 @@
      "other_deductions": 0,
      "payment_date": "2025-04-08",
      "payment_type": "Cert",
+     "rate_other": 0.0,
+     "rate_stamp_duty": 0.01,
+     "rate_state_levy": 0.005,
+     "rate_vat": 0.025,
+     "rate_wht": 0.075,
      "stamp_duty": 13277680.047,
      "vat": 99582600.3525,
      "vetting_fee": 6638840.0235,
@@ -5979,6 +6159,11 @@
      "other_deductions": 0,
      "payment_date": "2025-07-02",
      "payment_type": "Cert",
+     "rate_other": 0.0,
+     "rate_stamp_duty": 0.009999999999999998,
+     "rate_state_levy": 0.004999999999999999,
+     "rate_vat": 0.025000000000000005,
+     "rate_wht": 0.075,
      "stamp_duty": 8849779.1726,
      "vat": 66373343.79449999,
      "vetting_fee": 4424889.5863,
@@ -5991,6 +6176,11 @@
      "other_deductions": 0,
      "payment_date": "2025-07-02",
      "payment_type": "Cert",
+     "rate_other": 0.0,
+     "rate_stamp_duty": 0.01,
+     "rate_state_levy": 0.005,
+     "rate_vat": 0.025,
+     "rate_wht": 0.075,
      "stamp_duty": 11962001.30273605,
      "vat": 89715009.77052036,
      "vetting_fee": 5981000.651368025,
@@ -6003,6 +6193,11 @@
      "other_deductions": 0,
      "payment_date": "2026-01-27",
      "payment_type": "Cert",
+     "rate_other": 0.0,
+     "rate_stamp_duty": 0.01,
+     "rate_state_levy": 0.005,
+     "rate_vat": 0.02,
+     "rate_wht": 0.075,
      "stamp_duty": 7952623.4667,
      "vat": 59644676.00025,
      "vetting_fee": 3976311.73335,
@@ -6015,6 +6210,11 @@
      "other_deductions": 0,
      "payment_date": null,
      "payment_type": null,
+     "rate_other": 0.0,
+     "rate_stamp_duty": 0.009999999999999998,
+     "rate_state_levy": 0.004999999999999999,
+     "rate_vat": 0.024707620985455512,
+     "rate_wht": 0.075,
      "stamp_duty": 135998533.94214854,
      "vat": 1019989004.5661141,
      "vetting_fee": 67999266.97107427,
@@ -6027,6 +6227,11 @@
      "other_deductions": 0,
      "payment_date": null,
      "payment_type": null,
+     "rate_other": null,
+     "rate_stamp_duty": null,
+     "rate_state_levy": null,
+     "rate_vat": null,
+     "rate_wht": null,
      "stamp_duty": 0,
      "vat": 0,
      "vetting_fee": 0,
