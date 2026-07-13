@@ -133,8 +133,10 @@ export default function UploadWeeklyReportPage() {
   const projects = projectsData?.data ?? []
 
   const [projectId, setProjectId] = useState('')
-  const [year, setYear] = useState(new Date().getFullYear())
-  const [week, setWeek] = useState(1)
+  const [yearStr, setYearStr] = useState(String(new Date().getFullYear()))
+  const [weekStr, setWeekStr] = useState('')
+  const year = Number(yearStr) || 0
+  const week = Number(weekStr) || 0
   const [file, setFile] = useState<File | null>(null)
   const [dragOver, setDragOver] = useState(false)
 
@@ -185,6 +187,10 @@ export default function UploadWeeklyReportPage() {
     }
     if (!projectId) {
       toast.error('Pick the project first — the workbook is checked against it')
+      return
+    }
+    if (week < 1 || week > 53) {
+      toast.error('Enter the week number (1–53) before dropping the file')
       return
     }
     setFile(f)
@@ -259,13 +265,13 @@ export default function UploadWeeklyReportPage() {
           </div>
           <div className="space-y-1.5">
             <Label>Year</Label>
-            <Input type="number" value={year} disabled={!!preview}
-                   onChange={(e) => setYear(Number(e.target.value))} />
+            <Input inputMode="numeric" value={yearStr} disabled={!!preview}
+                   onChange={(e) => setYearStr(e.target.value.replace(/\D/g, '').slice(0, 4))} />
           </div>
           <div className="space-y-1.5">
             <Label>Week</Label>
-            <Input type="number" min={1} max={53} value={week} disabled={!!preview}
-                   onChange={(e) => setWeek(Number(e.target.value))} />
+            <Input inputMode="numeric" placeholder="1–53" value={weekStr} disabled={!!preview}
+                   onChange={(e) => setWeekStr(e.target.value.replace(/\D/g, '').slice(0, 2))} />
           </div>
         </CardContent>
       </Card>
@@ -287,9 +293,6 @@ export default function UploadWeeklyReportPage() {
           <CloudUpload className="text-muted-foreground h-10 w-10" />
           <div className="text-center">
             <p className="font-medium">Drop the weekly report here, or click to browse</p>
-            <p className="text-muted-foreground mt-1 text-sm">
-              The 16-sheet .xlsx exactly as the site emailed it
-            </p>
           </div>
           <input id="wk-file-input" type="file" accept=".xlsx" className="hidden"
                  onChange={(e) => onFile(e.target.files?.[0] ?? null)} />
