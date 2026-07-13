@@ -195,7 +195,7 @@ export default function UploadWeeklyReportPage() {
     }
     setFile(f)
     void runPreview(f, projectId)
-  }, [projectId, runPreview])
+  }, [projectId, week, runPreview])
 
   const warnCount = useMemo(() => {
     if (!preview) return 0
@@ -234,9 +234,6 @@ export default function UploadWeeklyReportPage() {
           </Button>
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Upload weekly report</h1>
-            <p className="text-muted-foreground text-sm">
-              Drop the site&apos;s workbook — review the cleaned data — accept. Nothing is saved until you say so.
-            </p>
           </div>
         </div>
         {preview && (
