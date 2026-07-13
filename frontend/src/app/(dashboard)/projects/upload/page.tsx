@@ -549,7 +549,7 @@ function SheetPanel({ name, sheet }: { name: string; sheet?: SheetPreview }) {
         {sheet.kind === 'parsed' && sheet.rows && sheet.rows.length > 0 && (
           name === 'BEME & Works Completed Fd'
             ? <BemeTable sheet={sheet} />
-            : <GenericTable sheet={sheet} />
+            : <GenericTable name={name} sheet={sheet} />
         )}
 
         {sheet.kind === 'stored_only' && (sheet.grid?.length ?? 0) > 0 && (
@@ -582,36 +582,217 @@ const HIDDEN_COLS = new Set(['bill_code', 'bill_no', 'dup_seq', 'stock_maintaine
 
 function num(v: unknown): number { return Number(v) || 0 }
 
-function GenericTable({ sheet }: { sheet: SheetPreview }) {
+type Col = { key: string; label: string; compute?: (r: Record<string, unknown>) => unknown }
+
+// every parsed sheet rendered in ITS OWN workbook's column names/order
+const SHEET_COLUMNS: Record<string, { cols: Col[]; groupBy?: string; groupLabel?: (v: string) => string }> = {
+  'Cost Report': {
+    groupBy: 'section',
+    cols: [
+      { key: 'description', label: 'Description' },
+      { key: 'cost_category', label: 'Cost Category' },
+      { key: 'unit', label: 'Unit' },
+      { key: 'quantity_this_week', label: 'Quantity This Week' },
+      { key: 'rate_ngn', label: 'Rate ₦' },
+      { key: 'amount_previous_week', label: 'Amount Previous Week' },
+      { key: 'amount_this_week', label: 'Amount This Week' },
+      { key: 'amount_to_date', label: 'Amount Up to Date' },
+    ],
+  },
+  'Plant Return': {
+    cols: [
+      { key: 'fleet_number_raw', label: 'Fleet No.' },
+      { key: 'description', label: 'Description' },
+      { key: 'plant_category', label: 'Plant Category' },
+      { key: 'hours_worked', label: 'Hours Worked' },
+      { key: 'standby_hours', label: 'S/B Hours' },
+      { key: 'breakdown_hours', label: 'B/D Hours' },
+      { key: 'rate_ngn', label: 'Rate ₦' },
+      { key: 'plant_cost', label: 'Plant Cost' },
+      { key: 'transferred_from', label: 'Transfered From' },
+      { key: 'current_location', label: 'Current Location' },
+      { key: 'remarks', label: 'Remarks' },
+    ],
+  },
+  'Diesel Consumption': {
+    cols: [
+      { key: 'fleet_number_raw', label: 'Fleet No.' },
+      { key: 'description', label: 'Description' },
+      { key: 'saturday_litres', label: 'Saturday' },
+      { key: 'sunday_litres', label: 'Sunday' },
+      { key: 'monday_litres', label: 'Monday' },
+      { key: 'tuesday_litres', label: 'Tuesday' },
+      { key: 'wednesday_litres', label: 'Wednesday' },
+      { key: 'thursday_litres', label: 'Thursday' },
+      { key: 'friday_litres', label: 'Friday' },
+      { key: '__total', label: 'Total Fuel Taken',
+        compute: (r) => ['saturday', 'sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday']
+          .reduce((a, d) => a + num(r[`${d}_litres`]), 0) },
+      { key: 'amount_ngn', label: 'Usage Value' },
+    ],
+  },
+  'Certificate Status': {
+    cols: [
+      { key: 'date_submitted', label: 'Date Submitted' },
+      { key: 'cert_number', label: 'Cert Number' },
+      { key: 'gross_value_works_done', label: 'Gross Value of Works Done' },
+      { key: 'add_materials_on_site', label: 'Add Materials on Site' },
+      { key: 'less_materials_on_site', label: 'Less Materials on Site' },
+      { key: 'general_bill_1', label: 'General Bill 1' },
+      { key: 'total_value_of_work_done', label: 'Total Value of Work Done' },
+      { key: 'total_retention_held', label: 'Total Retention Held' },
+      { key: 'total_net_payment', label: 'Total Net Payment' },
+      { key: 'retention_released', label: 'Add Release of Retention' },
+      { key: 'contingency_used', label: 'Add Value of Contingency Used' },
+      { key: 'fluctuation_materials', label: 'Add Fluctuation on Materials' },
+      { key: 'advance_received', label: 'Add Advance Received to date' },
+      { key: 'total_works_executed', label: 'Total Value of Works Executed' },
+      { key: 'advance_recovery', label: 'Deduct Advance Recovery' },
+    ],
+  },
+  'Payments Recieved': {
+    cols: [
+      { key: 'payment_date', label: 'Date' },
+      { key: 'voucher_number', label: 'Voucher Number' },
+      { key: 'payment_type', label: 'Payment Type' },
+      { key: 'gross_amount', label: 'Gross Amount' },
+      { key: 'wht', label: 'WHT' },
+      { key: 'vat', label: 'VAT' },
+      { key: 'vetting_fee', label: 'Vetting Fee' },
+      { key: 'stamp_duty', label: 'Stamp Duty' },
+      { key: 'other_deductions', label: 'Other' },
+      { key: 'net_amount', label: 'Net Amount Payable' },
+    ],
+  },
+  'Hired Vehicles': {
+    cols: [
+      { key: 'registration_no', label: 'Reg. No' },
+      { key: 'description', label: 'Description' },
+      { key: 'section', label: 'Section' },
+      { key: 'owners', label: 'Owners' },
+      { key: 'days_worked', label: 'Days Worked' },
+      { key: 'rate_ngn', label: 'Rate ₦' },
+      { key: 'amount_ngn', label: 'Amount ₦' },
+      { key: 'remarks', label: 'Remarks' },
+    ],
+  },
+  'Labour Strength': {
+    groupBy: 'block',
+    cols: [
+      { key: 'dept_slot', label: 'S/No' },
+      { key: 'department', label: 'Department' },
+      { key: 'manning_this_week', label: 'Manning This Week' },
+      { key: 'manning_previous_week', label: 'Manning Previous Week' },
+      { key: 'movement', label: 'Movement' },
+      { key: 'comment', label: 'Comment' },
+    ],
+    groupLabel: (v) => v === 'casual' ? 'CASUAL STAFF' : 'PERMANENT STAFF',
+  },
+  'Subcontractors': {
+    groupBy: 'subcontractor_name',
+    cols: [
+      { key: 'description', label: 'Description' },
+      { key: 'location', label: 'Location' },
+      { key: 'unit', label: 'Unit' },
+      { key: 'agreed_rate', label: 'Agreed Rate' },
+      { key: 'assigned_qty', label: 'Assigned Qty' },
+      { key: 'previous_qty', label: 'Previous Qty' },
+      { key: 'qty_this_week', label: 'Qty Executed for Week' },
+      { key: 'qty_to_date', label: 'Total Qty Executed To-Date' },
+      { key: 'balance_remaining', label: 'Balance to Complete' },
+      { key: 'value_previous', label: 'Previous Value Completed' },
+      { key: 'amount_this_week', label: 'Value Completed this week' },
+      { key: 'amount_to_date', label: 'Total Value Completed' },
+      { key: 'value_to_completion', label: 'Value to Completion' },
+    ],
+  },
+  'Materials & Civils': {
+    groupBy: 'sheet_source',
+    cols: [
+      { key: 'material_name', label: 'Description' },
+      { key: 'unit', label: 'Unit' },
+      { key: 'unit_cost', label: 'Current Price' },
+      { key: 'opening_stock', label: 'Opening Stock' },
+      { key: 'received', label: 'Received / Purchased' },
+      { key: 'closing_stock', label: 'Closing Stock' },
+      { key: 'available_for_use', label: 'Available for Use' },
+      { key: 'used_works', label: 'On Site Works' },
+      { key: 'used_precast', label: 'Precast' },
+      { key: 'used_mobilisation', label: 'Mobilsation' },
+      { key: 'used', label: 'Total Used' },
+      { key: 'discrepancy_qty', label: 'Discrepancy' },
+      { key: 'discrepancy_value', label: 'Discrepancy Value' },
+    ],
+    groupLabel: (v) => v === 'quarry' ? 'QUARRY MATERIALS' : 'MATERIALS',
+  },
+  'Weekly Summary': {
+    cols: [
+      { key: 'section', label: 'Section' },
+      { key: 'item', label: 'Item' },
+      { key: 'metric', label: 'Metric' },
+      { key: 'value', label: 'Value' },
+    ],
+  },
+}
+
+function GenericTable({ name, sheet }: { name: string; sheet: SheetPreview }) {
   const rows = sheet.rows!
-  const cols = Object.keys(rows[0]).filter((k) => !HIDDEN_COLS.has(k))
+  const cfg = SHEET_COLUMNS[name]
+  const cols: Col[] = cfg?.cols
+    ?? Object.keys(rows[0]).filter((k) => !HIDDEN_COLS.has(k))
+        .map((k) => ({ key: k, label: k.replace(/_/g, ' ') }))
+
+  const groups: [string | null, Record<string, unknown>[]][] = cfg?.groupBy
+    ? Array.from(
+        rows.reduce((m, r) => {
+          const g = String(r[cfg.groupBy!] ?? '')
+          if (!m.has(g)) m.set(g, [])
+          m.get(g)!.push(r)
+          return m
+        }, new Map<string, Record<string, unknown>[]>()).entries(),
+      )
+    : [[null, rows]]
+
+  const renderCell = (r: Record<string, unknown>, c: Col) => {
+    const v = c.compute ? c.compute(r) : r[c.key]
+    const isNum = typeof v === 'number'
+    return (
+      <TableCell key={c.key}
+        className={`max-w-[260px] truncate text-xs whitespace-nowrap tabular-nums ${isNum ? 'text-right' : ''}`}>
+        {v === null || v === undefined || v === '' ? '—' : isNum ? fmtN(v) : String(v)}
+      </TableCell>
+    )
+  }
+
   return (
     <div className="overflow-x-auto rounded-md border">
-      <Table>
+      <Table className="min-w-[900px]">
         <TableHeader>
           <TableRow>
-            {cols.map((k) => (
-              <TableHead key={k} className="whitespace-nowrap text-xs">
-                {k.replace(/_/g, ' ')}
+            {cols.map((c, i) => (
+              <TableHead key={c.key}
+                className={`whitespace-nowrap text-xs ${i >= 2 ? 'text-right' : ''}`}>
+                {c.label}
               </TableHead>
             ))}
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.map((r, i) => (
-            <TableRow key={i}>
-              {cols.map((k) => {
-                const v = r[k]
-                const isNum = typeof v === 'number'
-                return (
-                  <TableCell key={k}
-                    className={`max-w-[260px] truncate whitespace-nowrap text-xs tabular-nums ${isNum ? 'text-right' : ''}`}>
-                    {isNum ? fmtN(v) : String(v ?? '—')}
-                  </TableCell>
-                )
-              })}
-            </TableRow>
-          ))}
+          {groups.flatMap(([g, items]) => [
+            ...(g !== null && g !== ''
+              ? [
+                  <TableRow key={`g-${g}`} className="bg-muted/60 hover:bg-muted/60">
+                    <TableCell colSpan={cols.length} className="text-xs font-bold">
+                      {cfg?.groupLabel ? cfg.groupLabel(g) : g}
+                      <span className="text-muted-foreground font-normal"> · {items.length} rows</span>
+                    </TableCell>
+                  </TableRow>,
+                ]
+              : []),
+            ...items.map((r, i) => (
+              <TableRow key={`${g}-${i}`}>{cols.map((c) => renderCell(r, c))}</TableRow>
+            )),
+          ])}
         </TableBody>
       </Table>
       <p className="text-muted-foreground border-t px-3 py-2 text-xs">
