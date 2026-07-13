@@ -445,26 +445,42 @@ export default function UploadWeeklyReportPage() {
             </CardContent>
           </Card>
 
-          {/* sheet tabs — like the Excel bottom strip */}
-          <div className="border-border -mb-2 flex gap-1 overflow-x-auto border-b pb-0">
+          {/* sheet chips — all 16 visible, nothing hidden off-screen */}
+          <div className="flex flex-wrap gap-1.5">
             {SHEET_ORDER.filter((n) => preview.sheets[n]).map((name) => {
-              const s = preview.sheets[name]
+              const sh = preview.sheets[name]
               const on = activeSheet === name
-              const dot =
-                s.kind === 'stored_only' ? 'bg-muted-foreground/40'
-                : s.warnings.length ? 'bg-amber-500'
-                : 'bg-emerald-500'
+              const stored = sh.kind === 'stored_only'
+              const nWarn = sh.warnings?.length ?? 0
+              const count = stored ? null : (sh.total_rows ?? null)
               return (
                 <button
                   key={name}
                   onClick={() => setActiveSheet(name)}
-                  className={`-mb-px flex shrink-0 items-center gap-1.5 rounded-t-md border border-b-0 px-3 py-1.5 text-xs font-medium transition-colors ${
-                    on ? 'bg-background border-border text-foreground'
-                       : 'text-muted-foreground border-transparent hover:text-foreground'
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                    on
+                      ? 'border-primary bg-primary text-primary-foreground shadow-sm'
+                      : stored
+                        ? 'border-dashed text-muted-foreground hover:border-foreground/30 hover:text-foreground'
+                        : 'bg-card text-foreground/80 hover:border-foreground/30 hover:text-foreground'
                   }`}
                 >
-                  <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
+                  <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                    on ? 'bg-primary-foreground/70'
+                    : stored ? 'bg-muted-foreground/40'
+                    : nWarn ? 'bg-amber-500' : 'bg-emerald-500'
+                  }`} />
                   {SHORT_NAMES[name] ?? name}
+                  {count !== null && count > 0 && (
+                    <span className={`tabular-nums ${on ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
+                      {count}
+                    </span>
+                  )}
+                  {nWarn > 0 && !on && (
+                    <span className="font-semibold text-amber-600 dark:text-amber-400">
+                      {nWarn}⚠
+                    </span>
+                  )}
                 </button>
               )
             })}
@@ -510,7 +526,7 @@ function SheetPanel({ name, sheet }: { name: string; sheet?: SheetPreview }) {
   if (!sheet) return null
 
   return (
-    <Card className="rounded-tl-none">
+    <Card>
       <CardContent className="space-y-4 p-5">
         <p className="text-muted-foreground text-sm">{cleaningLine(name, sheet)}</p>
 
