@@ -703,6 +703,7 @@ def parse_beme(ws) -> dict[str, Any]:
             if current_bill is not None:
                 current_bill["sheet_total_contract"] = contract_amount
                 current_bill["sheet_total_this_week"] = this_week_amount
+                current_bill["sheet_total_previous"] = _num(r, "previous amount")
             continue
 
         # ── tail rows (after all bills) ─────────────────────────────────
@@ -743,6 +744,7 @@ def parse_beme(ws) -> dict[str, Any]:
                 "name": desc_s,
                 "sheet_total_contract": None,
                 "sheet_total_this_week": None,
+                "sheet_total_previous": None,
             }
             bills.append(current_bill)
             continue
@@ -810,8 +812,11 @@ def parse_beme(ws) -> dict[str, Any]:
                      for i in rows if i["bill_code"] == b["bill_code"])
         mine_w = sum(float(i["amount_this_week"] or 0)
                      for i in rows if i["bill_code"] == b["bill_code"])
+        mine_p = sum(float(i["amount_previous_reported"] or 0)
+                     for i in rows if i["bill_code"] == b["bill_code"])
         for label, mine, sheet in (("contract", mine_c, b["sheet_total_contract"]),
-                                   ("this_week", mine_w, b["sheet_total_this_week"])):
+                                   ("this_week", mine_w, b["sheet_total_this_week"]),
+                                   ("previous", mine_p, b["sheet_total_previous"])):
             if sheet is not None and abs(mine - float(sheet)) > 1.0:
                 checks.append({
                     "check": f"bill_{b['bill_code']}_{label}",

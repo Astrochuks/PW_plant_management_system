@@ -33,6 +33,7 @@
      "bill_no": 1,
      "name": "PRELIMINARIES",
      "sheet_total_contract": 311880000.0,
+     "sheet_total_previous": 250854911.25,
      "sheet_total_this_week": 0.0,
      "sort_order": 1
     },
@@ -41,6 +42,7 @@
      "bill_no": 2,
      "name": "SITE CLEARANCE AND EARTHWORKS",
      "sheet_total_contract": 1930547160.6,
+     "sheet_total_previous": 1012801306.4,
      "sheet_total_this_week": 0.0,
      "sort_order": 2
     },
@@ -49,6 +51,7 @@
      "bill_no": 3,
      "name": "CULVERTS AND DRAINS",
      "sheet_total_contract": 816610932.0,
+     "sheet_total_previous": 485080932.4,
      "sheet_total_this_week": 0.0,
      "sort_order": 3
     },
@@ -57,6 +60,7 @@
      "bill_no": 4,
      "name": "PAVEMENT AND SURFACING",
      "sheet_total_contract": 17457775723.5,
+     "sheet_total_previous": 11501181030.0,
      "sheet_total_this_week": 294550350.0,
      "sort_order": 4
     },
@@ -65,6 +69,7 @@
      "bill_no": 5,
      "name": "PAVEMENT MARKINGS",
      "sheet_total_contract": 6973621.875,
+     "sheet_total_previous": 0.0,
      "sheet_total_this_week": 0.0,
      "sort_order": 5
     },
@@ -73,6 +78,7 @@
      "bill_no": 6,
      "name": "AIRFIELD LIGHTING SYSTEMS",
      "sheet_total_contract": 498408386.25,
+     "sheet_total_previous": 52817425.0,
      "sheet_total_this_week": 0.0,
      "sort_order": 6
     },
@@ -81,6 +87,7 @@
      "bill_no": 7,
      "name": "UNDERGROUND FUELING SYSTEM",
      "sheet_total_contract": 408712500.0,
+     "sheet_total_previous": 0.0,
      "sheet_total_this_week": 0.0,
      "sort_order": 7
     },
@@ -89,6 +96,7 @@
      "bill_no": 8,
      "name": "FIXED GROUND POWER SUPPLY SYSTEM",
      "sheet_total_contract": 228034800.0,
+     "sheet_total_previous": 1750750.0,
      "sheet_total_this_week": 0.0,
      "sort_order": 8
     }
@@ -99,6 +107,18 @@
      "delta": 111072750.0,
      "ours": 609481136.25,
      "sheet": 498408386.25
+    },
+    {
+     "check": "bill_7_previous",
+     "delta": 1750750.0,
+     "ours": 1750750.0,
+     "sheet": 0.0
+    },
+    {
+     "check": "bill_8_previous",
+     "delta": -1750750.0,
+     "ours": 0.0,
+     "sheet": 1750750.0
     }
    ],
    "rows": [
@@ -1650,7 +1670,9 @@
    },
    "warnings": [
     "BEME item 7.09 appears inside Bill 8's block — assigned to Bill 7 by its code",
-    "BEME Bill 6 contract: our sum 609,481,136.25 != sheet total 498,408,386.25 — the sheet's own SUM range may be broken"
+    "BEME Bill 6 contract: our sum 609,481,136.25 != sheet total 498,408,386.25 — the sheet's own SUM range may be broken",
+    "BEME Bill 7 previous: our sum 1,750,750.00 != sheet total 0.00 — the sheet's own SUM range may be broken",
+    "BEME Bill 8 previous: our sum 0.00 != sheet total 1,750,750.00 — the sheet's own SUM range may be broken"
    ]
   },
   "Certificate Status": {

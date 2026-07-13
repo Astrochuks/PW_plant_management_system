@@ -106,12 +106,23 @@ class TestBemeClassification:
         item_descs = {r["description"] for r in b["rows"]}
         assert "Pavement and Joints" not in item_descs
 
-    def test_bill_totals_match_except_broken_bill6(self, week10):
+    def test_bill_totals_cross_checks(self, week10):
         b = week10["sheets"]["BEME & Works Completed Fd"]
         fails = {c["check"]: c for c in b["cross_checks"]}
-        # the site's Bill 6 SUM range stops at row 120 — ₦111,072,750 outside
-        assert set(fails) == {"bill_6_contract"}
+        # bill 6: the site's SUM range stops at row 120 — ₦111,072,750 outside
+        # bills 7/8 previous: the out-of-place 7.09 — we assign by code,
+        # their totals count it by position (symmetric ±1,750,750)
+        assert set(fails) == {"bill_6_contract", "bill_7_previous", "bill_8_previous"}
         assert fails["bill_6_contract"]["delta"] == pytest.approx(111_072_750.0)
+        assert fails["bill_7_previous"]["delta"] == pytest.approx(1_750_750.0)
+        assert fails["bill_8_previous"]["delta"] == pytest.approx(-1_750_750.0)
+
+    def test_w43_bill2_previous_total_broken(self, week43):
+        """The user's manual find, now automated: W43's own Bill 2
+        previous-amount total row excludes item 2.11 (₦59,090,000)."""
+        checks = {c["check"]: c for c in
+                  week43["sheets"]["BEME & Works Completed Fd"]["cross_checks"]}
+        assert checks["bill_2_previous"]["delta"] == pytest.approx(59_090_000.0)
 
     def test_tail_markup_structure(self, week10):
         tail = week10["sheets"]["BEME & Works Completed Fd"]["tail"]
