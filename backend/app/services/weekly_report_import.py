@@ -74,7 +74,7 @@ def _rows_hash(rows: Any) -> str:
 
 
 def _item_key(r: dict) -> tuple:
-    return (r["bill_no"], r["item_code"] or "", r["description"], r.get("dup_seq", 0))
+    return (r["bill_code"], r["item_code"] or "", r["description"], r.get("dup_seq", 0))
 
 
 def _cost_key(r: dict) -> str:
@@ -541,28 +541,34 @@ async def persist_weekly_report(
 
         # ── BEME: bills + items upserted once; progress per report ───────
         beme_sheet = sheets.get("BEME & Works Completed Fd", {})
-        bill_ids: dict[int, str] = {}
+        bill_ids: dict[str, str] = {}
         for b in beme_sheet.get("bills", []) or []:
-            bill_ids[b["bill_no"]] = str(await conn.fetchval(
-                """INSERT INTO project_beme_bills (project_id, bill_no, name,
+            bill_ids[b["bill_code"]] = str(await conn.fetchval(
+                """INSERT INTO project_beme_bills (project_id, bill_code,
+                                                   bill_no, sort_order, name,
                                                    contract_amount)
-                   VALUES ($1::uuid, $2, $3, $4)
-                   ON CONFLICT (project_id, bill_no) DO UPDATE SET
+                   VALUES ($1::uuid, $2, $3, $4, $5, $6)
+                   ON CONFLICT (project_id, bill_code) DO UPDATE SET
                        name = COALESCE(EXCLUDED.name, project_beme_bills.name),
+                       bill_no = COALESCE(EXCLUDED.bill_no,
+                                          project_beme_bills.bill_no),
+                       sort_order = COALESCE(EXCLUDED.sort_order,
+                                             project_beme_bills.sort_order),
                        contract_amount = COALESCE(EXCLUDED.contract_amount,
                                                   project_beme_bills.contract_amount)
                    RETURNING id""",
-                project_id, b["bill_no"], b["name"], b["sheet_total_contract"],
+                project_id, b["bill_code"], b.get("bill_no"),
+                b.get("sort_order"), b["name"], b["sheet_total_contract"],
             ))
         # defensive: items referencing a bill without a header row
-        for bill_no in sorted({r["bill_no"] for r in beme_rows} - set(bill_ids)):
-            bill_ids[bill_no] = str(await conn.fetchval(
-                """INSERT INTO project_beme_bills (project_id, bill_no)
+        for bill_code in sorted({r["bill_code"] for r in beme_rows} - set(bill_ids)):
+            bill_ids[bill_code] = str(await conn.fetchval(
+                """INSERT INTO project_beme_bills (project_id, bill_code)
                    VALUES ($1::uuid, $2)
-                   ON CONFLICT (project_id, bill_no) DO UPDATE SET
-                       bill_no = EXCLUDED.bill_no
+                   ON CONFLICT (project_id, bill_code) DO UPDATE SET
+                       bill_code = EXCLUDED.bill_code
                    RETURNING id""",
-                project_id, bill_no,
+                project_id, bill_code,
             ))
 
         await conn.executemany(
@@ -577,7 +583,7 @@ async def persist_weekly_report(
                    contract_amount = COALESCE(EXCLUDED.contract_amount,
                                               project_beme_items.contract_amount)""",
             [
-                (project_id, bill_ids[r["bill_no"]], r["item_code"] or "",
+                (project_id, bill_ids[r["bill_code"]], r["item_code"] or "",
                  r["description"], r["unit"], r["contract_qty"], r["rate"],
                  r["contract_amount"], r.get("dup_seq", 0))
                 for r in beme_rows
@@ -585,9 +591,9 @@ async def persist_weekly_report(
             timeout=120,
         )
         item_id_map = {
-            (r["bill_no"], r["item_code"], r["description"], r["dup_seq"]): str(r["id"])
+            (r["bill_code"], r["item_code"], r["description"], r["dup_seq"]): str(r["id"])
             for r in await conn.fetch(
-                """SELECT i.id, b.bill_no, i.item_code, i.description, i.dup_seq
+                """SELECT i.id, b.bill_code, i.item_code, i.description, i.dup_seq
                    FROM project_beme_items i
                    JOIN project_beme_bills b ON b.id = i.bill_id
                    WHERE i.project_id = $1::uuid""",

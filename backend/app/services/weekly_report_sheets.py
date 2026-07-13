@@ -578,8 +578,7 @@ def parse_certificates(ws) -> dict[str, Any]:
                 f"gross as previous cert — resubmission?)"
             )
         prev_gross = gross
-    if not rows:
-        warnings.append("Certificates: no cert rows parsed")
+    # an empty ledger is legitimate on a young project — no warning
     return {"rows": rows, "warnings": warnings}
 
 
@@ -610,6 +609,8 @@ def parse_payments(ws) -> dict[str, Any]:
             "other_deductions": _num(r, "other") or 0,
             "net_amount": _num(r, "net amount"),
         }
+        if not (row["gross_amount"] or 0) and not (row["net_amount"] or 0):
+            continue  # template placeholder (young project, no money moved)
         if row["gross_amount"] is not None and row["net_amount"] is not None:
             expected_net = row["gross_amount"] - (
                 row["wht"] + row["vat"] + row["vetting_fee"]
@@ -630,8 +631,19 @@ def parse_payments(ws) -> dict[str, Any]:
 # T2.10 — BEME (bills + items + this-week progress)
 # ---------------------------------------------------------------------------
 
-_ITEM_CODE_RX = re.compile(r"^\d+\.\d+[a-z]?$")
-_BILL_TOTAL_RX = re.compile(r"^total bill no\.?\s*(\d+)", re.IGNORECASE)
+_DOTTED_CODE_RX = re.compile(r"^\d+(\.\d+)*$")           # bill: any depth
+_ITEM_CODE_RX = re.compile(r"^\d+(\.\d+)+[a-z]?$")        # item: >= 2 segments
+_BILL_TOTAL_RX = re.compile(r"^total bill", re.IGNORECASE)  # number optional
+
+
+def _extends_by_one(bill_code: str, code: str) -> bool:
+    """'4.05a' extends '4'; '5.3.12' extends '5.3'; '5.2.1' does NOT
+    extend '5' — an item sits exactly one segment below its bill."""
+    base = code[:-1] if code and code[-1].isalpha() else code
+    if not base.startswith(bill_code + "."):
+        return False
+    rest = base[len(bill_code) + 1:]
+    return bool(rest) and "." not in rest
 
 
 def _normalize_item_code(raw: str | None) -> str | None:
@@ -648,11 +660,11 @@ def _normalize_item_code(raw: str | None) -> str | None:
 
 
 def parse_beme(ws) -> dict[str, Any]:
-    """Classify every row: bill header / real item (incl. letter variants)
-    / bill-total / tail (contingency, VOP, VAT) / summary table. Only real
-    items become data; the sheet's own totals become cross-checks.
-
-    Emits reported-previous per item — the baseline/gap inputs.
+    """Classify every row by the COMPANY standard (verified on Akwa Ibom
+    and Kaduna Bridge): a bill is a dotted code at ANY depth with an
+    ALL-CAPS name and no amounts; items sit exactly one code segment
+    deeper. Only real items become data; the sheet's own totals become
+    cross-checks. Emits reported-previous per item (baseline/gap inputs).
     """
     warnings: list[str] = []
     hit = find_header_row(
@@ -669,20 +681,25 @@ def parse_beme(ws) -> dict[str, Any]:
     summary_table: list[dict[str, Any]] = []
     current_bill: dict[str, Any] | None = None
     in_summary_table = False
+    unclassified_priced = 0
 
     for r in iter_table_rows(ws, hrow, cols, stop_after_blank=25, max_rows=2000):
         desc = _txt(r, "description")
         code = _normalize_item_code(_txt(r, "item"))
         contract_amount = _num(r, "contract amount")
         this_week_amount = _num(r, "this week amount")
+        rate = _num(r, "rate")
 
         code_s = code or ""
         desc_s = desc or ""
         desc_u = desc_s.upper()
 
-        # ── bill total rows: "Total Bill No.X Carried to Summary" ──────
-        marker = _BILL_TOTAL_RX.search(code_s) or _BILL_TOTAL_RX.search(desc_s)
-        if marker:
+        # ── repeated page headers ("ITEM | DESCRIPTION") ────────────────
+        if norm(code_s) == "item":
+            continue
+
+        # ── bill total rows: "Total Bill No… Carried to Summary" ───────
+        if _BILL_TOTAL_RX.search(code_s) or _BILL_TOTAL_RX.search(desc_s):
             if current_bill is not None:
                 current_bill["sheet_total_contract"] = contract_amount
                 current_bill["sheet_total_this_week"] = this_week_amount
@@ -715,33 +732,57 @@ def parse_beme(ws) -> dict[str, Any]:
                                              "this_week": this_week_amount}
             continue
 
-        # ── bill headers: integer code + ALL-CAPS name ─────────────────
-        if re.fullmatch(r"\d+", code_s) and desc_s and desc_s == desc_u:
-            if in_summary_table:
-                continue  # defensive: summary uses Title Case, but be safe
-            current_bill = {"bill_no": int(code_s), "name": desc_s,
-                            "sheet_total_contract": None,
-                            "sheet_total_this_week": None}
+        # ── bill headers: dotted code at ANY depth + CAPS + no money ───
+        if (_DOTTED_CODE_RX.fullmatch(code_s) and desc_s and desc_s == desc_u
+                and rate is None and contract_amount is None
+                and this_week_amount is None and not in_summary_table):
+            current_bill = {
+                "bill_code": code_s,
+                "bill_no": int(code_s) if code_s.isdigit() else None,
+                "sort_order": len(bills) + 1,
+                "name": desc_s,
+                "sheet_total_contract": None,
+                "sheet_total_this_week": None,
+            }
             bills.append(current_bill)
             continue
 
-        # ── summary-table restatement (codes 1..8, Title Case names) ───
-        if re.fullmatch(r"\d+", code_s) and desc_s:
-            summary_table.append({"bill_no": int(code_s), "name": desc_s,
+        # ── summary-table restatement (after the tail begins) ──────────
+        # covers coded bill lines AND its code-less rows (its own
+        # "Contingency & VOP" line) — never data, kept for the preview
+        if in_summary_table and desc_s and (
+                _DOTTED_CODE_RX.fullmatch(code_s) or not code_s):
+            summary_table.append({"bill_code": code_s or None, "name": desc_s,
                                   "contract": contract_amount,
                                   "this_week": this_week_amount})
             continue
 
-        # ── real items: n.nn or n.nna codes ─────────────────────────────
-        if _ITEM_CODE_RX.fullmatch(code_s) and desc_s and current_bill is not None \
-                and not in_summary_table:
+        # ── real items: one segment below their bill (by CODE, not by
+        # position — sites sometimes append an item inside another
+        # bill's block, e.g. Akwa Ibom's 7.09 sitting in Bill 8) ────────
+        owner = None
+        if (_ITEM_CODE_RX.fullmatch(code_s) and desc_s
+                and not in_summary_table and current_bill is not None):
+            if _extends_by_one(current_bill["bill_code"], code_s):
+                owner = current_bill
+            else:
+                owner = next((b for b in reversed(bills)
+                              if _extends_by_one(b["bill_code"], code_s)), None)
+                if owner is not None:
+                    warnings.append(
+                        f"BEME item {code_s} appears inside Bill "
+                        f"{current_bill['bill_code']}'s block — assigned to "
+                        f"Bill {owner['bill_code']} by its code"
+                    )
+        if owner is not None:
             rows.append({
-                "bill_no": current_bill["bill_no"],
+                "bill_code": owner["bill_code"],
+                "bill_no": owner["bill_no"],
                 "item_code": code_s,
                 "description": desc_s,
                 "unit": _txt(r, "unit"),
                 "contract_qty": _num(r, "contract qty"),
-                "rate": _num(r, "rate"),
+                "rate": rate,
                 "contract_amount": contract_amount,
                 "qty_previous_reported": _num(r, "previous qty"),
                 "amount_previous_reported": _num(r, "previous amount"),
@@ -749,13 +790,16 @@ def parse_beme(ws) -> dict[str, Any]:
                 "amount_this_week": this_week_amount,
             })
             continue
-        # anything else (blank codes, prose, repeated headers) is ignored
+
+        # priced rows we could not classify must never vanish silently
+        if contract_amount or this_week_amount:
+            unclassified_priced += 1
 
     # ── duplicate identities: the site reused 3.07 for two different
     # rows — dup_seq (occurrence index) keeps both as distinct items ────
     seen_ids: dict[tuple, int] = {}
     for item in rows:
-        key = (item["bill_no"], item["item_code"], item["description"])
+        key = (item["bill_code"], item["item_code"], item["description"])
         item["dup_seq"] = seen_ids.get(key, 0)
         seen_ids[key] = item["dup_seq"] + 1
 
@@ -763,22 +807,27 @@ def parse_beme(ws) -> dict[str, Any]:
     checks: list[dict[str, Any]] = []
     for b in bills:
         mine_c = sum(float(i["contract_amount"] or 0)
-                     for i in rows if i["bill_no"] == b["bill_no"])
+                     for i in rows if i["bill_code"] == b["bill_code"])
         mine_w = sum(float(i["amount_this_week"] or 0)
-                     for i in rows if i["bill_no"] == b["bill_no"])
+                     for i in rows if i["bill_code"] == b["bill_code"])
         for label, mine, sheet in (("contract", mine_c, b["sheet_total_contract"]),
                                    ("this_week", mine_w, b["sheet_total_this_week"])):
             if sheet is not None and abs(mine - float(sheet)) > 1.0:
                 checks.append({
-                    "check": f"bill_{b['bill_no']}_{label}",
+                    "check": f"bill_{b['bill_code']}_{label}",
                     "ours": round(mine, 2), "sheet": float(sheet),
                     "delta": round(mine - float(sheet), 2),
                 })
                 warnings.append(
-                    f"BEME Bill {b['bill_no']} {label}: our sum "
+                    f"BEME Bill {b['bill_code']} {label}: our sum "
                     f"{mine:,.2f} != sheet total {float(sheet):,.2f} — the "
                     f"sheet's own SUM range may be broken"
                 )
+    if unclassified_priced:
+        warnings.append(
+            f"BEME: {unclassified_priced} priced row(s) could not be "
+            f"classified — layout may deviate from the company standard"
+        )
     if not rows:
         warnings.append("BEME: no item rows parsed")
     if not bills:

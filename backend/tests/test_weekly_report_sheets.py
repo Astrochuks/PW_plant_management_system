@@ -98,8 +98,10 @@ class TestBemeClassification:
     def test_summary_table_never_pollutes_items(self, week10):
         b = week10["sheets"]["BEME & Works Completed Fd"]
         # summary table captured separately, with Title Case names
-        assert len(b["summary_table"]) == 8
-        assert b["summary_table"][3]["name"] == "Pavement and Joints"
+        # (8 coded bill lines + its code-less Contingency & VOP row)
+        coded = [x for x in b["summary_table"] if x["bill_code"]]
+        assert len(coded) == 8
+        assert coded[3]["name"] == "Pavement and Joints"
         # and its rows are NOT in items
         item_descs = {r["description"] for r in b["rows"]}
         assert "Pavement and Joints" not in item_descs
@@ -369,3 +371,63 @@ class TestWeek2:
                 gap[r["item_code"]] = prev2 - done43
         assert set(gap) == {"4.04", "4.05", "4.06"}
         assert sum(gap.values()) == pytest.approx(425_055_750.0)
+
+
+@pytest.fixture(scope="module")
+def kaduna9():
+    return parse_workbook(_load("week_09_kaduna_bridge_2025.xlsx"))
+
+
+class TestKadunaBridgeGeneralization:
+    """Second project, different structure — the company standard is the
+    hierarchy RULES, never Akwa Ibom's specific shape."""
+
+    def test_identity(self, kaduna9):
+        idy = kaduna9["identity"]
+        assert idy["short_name"] == "6TH BRIDGE OVER RIVER KADUNA"
+        assert idy["client_raw"] == "Nurus-Siraj Nigeria Limited"
+        assert idy["original_contract_amount"] == pytest.approx(4_617_148_926.06)
+
+    def test_hierarchical_bills(self, kaduna9):
+        b = kaduna9["sheets"]["BEME & Works Completed Fd"]
+        codes = [x["bill_code"] for x in b["bills"]]
+        assert codes == ["5", "5.1", "5.2", "5.3", "5.4", "5.5"]
+        assert b["bills"][3]["name"] == "SUPERSTRUCTURE"
+        assert len(b["rows"]) == 58
+
+    def test_every_bill_reconciles(self, kaduna9):
+        """Kaduna's own SUM ranges are clean — zero cross-check failures
+        (the broken-range disease is Akwa-specific, and OUR sums catch
+        either case)."""
+        b = kaduna9["sheets"]["BEME & Works Completed Fd"]
+        assert b["cross_checks"] == []
+        gen = sum(r["contract_amount"] or 0 for r in b["rows"]
+                  if r["bill_code"] == "5.3")
+        assert gen == pytest.approx(2_095_531_280.0)  # SUPERSTRUCTURE
+
+    def test_no_unclassified_priced_rows(self, kaduna9):
+        warns = kaduna9["sheets"]["BEME & Works Completed Fd"]["warnings"]
+        assert not [w for w in warns if "could not be classified" in w]
+
+    def test_young_ledgers_are_quiet(self, kaduna9):
+        certs = kaduna9["sheets"]["Certificate Status"]
+        pays = kaduna9["sheets"]["Payments Recieved"]
+        assert certs["rows"] == [] and certs["warnings"] == []
+        assert pays["rows"] == []  # zero-amount placeholders dropped
+
+    def test_cost_taxonomy_is_company_standard(self, kaduna9):
+        cats = {r["cost_category"] for r in
+                kaduna9["sheets"]["Cost Report"]["rows"] if r["cost_category"]}
+        assert cats == {"AGO", "Local Labour", "Materials", "Overheads",
+                        "Plant", "Site Level Expenses", "Sub Contractors"}
+
+
+class TestOutOfPlaceItem:
+    def test_akwa_709_assigned_by_code(self, week10):
+        """Akwa's 7.09 physically sits inside Bill 8's block — ownership
+        follows the CODE, with a warning."""
+        b = week10["sheets"]["BEME & Works Completed Fd"]
+        i709 = next(r for r in b["rows"] if r["item_code"] == "7.09")
+        assert i709["bill_code"] == "7"
+        assert any("7.09" in w and "assigned to Bill 7" in w
+                   for w in b["warnings"])

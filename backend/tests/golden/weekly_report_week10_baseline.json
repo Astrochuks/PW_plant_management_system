@@ -21,52 +21,68 @@
   "BEME & Works Completed Fd": {
    "bills": [
     {
+     "bill_code": "1",
      "bill_no": 1,
      "name": "PRELIMINARIES",
      "sheet_total_contract": 311880000.0,
-     "sheet_total_this_week": 0.0
+     "sheet_total_this_week": 0.0,
+     "sort_order": 1
     },
     {
+     "bill_code": "2",
      "bill_no": 2,
      "name": "SITE CLEARANCE AND EARTHWORKS",
      "sheet_total_contract": 1930547160.6,
-     "sheet_total_this_week": 0.0
+     "sheet_total_this_week": 0.0,
+     "sort_order": 2
     },
     {
+     "bill_code": "3",
      "bill_no": 3,
      "name": "CULVERTS AND DRAINS",
      "sheet_total_contract": 816610932.0,
-     "sheet_total_this_week": 0.0
+     "sheet_total_this_week": 0.0,
+     "sort_order": 3
     },
     {
+     "bill_code": "4",
      "bill_no": 4,
      "name": "PAVEMENT AND SURFACING",
      "sheet_total_contract": 17457775723.5,
-     "sheet_total_this_week": 294550350.0
+     "sheet_total_this_week": 294550350.0,
+     "sort_order": 4
     },
     {
+     "bill_code": "5",
      "bill_no": 5,
      "name": "PAVEMENT MARKINGS",
      "sheet_total_contract": 6973621.875,
-     "sheet_total_this_week": 0.0
+     "sheet_total_this_week": 0.0,
+     "sort_order": 5
     },
     {
+     "bill_code": "6",
      "bill_no": 6,
      "name": "AIRFIELD LIGHTING SYSTEMS",
      "sheet_total_contract": 498408386.25,
-     "sheet_total_this_week": 0.0
+     "sheet_total_this_week": 0.0,
+     "sort_order": 6
     },
     {
+     "bill_code": "7",
      "bill_no": 7,
      "name": "UNDERGROUND FUELING SYSTEM",
      "sheet_total_contract": 408712500.0,
-     "sheet_total_this_week": 0.0
+     "sheet_total_this_week": 0.0,
+     "sort_order": 7
     },
     {
+     "bill_code": "8",
      "bill_no": 8,
      "name": "FIXED GROUND POWER SUPPLY SYSTEM",
      "sheet_total_contract": 228034800.0,
-     "sheet_total_this_week": 0.0
+     "sheet_total_this_week": 0.0,
+     "sort_order": 8
     }
    ],
    "cross_checks": [
@@ -81,6 +97,7 @@
     {
      "amount_previous_reported": 50000000.0,
      "amount_this_week": null,
+     "bill_code": "1",
      "bill_no": 1,
      "contract_amount": 69000000.0,
      "contract_qty": 1.0,
@@ -95,6 +112,7 @@
     {
      "amount_previous_reported": 11500000.0,
      "amount_this_week": null,
+     "bill_code": "1",
      "bill_no": 1,
      "contract_amount": 13800000.0,
      "contract_qty": 1.0,
@@ -109,6 +127,7 @@
     {
      "amount_previous_reported": 25000000.0,
      "amount_this_week": null,
+     "bill_code": "1",
      "bill_no": 1,
      "contract_amount": 27600000.0,
      "contract_qty": 1.0,
@@ -123,6 +142,7 @@
     {
      "amount_previous_reported": 20000000.0,
      "amount_this_week": null,
+     "bill_code": "1",
      "bill_no": 1,
      "contract_amount": 27600000.0,
      "contract_qty": 1.0,
@@ -137,6 +157,7 @@
     {
      "amount_previous_reported": 2000000.0,
      "amount_this_week": null,
+     "bill_code": "1",
      "bill_no": 1,
      "contract_amount": 6900000.0,
      "contract_qty": 1.0,
@@ -151,6 +172,7 @@
     {
      "amount_previous_reported": 17680000.0,
      "amount_this_week": null,
+     "bill_code": "1",
      "bill_no": 1,
      "contract_amount": 20700000.0,
      "contract_qty": 1.0,
@@ -165,6 +187,7 @@
     {
      "amount_previous_reported": 18732900.25,
      "amount_this_week": null,
+     "bill_code": "1",
      "bill_no": 1,
      "contract_amount": 20700000.0,
      "contract_qty": 1.0,
@@ -179,6 +202,7 @@
     {
      "amount_previous_reported": 8000000.0,
      "amount_this_week": null,
+     "bill_code": "1",
      "bill_no": 1,
      "contract_amount": 11040000.0,
      "contract_qty": 1.0,
@@ -193,6 +217,7 @@
     {
      "amount_previous_reported": 78435661.0,
      "amount_this_week": null,
+     "bill_code": "1",
      "bill_no": 1,
      "contract_amount": 82800000.0,
      "contract_qty": 1.0,
@@ -207,6 +232,7 @@
     {
      "amount_previous_reported": 8315000.0,
      "amount_this_week": null,
+     "bill_code": "1",
      "bill_no": 1,
      "contract_amount": 13800000.0,
      "contract_qty": 1.0,
@@ -221,6 +247,7 @@
     {
      "amount_previous_reported": 8533850.0,
      "amount_this_week": null,
+     "bill_code": "1",
      "bill_no": 1,
      "contract_amount": 13800000.0,
      "contract_qty": 1.0,
@@ -235,6 +262,7 @@
     {
      "amount_previous_reported": 2657500.0,
      "amount_this_week": null,
+     "bill_code": "1",
      "bill_no": 1,
      "contract_amount": 4140000.0,
      "contract_qty": 1.0,
@@ -249,6 +277,7 @@
     {
      "amount_previous_reported": 18978000.0,
      "amount_this_week": 0.0,
+     "bill_code": "2",
      "bill_no": 2,
      "contract_amount": 23400000.0,
      "contract_qty": 13.0,
@@ -263,6 +292,7 @@
     {
      "amount_previous_reported": 44636580.0,
      "amount_this_week": 0.0,
+     "bill_code": "2",
      "bill_no": 2,
      "contract_amount": 71838600.0,
      "contract_qty": 105645.0,
@@ -277,6 +307,7 @@
     {
      "amount_previous_reported": 602409461.05,
      "amount_this_week": 0.0,
+     "bill_code": "2",
      "bill_no": 2,
      "contract_amount": 1138769905.0,
      "contract_qty": 147223.0,
@@ -291,6 +322,7 @@
     {
      "amount_previous_reported": 48707235.0,
      "amount_this_week": 0.0,
+     "bill_code": "2",
      "bill_no": 2,
      "contract_amount": 48661650.0,
      "contract_qty": 6361.0,
@@ -305,6 +337,7 @@
     {
      "amount_previous_reported": 4089150.0,
      "amount_this_week": 0.0,
+     "bill_code": "2",
      "bill_no": 2,
      "contract_amount": 7160400.0,
      "contract_qty": 2400.0,
@@ -319,6 +352,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "2",
      "bill_no": 2,
      "contract_amount": 61880000.0,
      "contract_qty": 17000.0,
@@ -333,6 +367,7 @@
     {
      "amount_previous_reported": 340659.0,
      "amount_this_week": 0.0,
+     "bill_code": "2",
      "bill_no": 2,
      "contract_amount": 150960000.0,
      "contract_qty": 8000.0,
@@ -347,6 +382,7 @@
     {
      "amount_previous_reported": 2489520.0,
      "amount_this_week": 0.0,
+     "bill_code": "2",
      "bill_no": 2,
      "contract_amount": 6396000.0,
      "contract_qty": 1000.0,
@@ -361,6 +397,7 @@
     {
      "amount_previous_reported": 153439701.35,
      "amount_this_week": 0.0,
+     "bill_code": "2",
      "bill_no": 2,
      "contract_amount": 260150605.60000002,
      "contract_qty": 101884.0,
@@ -375,6 +412,7 @@
     {
      "amount_previous_reported": 78621000.0,
      "amount_this_week": 0.0,
+     "bill_code": "2",
      "bill_no": 2,
      "contract_amount": 161330000.0,
      "contract_qty": 1300.0,
@@ -389,6 +427,7 @@
     {
      "amount_previous_reported": 59090000.0,
      "amount_this_week": 0.0,
+     "bill_code": "2",
      "bill_no": 2,
      "contract_amount": null,
      "contract_qty": null,
@@ -403,6 +442,7 @@
     {
      "amount_previous_reported": 17254584.0,
      "amount_this_week": 0.0,
+     "bill_code": "3",
      "bill_no": 3,
      "contract_amount": 31529321.999999996,
      "contract_qty": 4338.4,
@@ -417,6 +457,7 @@
     {
      "amount_previous_reported": 4033890.0,
      "amount_this_week": 0.0,
+     "bill_code": "3",
      "bill_no": 3,
      "contract_amount": 20624400.0,
      "contract_qty": 85.0,
@@ -431,6 +472,7 @@
     {
      "amount_previous_reported": 54827850.0,
      "amount_this_week": 0.0,
+     "bill_code": "3",
      "bill_no": 3,
      "contract_amount": 110580000.0,
      "contract_qty": 388.0,
@@ -445,6 +487,7 @@
     {
      "amount_previous_reported": 42114399.99999999,
      "amount_this_week": 0.0,
+     "bill_code": "3",
      "bill_no": 3,
      "contract_amount": 170400000.0,
      "contract_qty": 71.0,
@@ -459,6 +502,7 @@
     {
      "amount_previous_reported": 69428250.0,
      "amount_this_week": 0.0,
+     "bill_code": "3",
      "bill_no": 3,
      "contract_amount": 149476500.0,
      "contract_qty": 563.0,
@@ -473,6 +517,7 @@
     {
      "amount_previous_reported": 42116580.0,
      "amount_this_week": 0.0,
+     "bill_code": "3",
      "bill_no": 3,
      "contract_amount": 92339280.0,
      "contract_qty": 524.0,
@@ -487,6 +532,7 @@
     {
      "amount_previous_reported": 36207000.0,
      "amount_this_week": 0.0,
+     "bill_code": "3",
      "bill_no": 3,
      "contract_amount": 48600000.0,
      "contract_qty": 400.0,
@@ -501,6 +547,7 @@
     {
      "amount_previous_reported": 13600000.0,
      "amount_this_week": 0.0,
+     "bill_code": "3",
      "bill_no": 3,
      "contract_amount": 23120000.0,
      "contract_qty": 16.0,
@@ -515,6 +562,7 @@
     {
      "amount_previous_reported": 8550000.0,
      "amount_this_week": 0.0,
+     "bill_code": "3",
      "bill_no": 3,
      "contract_amount": 14535000.0,
      "contract_qty": 9.0,
@@ -529,6 +577,7 @@
     {
      "amount_previous_reported": 6000000.0,
      "amount_this_week": 0.0,
+     "bill_code": "3",
      "bill_no": 3,
      "contract_amount": 10200000.0,
      "contract_qty": 8.0,
@@ -543,6 +592,7 @@
     {
      "amount_previous_reported": 30917900.0,
      "amount_this_week": 0.0,
+     "bill_code": "3",
      "bill_no": 3,
      "contract_amount": 52560430.0,
      "contract_qty": 17.0,
@@ -557,6 +607,7 @@
     {
      "amount_previous_reported": 45934178.400000006,
      "amount_this_week": 0.0,
+     "bill_code": "3",
      "bill_no": 3,
      "contract_amount": 48528000.0,
      "contract_qty": 200.0,
@@ -571,6 +622,7 @@
     {
      "amount_previous_reported": 113556300.0,
      "amount_this_week": 0.0,
+     "bill_code": "3",
      "bill_no": 3,
      "contract_amount": 43200000.0,
      "contract_qty": 18.0,
@@ -585,6 +637,7 @@
     {
      "amount_previous_reported": 540000.0,
      "amount_this_week": 0.0,
+     "bill_code": "3",
      "bill_no": 3,
      "contract_amount": 918000.0,
      "contract_qty": 4.0,
@@ -599,6 +652,7 @@
     {
      "amount_previous_reported": 28347795.0,
      "amount_this_week": 0.0,
+     "bill_code": "4",
      "bill_no": 4,
      "contract_amount": 28663740.0,
      "contract_qty": 90996.0,
@@ -613,6 +667,7 @@
     {
      "amount_previous_reported": 941833700.5500002,
      "amount_this_week": 0.0,
+     "bill_code": "4",
      "bill_no": 4,
      "contract_amount": 1632467925.0,
      "contract_qty": 26345.0,
@@ -627,6 +682,7 @@
     {
      "amount_previous_reported": 1052239545.4499999,
      "amount_this_week": 0.0,
+     "bill_code": "4",
      "bill_no": 4,
      "contract_amount": 2014084350.0,
      "contract_qty": 15487.0,
@@ -641,6 +697,7 @@
     {
      "amount_previous_reported": 8008591462.8,
      "amount_this_week": 259350000.0,
+     "bill_code": "4",
      "bill_no": 4,
      "contract_amount": 10804920000.0,
      "contract_qty": 37912.0,
@@ -655,6 +712,7 @@
     {
      "amount_previous_reported": 245656015.20000002,
      "amount_this_week": 0.0,
+     "bill_code": "4",
      "bill_no": 4,
      "contract_amount": 409333680.0,
      "contract_qty": 1687.0,
@@ -669,6 +727,7 @@
     {
      "amount_previous_reported": 542177220.0,
      "amount_this_week": 18837000.0,
+     "bill_code": "4",
      "bill_no": 4,
      "contract_amount": 19126800.0,
      "contract_qty": 92.4,
@@ -683,6 +742,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "4",
      "bill_no": 4,
      "contract_amount": 518918400.0,
      "contract_qty": 2640.0,
@@ -697,6 +757,7 @@
     {
      "amount_previous_reported": 11901945.0,
      "amount_this_week": 0.0,
+     "bill_code": "4",
      "bill_no": 4,
      "contract_amount": 6238943.999999999,
      "contract_qty": 34.8,
@@ -711,6 +772,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "4",
      "bill_no": 4,
      "contract_amount": 230688000.0,
      "contract_qty": 1200.0,
@@ -725,6 +787,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "4",
      "bill_no": 4,
      "contract_amount": 11860992.0,
      "contract_qty": 62.4,
@@ -739,6 +802,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "4",
      "bill_no": 4,
      "contract_amount": 31104000.0,
      "contract_qty": 240.0,
@@ -753,6 +817,7 @@
     {
      "amount_previous_reported": 531160200.0,
      "amount_this_week": 16363350.0,
+     "bill_code": "4",
      "bill_no": 4,
      "contract_amount": 633420000.0,
      "contract_qty": 55200.0,
@@ -767,6 +832,7 @@
     {
      "amount_previous_reported": 33295500.0,
      "amount_this_week": 0.0,
+     "bill_code": "4",
      "bill_no": 4,
      "contract_amount": 293328000.0,
      "contract_qty": 3600.0,
@@ -781,6 +847,7 @@
     {
      "amount_previous_reported": 4289220.0,
      "amount_this_week": 0.0,
+     "bill_code": "4",
      "bill_no": 4,
      "contract_amount": 4380480.0,
      "contract_qty": 624.0,
@@ -795,6 +862,7 @@
     {
      "amount_previous_reported": 41319936.0,
      "amount_this_week": 0.0,
+     "bill_code": "4",
      "bill_no": 4,
      "contract_amount": 352512000.0,
      "contract_qty": 18000.0,
@@ -809,6 +877,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "4",
      "bill_no": 4,
      "contract_amount": 8445600.0,
      "contract_qty": 480.0,
@@ -823,6 +892,7 @@
     {
      "amount_previous_reported": 60368490.0,
      "amount_this_week": 0.0,
+     "bill_code": "4",
      "bill_no": 4,
      "contract_amount": 440640000.0,
      "contract_qty": 19200.0,
@@ -837,6 +907,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "4",
      "bill_no": 4,
      "contract_amount": 17642812.5,
      "contract_qty": 922.5,
@@ -851,6 +922,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "5",
      "bill_no": 5,
      "contract_amount": 3164062.5,
      "contract_qty": 375.0,
@@ -865,6 +937,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "5",
      "bill_no": 5,
      "contract_amount": 2025000.0,
      "contract_qty": 240.0,
@@ -879,6 +952,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "5",
      "bill_no": 5,
      "contract_amount": 316406.25,
      "contract_qty": 37.5,
@@ -893,6 +967,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "5",
      "bill_no": 5,
      "contract_amount": 441703.125,
      "contract_qty": 45.0,
@@ -907,6 +982,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "5",
      "bill_no": 5,
      "contract_amount": 398250.0,
      "contract_qty": 40.0,
@@ -921,6 +997,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "5",
      "bill_no": 5,
      "contract_amount": 628200.0,
      "contract_qty": 64.0,
@@ -935,6 +1012,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "6",
      "bill_no": 6,
      "contract_amount": 58127250.0,
      "contract_qty": 50.0,
@@ -949,6 +1027,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "6",
      "bill_no": 6,
      "contract_amount": 209258100.0,
      "contract_qty": 180.0,
@@ -963,6 +1042,7 @@
     {
      "amount_previous_reported": 9517500.0,
      "amount_this_week": 0.0,
+     "bill_code": "6",
      "bill_no": 6,
      "contract_amount": 9517500.0,
      "contract_qty": 20.0,
@@ -977,6 +1057,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "6",
      "bill_no": 6,
      "contract_amount": 9517500.0,
      "contract_qty": 20.0,
@@ -991,6 +1072,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "6",
      "bill_no": 6,
      "contract_amount": 3666000.0,
      "contract_qty": 32.0,
@@ -1005,6 +1087,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "6",
      "bill_no": 6,
      "contract_amount": 27565500.0,
      "contract_qty": 230.0,
@@ -1019,6 +1102,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "6",
      "bill_no": 6,
      "contract_amount": 13483125.0,
      "contract_qty": 1.0,
@@ -1033,6 +1117,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "6",
      "bill_no": 6,
      "contract_amount": 14158779.375,
      "contract_qty": 1.0,
@@ -1047,6 +1132,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "6",
      "bill_no": 6,
      "contract_amount": 57765937.5,
      "contract_qty": 17250.0,
@@ -1061,6 +1147,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "6",
      "bill_no": 6,
      "contract_amount": 951750.0,
      "contract_qty": 300.0,
@@ -1075,6 +1162,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "6",
      "bill_no": 6,
      "contract_amount": 18506250.0,
      "contract_qty": 6000.0,
@@ -1089,6 +1177,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "6",
      "bill_no": 6,
      "contract_amount": 7685381.249999999,
      "contract_qty": 270.0,
@@ -1103,6 +1192,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "6",
      "bill_no": 6,
      "contract_amount": 9532569.375,
      "contract_qty": 300.0,
@@ -1117,6 +1207,7 @@
     {
      "amount_previous_reported": 14741550.0,
      "amount_this_week": 0.0,
+     "bill_code": "6",
      "bill_no": 6,
      "contract_amount": 16584243.75,
      "contract_qty": 270.0,
@@ -1131,6 +1222,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "6",
      "bill_no": 6,
      "contract_amount": 20224687.5,
      "contract_qty": 1350.0,
@@ -1145,6 +1237,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "6",
      "bill_no": 6,
      "contract_amount": 11817562.5,
      "contract_qty": 270.0,
@@ -1159,6 +1252,7 @@
     {
      "amount_previous_reported": 10046250.0,
      "amount_this_week": 0.0,
+     "bill_code": "6",
      "bill_no": 6,
      "contract_amount": 10046250.0,
      "contract_qty": 3000.0,
@@ -1173,6 +1267,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "6",
      "bill_no": 6,
      "contract_amount": 0.0,
      "contract_qty": 0.0,
@@ -1187,6 +1282,7 @@
     {
      "amount_previous_reported": 13489000.0,
      "amount_this_week": 0.0,
+     "bill_code": "6",
      "bill_no": 6,
      "contract_amount": 13489000.0,
      "contract_qty": 800.0,
@@ -1201,6 +1297,7 @@
     {
      "amount_previous_reported": 5023125.0,
      "amount_this_week": 0.0,
+     "bill_code": "6",
      "bill_no": 6,
      "contract_amount": 16743750.0,
      "contract_qty": 100.0,
@@ -1215,6 +1312,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "6",
      "bill_no": 6,
      "contract_amount": 24146250.0,
      "contract_qty": 3.0,
@@ -1229,6 +1327,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "6",
      "bill_no": 6,
      "contract_amount": 27318750.0,
      "contract_qty": 1.0,
@@ -1243,6 +1342,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "6",
      "bill_no": 6,
      "contract_amount": 0.0,
      "contract_qty": 0.0,
@@ -1257,6 +1357,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "6",
      "bill_no": 6,
      "contract_amount": 29375000.0,
      "contract_qty": 1.0,
@@ -1271,6 +1372,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "7",
      "bill_no": 7,
      "contract_amount": 227812500.0,
      "contract_qty": 4.0,
@@ -1285,6 +1387,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "7",
      "bill_no": 7,
      "contract_amount": 26493750.0,
      "contract_qty": 3000.0,
@@ -1299,6 +1402,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "7",
      "bill_no": 7,
      "contract_amount": 98156250.0,
      "contract_qty": 1.0,
@@ -1313,6 +1417,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "7",
      "bill_no": 7,
      "contract_amount": 39375000.0,
      "contract_qty": 1.0,
@@ -1327,6 +1432,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "7",
      "bill_no": 7,
      "contract_amount": 16875000.0,
      "contract_qty": 1.0,
@@ -1341,6 +1447,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "8",
      "bill_no": 8,
      "contract_amount": 85429800.0,
      "contract_qty": 5.0,
@@ -1355,6 +1462,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "8",
      "bill_no": 8,
      "contract_amount": 81855000.0,
      "contract_qty": 5.0,
@@ -1369,6 +1477,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "8",
      "bill_no": 8,
      "contract_amount": 11250000.0,
      "contract_qty": 4000.0,
@@ -1383,6 +1492,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "8",
      "bill_no": 8,
      "contract_amount": 29812500.0,
      "contract_qty": 2000.0,
@@ -1397,6 +1507,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "8",
      "bill_no": 8,
      "contract_amount": 8437500.0,
      "contract_qty": 1.0,
@@ -1411,6 +1522,7 @@
     {
      "amount_previous_reported": 0.0,
      "amount_this_week": 0.0,
+     "bill_code": "8",
      "bill_no": 8,
      "contract_amount": 11250000.0,
      "contract_qty": 1.0,
@@ -1425,7 +1537,8 @@
     {
      "amount_previous_reported": 1750750.0,
      "amount_this_week": 0.0,
-     "bill_no": 8,
+     "bill_code": "7",
+     "bill_no": 7,
      "contract_amount": null,
      "contract_qty": null,
      "description": "4 - way ducts for remote parking stands",
@@ -1441,52 +1554,58 @@
    "status": "partial",
    "summary_table": [
     {
-     "bill_no": 1,
+     "bill_code": "1",
      "contract": 311880000.0,
      "name": "Preliminaries",
      "this_week": 0.0
     },
     {
-     "bill_no": 2,
+     "bill_code": "2",
      "contract": 1930547160.6,
      "name": "Site Clearance and Earthwork",
      "this_week": 0.0
     },
     {
-     "bill_no": 3,
+     "bill_code": "3",
      "contract": 816610932.0,
      "name": "Culverts and Drains",
      "this_week": 0.0
     },
     {
-     "bill_no": 4,
+     "bill_code": "4",
      "contract": 17457775723.5,
      "name": "Pavement and Joints",
      "this_week": 294550350.0
     },
     {
-     "bill_no": 5,
+     "bill_code": "5",
      "contract": 6973621.875,
      "name": "Pavement Markings",
      "this_week": 0.0
     },
     {
-     "bill_no": 6,
+     "bill_code": "6",
      "contract": 498408386.25,
      "name": "Airfield Lighting",
      "this_week": 0.0
     },
     {
-     "bill_no": 7,
+     "bill_code": "7",
      "contract": 408712500.0,
      "name": "Underground Fueling System",
      "this_week": 0.0
     },
     {
-     "bill_no": 8,
+     "bill_code": "8",
      "contract": 228034800.0,
      "name": "Fixed Ground Power Supply System",
      "this_week": 0.0
+    },
+    {
+     "bill_code": null,
+     "contract": 1082947156.21125,
+     "name": "Contingency & VOP",
+     "this_week": 14727517.5
     }
    ],
    "tail": {
@@ -1522,6 +1641,7 @@
     }
    },
    "warnings": [
+    "BEME item 7.09 appears inside Bill 8's block — assigned to Bill 7 by its code",
     "BEME Bill 6 contract: our sum 609,481,136.25 != sheet total 498,408,386.25 — the sheet's own SUM range may be broken"
    ]
   },
