@@ -33,16 +33,16 @@ function fullCurrency(amount: number): string {
 export function ProjectsStatsCards({ stats, isLoading, viewMode = 'all' }: ProjectsStatsCardsProps) {
   if (isLoading) {
     return (
-      <div className="grid grid-cols-2 gap-4 md:max-w-xl">
-        {[...Array(2)].map((_, i) => (
-          <Card key={i}>
-            <CardContent className="pt-6">
-              <Skeleton className="h-4 w-20 mb-2" />
-              <Skeleton className="h-8 w-16" />
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      <Card className="w-full sm:w-fit">
+        <CardContent className="flex divide-x p-0">
+          {[...Array(2)].map((_, i) => (
+            <div key={i} className="flex-1 px-6 py-4 sm:min-w-[200px]">
+              <Skeleton className="h-3 w-20 mb-2" />
+              <Skeleton className="h-7 w-16" />
+            </div>
+          ))}
+        </CardContent>
+      </Card>
     )
   }
 
@@ -57,35 +57,38 @@ export function ProjectsStatsCards({ stats, isLoading, viewMode = 'all' }: Proje
       ),
       subtext: undefined as string | undefined,
       icon: Activity,
-      color: 'text-emerald-600',
+      iconClass: 'text-emerald-600 bg-emerald-500/10',
     },
     {
       label: 'Total Value',
       value: compactCurrency(totalValue),
       subtext: totalValue >= 1_000_000 ? fullCurrency(totalValue) : undefined,
       icon: DollarSign,
-      color: 'text-primary',
+      iconClass: 'text-amber-600 bg-amber-500/10',
     },
   ]
 
   return (
-    <div className="grid grid-cols-2 gap-4 md:max-w-xl">
-      {cards.map((card) => (
-        <Card key={card.label}>
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-3">
-              <card.icon className={`h-5 w-5 ${card.color}`} />
-              <div>
-                <p className="text-xs text-muted-foreground">{card.label}</p>
-                <p className="text-xl font-bold tabular-nums">{card.value}</p>
-                {card.subtext && (
-                  <p className="text-[11px] text-muted-foreground tabular-nums">{card.subtext}</p>
-                )}
-              </div>
+    <Card className="w-full sm:w-fit">
+      <CardContent className="flex divide-x p-0">
+        {cards.map((card) => (
+          <div
+            key={card.label}
+            className="flex flex-1 items-center gap-3 px-5 py-4 sm:min-w-[200px]"
+          >
+            <div className={`rounded-lg p-2 ${card.iconClass}`}>
+              <card.icon className="h-4 w-4" />
             </div>
-          </CardContent>
-        </Card>
-      ))}
-    </div>
+            <div>
+              <p className="text-xs text-muted-foreground">{card.label}</p>
+              <p className="text-xl font-bold leading-tight tabular-nums">{card.value}</p>
+              {card.subtext && (
+                <p className="text-[11px] text-muted-foreground tabular-nums">{card.subtext}</p>
+              )}
+            </div>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
   )
 }

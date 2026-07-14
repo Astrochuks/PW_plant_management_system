@@ -55,9 +55,14 @@ export function ImportAwardLettersDialog() {
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose(); else setOpen(true); }}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm">
-          <Upload className="h-4 w-4 mr-2" />
-          Import Award Letters
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-muted-foreground hover:text-foreground"
+          title="Import Award Letters"
+        >
+          <Upload className="h-4 w-4" />
+          <span className="hidden md:inline md:ml-2">Import Award Letters</span>
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-[500px]">

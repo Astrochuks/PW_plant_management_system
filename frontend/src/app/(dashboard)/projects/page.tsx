@@ -99,13 +99,13 @@ function ProjectsPageInner() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center gap-3">
           <div className="p-2.5 rounded-xl bg-primary/10">
             <FolderKanban className="h-6 w-6 text-primary" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold">Project Registry</h1>
+            <h1 className="text-2xl font-bold tracking-tight">Project Registry</h1>
             <p className="text-sm text-muted-foreground">
               {meta?.total != null
                 ? `${meta.total} project${meta.total !== 1 ? 's' : ''}`
@@ -115,21 +115,35 @@ function ProjectsPageInner() {
         </div>
 
         {isAdmin && (
-          <div className="flex flex-wrap gap-2">
-            <Button asChild size="sm" variant="outline">
-              <Link href="/projects/submissions">
-                <UploadCloud className="h-4 w-4 mr-2" />
-                Weekly Reports
-              </Link>
-            </Button>
-            <Button asChild size="sm" variant="outline">
-              <Link href="/projects/review-queue">
-                <ClipboardList className="h-4 w-4 mr-2" />
-                Review Queue
-              </Link>
-            </Button>
-            <ImportAwardLettersDialog />
-            <Button asChild size="sm">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center rounded-lg border bg-card p-0.5">
+              <Button
+                asChild
+                size="sm"
+                variant="ghost"
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <Link href="/projects/submissions" title="Weekly Reports">
+                  <UploadCloud className="h-4 w-4" />
+                  <span className="hidden md:inline md:ml-2">Weekly Reports</span>
+                </Link>
+              </Button>
+              <div className="h-4 w-px bg-border" />
+              <Button
+                asChild
+                size="sm"
+                variant="ghost"
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <Link href="/projects/review-queue" title="Review Queue">
+                  <ClipboardList className="h-4 w-4" />
+                  <span className="hidden md:inline md:ml-2">Review Queue</span>
+                </Link>
+              </Button>
+              <div className="h-4 w-px bg-border" />
+              <ImportAwardLettersDialog />
+            </div>
+            <Button asChild size="sm" className="shadow-sm">
               <Link href="/projects/create">
                 <Plus className="h-4 w-4 mr-2" />
                 Create Project
