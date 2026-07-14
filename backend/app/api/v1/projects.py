@@ -1733,7 +1733,8 @@ async def create_project(
     current_user: Annotated[CurrentUser, Depends(require_admin)],
 ) -> dict[str, Any]:
     """Create a new project (admin only)."""
-    data = project.model_dump(exclude_none=True, mode="json")
+    # python-mode dump: asyncpg needs real date/UUID objects, not strings
+    data = project.model_dump(exclude_none=True)
     data["created_by"] = current_user.id
     data["updated_by"] = current_user.id
 
@@ -1759,7 +1760,7 @@ async def create_project(
         action="create",
         table_name="projects",
         record_id=str(created["id"]),
-        new_values=data,
+        new_values=project.model_dump(exclude_none=True, mode="json"),
         ip_address=get_client_ip(request),
         description=f"Created project: {project.project_name}",
     )
@@ -1777,7 +1778,8 @@ async def update_project(
     current_user: Annotated[CurrentUser, Depends(require_admin)],
 ) -> dict[str, Any]:
     """Update an existing project (admin only)."""
-    update_data = project.model_dump(exclude_none=True, mode="json")
+    # python-mode dump: asyncpg needs real date/UUID objects, not strings
+    update_data = project.model_dump(exclude_none=True)
     if not update_data:
         raise ValidationError("No fields to update")
 
@@ -1814,7 +1816,7 @@ async def update_project(
         table_name="projects",
         record_id=str(project_id),
         old_values=old_values,
-        new_values=update_data,
+        new_values=project.model_dump(exclude_none=True, mode="json"),
         ip_address=get_client_ip(request),
         description=f"Updated project: {existing.get('project_name')}",
     )

@@ -20,6 +20,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { toast } from 'sonner'
 import { useCreateProject, useUpdateProject } from '@/hooks/use-projects'
 import { useStates } from '@/hooks/use-locations'
+import { getErrorMessage } from '@/lib/api/client'
 import type { Project, CreateProjectRequest } from '@/lib/api/projects'
 
 interface ProjectFormProps {
@@ -159,8 +160,11 @@ export function ProjectForm({ project, mode }: ProjectFormProps) {
         toast.success('Project updated successfully')
         router.replace(`/projects/${project!.id}`)
       }
-    } catch {
-      toast.error(mode === 'create' ? 'Failed to create project' : 'Failed to update project')
+    } catch (err) {
+      toast.error(
+        (mode === 'create' ? 'Failed to create project: ' : 'Failed to update project: ')
+        + getErrorMessage(err)
+      )
     }
   }
 
