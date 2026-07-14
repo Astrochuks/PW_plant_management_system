@@ -75,9 +75,9 @@ export function ProjectsFilters({
   states,
 }: ProjectsFiltersProps) {
   return (
-    <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
+    <div className="flex flex-col gap-3">
       {/* Search */}
-      <div className="relative flex-1 xl:max-w-sm">
+      <div className="relative w-full lg:max-w-xl">
         <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
         <Input
           placeholder="Search projects..."
@@ -87,10 +87,10 @@ export function ProjectsFilters({
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5 xl:flex">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
       {/* Client filter */}
       <Select value={client} onValueChange={onClientChange}>
-        <SelectTrigger className="w-full xl:w-[180px]">
+        <SelectTrigger className="w-full">
           <SelectValue placeholder="All Clients" />
         </SelectTrigger>
         <SelectContent>
@@ -103,7 +103,7 @@ export function ProjectsFilters({
 
       {/* State filter */}
       <Select value={stateId} onValueChange={onStateIdChange}>
-        <SelectTrigger className="w-full xl:w-[160px]">
+        <SelectTrigger className="w-full">
           <SelectValue placeholder="All States" />
         </SelectTrigger>
         <SelectContent>
@@ -116,7 +116,7 @@ export function ProjectsFilters({
 
       {/* Type filter */}
       <Select value={projectType} onValueChange={onProjectTypeChange}>
-        <SelectTrigger className="w-full xl:w-[150px]">
+        <SelectTrigger className="w-full">
           <SelectValue placeholder="All Types" />
         </SelectTrigger>
         <SelectContent>
@@ -129,7 +129,7 @@ export function ProjectsFilters({
 
       {/* Work nature filter */}
       <Select value={workNature} onValueChange={onWorkNatureChange}>
-        <SelectTrigger className="w-full xl:w-[170px]">
+        <SelectTrigger className="w-full">
           <SelectValue placeholder="All Work Types" />
         </SelectTrigger>
         <SelectContent>
@@ -142,7 +142,7 @@ export function ProjectsFilters({
 
       {/* Status filter */}
       <Select value={status} onValueChange={onStatusChange}>
-        <SelectTrigger className="w-full xl:w-[160px]">
+        <SelectTrigger className="w-full">
           <SelectValue placeholder="All Statuses" />
         </SelectTrigger>
         <SelectContent>

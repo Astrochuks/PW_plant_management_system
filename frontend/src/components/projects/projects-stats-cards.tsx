@@ -1,6 +1,6 @@
 'use client'
 
-import { Activity, DollarSign } from 'lucide-react'
+import { Activity, Banknote } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { ProjectStats } from '@/hooks/use-projects'
@@ -33,61 +33,69 @@ function fullCurrency(amount: number): string {
 export function ProjectsStatsCards({ stats, isLoading, viewMode = 'all' }: ProjectsStatsCardsProps) {
   if (isLoading) {
     return (
-      <Card className="w-full sm:w-fit">
-        <CardContent className="flex divide-x p-0">
-          {[...Array(2)].map((_, i) => (
-            <div key={i} className="flex-1 px-6 py-4 sm:min-w-[200px]">
-              <Skeleton className="h-3 w-20 mb-2" />
-              <Skeleton className="h-7 w-16" />
-            </div>
-          ))}
-        </CardContent>
-      </Card>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {[1, 2].map((i) => (
+          <Card key={i} className="py-0">
+            <CardContent className="flex items-center gap-3 py-3 px-4">
+              <Skeleton className="h-5 w-5 rounded" />
+              <div className="space-y-1.5">
+                <Skeleton className="h-5 w-16" />
+                <Skeleton className="h-3 w-24" />
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
     )
   }
 
   const totals = stats?.totals
   const totalValue = totals?.total_contract_value ?? 0
-
-  const cards = [
-    {
-      label: viewMode === 'legacy' ? 'Legacy Projects' : 'Active Projects',
-      value: String(
-        (viewMode === 'legacy' ? totals?.total : totals?.active) ?? 0
-      ),
-      subtext: undefined as string | undefined,
-      icon: Activity,
-      iconClass: 'text-emerald-600 bg-emerald-500/10',
-    },
-    {
-      label: 'Total Value',
-      value: compactCurrency(totalValue),
-      subtext: totalValue >= 1_000_000 ? fullCurrency(totalValue) : undefined,
-      icon: DollarSign,
-      iconClass: 'text-amber-600 bg-amber-500/10',
-    },
-  ]
+  const count = (viewMode === 'legacy' ? totals?.total : totals?.active) ?? 0
 
   return (
-    <Card className="w-full sm:w-fit">
-      <CardContent className="flex divide-x p-0">
-        {cards.map((card) => (
-          <div
-            key={card.label}
-            className="flex flex-1 items-center gap-3 px-5 py-4 sm:min-w-[200px]"
-          >
-            <div className={`rounded-lg p-2 ${card.iconClass}`}>
-              <card.icon className="h-4 w-4" />
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">{card.label}</p>
-              <p className="text-xl font-bold leading-tight tabular-nums">{card.value}</p>
-              {card.subtext && (
-                <p className="text-[11px] text-muted-foreground tabular-nums">{card.subtext}</p>
-              )}
-            </div>
-          </div>
-        ))}
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <MiniKpi
+        label={viewMode === 'legacy' ? 'Legacy Projects' : 'Active Projects'}
+        value={count.toLocaleString()}
+        sub={viewMode === 'legacy' ? 'historical register' : 'reporting weekly'}
+        icon={Activity}
+        iconColor="text-emerald-600 dark:text-emerald-400"
+      />
+      <MiniKpi
+        label="Total Value"
+        value={compactCurrency(totalValue)}
+        sub={totalValue >= 1_000_000 ? fullCurrency(totalValue) : 'current contract sums'}
+        icon={Banknote}
+        iconColor="text-amber-600 dark:text-amber-400"
+      />
+    </div>
+  )
+}
+
+function MiniKpi({
+  label,
+  value,
+  sub,
+  icon: Icon,
+  iconColor,
+}: {
+  label: string
+  value: string
+  sub: string
+  icon: React.ElementType
+  iconColor: string
+}) {
+  return (
+    <Card className="py-0">
+      <CardContent className="flex items-center gap-3 py-3 px-4">
+        <Icon className={`h-5 w-5 shrink-0 ${iconColor}`} />
+        <div className="min-w-0">
+          <p className="text-lg font-bold leading-tight tabular-nums">{value}</p>
+          <p className="text-[11px] text-muted-foreground leading-tight truncate">
+            {label} &middot; {sub}
+          </p>
+        </div>
       </CardContent>
     </Card>
   )

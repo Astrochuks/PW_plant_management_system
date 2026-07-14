@@ -1,5 +1,6 @@
 'use client'
 
+import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { FolderKanban, Columns3, ChevronDown } from 'lucide-react'
 import {
@@ -55,7 +56,7 @@ interface ColumnDef {
   skeleton?: string
 }
 
-const STATUS_STYLES: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline'; className?: string }> = {
+export const STATUS_STYLES: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline'; className?: string }> = {
   active: { label: 'Active', variant: 'default', className: 'bg-emerald-600 hover:bg-emerald-600 text-white' },
   completed: { label: 'Completed', variant: 'secondary', className: 'bg-gray-200 text-gray-700' },
   retention_period: { label: 'Retention', variant: 'secondary', className: 'bg-amber-100 text-amber-800' },
@@ -306,6 +307,7 @@ interface ProjectsTableProps {
   visibleColumns: ColumnKey[]
   onVisibleColumnsChange: (columns: ColumnKey[]) => void
   resultText?: string
+  actions?: React.ReactNode
 }
 
 export function ProjectsTable({
@@ -315,6 +317,7 @@ export function ProjectsTable({
   visibleColumns,
   onVisibleColumnsChange,
   resultText,
+  actions,
 }: ProjectsTableProps) {
   const router = useRouter()
 
@@ -336,8 +339,10 @@ export function ProjectsTable({
   return (
     <div className="space-y-0">
       {/* Toolbar */}
-      <div className="flex items-center justify-between py-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 py-2">
         <p className="text-sm text-muted-foreground">{resultText}</p>
+        <div className="flex flex-wrap items-center gap-2">
+        {actions}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="outline" size="sm">
@@ -373,6 +378,7 @@ export function ProjectsTable({
             </DropdownMenuCheckboxItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        </div>
       </div>
 
       {/* Table */}
@@ -385,42 +391,61 @@ export function ProjectsTable({
           <p className="text-sm mt-1">Try adjusting your filters or search term</p>
         </div>
       ) : (
-        <div className="rounded-md border overflow-hidden">
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
+        <div className="rounded-lg border-2 border-border overflow-x-auto">
+          {/* PW Brand Banner */}
+          <div className="flex items-center gap-3 px-4 py-2 bg-background border-b-2 border-border">
+            <Image
+              src="/images/logo.png"
+              alt="P.W. Nigeria Ltd."
+              width={55}
+              height={55}
+              className="rounded"
+            />
+            <span className="text-foreground font-bold text-base tracking-wide">
+              P.W. NIGERIA LTD. — Project Register
+            </span>
+          </div>
+          <Table className="border-collapse">
+            <TableHeader>
+              <TableRow className="bg-[#ffbf36] hover:bg-[#ffbf36] border-b-2 border-[#e6ac31]">
+                {columns.map((col) => (
+                  <TableHead
+                    key={col.key}
+                    className={`
+                      text-[#101415] font-semibold text-xs uppercase tracking-wider border-x border-[#e6ac31]/50
+                      ${col.width || ''}
+                      ${col.align === 'right' ? 'text-right' : ''}
+                    `}
+                  >
+                    {col.header}
+                  </TableHead>
+                ))}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {projects.map((project, idx) => (
+                <TableRow
+                  key={project.id}
+                  className={`
+                    cursor-pointer
+                    ${idx % 2 === 0 ? 'bg-background' : 'bg-muted/30'}
+                    hover:bg-muted/60 border-b border-border
+                  `}
+                  onClick={() => router.push(`/projects/${project.id}`)}
+                  onMouseEnter={() => onPrefetch?.(project.id)}
+                >
                   {columns.map((col) => (
-                    <TableHead
+                    <TableCell
                       key={col.key}
-                      className={`${col.width || ''} ${col.align === 'right' ? 'text-right' : ''}`}
+                      className={`text-sm border-x border-border/50 ${col.align === 'right' ? 'text-right' : ''}`}
                     >
-                      {col.header}
-                    </TableHead>
+                      {col.render(project)}
+                    </TableCell>
                   ))}
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {projects.map((project) => (
-                  <TableRow
-                    key={project.id}
-                    className="cursor-pointer hover:bg-muted/50"
-                    onClick={() => router.push(`/projects/${project.id}`)}
-                    onMouseEnter={() => onPrefetch?.(project.id)}
-                  >
-                    {columns.map((col) => (
-                      <TableCell
-                        key={col.key}
-                        className={col.align === 'right' ? 'text-right' : ''}
-                      >
-                        {col.render(project)}
-                      </TableCell>
-                    ))}
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+              ))}
+            </TableBody>
+          </Table>
         </div>
       )}
     </div>

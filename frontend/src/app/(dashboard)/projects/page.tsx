@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback } from 'react'
 import Link from 'next/link'
-import { FolderKanban, Plus, ClipboardList, UploadCloud } from 'lucide-react'
+import { FolderKanban, Plus, ClipboardList, UploadCloud, Table2, LayoutGrid } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/providers/auth-provider'
 import {
@@ -18,8 +18,11 @@ import { ProjectsStatsCards } from '@/components/projects/projects-stats-cards'
 import { ProjectsFilters } from '@/components/projects/projects-filters'
 import { ProjectsTable, DEFAULT_VISIBLE_COLUMNS } from '@/components/projects/projects-table'
 import type { ColumnKey } from '@/components/projects/projects-table'
+import { ProjectsCards } from '@/components/projects/projects-cards'
 import { ImportAwardLettersDialog } from '@/components/projects/import-award-letters-dialog'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+
+type DisplayMode = 'table' | 'cards'
 
 type ViewMode = 'active' | 'legacy' | 'all'
 
@@ -40,6 +43,14 @@ function ProjectsPageInner() {
 
   const [filters, setFilters] = useUrlFilters(FILTER_DEFAULTS)
   const [visibleColumns, setVisibleColumns] = useState<ColumnKey[]>(DEFAULT_VISIBLE_COLUMNS)
+  const [display, setDisplay] = useState<DisplayMode>('table')
+  useEffect(() => {
+    if (localStorage.getItem('projects-display') === 'cards') setDisplay('cards')
+  }, [])
+  const changeDisplay = (mode: DisplayMode) => {
+    setDisplay(mode)
+    localStorage.setItem('projects-display', mode)
+  }
 
   const search = filters.search
   const client = filters.client
@@ -115,40 +126,32 @@ function ProjectsPageInner() {
         </div>
 
         {isAdmin && (
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center rounded-lg border bg-card p-0.5">
-              <Button
-                asChild
-                size="sm"
-                variant="ghost"
-                className="text-muted-foreground hover:text-foreground"
-              >
-                <Link href="/projects/submissions" title="Weekly Reports">
-                  <UploadCloud className="h-4 w-4" />
-                  <span className="hidden md:inline md:ml-2">Weekly Reports</span>
-                </Link>
-              </Button>
-              <div className="h-4 w-px bg-border" />
-              <Button
-                asChild
-                size="sm"
-                variant="ghost"
-                className="text-muted-foreground hover:text-foreground"
-              >
-                <Link href="/projects/review-queue" title="Review Queue">
-                  <ClipboardList className="h-4 w-4" />
-                  <span className="hidden md:inline md:ml-2">Review Queue</span>
-                </Link>
-              </Button>
-              <div className="h-4 w-px bg-border" />
-              <ImportAwardLettersDialog />
-            </div>
-            <Button asChild size="sm" className="shadow-sm">
-              <Link href="/projects/create">
-                <Plus className="h-4 w-4 mr-2" />
-                Create Project
+          <div className="flex items-center rounded-lg border bg-card p-0.5 w-fit">
+            <Button
+              asChild
+              size="sm"
+              variant="ghost"
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <Link href="/projects/submissions" title="Weekly Reports">
+                <UploadCloud className="h-4 w-4" />
+                <span className="hidden md:inline md:ml-2">Weekly Reports</span>
               </Link>
             </Button>
+            <div className="h-4 w-px bg-border" />
+            <Button
+              asChild
+              size="sm"
+              variant="ghost"
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <Link href="/projects/review-queue" title="Review Queue">
+                <ClipboardList className="h-4 w-4" />
+                <span className="hidden md:inline md:ml-2">Review Queue</span>
+              </Link>
+            </Button>
+            <div className="h-4 w-px bg-border" />
+            <ImportAwardLettersDialog />
           </div>
         )}
       </div>
@@ -198,15 +201,71 @@ function ProjectsPageInner() {
         states={states}
       />
 
-      {/* Table */}
-      <ProjectsTable
-        projects={projects}
-        isLoading={isLoading}
-        onPrefetch={prefetch}
-        visibleColumns={visibleColumns}
-        onVisibleColumnsChange={handleVisibleColumnsChange}
-        resultText={resultText}
-      />
+      {/* Register: table or cards */}
+      {(() => {
+        const viewToggle = (
+          <div className="flex items-center rounded-lg border p-0.5">
+            <Button
+              variant={display === 'table' ? 'secondary' : 'ghost'}
+              size="sm"
+              className="h-7 px-2"
+              onClick={() => changeDisplay('table')}
+              title="Table view"
+              aria-pressed={display === 'table'}
+            >
+              <Table2 className="h-4 w-4" />
+            </Button>
+            <Button
+              variant={display === 'cards' ? 'secondary' : 'ghost'}
+              size="sm"
+              className="h-7 px-2"
+              onClick={() => changeDisplay('cards')}
+              title="Card view"
+              aria-pressed={display === 'cards'}
+            >
+              <LayoutGrid className="h-4 w-4" />
+            </Button>
+          </div>
+        )
+        const createButton = isAdmin ? (
+          <Button asChild size="sm" className="shadow-sm">
+            <Link href="/projects/create">
+              <Plus className="h-4 w-4 mr-2" />
+              Create Project
+            </Link>
+          </Button>
+        ) : null
+
+        if (display === 'table') {
+          return (
+            <ProjectsTable
+              projects={projects}
+              isLoading={isLoading}
+              onPrefetch={prefetch}
+              visibleColumns={visibleColumns}
+              onVisibleColumnsChange={handleVisibleColumnsChange}
+              resultText={resultText}
+              actions={<>{createButton}{viewToggle}</>}
+            />
+          )
+        }
+        return (
+          <div className="space-y-0">
+            <div className="flex flex-wrap items-center justify-between gap-2 py-2">
+              <p className="text-sm text-muted-foreground">{resultText}</p>
+              <div className="flex flex-wrap items-center gap-2">
+                {createButton}
+                {viewToggle}
+              </div>
+            </div>
+            <ProjectsCards
+              projects={projects}
+              isLoading={isLoading}
+              onPrefetch={prefetch}
+            />
+          </div>
+        )
+      })()}
 
       {/* Pagination */}
       {meta && meta.total_pages > 1 && (
