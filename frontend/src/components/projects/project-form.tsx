@@ -36,6 +36,26 @@ const STATUS_OPTIONS = [
   { value: 'cancelled', label: 'Cancelled' },
 ]
 
+const TYPE_OPTIONS = [
+  { value: 'road', label: 'Road' },
+  { value: 'bridge', label: 'Bridge' },
+  { value: 'drainage', label: 'Drainage' },
+  { value: 'building', label: 'Building' },
+  { value: 'airport', label: 'Airport' },
+  { value: 'water', label: 'Water' },
+  { value: 'infrastructure', label: 'Infrastructure' },
+  { value: 'other', label: 'Other' },
+]
+
+const NATURE_OPTIONS = [
+  { value: 'construction', label: 'Construction' },
+  { value: 'dualization', label: 'Dualization' },
+  { value: 'rehabilitation', label: 'Rehabilitation' },
+  { value: 'maintenance', label: 'Maintenance' },
+  { value: 'emergency_repair', label: 'Emergency Repair' },
+  { value: 'completion', label: 'Completion' },
+]
+
 function buildInitialForm(project?: Project): Record<string, any> {
   return {
     project_name: project?.project_name ?? '',
@@ -43,6 +63,8 @@ function buildInitialForm(project?: Project): Record<string, any> {
     short_name: project?.short_name ?? '',
     state_id: project?.state_id ?? '',
     status: project?.status ?? 'active',
+    project_type: project?.project_type ?? '',
+    work_nature: project?.work_nature ?? '',
     is_legacy: project?.is_legacy ?? false,
     original_contract_sum: project?.original_contract_sum ?? '',
     variation_sum: project?.variation_sum ?? '',
@@ -265,6 +287,42 @@ export function ProjectForm({ project, mode }: ProjectFormProps) {
                   </SelectTrigger>
                   <SelectContent>
                     {STATUS_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="relative">
+                <FieldDot field="project_type" />
+                <Label htmlFor="project_type">Type</Label>
+                <Select
+                  value={form.project_type || 'none'}
+                  onValueChange={(v) => handleChange('project_type', v === 'none' ? '' : v)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Not set</SelectItem>
+                    {TYPE_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="relative">
+                <FieldDot field="work_nature" />
+                <Label htmlFor="work_nature">Work Nature</Label>
+                <Select
+                  value={form.work_nature || 'none'}
+                  onValueChange={(v) => handleChange('work_nature', v === 'none' ? '' : v)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select work nature" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Not set</SelectItem>
+                    {NATURE_OPTIONS.map((opt) => (
                       <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
                     ))}
                   </SelectContent>

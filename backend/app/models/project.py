@@ -55,6 +55,14 @@ class ProjectCreate(BaseModel):
         "active",
         pattern=r"^(active|completed|on_hold|cancelled|retention_period)$",
     )
+    project_type: str | None = Field(
+        None,
+        pattern=r"^(road|bridge|drainage|building|airport|water|infrastructure|other)$",
+    )
+    work_nature: str | None = Field(
+        None,
+        pattern=r"^(construction|dualization|rehabilitation|maintenance|emergency_repair|completion)$",
+    )
     is_legacy: bool = False
     notes: str | None = None
 
@@ -106,6 +114,14 @@ class ProjectUpdate(BaseModel):
     status: str | None = Field(
         None,
         pattern=r"^(active|completed|on_hold|cancelled|retention_period)$",
+    )
+    project_type: str | None = Field(
+        None,
+        pattern=r"^(road|bridge|drainage|building|airport|water|infrastructure|other)$",
+    )
+    work_nature: str | None = Field(
+        None,
+        pattern=r"^(construction|dualization|rehabilitation|maintenance|emergency_repair|completion)$",
     )
     is_legacy: bool | None = None
     notes: str | None = None

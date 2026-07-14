@@ -15,7 +15,6 @@ import { useStates } from '@/hooks/use-locations'
 import { useDebounce } from '@/hooks/use-debounce'
 import { useUrlFilters } from '@/hooks/use-url-filters'
 import { ProjectsStatsCards } from '@/components/projects/projects-stats-cards'
-import { RegisterBenchmarks } from '@/components/projects/register-benchmarks'
 import { ProjectsFilters } from '@/components/projects/projects-filters'
 import { ProjectsTable, DEFAULT_VISIBLE_COLUMNS } from '@/components/projects/projects-table'
 import type { ColumnKey } from '@/components/projects/projects-table'
@@ -32,7 +31,7 @@ const FILTER_DEFAULTS = {
   projectType: 'all',
   workNature: 'all',
   page: '1',
-  viewMode: 'legacy',
+  viewMode: 'active',
 }
 
 function ProjectsPageInner() {
@@ -49,7 +48,7 @@ function ProjectsPageInner() {
   const projectType = filters.projectType
   const workNature = filters.workNature
   const page = Number(filters.page) || 1
-  const viewMode = (filters.viewMode || 'legacy') as ViewMode
+  const viewMode = (filters.viewMode || 'active') as ViewMode
 
   const debouncedSearch = useDebounce(search, 300)
   const isLegacyParam = viewMode === 'all' ? undefined : viewMode === 'legacy'
@@ -142,8 +141,6 @@ function ProjectsPageInner() {
 
       {/* Stats */}
       <ProjectsStatsCards stats={statsData} isLoading={statsLoading} viewMode={viewMode} />
-
-      <RegisterBenchmarks />
 
       {/* Active / Legacy / All Toggle */}
       <div className="flex items-center gap-1 rounded-lg bg-muted p-1 w-fit">

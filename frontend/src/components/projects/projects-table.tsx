@@ -45,7 +45,6 @@ export type ColumnKey =
   | 'amount_paid'
   | 'source_sheet'
   | 'project_type'
-  | 'completeness'
 
 interface ColumnDef {
   key: ColumnKey
@@ -158,32 +157,6 @@ const COLUMN_DEFS: ColumnDef[] = [
       </div>
     ),
     skeleton: 'w-16',
-  },
-  {
-    key: 'completeness',
-    header: 'Data',
-    width: 'w-[80px]',
-    align: 'center',
-    render: (p) => {
-      const c = p.completeness == null ? null : Number(p.completeness)
-      if (c == null) return <span className="text-muted-foreground text-xs">-</span>
-      const pct = Math.round(c * 100)
-      const color = pct >= 100 ? 'bg-emerald-500' : pct >= 67 ? 'bg-amber-500' : 'bg-red-500'
-      const source = p.register_source === 'weekly_report_inferred' ? ' · auto-created' : ''
-      return (
-        <span
-          className="inline-flex items-center gap-1.5 text-xs"
-          title={`${pct}% of core register fields filled${source}`}
-        >
-          <span className={`h-2 w-2 rounded-full ${color}`} />
-          {pct}%
-          {p.register_source === 'weekly_report_inferred' && (
-            <Badge variant="outline" className="ml-1 text-[9px]">auto</Badge>
-          )}
-        </span>
-      )
-    },
-    skeleton: 'w-10',
   },
   {
     key: 'contract_sum',
@@ -299,7 +272,6 @@ export const ALL_COLUMNS: { key: ColumnKey; label: string }[] = [
   { key: 'site', label: 'Site' },
   { key: 'status', label: 'Status' },
   { key: 'project_type', label: 'Type' },
-  { key: 'completeness', label: 'Data Completeness' },
   { key: 'contract_sum', label: 'Contract Sum' },
   { key: 'award_date', label: 'Award Date' },
   { key: 'award_letter', label: 'Award Letter' },
@@ -321,7 +293,6 @@ export const DEFAULT_VISIBLE_COLUMNS: ColumnKey[] = [
   'state',
   'status',
   'project_type',
-  'completeness',
   'contract_sum',
   'award_date',
 ]

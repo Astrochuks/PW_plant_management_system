@@ -157,6 +157,8 @@ export interface CreateProjectRequest {
   cost_to_date?: number;
   revenue_to_date?: number;
   status?: ProjectStatus;
+  project_type?: ProjectType;
+  work_nature?: WorkNature;
   notes?: string;
 }
 
