@@ -28,7 +28,12 @@ logger = get_logger(__name__)
 async def _resolve_fleet(
     conn: asyncpg.Connection, raw_numbers: list[str]
 ) -> tuple[dict[str, str], list[str]]:
-    """{raw → plant_id} via normalized fleet numbers; unresolved raws listed."""
+    """{raw → plant_id} via normalized fleet numbers; unresolved raws listed.
+
+    Resolution order: plants_master exact match, then the alias table
+    (durable manual verdicts). An 'external' alias (hired vehicle,
+    contractor kit) is neither resolved nor unresolved — the row keeps
+    plant_id NULL and the number stays out of the review queue."""
     normalized: dict[str, list[str]] = {}
     for raw in raw_numbers:
         n = normalize_fleet_number(raw)
@@ -43,12 +48,28 @@ async def _resolve_fleet(
     )
     by_norm = {r["fleet_number"]: str(r["id"]) for r in rows}
 
+    leftover = [n for n in normalized if n not in by_norm]
+    aliases: dict[str, tuple[str, str | None]] = {}
+    if leftover:
+        alias_rows = await conn.fetch(
+            """SELECT raw_normalized, kind, plant_id
+               FROM project_fleet_aliases WHERE raw_normalized = ANY($1::text[])""",
+            leftover,
+        )
+        aliases = {r["raw_normalized"]: (r["kind"], str(r["plant_id"]) if r["plant_id"] else None)
+                   for r in alias_rows}
+
     resolved: dict[str, str] = {}
     unresolved: list[str] = []
     for norm_num, raws in normalized.items():
         for raw in raws:  # every raw spelling maps, not just the first
             if norm_num in by_norm:
                 resolved[raw] = by_norm[norm_num]
+            elif norm_num in aliases:
+                kind, plant_id = aliases[norm_num]
+                if kind == "plant":
+                    resolved[raw] = plant_id
+                # 'external': saved with NULL plant_id, not queued
             else:
                 unresolved.append(raw)
     return resolved, unresolved

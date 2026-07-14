@@ -363,7 +363,8 @@ async def retry_project_submission(
 async def list_unmapped_fleet_numbers(
     current_user: Annotated[CurrentUser, Depends(require_projects_access)],
 ) -> dict[str, Any]:
-    """Fleet numbers in project reports that don't match plants_master."""
+    """Fleet numbers in project reports that don't match plants_master
+    and have no alias verdict yet (external ones are settled — hidden)."""
     rows = await fetch(
         """SELECT fleet_number_raw,
                   count(*)::int AS occurrences,
@@ -379,8 +380,29 @@ async def list_unmapped_fleet_numbers(
                FROM project_diesel_consumption WHERE plant_id IS NULL
            ) u
            WHERE fleet_number_raw IS NOT NULL
+             AND NOT EXISTS (
+                 SELECT 1 FROM project_fleet_aliases a
+                 WHERE a.raw_normalized =
+                       upper(replace(trim(u.fleet_number_raw), ' ', ''))
+             )
            GROUP BY fleet_number_raw
            ORDER BY occurrences DESC"""
+    )
+    return {"success": True, "data": rows}
+
+
+@router.get("/fleet-aliases")
+async def list_fleet_aliases(
+    current_user: Annotated[CurrentUser, Depends(require_projects_access)],
+) -> dict[str, Any]:
+    """All durable fleet verdicts (for the review UI and for undo)."""
+    rows = await fetch(
+        """SELECT a.id, a.raw_normalized, a.kind, a.label, a.notes,
+                  a.created_at, pm.fleet_number AS plant_fleet_number,
+                  pm.description AS plant_description
+           FROM project_fleet_aliases a
+           LEFT JOIN plants_master pm ON pm.id = a.plant_id
+           ORDER BY a.created_at DESC"""
     )
     return {"success": True, "data": rows}
 
@@ -416,6 +438,20 @@ async def link_unmapped_fleet_number(
         )
         updated += int(result.split()[-1])
 
+    # durable verdict: future imports resolve this raw number automatically
+    from app.workers.etl_worker import normalize_fleet_number
+    norm = normalize_fleet_number(raw)
+    if norm:
+        await execute(
+            """INSERT INTO project_fleet_aliases
+                   (raw_normalized, kind, plant_id, created_by)
+               VALUES ($1, 'plant', $2::uuid, $3::uuid)
+               ON CONFLICT (raw_normalized) DO UPDATE SET
+                   kind = 'plant', plant_id = EXCLUDED.plant_id,
+                   label = NULL, created_by = EXCLUDED.created_by""",
+            norm, str(plant_id), current_user.id,
+        )
+
     background_tasks.add_task(
         audit_service.log,
         user_id=current_user.id,
@@ -424,12 +460,87 @@ async def link_unmapped_fleet_number(
         table_name="project_plant_utilization",
         record_id=raw,
         new_values={"fleet_number_raw": raw, "plant_id": str(plant_id),
-                    "rows_backfilled": updated},
+                    "rows_backfilled": updated, "alias": norm},
         ip_address=get_client_ip(request),
         description=f"Linked fleet {raw} → {plant['fleet_number']} ({updated} rows)",
     )
     return {"success": True,
             "data": {"linked_to": plant["fleet_number"], "rows_backfilled": updated}}
+
+
+@router.post("/unmapped-fleet-numbers/mark-external")
+async def mark_fleet_number_external(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+    body: dict[str, Any] = None,
+) -> dict[str, Any]:
+    """Settle a raw fleet number as NOT company plant (hired vehicle,
+    contractor kit). Rows keep their raw number with plant_id NULL and
+    still count in site totals; the number leaves the queue for good."""
+    body = body or {}
+    raw = (body.get("fleet_number_raw") or "").strip()
+    if not raw:
+        raise ValidationError("fleet_number_raw is required")
+    label = (body.get("label") or "External / hired").strip()
+
+    from app.workers.etl_worker import normalize_fleet_number
+    norm = normalize_fleet_number(raw)
+    if not norm:
+        raise ValidationError(f"{raw!r} does not normalize to a fleet number")
+
+    await execute(
+        """INSERT INTO project_fleet_aliases
+               (raw_normalized, kind, label, notes, created_by)
+           VALUES ($1, 'external', $2, $3, $4::uuid)
+           ON CONFLICT (raw_normalized) DO UPDATE SET
+               kind = 'external', plant_id = NULL,
+               label = EXCLUDED.label, notes = EXCLUDED.notes,
+               created_by = EXCLUDED.created_by""",
+        norm, label, body.get("notes"), current_user.id,
+    )
+    background_tasks.add_task(
+        audit_service.log,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        action="update",
+        table_name="project_fleet_aliases",
+        record_id=norm,
+        new_values={"fleet_number_raw": raw, "kind": "external", "label": label},
+        ip_address=get_client_ip(request),
+        description=f"Marked fleet {raw} as external ({label})",
+    )
+    return {"success": True, "data": {"raw_normalized": norm, "kind": "external"}}
+
+
+@router.delete("/fleet-aliases/{alias_id}")
+async def delete_fleet_alias(
+    alias_id: UUID,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+) -> dict[str, Any]:
+    """Undo a verdict. An external number returns to the queue; a plant
+    alias stops auto-linking future uploads (already-linked rows keep
+    their plant_id — use re-resolve after correcting plants_master)."""
+    row = await fetchrow(
+        "DELETE FROM project_fleet_aliases WHERE id = $1::uuid RETURNING raw_normalized, kind",
+        str(alias_id),
+    )
+    if row is None:
+        raise NotFoundError("Alias not found")
+    background_tasks.add_task(
+        audit_service.log,
+        user_id=current_user.id,
+        user_email=current_user.email,
+        action="delete",
+        table_name="project_fleet_aliases",
+        record_id=row["raw_normalized"],
+        new_values={"kind": row["kind"]},
+        ip_address=get_client_ip(request),
+        description=f"Removed fleet verdict for {row['raw_normalized']}",
+    )
+    return {"success": True, "data": {"raw_normalized": row["raw_normalized"]}}
 
 
 @router.post("/unmapped-fleet-numbers/re-resolve")
