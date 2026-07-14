@@ -594,15 +594,26 @@ def parse_payments(ws) -> dict[str, Any]:
     hrow, cols = hit
 
     rows = []
+    sheet_total_gross = None
+    sheet_total_net = None
     for r in iter_table_rows(ws, hrow, cols):
         voucher = _txt(r, "voucher number")
+        ptype = _txt(r, "payment type")
         gross = _num(r, "gross amount")
+        label = norm(_txt(r, "date") or "")
+        if label.startswith("total"):
+            # the sheet's own 'Total All:' row — cross-check, never a payment
+            sheet_total_gross = gross
+            sheet_total_net = _num(r, "net amount")
+            continue
+        if voucher is None and ptype is None:
+            continue  # spacers + unlabeled summary rows below Total All
         if voucher is None and gross is None:
             continue
         row = {
             "payment_date": _dt(r, "date"),
             "voucher_number": voucher,
-            "payment_type": _txt(r, "payment type"),
+            "payment_type": ptype,
             "gross_amount": gross,
             "wht": _num(r, "wht") or 0,
             "vat": _num(r, "vat") or 0,
@@ -630,6 +641,22 @@ def parse_payments(ws) -> dict[str, Any]:
                     f"{expected_net:,.2f} != net {row['net_amount']:,.2f}"
                 )
         rows.append(row)
+    # the sheet's own totals verify our rows (locked convention: totals
+    # are cross-checks, never data)
+    if rows and sheet_total_gross is not None:
+        total = sum(x["gross_amount"] or 0 for x in rows)
+        if abs(total - sheet_total_gross) > 1.0:
+            warnings.append(
+                f"Payments: rows gross {total:,.2f} != sheet "
+                f"'Total All' {sheet_total_gross:,.2f}"
+            )
+    if rows and sheet_total_net is not None:
+        total_net = sum(x["net_amount"] or 0 for x in rows)
+        if abs(total_net - sheet_total_net) > 1.0:
+            warnings.append(
+                f"Payments: rows net {total_net:,.2f} != sheet "
+                f"'Total All' net {sheet_total_net:,.2f}"
+            )
     if not rows:
         warnings.append("Payments: no rows parsed")
     return {"rows": rows, "warnings": warnings}

@@ -310,12 +310,16 @@ class TestCertificatesAndPayments:
         sheet = week10["sheets"]["Payments Recieved"]
         rows = sheet["rows"]
         assert not [w for w in sheet["warnings"] if "gross-deductions" in w]
-        # real payment rows: 2 advances + 15 cert payments (no total rows)
-        real = [r for r in rows if r["voucher_number"]]
-        assert len(real) == 17
-        advances = [r for r in real if "advance" in (r["payment_type"] or "").lower()]
+        # real payment rows ONLY: 2 advances + 15 cert payments — the
+        # sheet's 'Total All:' row and the bare number under it are
+        # cross-checks, never rows (regression: they used to leak in)
+        assert len(rows) == 17
+        assert all(r["voucher_number"] and r["payment_type"] for r in rows)
+        advances = [r for r in rows if "advance" in (r["payment_type"] or "").lower()]
         assert sum(r["gross_amount"] for r in advances) == pytest.approx(
             2_655_339_994.77)
+        # rows must sum to the sheet's own Total All (silent cross-check)
+        assert not [w for w in sheet["warnings"] if "Total All" in w]
 
 
 class TestStoredOnlySheets:
