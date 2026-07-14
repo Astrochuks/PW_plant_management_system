@@ -52,7 +52,9 @@ function ProjectsPageInner() {
     localStorage.setItem('projects-display', mode)
   }
 
-  const search = filters.search
+  // Search is typed into LOCAL state (instant), synced to the URL only
+  // after the debounce — router.replace per keystroke made typing lag.
+  const [searchInput, setSearchInput] = useState(filters.search)
   const client = filters.client
   const status = filters.status
   const stateId = filters.stateId
@@ -61,7 +63,19 @@ function ProjectsPageInner() {
   const page = Number(filters.page) || 1
   const viewMode = (filters.viewMode || 'active') as ViewMode
 
-  const debouncedSearch = useDebounce(search, 300)
+  const debouncedSearch = useDebounce(searchInput, 300)
+  // Sync the settled search into the URL (back-button restore), and pull
+  // URL changes (back/forward) into the input.
+  useEffect(() => {
+    if (debouncedSearch !== filters.search) {
+      setFilters({ search: debouncedSearch, page: '1' } as Partial<typeof filters>)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedSearch])
+  useEffect(() => {
+    setSearchInput((prev) => (filters.search !== prev && filters.search !== debouncedSearch ? filters.search : prev))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.search])
   const isLegacyParam = viewMode === 'all' ? undefined : viewMode === 'legacy'
 
   // Data
@@ -90,7 +104,7 @@ function ProjectsPageInner() {
   const globalTotals = globalStats?.totals
 
   // Handlers — update URL params
-  const handleSearchChange = (v: string) => setFilters({ search: v, page: '1' })
+  const handleSearchChange = (v: string) => setSearchInput(v)
   const handleClientChange = (v: string) => setFilters({ client: v, page: '1' })
   const handleStatusChange = (v: string) => setFilters({ status: v, page: '1' })
   const handleStateIdChange = (v: string) => setFilters({ stateId: v, page: '1' })
@@ -171,7 +185,7 @@ function ProjectsPageInner() {
             onClick={() => handleViewModeChange(key)}
             className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
               viewMode === key
-                ? 'bg-background text-foreground shadow-sm'
+                ? 'bg-primary/20 text-foreground shadow-sm'
                 : 'text-muted-foreground hover:text-foreground'
             }`}
           >
@@ -185,7 +199,7 @@ function ProjectsPageInner() {
 
       {/* Filters */}
       <ProjectsFilters
-        search={search}
+        search={searchInput}
         onSearchChange={handleSearchChange}
         client={client}
         onClientChange={handleClientChange}

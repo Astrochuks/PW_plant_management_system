@@ -58,7 +58,7 @@ export function ProjectsStatsCards({ stats, isLoading, viewMode = 'all' }: Proje
       <MiniKpi
         label={viewMode === 'legacy' ? 'Legacy Projects' : 'Active Projects'}
         value={count.toLocaleString()}
-        sub={viewMode === 'legacy' ? 'historical register' : 'reporting weekly'}
+        sub={viewMode === 'legacy' ? 'historical register' : undefined}
         icon={Activity}
         iconColor="text-emerald-600 dark:text-emerald-400"
       />
@@ -82,7 +82,7 @@ function MiniKpi({
 }: {
   label: string
   value: string
-  sub: string
+  sub?: string
   icon: React.ElementType
   iconColor: string
 }) {
@@ -93,7 +93,8 @@ function MiniKpi({
         <div className="min-w-0">
           <p className="text-lg font-bold leading-tight tabular-nums">{value}</p>
           <p className="text-[11px] text-muted-foreground leading-tight truncate">
-            {label} &middot; {sub}
+            {label}
+            {sub && <> &middot; {sub}</>}
           </p>
         </div>
       </CardContent>
