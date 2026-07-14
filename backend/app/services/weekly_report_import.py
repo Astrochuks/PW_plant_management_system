@@ -450,9 +450,10 @@ async def persist_weekly_report(
                     total_retention_held, total_net_payment,
                     retention_released, contingency_used, contingency_deducted,
                     fluctuation_materials, advance_received,
-                    total_works_executed, advance_recovery)
+                    total_works_executed, advance_recovery,
+                    new_total, less_previously_certified)
                    VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10,
-                           $11, $12, $13, $14, $15, $16, $17, $18, $19)
+                           $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
                    ON CONFLICT (project_id, cert_number) DO UPDATE SET
                        weekly_report_id = EXCLUDED.weekly_report_id,
                        date_submitted = COALESCE(EXCLUDED.date_submitted,
@@ -472,6 +473,8 @@ async def persist_weekly_report(
                        advance_received = EXCLUDED.advance_received,
                        total_works_executed = EXCLUDED.total_works_executed,
                        advance_recovery = EXCLUDED.advance_recovery,
+                       new_total = EXCLUDED.new_total,
+                       less_previously_certified = EXCLUDED.less_previously_certified,
                        updated_at = now()""",
                 report_id, project_id, r["cert_number"], r["date_submitted"],
                 r["gross_value_works_done"], r["add_materials_on_site"],
@@ -481,7 +484,8 @@ async def persist_weekly_report(
                 r.get("retention_released"), r.get("contingency_used"),
                 r.get("contingency_deducted"), r.get("fluctuation_materials"),
                 r.get("advance_received"), r.get("total_works_executed"),
-                r.get("advance_recovery"),
+                r.get("advance_recovery"), r.get("new_total"),
+                r.get("less_previously_certified"),
             )
         counts["project_certificates"] = len(cert_rows)
 
@@ -721,15 +725,18 @@ async def persist_weekly_report(
                (weekly_report_id, project_id, year, week_number, week_ending_date,
                 sheet_source, material_name, unit, unit_cost, opening_stock,
                 received, closing_stock, available_for_use, used_works,
-                used_precast, used_mobilisation, used, discrepancy_qty,
+                used_precast, used_mobilisation, used_other, used,
+                variance_qty, variance_value, discrepancy_qty,
                 discrepancy_value, stock_maintained, remarks)
                VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10,
-                       $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)""",
+                       $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
+                       $22, $23, $24)""",
             [
                 (*base, r["sheet_source"], r["material_name"], r["unit"],
                  r["unit_cost"], r["opening_stock"], r["received"],
                  r["closing_stock"], r["available_for_use"], r["used_works"],
-                 r["used_precast"], r["used_mobilisation"], r["used"],
+                 r["used_precast"], r["used_mobilisation"], r.get("used_other"),
+                 r["used"], r.get("variance_qty"), r.get("variance_value"),
                  r["discrepancy_qty"], r["discrepancy_value"],
                  r["stock_maintained"], r["remarks"])
                 for r in mat_rows
