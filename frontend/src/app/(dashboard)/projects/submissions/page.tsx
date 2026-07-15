@@ -289,9 +289,9 @@ function SubmissionRow({ sub, isAdmin }: { sub: ProjectSubmission; isAdmin: bool
       </TableRow>
       {expanded && (
         <TableRow>
-          <TableCell colSpan={7} className="bg-muted/30">
-            <div className="grid gap-4 p-2 text-xs md:grid-cols-2">
-              <div>
+          <TableCell colSpan={7} className="bg-muted/30 whitespace-normal">
+            <div className="grid max-w-full gap-4 p-2 text-xs md:grid-cols-2">
+              <div className="min-w-0">
                 <p className="mb-1 font-semibold">Sheets</p>
                 <div className="flex flex-wrap gap-1">
                   {Object.entries(sub.sheets_processed ?? {}).map(([name, st]) => (
@@ -314,7 +314,7 @@ function SubmissionRow({ sub, isAdmin }: { sub: ProjectSubmission; isAdmin: bool
                   <p className="text-destructive mt-2">{sub.error_message}</p>
                 )}
               </div>
-              <div>
+              <div className="min-w-0">
                 <p className="mb-1 font-semibold">
                   Rows{sub.parse_duration_ms ? ` · ${(sub.parse_duration_ms / 1000).toFixed(1)}s` : ''}
                 </p>
@@ -332,8 +332,13 @@ function SubmissionRow({ sub, isAdmin }: { sub: ProjectSubmission; isAdmin: bool
                     <summary className="cursor-pointer font-medium text-amber-700">
                       {warnings.length} warning{warnings.length > 1 ? 's' : ''}
                     </summary>
-                    <ul className="text-muted-foreground mt-1 list-disc pl-4">
+                    <ul className="text-muted-foreground mt-1 list-disc break-words pl-4">
                       {warnings.slice(0, 12).map((w, i) => <li key={i}>{w}</li>)}
+                      {warnings.length > 12 && (
+                        <li className="list-none text-[11px] italic">
+                          + {warnings.length - 12} more — stored as sheet flags, queryable per week
+                        </li>
+                      )}
                     </ul>
                   </details>
                 )}
