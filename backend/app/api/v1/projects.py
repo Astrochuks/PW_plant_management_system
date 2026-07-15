@@ -771,6 +771,22 @@ async def list_project_operations(
     return {"success": True, "data": rows}
 
 
+@router.get("/{project_id}/overview")
+async def get_project_overview(
+    project_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(require_projects_access)],
+) -> dict[str, Any]:
+    """The living Contract Summary — every figure computed from ledgers
+    and atomic weekly facts per docs/WORKBOOK_ARITHMETIC.md, never from
+    the workbook's fossil client-position block."""
+    from app.services.project_overview import compute_project_overview
+
+    data = await compute_project_overview(str(project_id))
+    if not data:
+        raise NotFoundError("Project", str(project_id))
+    return {"success": True, "data": data}
+
+
 @router.get("/{project_id}/operations/summary")
 async def get_project_operations_summary(
     project_id: UUID,
