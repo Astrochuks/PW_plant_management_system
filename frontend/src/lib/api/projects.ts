@@ -825,3 +825,90 @@ export async function getSubmissionDownloadUrl(
   const response = await apiClient.get(`/projects/submissions/${submissionId}/download`);
   return response.data.data;
 }
+
+// ── Project hub: Overview (living contract summary) ────────────────────
+
+export interface ProjectOverview {
+  project: {
+    id: string;
+    project_name: string;
+    short_name: string | null;
+    client: string;
+    state_name: string | null;
+    status: ProjectStatus;
+    project_type: ProjectType | null;
+    work_nature: WorkNature | null;
+    current_contract_sum: number | null;
+    original_contract_sum: number | null;
+    award_date: string | null;
+    commencement_date: string | null;
+    revised_completion_date: string | null;
+  };
+  latest_week: {
+    year: number;
+    week_number: number;
+    week_ending_date: string;
+    works_this_week: number;
+    cost_this_week: number;
+  } | null;
+  ladder: {
+    contract_sum: number;
+    beme_scope: number;
+    works_to_date: number;
+    earnings_to_date: number;
+    certified_ex_vat: number;
+    certified_incl_vat: number;
+    paid_gross: number;
+    paid_net: number;
+    wip_incl_vat: number;
+    certified_not_paid: number;
+  };
+  net_earnings: {
+    value: number;
+    pct: number | null;
+    earnings: number;
+    costs_to_date: number;
+  };
+  progress: {
+    physical_pct: number | null;
+    commercial_pct: number | null;
+    reported_pct: number | null;
+  };
+  payment_status: {
+    count: number;
+    advances: number;
+    certs_paid: number;
+    on_account: number;
+    total_gross: number;
+    total_net: number;
+  };
+  certificates: {
+    count: number;
+    cumulative_gross: number;
+    retention_held: number;
+    retention_released: number;
+    advance_recovery: number;
+  };
+  alerts: {
+    scope_exceeds_contract: boolean;
+    missing_weeks: Array<[number, number]>;
+    flags_latest_week: number;
+    flags_serious: number;
+    flags_total: number;
+    unresolved_fleet: number;
+  };
+  recent_weeks: Array<{
+    year: number;
+    week_number: number;
+    week_ending_date: string;
+    flags: number;
+    works_this_week: number;
+    cost_this_week: number;
+    submission_id: string | null;
+  }>;
+}
+
+export async function getProjectOverview(projectId: string): Promise<ProjectOverview> {
+  const response = await apiClient.get(`/projects/${projectId}/overview`);
+  return response.data.data;
+}

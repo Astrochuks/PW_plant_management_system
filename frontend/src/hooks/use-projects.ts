@@ -12,6 +12,7 @@ import {
 import {
   getProjects,
   getProject,
+  getProjectOverview,
   getProjectStats,
   getProjectClients,
   getProjectMilestones,
@@ -59,6 +60,15 @@ export function useProjects(params: ProjectsListParams = {}) {
     queryFn: () => getProjects(params),
     staleTime: 5 * 60 * 1000,
     placeholderData: keepPreviousData,
+  });
+}
+
+export function useProjectOverview(id: string | null) {
+  return useQuery({
+    queryKey: [...projectsKeys.detail(id!), 'overview'],
+    queryFn: () => getProjectOverview(id!),
+    enabled: !!id,
+    staleTime: 2 * 60 * 1000,
   });
 }
 
