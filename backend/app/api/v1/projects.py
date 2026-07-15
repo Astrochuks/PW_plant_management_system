@@ -787,6 +787,221 @@ async def get_project_overview(
     return {"success": True, "data": data}
 
 
+@router.get("/{project_id}/work-done")
+async def get_project_work_done(
+    project_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(require_projects_access)],
+) -> dict[str, Any]:
+    """BEME drill-down: per-item cumulative (stored weeks + baseline/gap
+    adjustments, == workbook to-date) + latest-week movement, grouped by
+    bill. Quantity and amount progress are independent facts."""
+    pid = str(project_id)
+    rows = await fetch(
+        """SELECT v.*, lm.qty_this_week AS latest_qty, lm.amount_this_week AS latest_amount
+           FROM v_project_beme_cumulative v
+           LEFT JOIN LATERAL (
+               SELECT qty_this_week, amount_this_week
+               FROM project_beme_progress p
+               WHERE p.item_id = v.item_id
+                 AND p.weekly_report_id = (
+                     SELECT id FROM project_weekly_reports
+                     WHERE project_id = $1::uuid
+                     ORDER BY year DESC, week_number DESC LIMIT 1)
+           ) lm ON TRUE
+           WHERE v.project_id = $1::uuid""",
+        pid,
+    )
+    if not rows:
+        return {"success": True, "data": {"bills": []}}
+
+    def code_key(code: str | None) -> tuple:
+        parts = []
+        for seg in (code or "").split("."):
+            num = "".join(ch for ch in seg if ch.isdigit())
+            parts.append((int(num) if num else 0, seg))
+        return tuple(parts)
+
+    bills: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        b = bills.setdefault(r["bill_code"] or str(r["bill_no"]), {
+            "bill_code": r["bill_code"],
+            "bill_name": r["bill_name"],
+            "sort_order": r["sort_order"],
+            "contract_amount": 0.0,
+            "amount_done": 0.0,
+            "latest_amount": 0.0,
+            "items": [],
+        })
+        b["contract_amount"] += float(r["contract_amount"] or 0)
+        b["amount_done"] += float(r["amount_done"] or 0)
+        b["latest_amount"] += float(r["latest_amount"] or 0)
+        b["items"].append({
+            "item_code": r["item_code"],
+            "description": r["description"],
+            "unit": r["unit"],
+            "contract_qty": r["contract_qty"],
+            "rate": r["rate"],
+            "contract_amount": r["contract_amount"],
+            "qty_done": r["qty_done"],
+            "amount_done": r["amount_done"],
+            "pct_complete": r["pct_complete"],
+            "is_overrun": r["is_overrun"],
+            "no_contract_qty": r["no_contract_qty"],
+            "latest_qty": r["latest_qty"],
+            "latest_amount": r["latest_amount"],
+        })
+
+    out = sorted(bills.values(), key=lambda b: (b["sort_order"] or 0, code_key(b["bill_code"])))
+    for b in out:
+        b["items"].sort(key=lambda i: code_key(i["item_code"]))
+        b["pct_complete"] = (
+            round(b["amount_done"] / b["contract_amount"], 4)
+            if b["contract_amount"] else None
+        )
+    return {"success": True, "data": {"bills": out}}
+
+
+@router.get("/{project_id}/costs/summary")
+async def get_project_costs_summary(
+    project_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(require_projects_access)],
+) -> dict[str, Any]:
+    """Per-category cost position: to-date from the LATEST week's own
+    cumulative column (previous + this week — exact even with missing
+    weeks), this-week movement, and the stored-weeks sum for trends."""
+    pid = str(project_id)
+    rows = await fetch(
+        """WITH latest AS (
+               SELECT id FROM project_weekly_reports
+               WHERE project_id = $1::uuid
+               ORDER BY year DESC, week_number DESC LIMIT 1)
+           SELECT cost_category,
+                  coalesce(sum(amount_to_date)  FILTER (WHERE weekly_report_id = (SELECT id FROM latest)), 0) AS to_date,
+                  coalesce(sum(amount_this_week) FILTER (WHERE weekly_report_id = (SELECT id FROM latest)), 0) AS this_week,
+                  coalesce(sum(amount_this_week), 0) AS stored_weeks
+           FROM project_cost_report
+           WHERE project_id = $1::uuid AND cost_category IS NOT NULL
+           GROUP BY cost_category
+           ORDER BY 2 DESC""",
+        pid,
+    )
+    total_to_date = sum(float(r["to_date"] or 0) for r in rows)
+    return {"success": True, "data": {
+        "categories": rows,
+        "total_to_date": round(total_to_date, 2),
+    }}
+
+
+@router.get("/{project_id}/site")
+async def get_project_site(
+    project_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(require_projects_access)],
+) -> dict[str, Any]:
+    """Site resources, latest week + trends: labour by department,
+    subcontractor ledgers (latest report carries the truth), materials
+    usage/stock, hired vehicles."""
+    pid = str(project_id)
+    latest_id = await fetchval(
+        """SELECT id FROM project_weekly_reports WHERE project_id = $1::uuid
+           ORDER BY year DESC, week_number DESC LIMIT 1""",
+        pid,
+    )
+    if latest_id is None:
+        return {"success": True, "data": None}
+
+    labour = await fetch(
+        """SELECT block, dept_slot, department, manning_this_week,
+                  manning_previous_week, movement, comment
+           FROM project_labour_strength
+           WHERE weekly_report_id = $1::uuid
+           ORDER BY block DESC, dept_slot""",
+        str(latest_id),
+    )
+    labour_trend = await fetch(
+        """SELECT wr.year, wr.week_number, wr.week_ending_date,
+                  coalesce(sum(l.manning_this_week), 0)::int AS total
+           FROM project_weekly_reports wr
+           LEFT JOIN project_labour_strength l ON l.weekly_report_id = wr.id
+           WHERE wr.project_id = $1::uuid
+           GROUP BY wr.year, wr.week_number, wr.week_ending_date
+           ORDER BY wr.year, wr.week_number""",
+        pid,
+    )
+    subs = await fetch(
+        """SELECT subcontractor_name, description, location, unit,
+                  agreed_rate, assigned_qty, qty_to_date, balance_remaining,
+                  qty_this_week, amount_this_week, amount_to_date,
+                  value_to_completion
+           FROM v_project_subcontractors_latest
+           WHERE project_id = $1::uuid
+           ORDER BY subcontractor_name, description""",
+        pid,
+    )
+    materials = await fetch(
+        """SELECT sheet_source, material_name, unit, unit_cost,
+                  opening_stock, received, closing_stock, available_for_use,
+                  used_works, used_precast, used_mobilisation, used_other,
+                  used, variance_qty, variance_value, stock_maintained
+           FROM project_materials_stock
+           WHERE weekly_report_id = $1::uuid
+           ORDER BY sheet_source, material_name""",
+        str(latest_id),
+    )
+    hired = await fetch(
+        """SELECT registration_no, description, section, owners,
+                  days_worked, rate_ngn, amount_ngn, remarks
+           FROM project_hired_vehicles
+           WHERE weekly_report_id = $1::uuid
+           ORDER BY section, description""",
+        str(latest_id),
+    )
+    hired_to_date = await fetchval(
+        """SELECT coalesce(sum(amount_ngn), 0) FROM project_hired_vehicles
+           WHERE project_id = $1::uuid""",
+        pid,
+    )
+    return {"success": True, "data": {
+        "labour": labour,
+        "labour_trend": labour_trend,
+        "subcontractors": subs,
+        "materials": materials,
+        "hired_vehicles": hired,
+        "hired_to_date_stored": float(hired_to_date or 0),
+    }}
+
+
+@router.get("/{project_id}/financials/ledgers")
+async def get_project_financial_ledgers(
+    project_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(require_projects_access)],
+) -> dict[str, Any]:
+    """The two client-money ledgers, verbatim: every certificate (all 19
+    workbook columns) and the latest payments ledger."""
+    pid = str(project_id)
+    certs = await fetch(
+        """SELECT cert_number, date_submitted, gross_value_works_done,
+                  add_materials_on_site, less_materials_on_site,
+                  general_bill_1, total_value_of_work_done,
+                  value_of_works_per_cert, total_retention_held,
+                  total_net_payment, retention_released, contingency_used,
+                  contingency_deducted, fluctuation_materials,
+                  advance_received, total_works_executed, advance_recovery,
+                  new_total, less_previously_certified
+           FROM project_certificates WHERE project_id = $1::uuid
+           ORDER BY gross_value_works_done NULLS FIRST""",
+        pid,
+    )
+    payments = await fetch(
+        """SELECT payment_date, voucher_number, payment_type, gross_amount,
+                  wht, vat, vetting_fee, stamp_duty, other_deductions,
+                  net_amount
+           FROM v_project_payments_latest WHERE project_id = $1::uuid
+           ORDER BY payment_date NULLS FIRST, voucher_number""",
+        pid,
+    )
+    return {"success": True, "data": {"certificates": certs, "payments": payments}}
+
+
 @router.get("/{project_id}/operations/summary")
 async def get_project_operations_summary(
     project_id: UUID,
