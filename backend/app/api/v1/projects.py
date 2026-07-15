@@ -580,6 +580,33 @@ async def re_resolve_fleet_numbers(
     return {"success": True, "data": {"rows_backfilled": updated}}
 
 
+@router.get("/submissions/{submission_id}/download")
+async def download_submission_file(
+    submission_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(require_projects_access)],
+) -> dict[str, Any]:
+    """One-hour signed link to the original workbook (the Bronze layer —
+    stored untouched exactly as the site emailed it)."""
+    sub = await fetchrow(
+        """SELECT file_path, file_name FROM project_report_submissions
+           WHERE id = $1::uuid""",
+        str(submission_id),
+    )
+    if sub is None or not sub["file_path"]:
+        raise NotFoundError("Submission file not found")
+
+    from app.core.database import get_supabase_admin_client  # Storage only
+    res = get_supabase_admin_client().storage.from_("reports").create_signed_url(
+        sub["file_path"], 3600,
+        options={"download": sub["file_name"] or True},
+    )
+    url = (res or {}).get("signedURL") or (res or {}).get("signedUrl")
+    if not url:
+        raise ValidationError("Could not create a download link for this file")
+    return {"success": True,
+            "data": {"url": url, "file_name": sub["file_name"]}}
+
+
 @router.delete("/submissions/{submission_id}")
 async def delete_project_submission(
     submission_id: UUID,

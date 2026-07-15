@@ -818,3 +818,10 @@ export async function previewWeeklyReport(
   });
   return response.data.data;
 }
+
+export async function getSubmissionDownloadUrl(
+  submissionId: string,
+): Promise<{ url: string; file_name: string | null }> {
+  const response = await apiClient.get(`/projects/submissions/${submissionId}/download`);
+  return response.data.data;
+}

@@ -9,9 +9,10 @@ import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import {
-  ArrowLeft, CheckCircle2, ClipboardX, FileSpreadsheet, Loader2,
+  ArrowLeft, CheckCircle2, ClipboardX, Download, FileSpreadsheet, Loader2,
   RefreshCcw, Trash2, UploadCloud, XCircle,
 } from 'lucide-react'
+import { getSubmissionDownloadUrl } from '@/lib/api/projects'
 
 import { useAuth } from '@/providers/auth-provider'
 import { ProtectedRoute } from '@/components/protected-route'
@@ -212,7 +213,27 @@ function SubmissionRow({ sub, isAdmin }: { sub: ProjectSubmission; isAdmin: bool
           {rowTotal || '—'}
         </TableCell>
         <TableCell className="text-muted-foreground max-w-[200px]">
-          <span className="line-clamp-1 text-xs">{sub.file_name ?? '—'}</span>
+          {sub.file_name ? (
+            <button
+              type="button"
+              className="group/file flex max-w-full items-center gap-1.5 text-xs hover:text-foreground hover:underline"
+              title="Download the original workbook"
+              onClick={async (e) => {
+                e.stopPropagation()
+                try {
+                  const { url } = await getSubmissionDownloadUrl(sub.id)
+                  window.open(url, '_blank', 'noopener')
+                } catch {
+                  toast.error('Could not fetch the file — it may have been removed from storage')
+                }
+              }}
+            >
+              <Download className="h-3 w-3 shrink-0 opacity-60 group-hover/file:opacity-100" />
+              <span className="line-clamp-1 text-left">{sub.file_name}</span>
+            </button>
+          ) : (
+            <span className="line-clamp-1 text-xs">—</span>
+          )}
         </TableCell>
         <TableCell className="text-muted-foreground text-xs">
           {new Date(sub.uploaded_at).toLocaleString('en-NG', {
