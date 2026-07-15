@@ -35,8 +35,6 @@ async def _set_status(submission_id: str, **fields: Any) -> None:
 
 async def process_project_weekly_report(submission_id: str) -> None:
     """Entry point for BackgroundTasks. Owns all its error handling."""
-    import json
-
     started = time.monotonic()
     try:
         sub = await fetchrow(
@@ -101,13 +99,13 @@ async def process_project_weekly_report(submission_id: str) -> None:
             status=status,
             week_ending_date=stats["week_ending_date"],
             weekly_report_id=stats["weekly_report_id"],
-            sheets_processed=json.dumps(sheet_status),
-            row_counts=json.dumps({
+            sheets_processed=sheet_status,
+            row_counts={
                 **stats["row_counts"],
                 "_fleet_resolved": stats["fleet_resolved"],
                 "_fleet_unresolved": stats["fleet_unresolved"],
                 "_warnings": warnings[:50],
-            }),
+            },
             parse_duration_ms=int((time.monotonic() - started) * 1000),
             error_message=None,
         )

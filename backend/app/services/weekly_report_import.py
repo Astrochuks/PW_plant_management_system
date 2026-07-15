@@ -187,7 +187,7 @@ async def recompute_adjustments(
                             "chain_break", "warning",
                             f"item reported-previous ₦{rep_a:,.2f} != our "
                             f"cumulative ₦{got_a:,.2f} with no missing weeks",
-                            json.dumps({"item_id": iid, "delta": round(da, 2)}),
+                            {"item_id": iid, "delta": round(da, 2)},
                         ))
                         stats["chain_breaks"] += 1
                     else:
@@ -245,7 +245,7 @@ async def recompute_adjustments(
                             f"{r['description'][:40]!r} reported-previous "
                             f"₦{rep_a:,.2f} != our cumulative ₦{got_a:,.2f} "
                             f"with no missing weeks",
-                            json.dumps({"cost_key": ck, "delta": round(da, 2)}),
+                            {"cost_key": ck, "delta": round(da, 2)},
                         ))
                         stats["chain_breaks"] += 1
                     else:
@@ -303,8 +303,7 @@ async def persist_weekly_report(
 
     def flag(sheet: str, ftype: str, severity: str, message: str,
              detail: dict | None = None) -> None:
-        flags.append((sheet, ftype, severity, message,
-                      json.dumps(detail) if detail else None))
+        flags.append((sheet, ftype, severity, message, detail or None))
 
     # Week-ending date: the workbook's own calendar is the authority
     week_endings = sheets.get("Lists", {}).get("week_endings", {}) or {}
@@ -366,8 +365,8 @@ async def persist_weekly_report(
                RETURNING id""",
             project_id, year, week_number, week_ending, user_id,
             _pct_from_summary(parsed),
-            json.dumps({n: s["status"] for n, s in sheets.items()}),
-            json.dumps(sheet_hashes),
+            {n: s["status"] for n, s in sheets.items()},
+            sheet_hashes,
         ))
 
         # ── fleet resolution across plant + diesel sheets ────────────────
