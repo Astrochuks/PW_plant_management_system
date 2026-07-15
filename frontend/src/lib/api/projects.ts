@@ -912,3 +912,114 @@ export async function getProjectOverview(projectId: string): Promise<ProjectOver
   const response = await apiClient.get(`/projects/${projectId}/overview`);
   return response.data.data;
 }
+
+// ── Project hub: Work done / Costs / Site / Financial ledgers ───────────
+
+export interface WorkDoneItem {
+  item_code: string | null;
+  description: string | null;
+  unit: string | null;
+  contract_qty: number | null;
+  rate: number | null;
+  contract_amount: number | null;
+  qty_done: number | null;
+  amount_done: number | null;
+  pct_complete: number | null;
+  is_overrun: boolean | null;
+  no_contract_qty: boolean | null;
+  latest_qty: number | null;
+  latest_amount: number | null;
+}
+
+export interface WorkDoneBill {
+  bill_code: string | null;
+  bill_name: string | null;
+  contract_amount: number;
+  amount_done: number;
+  latest_amount: number;
+  pct_complete: number | null;
+  items: WorkDoneItem[];
+}
+
+export async function getProjectWorkDone(projectId: string): Promise<{ bills: WorkDoneBill[] }> {
+  const response = await apiClient.get(`/projects/${projectId}/work-done`);
+  const n = (v: unknown) => (v == null ? null : Number(v));
+  return {
+    bills: (response.data.data.bills ?? []).map((b: Record<string, unknown>) => ({
+      ...b,
+      contract_amount: Number(b.contract_amount ?? 0),
+      amount_done: Number(b.amount_done ?? 0),
+      latest_amount: Number(b.latest_amount ?? 0),
+      pct_complete: n(b.pct_complete),
+      items: (b.items as Record<string, unknown>[]).map((i) => ({
+        ...i,
+        contract_qty: n(i.contract_qty), rate: n(i.rate),
+        contract_amount: n(i.contract_amount), qty_done: n(i.qty_done),
+        amount_done: n(i.amount_done), pct_complete: n(i.pct_complete),
+        latest_qty: n(i.latest_qty), latest_amount: n(i.latest_amount),
+      })),
+    })),
+  };
+}
+
+export interface CostCategoryRow {
+  cost_category: string;
+  to_date: number;
+  this_week: number;
+  stored_weeks: number;
+}
+
+export async function getProjectCostsSummary(projectId: string): Promise<{
+  categories: CostCategoryRow[];
+  total_to_date: number;
+}> {
+  const response = await apiClient.get(`/projects/${projectId}/costs/summary`);
+  const d = response.data.data;
+  return {
+    categories: (d.categories ?? []).map((c: Record<string, unknown>) => ({
+      cost_category: c.cost_category,
+      to_date: Number(c.to_date ?? 0),
+      this_week: Number(c.this_week ?? 0),
+      stored_weeks: Number(c.stored_weeks ?? 0),
+    })),
+    total_to_date: Number(d.total_to_date ?? 0),
+  };
+}
+
+export interface ProjectSite {
+  labour: Array<{
+    block: string; dept_slot: number | null; department: string | null;
+    manning_this_week: number | null; manning_previous_week: number | null;
+    movement: number | null; comment: string | null;
+  }>;
+  labour_trend: Array<{ year: number; week_number: number; week_ending_date: string; total: number }>;
+  subcontractors: Array<Record<string, unknown>>;
+  materials: Array<Record<string, unknown>>;
+  hired_vehicles: Array<Record<string, unknown>>;
+  hired_to_date_stored: number;
+}
+
+export async function getProjectSite(projectId: string): Promise<ProjectSite | null> {
+  const response = await apiClient.get(`/projects/${projectId}/site`);
+  return response.data.data;
+}
+
+export interface CertificateRow extends Record<string, unknown> {
+  cert_number: string;
+  date_submitted: string | null;
+  gross_value_works_done: number | null;
+}
+
+export async function getProjectLedgers(projectId: string): Promise<{
+  certificates: CertificateRow[];
+  payments: Array<Record<string, unknown>>;
+}> {
+  const response = await apiClient.get(`/projects/${projectId}/financials/ledgers`);
+  return response.data.data;
+}
+
+export async function markFleetNumberExternal(raw: string, label?: string): Promise<void> {
+  await apiClient.post('/projects/unmapped-fleet-numbers/mark-external', {
+    fleet_number_raw: raw, label,
+  });
+}

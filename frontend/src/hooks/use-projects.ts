@@ -13,6 +13,10 @@ import {
   getProjects,
   getProject,
   getProjectOverview,
+  getProjectWorkDone,
+  getProjectCostsSummary,
+  getProjectSite,
+  getProjectLedgers,
   getProjectStats,
   getProjectClients,
   getProjectMilestones,
@@ -69,6 +73,38 @@ export function useProjectOverview(id: string | null) {
     queryFn: () => getProjectOverview(id!),
     enabled: !!id,
     staleTime: 2 * 60 * 1000,
+  });
+}
+
+export function useProjectWorkDone(id: string | null) {
+  return useQuery({
+    queryKey: [...projectsKeys.detail(id!), 'work-done'],
+    queryFn: () => getProjectWorkDone(id!),
+    enabled: !!id, staleTime: 2 * 60 * 1000,
+  });
+}
+
+export function useProjectCostsSummary(id: string | null) {
+  return useQuery({
+    queryKey: [...projectsKeys.detail(id!), 'costs-summary'],
+    queryFn: () => getProjectCostsSummary(id!),
+    enabled: !!id, staleTime: 2 * 60 * 1000,
+  });
+}
+
+export function useProjectSite(id: string | null) {
+  return useQuery({
+    queryKey: [...projectsKeys.detail(id!), 'site'],
+    queryFn: () => getProjectSite(id!),
+    enabled: !!id, staleTime: 2 * 60 * 1000,
+  });
+}
+
+export function useProjectLedgers(id: string | null) {
+  return useQuery({
+    queryKey: [...projectsKeys.detail(id!), 'ledgers'],
+    queryFn: () => getProjectLedgers(id!),
+    enabled: !!id, staleTime: 2 * 60 * 1000,
   });
 }
 
