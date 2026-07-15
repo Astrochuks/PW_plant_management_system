@@ -7,7 +7,7 @@
  * filters are restored from the URL instead of resetting to defaults.
  */
 
-import { useSearchParams, useRouter, usePathname } from 'next/navigation';
+import { useSearchParams, usePathname } from 'next/navigation';
 import { useCallback, useMemo, useRef } from 'react';
 
 /**
@@ -17,7 +17,6 @@ export function useUrlFilters<T extends Record<string, string>>(
   defaults: T
 ): [T, (updates: Partial<T>) => void, () => void] {
   const searchParams = useSearchParams();
-  const router = useRouter();
   const pathname = usePathname();
   // Use ref to avoid stale closures in callbacks
   const searchParamsRef = useRef(searchParams);
@@ -45,14 +44,18 @@ export function useUrlFilters<T extends Record<string, string>>(
         }
       }
       const qs = params.toString();
-      router.replace(`${pathname}${qs ? `?${qs}` : ''}`, { scroll: false });
+      // Shallow update: window.history keeps useSearchParams in sync
+      // (Next 14.1+) WITHOUT a server round-trip per change —
+      // router.replace re-rendered the route from the server and made
+      // every filter click feel laggy.
+      window.history.replaceState(null, '', `${pathname}${qs ? `?${qs}` : ''}`);
     },
-    [router, pathname, defaults]
+    [pathname, defaults]
   );
 
   const clearFilters = useCallback(() => {
-    router.replace(pathname, { scroll: false });
-  }, [router, pathname]);
+    window.history.replaceState(null, '', pathname);
+  }, [pathname]);
 
   return [current, setFilters, clearFilters];
 }

@@ -29,7 +29,6 @@ type ViewMode = 'active' | 'legacy' | 'all'
 const FILTER_DEFAULTS = {
   search: '',
   client: 'all',
-  status: 'all',
   stateId: 'all',
   projectType: 'all',
   workNature: 'all',
@@ -56,7 +55,6 @@ function ProjectsPageInner() {
   // after the debounce — router.replace per keystroke made typing lag.
   const [searchInput, setSearchInput] = useState(filters.search)
   const client = filters.client
-  const status = filters.status
   const stateId = filters.stateId
   const projectType = filters.projectType
   const workNature = filters.workNature
@@ -85,12 +83,11 @@ function ProjectsPageInner() {
   const { data: statesData } = useStates()
   const prefetch = usePrefetchProjectDetail()
 
-  const { data, isLoading } = useProjects({
+  const { data, isLoading, isFetching } = useProjects({
     page,
     limit: 20,
     search: debouncedSearch || undefined,
     client: client !== 'all' ? client : undefined,
-    status: status !== 'all' ? (status as any) : undefined,
     state_id: stateId !== 'all' ? stateId : undefined,
     project_type: projectType !== 'all' ? (projectType as any) : undefined,
     work_nature: workNature !== 'all' ? (workNature as any) : undefined,
@@ -106,7 +103,6 @@ function ProjectsPageInner() {
   // Handlers — update URL params
   const handleSearchChange = (v: string) => setSearchInput(v)
   const handleClientChange = (v: string) => setFilters({ client: v, page: '1' })
-  const handleStatusChange = (v: string) => setFilters({ status: v, page: '1' })
   const handleStateIdChange = (v: string) => setFilters({ stateId: v, page: '1' })
   const handleProjectTypeChange = (v: string) => setFilters({ projectType: v, page: '1' })
   const handleWorkNatureChange = (v: string) => setFilters({ workNature: v, page: '1' })
@@ -120,6 +116,7 @@ function ProjectsPageInner() {
       ? 'No projects match the current filters'
       : `Showing ${((meta.page - 1) * meta.limit) + 1}–${Math.min(meta.page * meta.limit, meta.total)} of ${meta.total.toLocaleString()} projects`
     : ''
+  const refreshing = isFetching && !isLoading
 
   return (
     <div className="space-y-6">
@@ -203,8 +200,6 @@ function ProjectsPageInner() {
         onSearchChange={handleSearchChange}
         client={client}
         onClientChange={handleClientChange}
-        status={status}
-        onStatusChange={handleStatusChange}
         stateId={stateId}
         onStateIdChange={handleStateIdChange}
         projectType={projectType}
@@ -252,6 +247,7 @@ function ProjectsPageInner() {
 
         if (display === 'table') {
           return (
+            <div className={refreshing ? 'opacity-60 transition-opacity duration-200' : 'transition-opacity duration-200'}>
             <ProjectsTable
               projects={projects}
               isLoading={isLoading}
@@ -261,10 +257,11 @@ function ProjectsPageInner() {
               resultText={resultText}
               actions={<>{createButton}{viewToggle}</>}
             />
+            </div>
           )
         }
         return (
-          <div className="space-y-0">
+          <div className={`space-y-0 ${refreshing ? 'opacity-60' : ''} transition-opacity duration-200`}>
             <div className="flex flex-wrap items-center justify-between gap-2 py-2">
               <p className="text-sm text-muted-foreground">{resultText}</p>
               <div className="flex flex-wrap items-center gap-2">
