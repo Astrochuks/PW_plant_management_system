@@ -619,8 +619,13 @@ async def delete_weekly_submission(
 ) -> dict:
     """Delete a weekly report submission and its plant records (admin only).
 
+    Affected plants are then REWOUND to their latest remaining weekly
+    record (condition, remarks, verification week) and the location
+    timeline is rebuilt — deleting a week restores the world to how it
+    looked before that upload. Plants whose only record was this upload
+    have their verification/condition cleared (state unknown).
+
     Also attempts to remove the source file from Storage if present.
-    Note: plant conditions already applied to plants_master are NOT reversed.
     """
     row = await fetchrow(
         "SELECT id, source_file_path, source_file_name FROM weekly_report_submissions WHERE id = $1::uuid",
@@ -637,6 +642,12 @@ async def delete_weekly_submission(
     sid = str(submission_id)
     pool = get_pool()
     async with pool.acquire() as conn, conn.transaction():
+        affected_plant_ids = [
+            str(r["plant_id"]) for r in await conn.fetch(
+                "SELECT DISTINCT plant_id FROM plant_weekly_records WHERE submission_id = $1::uuid",
+                sid,
+            )
+        ]
         await conn.execute(
             "DELETE FROM plant_events WHERE submission_id = $1::uuid", sid
         )
@@ -655,6 +666,52 @@ async def delete_weekly_submission(
         await conn.execute(
             "DELETE FROM weekly_report_submissions WHERE id = $1::uuid", sid
         )
+
+        # Rewind plants_master to each plant's latest REMAINING record —
+        # records are the source of truth (rebuild_location_timeline
+        # derives location from them; condition/verification must follow
+        # the same rule or deleting a week leaves ghosts).
+        if affected_plant_ids:
+            await conn.execute(
+                """UPDATE plants_master pm SET
+                       condition = r.condition,
+                       remarks = r.remarks,
+                       physical_verification = r.physical_verification,
+                       last_verified_date = r.week_ending_date,
+                       last_verified_year = r.year,
+                       last_verified_week = r.week_number,
+                       updated_at = now()
+                   FROM (
+                       SELECT DISTINCT ON (plant_id) plant_id, condition, remarks,
+                              physical_verification, week_ending_date, year, week_number
+                       FROM plant_weekly_records
+                       WHERE plant_id = ANY($1::uuid[])
+                       ORDER BY plant_id, year DESC, week_number DESC
+                   ) r
+                   WHERE pm.id = r.plant_id""",
+                affected_plant_ids,
+            )
+            # Plants whose ONLY record was this upload: state is unknown
+            await conn.execute(
+                """UPDATE plants_master pm SET
+                       condition = NULL, last_verified_date = NULL,
+                       last_verified_year = NULL, last_verified_week = NULL,
+                       current_location_id = NULL, updated_at = now()
+                   WHERE pm.id = ANY($1::uuid[])
+                     AND NOT EXISTS (SELECT 1 FROM plant_weekly_records w
+                                     WHERE w.plant_id = pm.id)""",
+                affected_plant_ids,
+            )
+
+    # Location timeline + current location derive from the remaining
+    # records (outside the txn: rebuild manages its own writes)
+    if affected_plant_ids:
+        from app.workers.etl_worker import rebuild_location_timeline
+        try:
+            await rebuild_location_timeline(affected_plant_ids)
+        except Exception as e:
+            logger.warning("Timeline rebuild after delete failed — run admin/rebuild-timeline",
+                           error=str(e), plants=len(affected_plant_ids))
 
     # Best-effort: remove source file from Storage
     file_path = row.get("source_file_path")
