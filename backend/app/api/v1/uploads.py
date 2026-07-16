@@ -1493,6 +1493,7 @@ async def preview_weekly_report(
         compare_status = COMPARE_NEW_PLANT  # default
         previous_remarks = None
         previous_week_ending_date = None
+        previous_condition = None  # stays None when the plant has no history
 
         if previous_record:
             previous_remarks = previous_record.get("remarks")
