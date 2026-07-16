@@ -267,6 +267,35 @@ def normalize_fleet_number(value: Any) -> str | None:
     return s if len(s) >= 2 else None
 
 
+def resolve_same_week_claim(
+    incoming_is_new_here: bool, existing_is_continuing: bool
+) -> str:
+    """Verdict when two sites report the same plant for the same week.
+
+    Evidence beats upload order:
+    - incoming_is_new_here: the plant was NOT at the uploading site last
+      week (a new appearance — the signature of a real movement)
+    - existing_is_continuing: the site that already claimed this week HAD
+      the plant last week (a rolled-forward row, often a frozen template
+      copy the clerk stopped maintaining)
+
+    Returns:
+      'takeover'      — new arrival beats the continuing claim: the plant
+                        moved; this upload takes the week + location, a
+                        transfer is recorded
+      'keep_existing' — the existing claim is the arrival and this row is
+                        the continuing one: leave everything as is
+      'review'        — both look like arrivals, or both look continuing:
+                        genuinely ambiguous, keep the first upload and
+                        flag for a human verdict
+    """
+    if incoming_is_new_here and existing_is_continuing:
+        return "takeover"
+    if not incoming_is_new_here and not existing_is_continuing:
+        return "keep_existing"
+    return "review"
+
+
 def derive_physical_verification(phys_value: Any, remarks_value: Any) -> bool:
     """Derive physical verification status from column value and remarks.
 
@@ -2440,6 +2469,7 @@ async def save_confirmed_weekly_report(
         "plants_updated": 0,
         "transfers_created": 0,
         "errors": [],
+        "warnings": [],
     }
 
     try:
@@ -2513,7 +2543,7 @@ async def save_confirmed_weekly_report(
         # location for the SAME week (uploaded by another report first).
         # If that other report was a "new arrival", we should not overwrite it.
         plants_elsewhere_same_week_rows = await fetch(
-            """SELECT pm.fleet_number, pwr.location_id,
+            """SELECT pm.fleet_number, pwr.location_id, l.name AS location_name,
                       EXISTS(
                           SELECT 1 FROM plant_weekly_records pwr2
                           JOIN plants_master pm2 ON pm2.id = pwr2.plant_id
@@ -2523,16 +2553,21 @@ async def save_confirmed_weekly_report(
                       ) AS was_there_prev_week
                FROM plant_weekly_records pwr
                JOIN plants_master pm ON pm.id = pwr.plant_id
+               LEFT JOIN locations l ON l.id = pwr.location_id
                WHERE pm.fleet_number = ANY($1::text[])
                  AND pwr.year = $2 AND pwr.week_number = $5
                  AND pwr.location_id != $6::uuid""",
             upload_fleet_numbers, year, prev_year, prev_week, week_number, str(location_id),
         )
+        # Same-week claims by OTHER sites, by fleet number
+        elsewhere_claims = {r["fleet_number"]: r for r in plants_elsewhere_same_week_rows}
         # Fleet numbers that are new arrivals at another location this same week
         new_arrivals_elsewhere = {
             r["fleet_number"] for r in plants_elsewhere_same_week_rows
             if not r["was_there_prev_week"]
         }
+        # Plants whose same-week claim THIS upload wins (evidence-based)
+        same_week_takeovers: set[str] = set()
 
         # Prepare plants for upsert
         plants_to_upsert = []
@@ -2576,14 +2611,62 @@ async def save_confirmed_weekly_report(
             # The weekly_record is still saved (audit trail) but the plant master is left alone.
             is_missing_here = condition == "missing"
 
-            # Direct same-week check: if plant is already at a DIFFERENT site
-            # for THIS same week, the first upload should win.
+            # Direct same-week check: the plant is already claimed by a
+            # DIFFERENT site for THIS same week. Evidence beats upload
+            # order (resolve_same_week_claim): a new arrival here takes
+            # the week from a continuing (often frozen-copy) claim.
             existing_location = fleet_to_location.get(fleet_num)
             already_at_different_site_this_week = (
                 existing_verification == (year, week_number)
                 and existing_location
                 and str(existing_location) != str(location_id)
             )
+
+            claim = elsewhere_claims.get(fleet_num)
+            if already_at_different_site_this_week and claim is not None \
+                    and not is_missing_here and is_active_location:
+                verdict = resolve_same_week_claim(
+                    incoming_is_new_here=is_new_here,
+                    existing_is_continuing=bool(claim["was_there_prev_week"]),
+                )
+                claim_loc = claim["location_name"] or "another site"
+                if verdict == "takeover":
+                    # This upload wins the week: location updates, the
+                    # weekly record upsert replaces the other site's row,
+                    # and a transfer documents the movement.
+                    already_at_different_site_this_week = False
+                    same_week_takeovers.add(fleet_num)
+                    pid_existing = fleet_to_id.get(fleet_num)
+                    if pid_existing:
+                        transfers_to_create.append({
+                            "plant_id": pid_existing,
+                            "from_location_id": claim["location_id"],
+                            "to_location_id": location_id,
+                            "transfer_date": week_ending_date,
+                            "actual_arrival_date": week_ending_date,
+                            "status": "confirmed",
+                            "direction": "inbound",
+                            "source_submission_id": submission_id,
+                            "created_at": datetime.utcnow(),
+                        })
+                    result["warnings"].append(
+                        f"{fleet_num}: also reported by {claim_loc} this week — "
+                        f"moved to {location_name_for_log} (their row was a "
+                        f"carry-over; transfer recorded)"
+                    )
+                elif verdict == "keep_existing":
+                    result["warnings"].append(
+                        f"{fleet_num}: kept at {claim_loc} — it newly arrived "
+                        f"there this week; this report's row looks like a "
+                        f"carry-over"
+                    )
+                else:  # review — ambiguous, keep the first upload, flag it
+                    result["warnings"].append(
+                        f"{fleet_num}: reported by BOTH {claim_loc} and "
+                        f"{location_name_for_log} for week {week_number} — kept "
+                        f"{claim_loc} (uploaded first). Verify where the plant "
+                        f"actually is and correct via transfer if needed"
+                    )
 
             skip_location_update = (
                 is_missing_here
@@ -2749,10 +2832,13 @@ async def save_confirmed_weekly_report(
         # Build set of plants that were skipped for location update
         # (already claimed by another site this week). We also skip their
         # weekly_record to prevent the ON CONFLICT from overwriting the
-        # other site's record.
+        # other site's record — EXCEPT takeovers, whose record upsert
+        # deliberately moves the week to this site.
         plants_skipped_location = set()
         for plant_data in validated_plants:
             fn = plant_data["fleet_number"]
+            if fn in same_week_takeovers:
+                continue
             existing_loc = fleet_to_location.get(fn)
             existing_ver = fleet_to_verification.get(fn, (0, 0))
             if (
@@ -3163,11 +3249,13 @@ async def save_confirmed_weekly_report(
         await execute(
             """UPDATE weekly_report_submissions SET
                 status = $6, processing_completed_at = $2,
-                plants_processed = $3, plants_created = $4, plants_updated = $5
+                plants_processed = $3, plants_created = $4, plants_updated = $5,
+                warnings = $7::jsonb
             WHERE id = $1::uuid""",
             submission_id, datetime.utcnow(),
             result["plants_processed"], result["plants_created"], result["plants_updated"],
             final_status,
+            json.dumps(result["warnings"]) if result["warnings"] else None,
         )
 
         result["success"] = True
