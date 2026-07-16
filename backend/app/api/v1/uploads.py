@@ -13,7 +13,7 @@ from app.api.v1.auth import get_client_ip
 from app.config import get_settings
 from app.core.database import get_supabase_admin_client  # Storage only
 from app.core.exceptions import ValidationError, AuthenticationError, NotFoundError
-from app.core.pool import fetch, fetchrow, fetchval, execute
+from app.core.pool import fetch, fetchrow, fetchval, execute, get_pool
 from app.core.security import (
     CurrentUser,
     get_current_user,
@@ -629,17 +629,32 @@ async def delete_weekly_submission(
     if not row:
         raise NotFoundError("Weekly report submission", str(submission_id))
 
-    # Delete plant_weekly_records first (no CASCADE)
-    deleted_records = await fetchval(
-        "WITH d AS (DELETE FROM plant_weekly_records WHERE submission_id = $1::uuid RETURNING id) SELECT count(*) FROM d",
-        str(submission_id),
-    )
-
-    # Delete the submission
-    await execute(
-        "DELETE FROM weekly_report_submissions WHERE id = $1::uuid",
-        str(submission_id),
-    )
+    # ONE transaction — a failure must never leave a half-deleted
+    # submission (records gone, header row stranded). plant_events and
+    # plant_transfers reference submissions with NO ACTION: events from
+    # this upload are derived artifacts (delete them); transfers may be
+    # user-confirmed records with their own lifecycle (unlink, keep).
+    sid = str(submission_id)
+    pool = get_pool()
+    async with pool.acquire() as conn, conn.transaction():
+        await conn.execute(
+            "DELETE FROM plant_events WHERE submission_id = $1::uuid", sid
+        )
+        await conn.execute(
+            """UPDATE plant_transfers SET source_submission_id = NULL
+               WHERE source_submission_id = $1::uuid""", sid
+        )
+        await conn.execute(
+            """UPDATE plant_transfers SET confirmed_by_submission_id = NULL
+               WHERE confirmed_by_submission_id = $1::uuid""", sid
+        )
+        deleted_records = await conn.fetchval(
+            "WITH d AS (DELETE FROM plant_weekly_records WHERE submission_id = $1::uuid RETURNING id) SELECT count(*) FROM d",
+            sid,
+        )
+        await conn.execute(
+            "DELETE FROM weekly_report_submissions WHERE id = $1::uuid", sid
+        )
 
     # Best-effort: remove source file from Storage
     file_path = row.get("source_file_path")
