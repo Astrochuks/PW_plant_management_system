@@ -1514,6 +1514,24 @@ async def preview_weekly_report(
                 "week_ending_date": r.get("week_ending_date"),
             }
 
+    # Last stored row AT THIS SITE per plant — the ghost-row baseline.
+    # Mirrors save_confirmed_weekly_report: a frozen copy (0 hrs, same
+    # remarks as this site's own last row) of a plant that lives at
+    # another site will be IGNORED on save; the preview must say so
+    # instead of presenting it as a transfer-in.
+    last_here_by_plant_id = {}
+    if plant_ids_to_lookup:
+        here_rows = await fetch(
+            """SELECT DISTINCT ON (plant_id) plant_id, remarks
+               FROM plant_weekly_records
+               WHERE plant_id = ANY($1::uuid[])
+                 AND location_id = $2::uuid
+                 AND (year, week_number) < ($3, $4)
+               ORDER BY plant_id, year DESC, week_number DESC""",
+            plant_ids_to_lookup, str(location_id), year, week_number,
+        )
+        last_here_by_plant_id = {r["plant_id"]: r.get("remarks") for r in here_rows}
+
     # Process each row in file
     preview_plants = []
     current_week_fleet_numbers = set()
@@ -1653,6 +1671,31 @@ async def preview_weekly_report(
                 previous_location_id = prev_loc["current_location_id"]
                 previous_location_name = prev_loc["current_location_name"]
 
+        # Ghost-row verdict (mirrors save_confirmed_weekly_report): the
+        # plant lives at another site and this row is a frozen copy of
+        # this site's own last row → save will IGNORE it.
+        ghost_row = False
+        ghost_reason = None
+        if (
+            previous_location_id  # lives at a different site
+            and plant_info and plant_info.get("plant_id")
+            and detected_condition.condition != "missing"
+        ):
+            last_here_remarks = last_here_by_plant_id.get(plant_info["plant_id"])
+            frozen = (
+                float(hours_worked or 0) == 0
+                and plant_info["plant_id"] in last_here_by_plant_id
+                and compare_remarks_with_previous(remarks, last_here_remarks)
+            )
+            if frozen:
+                ghost_row = True
+                ghost_reason = (
+                    f"Lives at {previous_location_name} per its transfer history — "
+                    f"this row is an unchanged carry-over (0 hrs, same remarks) and "
+                    f"will be IGNORED on save. If the plant truly returned here, "
+                    f"update its remarks or hours in the file."
+                )
+
         plant_preview = {
             "fleet_number": fleet_num,
             "description": description,
@@ -1683,6 +1726,8 @@ async def preview_weekly_report(
             "was_in_previous_week": not is_new,
             "previous_location_id": previous_location_id,
             "previous_location_name": previous_location_name,
+            "ghost_row": ghost_row,
+            "ghost_reason": ghost_reason,
 
             # Smart carry-over status (NEW)
             "compare_status": compare_status,  # carried_over | remarks_changed | new_plant | empty_carried

@@ -30,6 +30,8 @@ export interface PreviewPlant {
   transfer_from_raw: string | null;
   transfer_to_raw: string | null;
   is_new: boolean;
+  ghost_row?: boolean;
+  ghost_reason?: string | null;
   was_in_previous_week: boolean;
   previous_location_id: string | null;
   previous_location_name: string | null;

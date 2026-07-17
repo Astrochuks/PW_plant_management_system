@@ -972,13 +972,21 @@ function PlantRow({
       <TableCell className="font-mono text-sm">
         <div className="flex items-center gap-1.5 flex-wrap">
           {plant.fleet_number}
-          {plant.is_new && (
+          {plant.ghost_row ? (
+            <Badge variant="outline" className="text-[10px] bg-slate-100 text-slate-500 px-1 py-0" title={plant.ghost_reason ?? ''}>
+              IGNORED
+            </Badge>
+          ) : plant.is_new && (
             <Badge variant="outline" className="text-[10px] bg-emerald-100 text-emerald-700 px-1 py-0">
               NEW
             </Badge>
           )}
         </div>
-        {plant.is_new && plant.previous_location_name && (
+        {plant.ghost_row ? (
+          <span className="text-[10px] text-slate-500 block mt-0.5" title={plant.ghost_reason ?? ''}>
+            lives at {plant.previous_location_name} · frozen carry-over
+          </span>
+        ) : plant.is_new && plant.previous_location_name && (
           <span className="text-[10px] text-amber-600 block mt-0.5">
             from {plant.previous_location_name}
           </span>
