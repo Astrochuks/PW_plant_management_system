@@ -85,6 +85,7 @@ export interface ConfirmResponse {
 }
 
 export interface ConfirmedPlant {
+  force_include?: boolean;
   fleet_number: string;
   description: string | null;
   remarks: string | null;

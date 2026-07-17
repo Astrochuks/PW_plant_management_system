@@ -144,8 +144,14 @@ class DatabaseUnavailableError(Exception):
     pass
 
 
-async def _exec_with_recovery(fn_name: str, coro_factory):
-    """Execute a pool operation, triggering recovery on pool death."""
+async def _exec_with_recovery(fn_name: str, coro_factory, *, retried: bool = False):
+    """Execute a pool operation, triggering recovery on pool death.
+
+    Reads (fetch/fetchrow/fetchval) are retried ONCE on a plain query
+    timeout — a 15s command timeout is usually a transient network blip
+    to the pooler, not a dead pool, and killing a whole submission for
+    it is worse than a second attempt. Writes are never auto-retried
+    (a timed-out write may still have landed)."""
     import asyncio
 
     try:
@@ -157,6 +163,13 @@ async def _exec_with_recovery(fn_name: str, coro_factory):
 
     try:
         return await coro_factory(pool)
+    except TimeoutError as e:
+        if fn_name in ("fetch", "fetchrow", "fetchval") and not retried:
+            logger.warning(f"Query timeout in {fn_name} — retrying once")
+            return await _exec_with_recovery(fn_name, coro_factory, retried=True)
+        logger.warning(f"Query timeout in {fn_name} (final), triggering pool recovery", error=str(e))
+        asyncio.create_task(_try_recover_pool())
+        raise DatabaseUnavailableError("Database temporarily unavailable — reconnecting") from e
     except (OSError, asyncpg.InterfaceError, asyncpg.ConnectionDoesNotExistError) as e:
         # Connection-level failure — pool may be dead
         logger.warning(f"Connection error in {fn_name}, triggering pool recovery", error=str(e))

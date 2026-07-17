@@ -2644,7 +2644,8 @@ async def save_confirmed_weekly_report(
             # last stored row for the plant, OR first row ever here.
             last_here = last_records_here.get(fleet_num)
             incoming_fresh = (
-                float(plant_data.get("hours_worked") or 0) > 0
+                bool(plant_data.get("force_include"))  # admin vouched for this row
+                or float(plant_data.get("hours_worked") or 0) > 0
                 or last_here is None
                 or not compare_remarks_with_previous(
                     plant_data.get("remarks"), last_here["remarks"])
@@ -2667,6 +2668,7 @@ async def save_confirmed_weekly_report(
                 and not incoming_fresh
                 and not is_missing_here
                 and is_active_location
+                and not plant_data.get("force_include")  # admin overrode in preview
             ):
                 ghost_rows.add(fleet_num)
                 result["warnings"].append(

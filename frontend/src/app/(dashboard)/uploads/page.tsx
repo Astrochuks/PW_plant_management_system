@@ -100,6 +100,7 @@ function UploadPageContent() {
   const [editedTransferTo, setEditedTransferTo] = useState<Record<string, string>>({});
   const [editedTransferFrom, setEditedTransferFrom] = useState<Record<string, string>>({});
   const [missingActions, setMissingActions] = useState<Record<string, MissingPlantAction>>({});
+  const [includedGhosts, setIncludedGhosts] = useState<Record<string, boolean>>({});
   const [confirmResult, setConfirmResult] = useState<{ submissionId: string; count: number } | null>(null);
 
   const handlePreviewSuccess = useCallback((data: PreviewResponse, file: File) => {
@@ -171,6 +172,8 @@ function UploadPageContent() {
           setEditedTransferFrom={setEditedTransferFrom}
           missingActions={missingActions}
           setMissingActions={setMissingActions}
+          includedGhosts={includedGhosts}
+          setIncludedGhosts={setIncludedGhosts}
           onBack={handleReset}
           onConfirmSuccess={handleConfirmSuccess}
         />
@@ -414,6 +417,8 @@ interface ReviewStepProps {
   setEditedTransferFrom: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   missingActions: Record<string, MissingPlantAction>;
   setMissingActions: React.Dispatch<React.SetStateAction<Record<string, MissingPlantAction>>>;
+  includedGhosts: Record<string, boolean>;
+  setIncludedGhosts: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   onBack: () => void;
   onConfirmSuccess: (submissionId: string, count: number) => void;
 }
@@ -429,6 +434,8 @@ function ReviewStep({
   setEditedTransferTo,
   editedTransferFrom,
   setEditedTransferFrom,
+  includedGhosts,
+  setIncludedGhosts,
   missingActions,
   setMissingActions,
   onBack,
@@ -565,6 +572,7 @@ function ReviewStep({
       condition: editedConditions[p._key] || p.detected_condition,
       transfer_to_location_id: editedTransferTo[p._key] || p.detected_transfer_to_id,
       transfer_from_location_id: editedTransferFrom[p._key] || p.detected_transfer_from_id,
+      force_include: includedGhosts[p._key] || undefined,
     }));
 
     const missingPlantActions = Object.values(missingActions).filter((a) => a.action !== 'keep');
@@ -590,7 +598,7 @@ function ReviewStep({
         },
       }
     );
-  }, [data, plantsWithKeys, editedConditions, editedVerification, editedTransferTo, editedTransferFrom, missingActions, confirmMutation, onConfirmSuccess, storageKey]);
+  }, [data, plantsWithKeys, editedConditions, editedVerification, editedTransferTo, editedTransferFrom, missingActions, includedGhosts, confirmMutation, onConfirmSuccess, storageKey]);
 
   return (
     <div className="space-y-4">
@@ -728,6 +736,15 @@ function ReviewStep({
                   editedVerification={editedVerification[plant._key]}
                   editedTransferTo={editedTransferTo[plant._key]}
                   editedTransferFrom={editedTransferFrom[plant._key]}
+                  ghostIncluded={!!includedGhosts[plant._key]}
+                  onGhostToggle={() => {
+                    setIncludedGhosts((prev) => {
+                      const next = { ...prev };
+                      if (next[plant._key]) delete next[plant._key];
+                      else next[plant._key] = true;
+                      return next;
+                    });
+                  }}
                   onConditionChange={(value) => {
                     setEditedConditions((prev) => {
                       if (value === plant.detected_condition) {
@@ -932,6 +949,8 @@ interface PlantRowProps {
   onVerificationToggle: () => void;
   onTransferToChange: (value: string | null) => void;
   onTransferFromChange: (value: string | null) => void;
+  ghostIncluded: boolean;
+  onGhostToggle: () => void;
 }
 
 function PlantRow({
@@ -947,6 +966,8 @@ function PlantRow({
   onVerificationToggle,
   onTransferToChange,
   onTransferFromChange,
+  ghostIncluded,
+  onGhostToggle,
 }: PlantRowProps) {
   const [showTransferEdit, setShowTransferEdit] = useState(false);
   const effectiveCondition = editedCondition || plant.detected_condition;
@@ -973,8 +994,12 @@ function PlantRow({
         <div className="flex items-center gap-1.5 flex-wrap">
           {plant.fleet_number}
           {plant.ghost_row ? (
-            <Badge variant="outline" className="text-[10px] bg-slate-100 text-slate-500 px-1 py-0" title={plant.ghost_reason ?? ''}>
-              IGNORED
+            <Badge
+              variant="outline"
+              className={`text-[10px] px-1 py-0 ${ghostIncluded ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}
+              title={plant.ghost_reason ?? ''}
+            >
+              {ghostIncluded ? 'INCLUDED' : 'IGNORED'}
             </Badge>
           ) : plant.is_new && (
             <Badge variant="outline" className="text-[10px] bg-emerald-100 text-emerald-700 px-1 py-0">
@@ -985,6 +1010,14 @@ function PlantRow({
         {plant.ghost_row ? (
           <span className="text-[10px] text-slate-500 block mt-0.5" title={plant.ghost_reason ?? ''}>
             lives at {plant.previous_location_name} · frozen carry-over
+            {' · '}
+            <button
+              type="button"
+              className="underline hover:text-foreground"
+              onClick={onGhostToggle}
+            >
+              {ghostIncluded ? 'ignore it' : 'include anyway'}
+            </button>
           </span>
         ) : plant.is_new && plant.previous_location_name && (
           <span className="text-[10px] text-amber-600 block mt-0.5">
