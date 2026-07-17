@@ -24,6 +24,7 @@ from app.core.database import get_supabase_admin_client  # Only for Storage down
 from app.core.pool import fetch, fetchrow, fetchval, execute, executemany
 from app.core.events import broadcast
 from app.monitoring.logging import get_logger
+from app.services.preview_service import compare_remarks_with_previous
 from app.services.remarks_parser import (
     parse_remarks_batch,
     derive_condition,
@@ -268,32 +269,34 @@ def normalize_fleet_number(value: Any) -> str | None:
 
 
 def resolve_same_week_claim(
-    incoming_is_new_here: bool, existing_is_continuing: bool
+    incoming_fresh: bool,
+    existing_fresh: bool,
+    incoming_held_prev_week: bool,
+    existing_held_prev_week: bool,
 ) -> str:
     """Verdict when two sites report the same plant for the same week.
 
-    Evidence beats upload order:
-    - incoming_is_new_here: the plant was NOT at the uploading site last
-      week (a new appearance — the signature of a real movement)
-    - existing_is_continuing: the site that already claimed this week HAD
-      the plant last week (a rolled-forward row, often a frozen template
-      copy the clerk stopped maintaining)
+    Evidence beats upload order, in two tiers:
 
-    Returns:
-      'takeover'      — new arrival beats the continuing claim: the plant
-                        moved; this upload takes the week + location, a
-                        transfer is recorded
-      'keep_existing' — the existing claim is the arrival and this row is
-                        the continuing one: leave everything as is
-      'review'        — both look like arrivals, or both look continuing:
-                        genuinely ambiguous, keep the first upload and
-                        flag for a human verdict
+    1. FRESHNESS first — a row with worked hours or changed remarks is a
+       living report; a frozen copy of the site's own previous row is a
+       template zombie. A living row always beats a zombie, regardless
+       of which uploaded first and regardless of arrival/continuing
+       (the arrival signal INVERTS from the second week after a move —
+       the old site's zombie starts looking like a 'new arrival').
+    2. Equal freshness — RECORD INCUMBENCY tiebreaks: the site that held
+       the plant last week per plant_weekly_records (the timeline) keeps
+       it, flagged for review. Fully symmetric cases keep the first
+       upload, flagged.
+
+    Returns 'takeover' | 'keep_existing' | 'review_takeover' |
+    'review_keep_existing' (review_* = act, but flag for a human).
     """
-    if incoming_is_new_here and existing_is_continuing:
-        return "takeover"
-    if not incoming_is_new_here and not existing_is_continuing:
-        return "keep_existing"
-    return "review"
+    if incoming_fresh != existing_fresh:
+        return "takeover" if incoming_fresh else "keep_existing"
+    if incoming_held_prev_week and not existing_held_prev_week:
+        return "review_takeover"
+    return "review_keep_existing"
 
 
 def derive_physical_verification(phys_value: Any, remarks_value: Any) -> bool:
@@ -2539,18 +2542,40 @@ async def save_confirmed_weekly_report(
         )
         plants_here_prev_week = {r["fleet_number"] for r in plants_here_prev_week_rows}
 
+        # Each plant's last stored row AT THIS SITE (any earlier week) —
+        # the baseline for freshness: identical remarks + zero hours =
+        # a frozen template copy, not a living report.
+        last_here_rows = await fetch(
+            """SELECT DISTINCT ON (pm.fleet_number) pm.fleet_number, pwr.remarks
+               FROM plant_weekly_records pwr
+               JOIN plants_master pm ON pm.id = pwr.plant_id
+               WHERE pm.fleet_number = ANY($1::text[])
+                 AND pwr.location_id = $2::uuid
+                 AND (pwr.year, pwr.week_number) < ($3, $4)
+               ORDER BY pm.fleet_number, pwr.year DESC, pwr.week_number DESC""",
+            upload_fleet_numbers, str(location_id), year, week_number,
+        )
+        last_records_here = {r["fleet_number"]: r for r in last_here_rows}
+
         # Also check which plants already have a weekly record at a DIFFERENT
         # location for the SAME week (uploaded by another report first).
         # If that other report was a "new arrival", we should not overwrite it.
         plants_elsewhere_same_week_rows = await fetch(
             """SELECT pm.fleet_number, pwr.location_id, l.name AS location_name,
+                      pwr.hours_worked AS claim_hours, pwr.remarks AS claim_remarks,
                       EXISTS(
                           SELECT 1 FROM plant_weekly_records pwr2
                           JOIN plants_master pm2 ON pm2.id = pwr2.plant_id
                           WHERE pm2.fleet_number = pm.fleet_number
                             AND pwr2.location_id = pwr.location_id
                             AND pwr2.year = $3 AND pwr2.week_number = $4
-                      ) AS was_there_prev_week
+                      ) AS was_there_prev_week,
+                      (SELECT pwr3.remarks FROM plant_weekly_records pwr3
+                        WHERE pwr3.plant_id = pwr.plant_id
+                          AND pwr3.location_id = pwr.location_id
+                          AND (pwr3.year, pwr3.week_number) < ($2, $5)
+                        ORDER BY pwr3.year DESC, pwr3.week_number DESC
+                        LIMIT 1) AS claim_prev_remarks
                FROM plant_weekly_records pwr
                JOIN plants_master pm ON pm.id = pwr.plant_id
                LEFT JOIN locations l ON l.id = pwr.location_id
@@ -2568,6 +2593,9 @@ async def save_confirmed_weekly_report(
         }
         # Plants whose same-week claim THIS upload wins (evidence-based)
         same_week_takeovers: set[str] = set()
+        # Ghost rows: frozen copies of a plant that lives at another site
+        # per the timeline — dropped entirely (warned, never stored)
+        ghost_rows: set[str] = set()
 
         # Prepare plants for upsert
         plants_to_upsert = []
@@ -2611,26 +2639,70 @@ async def save_confirmed_weekly_report(
             # The weekly_record is still saved (audit trail) but the plant master is left alone.
             is_missing_here = condition == "missing"
 
+            # ── Freshness: a living report vs a frozen template copy ──
+            # Fresh = worked hours, OR remarks changed vs this site's own
+            # last stored row for the plant, OR first row ever here.
+            last_here = last_records_here.get(fleet_num)
+            incoming_fresh = (
+                float(plant_data.get("hours_worked") or 0) > 0
+                or last_here is None
+                or not compare_remarks_with_previous(
+                    plant_data.get("remarks"), last_here["remarks"])
+            )
+
+            existing_location = fleet_to_location.get(fleet_num)
+            lives_elsewhere = bool(
+                existing_location and str(existing_location) != str(location_id)
+            )
+
+            # ── Ghost-row guard ───────────────────────────────────────
+            # The plant lives at ANOTHER site per the timeline, this
+            # upload is the newest information, and the row is a frozen
+            # copy → template zombie. Drop it entirely (warned) so it can
+            # never steal the plant back — regardless of upload order,
+            # and even if the current site never uploads this week.
+            if (
+                lives_elsewhere
+                and is_newer_or_same
+                and not incoming_fresh
+                and not is_missing_here
+                and is_active_location
+            ):
+                ghost_rows.add(fleet_num)
+                result["warnings"].append(
+                    f"{fleet_num}: lives at another site per its transfer "
+                    f"history — this row is an unchanged carry-over (0 hrs, "
+                    f"same remarks) and was ignored. Remove it from "
+                    f"{location_name_for_log}'s template"
+                )
+                continue
+
             # Direct same-week check: the plant is already claimed by a
             # DIFFERENT site for THIS same week. Evidence beats upload
-            # order (resolve_same_week_claim): a new arrival here takes
-            # the week from a continuing (often frozen-copy) claim.
-            existing_location = fleet_to_location.get(fleet_num)
+            # order (resolve_same_week_claim): freshness first, then the
+            # timeline (record incumbency) tiebreaks.
             already_at_different_site_this_week = (
                 existing_verification == (year, week_number)
-                and existing_location
-                and str(existing_location) != str(location_id)
+                and lives_elsewhere
             )
 
             claim = elsewhere_claims.get(fleet_num)
             if already_at_different_site_this_week and claim is not None \
                     and not is_missing_here and is_active_location:
+                existing_fresh = (
+                    float(claim["claim_hours"] or 0) > 0
+                    or claim["claim_prev_remarks"] is None
+                    or not compare_remarks_with_previous(
+                        claim["claim_remarks"], claim["claim_prev_remarks"])
+                )
                 verdict = resolve_same_week_claim(
-                    incoming_is_new_here=is_new_here,
-                    existing_is_continuing=bool(claim["was_there_prev_week"]),
+                    incoming_fresh=incoming_fresh,
+                    existing_fresh=existing_fresh,
+                    incoming_held_prev_week=not is_new_here,
+                    existing_held_prev_week=bool(claim["was_there_prev_week"]),
                 )
                 claim_loc = claim["location_name"] or "another site"
-                if verdict == "takeover":
+                if verdict in ("takeover", "review_takeover"):
                     # This upload wins the week: location updates, the
                     # weekly record upsert replaces the other site's row,
                     # and a transfer documents the movement.
@@ -2651,21 +2723,19 @@ async def save_confirmed_weekly_report(
                         })
                     result["warnings"].append(
                         f"{fleet_num}: also reported by {claim_loc} this week — "
-                        f"moved to {location_name_for_log} (their row was a "
-                        f"carry-over; transfer recorded)"
+                        f"moved to {location_name_for_log} "
+                        + ("(their row was a frozen carry-over; transfer recorded)"
+                           if verdict == "takeover"
+                           else "(held here last week per the timeline — VERIFY: "
+                                "both rows looked equally fresh)")
                     )
-                elif verdict == "keep_existing":
+                else:  # keep_existing / review_keep_existing
                     result["warnings"].append(
-                        f"{fleet_num}: kept at {claim_loc} — it newly arrived "
-                        f"there this week; this report's row looks like a "
-                        f"carry-over"
-                    )
-                else:  # review — ambiguous, keep the first upload, flag it
-                    result["warnings"].append(
-                        f"{fleet_num}: reported by BOTH {claim_loc} and "
-                        f"{location_name_for_log} for week {week_number} — kept "
-                        f"{claim_loc} (uploaded first). Verify where the plant "
-                        f"actually is and correct via transfer if needed"
+                        f"{fleet_num}: kept at {claim_loc} for week {week_number} — "
+                        + ("this report's row looks like a frozen carry-over"
+                           if verdict == "keep_existing"
+                           else f"VERIFY: also reported by {location_name_for_log} "
+                                f"and both rows looked equally fresh")
                     )
 
             skip_location_update = (
@@ -2837,7 +2907,7 @@ async def save_confirmed_weekly_report(
         plants_skipped_location = set()
         for plant_data in validated_plants:
             fn = plant_data["fleet_number"]
-            if fn in same_week_takeovers:
+            if fn in same_week_takeovers or fn in ghost_rows:
                 continue
             existing_loc = fleet_to_location.get(fn)
             existing_ver = fleet_to_verification.get(fn, (0, 0))
@@ -2851,6 +2921,8 @@ async def save_confirmed_weekly_report(
         # Create weekly records
         for plant_data in validated_plants:
             fleet_num = plant_data["fleet_number"]
+            if fleet_num in ghost_rows:
+                continue
             plant_id = fleet_to_id.get(fleet_num)
 
             if not plant_id:
@@ -3013,6 +3085,8 @@ async def save_confirmed_weekly_report(
 
         for plant_data in validated_plants:
             fleet_num = plant_data["fleet_number"]
+            if fleet_num in ghost_rows:
+                continue
             plant_id = fleet_to_id.get(fleet_num)
             if not plant_id:
                 continue
