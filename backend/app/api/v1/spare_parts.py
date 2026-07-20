@@ -222,7 +222,7 @@ async def autocomplete_po_numbers(
     rows = await fetch(
         """SELECT sp.purchase_order_number,
                   count(*)::int AS items_count,
-                  COALESCE(sum(sp.total_cost), 0)::numeric AS total_cost,
+                  COALESCE(sum(COALESCE(sp.total_cost_ngn, sp.total_cost)), 0)::numeric AS total_cost,
                   array_agg(DISTINCT COALESCE(s.name, sp.supplier)) FILTER (WHERE COALESCE(s.name, sp.supplier) IS NOT NULL) AS suppliers
            FROM spare_parts sp
            LEFT JOIN suppliers s ON s.id = sp.supplier_id
