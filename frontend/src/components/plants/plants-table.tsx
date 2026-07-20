@@ -8,7 +8,7 @@
 import { useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { CheckCircle, XCircle, Wrench, Download, Columns3, ChevronDown, Plus } from 'lucide-react';
+import { CheckCircle, XCircle, Download, Columns3, ChevronDown, Plus } from 'lucide-react';
 import { useAuth } from '@/providers/auth-provider';
 import {
   Table,
@@ -250,10 +250,7 @@ const COLUMN_DEFS: ColumnDef[] = [
     align: 'right',
     render: (p) =>
       p.total_maintenance_cost != null ? (
-        <span className="flex items-center justify-end gap-1 text-sm">
-          <Wrench className="h-3 w-3 text-muted-foreground" />
-          {formatCurrency(p.total_maintenance_cost)}
-        </span>
+        <span className="text-sm">{formatCurrency(p.total_maintenance_cost)}</span>
       ) : (
         '-'
       ),
