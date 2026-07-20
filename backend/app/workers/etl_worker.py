@@ -1953,6 +1953,19 @@ async def rebuild_location_timeline(plant_ids: list) -> dict[str, int]:
     if not plant_ids:
         return {"history": 0, "events": 0, "transfers_inserted": 0, "transfers_confirmed": 0}
 
+    # Big plant sets: process in chunks of 50 so a single oversized fetch
+    # can't blow the command timeout on a slow network day (W27 storm:
+    # ≤48-plant rebuilds survived ~900ms RTTs, ≥71-plant ones died).
+    # Per-plant work is independent, so chunking is safe.
+    _CHUNK = 50
+    if len(plant_ids) > _CHUNK:
+        totals = {"history": 0, "events": 0, "transfers_inserted": 0, "transfers_confirmed": 0}
+        for i in range(0, len(plant_ids), _CHUNK):
+            part = await rebuild_location_timeline(plant_ids[i:i + _CHUNK])
+            for k in totals:
+                totals[k] += part.get(k, 0)
+        return totals
+
     from itertools import groupby
     from operator import itemgetter
 
