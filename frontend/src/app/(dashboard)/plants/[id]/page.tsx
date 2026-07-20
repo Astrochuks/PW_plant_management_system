@@ -646,7 +646,7 @@ function PlantDetailContent({ plantId }: { plantId: string }) {
               <div>
                 <p className="text-xs text-muted-foreground">Purchase Cost</p>
                 <p className="text-lg font-semibold">
-                  {plant.purchase_cost ? formatCurrency(plant.purchase_cost) : '-'}
+                  {plant.purchase_cost ? formatCurrency(plant.purchase_cost, plant.purchase_currency || 'NGN') : '-'}
                 </p>
               </div>
             </CardContent>
