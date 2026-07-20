@@ -265,6 +265,18 @@ def normalize_fleet_number(value: Any) -> str | None:
     # "AF 25" -> "AF25", "T 462" -> "T462"
     s = s.replace(" ", "")
 
+    # Attachment notation (company convention): 'FBT18>T526' means FBT18
+    # is attached to T526; 'WP432/T507' means WP432 rides on T507. The
+    # LEFT side is the asset's identity — the pairing is metadata, and
+    # keeping it in the number forks a new plant every time the pairing
+    # changes. Both halves are usually registered as their own assets.
+    for sep in (">", "/"):
+        if sep in s:
+            left = s.split(sep, 1)[0]
+            if len(left) >= 2:
+                s = left
+            break
+
     return s if len(s) >= 2 else None
 
 

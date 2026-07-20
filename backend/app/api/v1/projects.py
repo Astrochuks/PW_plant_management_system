@@ -377,7 +377,8 @@ async def list_unmapped_fleet_numbers(
                FROM project_plant_utilization WHERE plant_id IS NULL
                UNION ALL
                SELECT fleet_number_raw, project_id, week_number, description
-               FROM project_diesel_consumption WHERE plant_id IS NULL
+               FROM project_diesel_consumption
+               WHERE plant_id IS NULL AND NOT coalesce(is_cost_centre, false)
            ) u
            WHERE fleet_number_raw IS NOT NULL
              AND NOT EXISTS (

@@ -81,7 +81,8 @@ SELECT
        WHERE project_id = $1::uuid AND plant_id IS NULL
       UNION ALL
       SELECT fleet_number_raw FROM project_diesel_consumption
-       WHERE project_id = $1::uuid AND plant_id IS NULL) u
+       WHERE project_id = $1::uuid AND plant_id IS NULL
+         AND NOT coalesce(is_cost_centre, false)) u
     WHERE u.fleet_number_raw IS NOT NULL
       AND NOT EXISTS (
         SELECT 1 FROM project_fleet_aliases a
