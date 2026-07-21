@@ -30,7 +30,8 @@ export default function ProjectOverviewPage() {
       {/* Week banner */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs text-muted-foreground">
-          All money in <b>₦m</b> (millions) — the workbook&apos;s own unit
+          Tables in <b>₦m</b> (millions), the workbook&apos;s unit — cards show
+          the full figure
         </p>
         <p className="text-sm">
           <span className="text-muted-foreground">Week No:</span>{' '}
@@ -43,17 +44,23 @@ export default function ProjectOverviewPage() {
 
       {/* Headline strip */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <Kpi label="Contract Value (₦m)" value={nairaM(o.headline.contract_sum, 0)}
-          lineage="register" />
+        <Kpi label="Contract Value" value={naira(o.headline.contract_sum, true)}
+          sub={naira(o.headline.contract_sum)} lineage="register" />
         <Kpi label="Overall % Complete" value={pctFmt(o.headline.pct_complete)}
+          sub={`${naira(o.physical.ladder.works.to_date, true)} of ${naira(o.physical.ladder.works.beme, true)}`}
           lineage="works ÷ BEME sub-total" />
-        <Kpi label="Certified to Date (₦m)" value={nairaM(o.headline.certified_to_date)}
+        <Kpi label="Certified to Date"
+          value={o.certs_payments.certificates_total ? naira(o.headline.certified_to_date, true) : 'None yet'}
+          sub={o.certs_payments.certificates_total ? naira(o.headline.certified_to_date) : 'no certificates recorded'}
           lineage="cert ledger cumulative" />
-        <Kpi label="Paid – Gross (₦m)" value={nairaM(o.headline.paid_gross)}
+        <Kpi label="Paid – Gross"
+          value={o.certs_payments.payments_count ? naira(o.headline.paid_gross, true) : 'None yet'}
+          sub={o.certs_payments.payments_count ? naira(o.headline.paid_gross) : 'no payments recorded'}
           lineage="payments ledger" />
-        <Kpi label="Cost to Date (₦m)" value={nairaM(o.headline.cost_to_date)}
-          lineage="previous + stored weeks" />
+        <Kpi label="Cost to Date" value={naira(o.headline.cost_to_date, true)}
+          sub={naira(o.headline.cost_to_date)} lineage="previous + stored weeks" />
         <Kpi label="Net Margin %" value={pctFmt(o.headline.net_margin_pct)}
+          sub={`net ${naira(o.cost_profitability.net_to_date, true)} to date`}
           lineage="net ÷ work done incl VAT"
           tone={o.headline.net_margin_pct != null && o.headline.net_margin_pct < 0 ? 'bad' : 'good'} />
       </div>
@@ -90,8 +97,8 @@ function ScheduleCard({ o }: { o: ProjectOverview }) {
       </CardHeader>
       <CardContent className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm md:grid-cols-3 xl:grid-cols-4">
         <Fact label="Client" value={s.client ?? '—'} wide />
-        <Fact label="Original contract (₦m)" value={nairaM(o.project.original_contract_sum)} />
-        <Fact label="Current contract (₦m)" value={nairaM(o.project.current_contract_sum)} />
+        <Fact label="Original contract sum" value={naira(o.project.original_contract_sum)} />
+        <Fact label="Current contract sum" value={naira(o.project.current_contract_sum)} />
         <Fact label="Contract award date" value={fmtDate(s.award_date)} />
         <Fact label="Commencement date" value={fmtDate(s.commencement_date)} />
         <Fact label="Revised completion" value={fmtDate(s.revised_completion_date)} />
@@ -232,14 +239,14 @@ function CertsPaymentsCard({ o }: { o: ProjectOverview }) {
         ) : (
           <div className="grid gap-x-8 gap-y-1.5 text-sm md:grid-cols-2">
             <MoneyRow label="Certificates (No.)" text={String(c.certificates_total)} />
-            <MoneyRow label="Advance Received (₦m)" v={c.advance_received} />
-            <MoneyRow label="Total Certified (₦m)" v={c.certified_to_date} />
-            <MoneyRow label="Advance Recovered (₦m)" v={c.advance_recovered} />
-            <MoneyRow label="Payments Received – Gross (₦m)" v={c.payments_gross} />
-            <MoneyRow label="Advance Outstanding (₦m)" v={c.advance_outstanding} />
-            <MoneyRow label="Payments Received – Net (₦m)" v={c.payments_net} />
-            <MoneyRow label="Retention Held (₦m)" v={c.retention_held} />
-            <MoneyRow label="Certified – Not Yet Paid (₦m)" v={c.certified_not_paid}
+            <MoneyRow label="Advance Received" v={c.advance_received} />
+            <MoneyRow label="Total Certified" v={c.certified_to_date} />
+            <MoneyRow label="Advance Recovered" v={c.advance_recovered} />
+            <MoneyRow label="Payments Received – Gross" v={c.payments_gross} />
+            <MoneyRow label="Advance Outstanding" v={c.advance_outstanding} />
+            <MoneyRow label="Payments Received – Net" v={c.payments_net} />
+            <MoneyRow label="Retention Held" v={c.retention_held} />
+            <MoneyRow label="Certified – Not Yet Paid" v={c.certified_not_paid}
               note="certified − cert-type payments (advances excluded)" />
             <MoneyRow label="% of Certified Value Paid" text={pctFmt(c.pct_certified_paid)} />
           </div>
@@ -263,7 +270,7 @@ function ResourcesCard({ o }: { o: ProjectOverview }) {
         <MoneyRow label="Direct Labour Headcount" text={num(r.labour_direct)} />
         <MoneyRow label="Casual Labour Headcount" text={num(r.labour_casual)} />
         <MoneyRow label="Diesel Used This Week (L)" text={num(r.diesel_litres_week)} />
-        <MoneyRow label="Diesel Cost This Week (₦m)" v={r.diesel_cost_week}
+        <MoneyRow label="Diesel Cost This Week" v={r.diesel_cost_week}
           note="Cost Report AGO row — the money truth" />
       </CardContent>
     </Card>
@@ -422,8 +429,8 @@ function FinancialPositionCard({ o }: { o: ProjectOverview }) {
 
 /* ── shared bits ─────────────────────────────────────────────────────── */
 
-function Kpi({ label, value, lineage, tone }: {
-  label: string; value: string; lineage: string; tone?: 'good' | 'bad'
+function Kpi({ label, value, sub, lineage, tone }: {
+  label: string; value: string; sub?: string; lineage: string; tone?: 'good' | 'bad'
 }) {
   return (
     <Card>
@@ -432,6 +439,7 @@ function Kpi({ label, value, lineage, tone }: {
         <p className={`mt-0.5 text-xl font-bold tabular-nums ${
           tone === 'bad' ? 'text-red-600' : tone === 'good' ? 'text-emerald-700 dark:text-emerald-400' : ''
         }`}>{value}</p>
+        {sub && <p className="truncate text-xs tabular-nums text-muted-foreground" title={sub}>{sub}</p>}
         <p className="mt-0.5 truncate text-[11px] text-muted-foreground" title={lineage}>{lineage}</p>
       </CardContent>
     </Card>
@@ -453,7 +461,7 @@ function MoneyRow({ label, v, text, note }: {
   return (
     <div className="flex items-baseline justify-between gap-3 border-b border-dashed pb-1 last:border-0" title={note}>
       <span className="text-muted-foreground">{label}</span>
-      <span className="font-medium tabular-nums">{text ?? nairaM(v)}</span>
+      <span className="font-medium tabular-nums">{text ?? naira(v)}</span>
     </div>
   )
 }
