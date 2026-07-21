@@ -3,14 +3,21 @@
 /**
  * Overview — the PROJECT KPI DASHBOARD. Mirrors the company's Excel
  * dashboard block-for-block; every figure computed from ledgers and
- * atomic weekly facts (docs/WORKBOOK_ARITHMETIC.md). All money in ₦m
- * (millions), like the workbook. Data-quality alerts live on the
- * admin Issues tab, not here.
+ * atomic weekly facts (docs/WORKBOOK_ARITHMETIC.md). Tables in ₦m
+ * (the workbook's unit); cards show full figures. Data-quality alerts
+ * live on the admin Issues tab, not here.
+ *
+ * Color system: PW amber (#f59e0b) is THE accent — progress, this-week
+ * emphasis, totals. Cost categories carry a FIXED per-name palette
+ * (never index-cycled) shared by the donut and its table dots.
  */
 
 import { useMemo } from 'react'
 import { useParams } from 'next/navigation'
 import ECharts from 'echarts-for-react'
+import {
+  Banknote, CalendarDays, HardHat, Percent, Timer, TrendingUp, Wallet,
+} from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -88,6 +95,91 @@ export default function ProjectOverviewPage() {
   )
 }
 
+/* ── Contract & Schedule ─────────────────────────────────────────────── */
+
+function ScheduleCard({ o }: { o: ProjectOverview }) {
+  const s = o.schedule
+  const overdue = s.status === 'overdue'
+  const elapsed = s.months_elapsed ?? 0
+  const duration = s.duration_months ?? 0
+  // the bar's full width is total elapsed time; amber = planned window,
+  // red = everything past it
+  const plannedPct = elapsed > 0 && duration > 0
+    ? Math.min(100, (duration / elapsed) * 100) : 100
+
+  return (
+    <Card>
+      <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
+        <CardTitle className="text-sm">Contract &amp; schedule</CardTitle>
+        {s.status && (
+          <Badge className={overdue
+            ? 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300'
+            : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'}>
+            {overdue ? 'OVERDUE' : 'ON TRACK'}
+          </Badge>
+        )}
+      </CardHeader>
+      <CardContent className="grid gap-5 lg:grid-cols-[1fr_360px]">
+        <div className="grid content-start gap-x-6 gap-y-3 text-sm sm:grid-cols-2 xl:grid-cols-3">
+          <Fact label="Client" value={s.client ?? '—'} wide />
+          <Fact label="Original contract sum" value={naira(o.project.original_contract_sum)} />
+          <Fact label="Current contract sum" value={naira(o.project.current_contract_sum)} />
+          <FactIcon icon={CalendarDays} label="Contract award date" value={fmtDate(s.award_date)} />
+          <FactIcon icon={CalendarDays} label="Commencement date" value={fmtDate(s.commencement_date)} />
+          <FactIcon icon={CalendarDays} label="Revised completion" value={fmtDate(s.revised_completion_date)} />
+        </div>
+
+        {/* Schedule position */}
+        <div className="rounded-lg border bg-muted/30 p-4">
+          <div className="mb-2 flex items-center gap-2">
+            <Timer className="h-4 w-4 text-muted-foreground" />
+            <p className="text-xs font-medium text-muted-foreground">
+              Schedule position · {s.duration_months != null ? `${num(s.duration_months, 0)}-month contract` : 'duration unknown'}
+            </p>
+          </div>
+          <div className="flex h-3 w-full overflow-hidden rounded-full bg-muted">
+            <div className="h-full rounded-l-full bg-amber-500"
+              style={{ width: `${plannedPct}%` }} />
+            {overdue && (
+              <div className="h-full rounded-r-full bg-red-500"
+                style={{ width: `${100 - plannedPct}%` }} />
+            )}
+          </div>
+          <div className="mt-1.5 flex justify-between text-[11px] text-muted-foreground">
+            <span>
+              <span className="mr-1 inline-block h-2 w-2 rounded-full bg-amber-500" />
+              planned {duration ? `${num(duration, 0)} mo` : '—'}
+            </span>
+            {overdue && (
+              <span className="font-medium text-red-600">
+                <span className="mr-1 inline-block h-2 w-2 rounded-full bg-red-500" />
+                overrun +{num(s.months_overdue ?? 0, 1)} mo
+              </span>
+            )}
+          </div>
+          <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+            <ScheduleStat label="Months elapsed" value={s.months_elapsed != null ? num(s.months_elapsed, 1) : '—'} />
+            <ScheduleStat label="Time vs duration" value={pctFmt(s.time_elapsed_pct, 0)}
+              tone={overdue ? 'bad' : undefined} />
+            <ScheduleStat label="Months overdue"
+              value={s.months_overdue != null && s.months_overdue > 0 ? num(s.months_overdue, 1) : '—'}
+              tone={overdue ? 'bad' : undefined} />
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function ScheduleStat({ label, value, tone }: { label: string; value: string; tone?: 'bad' }) {
+  return (
+    <div className="rounded-md bg-background px-2 py-1.5 shadow-sm">
+      <p className={`text-sm font-bold tabular-nums ${tone === 'bad' ? 'text-red-600' : ''}`}>{value}</p>
+      <p className="text-[10px] leading-tight text-muted-foreground">{label}</p>
+    </div>
+  )
+}
+
 /* ── This week — the pulse ───────────────────────────────────────────── */
 
 const VAT = 1.075
@@ -99,7 +191,11 @@ function Delta({ now, prev, prevLabel, downIsGood, pts }: {
   if (prev == null) return null
   const diff = now - prev
   if (pts ? Math.abs(diff) < 0.0005 : prev === 0) {
-    return <span className="text-[11px] text-muted-foreground">vs {prevLabel}: —</span>
+    return (
+      <span className="inline-flex rounded-full bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
+        vs {prevLabel}: —
+      </span>
+    )
   }
   const up = diff > 0
   const good = downIsGood ? !up : up
@@ -107,7 +203,11 @@ function Delta({ now, prev, prevLabel, downIsGood, pts }: {
     ? `${up ? '+' : ''}${(diff * 100).toFixed(1)} pts`
     : `${up ? '+' : ''}${((diff / prev) * 100).toFixed(1)}%`
   return (
-    <span className={`text-[11px] font-medium tabular-nums ${good ? 'text-emerald-600' : 'text-red-600'}`}>
+    <span className={`inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] font-medium tabular-nums ${
+      good
+        ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+        : 'bg-red-500/10 text-red-600'
+    }`}>
       {up ? '▲' : '▼'} {label} vs {prevLabel}
     </span>
   )
@@ -148,49 +248,73 @@ function ThisWeekCard({ o }: { o: ProjectOverview }) {
           </p>
         )}
       </CardHeader>
-      <CardContent className="grid gap-4 lg:grid-cols-[1fr_340px]">
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <MiniKpi label="Work Done + VAT" value={naira(cp.works_incl_vat_this_week, true)}
+      <CardContent className="grid gap-4 lg:grid-cols-[1fr_360px]">
+        <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+          <MiniKpi icon={HardHat} iconClass="bg-amber-500/10 text-amber-600"
+            label="Work Done + VAT" value={naira(cp.works_incl_vat_this_week, true)}
             sub={naira(cp.works_incl_vat_this_week)}
             delta={<Delta now={cp.works_incl_vat_this_week} prev={prevEarnings} prevLabel={prevLabel} />} />
-          <MiniKpi label="Cost" value={naira(cp.total_this_week, true)}
+          <MiniKpi icon={Wallet} iconClass="bg-blue-500/10 text-blue-600"
+            label="Cost" value={naira(cp.total_this_week, true)}
             sub={naira(cp.total_this_week)}
             delta={<Delta now={cp.total_this_week} prev={pw?.cost_this_week ?? null} prevLabel={prevLabel} downIsGood />} />
-          <MiniKpi label="Work Added" value={pctFmt(lw.pct_added, 2)}
+          <MiniKpi icon={TrendingUp} iconClass="bg-violet-500/10 text-violet-600"
+            label="Work Added" value={pctFmt(lw.pct_added, 2)}
             sub="of BEME scope, this week alone"
             delta={pw && lw.pct_added != null
               ? <Delta now={lw.pct_added} prev={o.physical.ladder.works.beme ? pw.works_this_week / o.physical.ladder.works.beme : null} prevLabel={prevLabel} pts />
               : null} />
-          <MiniKpi label="Net Margin" value={pctFmt(cp.margin_this_week)}
+          <MiniKpi icon={Percent}
+            iconClass={cp.net_this_week < 0 ? 'bg-red-500/10 text-red-600' : 'bg-emerald-500/10 text-emerald-600'}
+            label="Net Margin" value={pctFmt(cp.margin_this_week)}
             sub={`net ${naira(cp.net_this_week, true)} this week`}
             delta={<Delta now={cp.margin_this_week ?? 0} prev={prevMargin} prevLabel={prevLabel} pts />} />
         </div>
-        <div className="space-y-3">
-          <p className="text-xs font-medium text-muted-foreground">
+        <div className="rounded-lg border bg-muted/30 p-4">
+          <p className="mb-3 text-xs font-medium text-muted-foreground">
             {pw ? `This week vs ${prevLabel}` : 'No previous week stored yet'}
           </p>
-          {pw && compare.map((c) => (
-            <div key={c.label} className="space-y-1">
-              <p className="text-xs">{c.label}</p>
-              <CompareBar label={weekLabel(lw.year, lw.week_number)} value={c.now} max={maxVal} strong />
-              <CompareBar label={prevLabel} value={c.prev ?? 0} max={maxVal} />
-            </div>
-          ))}
+          <div className="space-y-4">
+            {pw && compare.map((c) => {
+              const change = c.prev ? ((c.now - c.prev) / c.prev) * 100 : null
+              return (
+                <div key={c.label} className="space-y-1">
+                  <div className="flex items-baseline justify-between">
+                    <p className="text-xs font-medium">{c.label}</p>
+                    {change != null && (
+                      <span className="text-[11px] tabular-nums text-muted-foreground">
+                        {change > 0 ? '+' : ''}{change.toFixed(1)}%
+                      </span>
+                    )}
+                  </div>
+                  <CompareBar label={`W${String(lw.week_number).padStart(2, '0')}`} value={c.now} max={maxVal} strong />
+                  <CompareBar label={prevLabel} value={c.prev ?? 0} max={maxVal} />
+                </div>
+              )
+            })}
+          </div>
         </div>
       </CardContent>
     </Card>
   )
 }
 
-function MiniKpi({ label, value, sub, delta }: {
+function MiniKpi({ icon: Icon, iconClass, label, value, sub, delta }: {
+  icon: React.ComponentType<{ className?: string }>
+  iconClass: string
   label: string; value: string; sub?: string; delta?: React.ReactNode
 }) {
   return (
     <div className="rounded-lg border p-3">
-      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p className="mt-0.5 text-lg font-bold tabular-nums">{value}</p>
+      <div className="flex items-center gap-2">
+        <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${iconClass}`}>
+          <Icon className="h-4 w-4" />
+        </span>
+        <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+      </div>
+      <p className="mt-2 text-lg font-bold tabular-nums">{value}</p>
       {sub && <p className="truncate text-[11px] tabular-nums text-muted-foreground" title={sub}>{sub}</p>}
-      {delta && <div className="mt-0.5">{delta}</div>}
+      {delta && <div className="mt-1.5">{delta}</div>}
     </div>
   )
 }
@@ -200,47 +324,17 @@ function CompareBar({ label, value, max, strong }: {
 }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="w-16 shrink-0 text-[11px] tabular-nums text-muted-foreground">{label}</span>
-      <div className="h-3.5 flex-1 overflow-hidden rounded-sm bg-muted">
+      <span className="w-10 shrink-0 text-[11px] font-medium tabular-nums text-muted-foreground">{label}</span>
+      <div className="h-4 flex-1 overflow-hidden rounded-sm bg-muted">
         <div
-          className={`h-full rounded-sm ${strong ? 'bg-amber-500' : 'bg-muted-foreground/40'}`}
+          className={`h-full rounded-sm ${strong ? 'bg-amber-500' : 'bg-slate-400/50 dark:bg-slate-500/50'}`}
           style={{ width: `${Math.max(1.5, (value / max) * 100)}%` }}
         />
       </div>
-      <span className="w-20 shrink-0 text-right text-[11px] tabular-nums">{naira(value, true)}</span>
+      <span className={`w-20 shrink-0 text-right text-[11px] tabular-nums ${strong ? 'font-semibold' : 'text-muted-foreground'}`}>
+        {naira(value, true)}
+      </span>
     </div>
-  )
-}
-
-/* ── Contract & Schedule ─────────────────────────────────────────────── */
-
-function ScheduleCard({ o }: { o: ProjectOverview }) {
-  const s = o.schedule
-  return (
-    <Card>
-      <CardHeader className="flex-row items-center justify-between pb-2">
-        <CardTitle className="text-sm">Contract &amp; schedule</CardTitle>
-        {s.status && (
-          <Badge className={s.status === 'overdue'
-            ? 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300'
-            : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'}>
-            {s.status === 'overdue' ? 'OVERDUE' : 'ON TRACK'}
-          </Badge>
-        )}
-      </CardHeader>
-      <CardContent className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm md:grid-cols-3 xl:grid-cols-4">
-        <Fact label="Client" value={s.client ?? '—'} wide />
-        <Fact label="Original contract sum" value={naira(o.project.original_contract_sum)} />
-        <Fact label="Current contract sum" value={naira(o.project.current_contract_sum)} />
-        <Fact label="Contract award date" value={fmtDate(s.award_date)} />
-        <Fact label="Commencement date" value={fmtDate(s.commencement_date)} />
-        <Fact label="Revised completion" value={fmtDate(s.revised_completion_date)} />
-        <Fact label="Contract duration" value={s.duration_months != null ? `${num(s.duration_months, 1)} months` : '—'} />
-        <Fact label="Months elapsed" value={s.months_elapsed != null ? num(s.months_elapsed, 1) : '—'} />
-        <Fact label="Time elapsed vs duration" value={pctFmt(s.time_elapsed_pct, 0)} />
-        <Fact label="Months overdue" value={s.months_overdue != null && s.months_overdue > 0 ? num(s.months_overdue, 1) : '—'} />
-      </CardContent>
-    </Card>
   )
 }
 
@@ -257,22 +351,25 @@ function PhysicalProgressCard({ o }: { o: ProjectOverview }) {
         trigger: 'axis' as const,
         valueFormatter: (v: number) => `${v.toFixed(1)}%`,
       },
-      grid: { left: 8, right: 44, top: 8, bottom: 8, containLabel: true },
+      grid: { left: 8, right: 48, top: 4, bottom: 4, containLabel: true },
       xAxis: {
         type: 'value' as const, max: 100,
-        axisLabel: { formatter: '{value}%' },
-        splitLine: { lineStyle: { opacity: 0.3 } },
+        axisLabel: { show: false }, axisTick: { show: false },
+        splitLine: { show: false },
       },
       yAxis: {
         type: 'category' as const,
         data: rows.map((b) => titleCase(b.name)),
-        axisLabel: { width: 170, overflow: 'truncate' as const, fontSize: 11 },
+        axisLine: { show: false }, axisTick: { show: false },
+        axisLabel: { width: 165, overflow: 'truncate' as const, fontSize: 11 },
       },
       series: [{
         type: 'bar' as const,
         data: rows.map((b) => Math.round((b.pct_complete ?? 0) * 1000) / 10),
-        barMaxWidth: 14,
-        itemStyle: { color: '#f59e0b', borderRadius: [0, 4, 4, 0] },
+        barMaxWidth: 12,
+        showBackground: true,
+        backgroundStyle: { color: 'rgba(148, 163, 184, 0.12)', borderRadius: 6 },
+        itemStyle: { color: '#f59e0b', borderRadius: 6 },
         label: {
           show: true, position: 'right' as const, fontSize: 11,
           formatter: ({ value }: { value: number }) => `${value}%`,
@@ -286,69 +383,93 @@ function PhysicalProgressCard({ o }: { o: ProjectOverview }) {
       <CardHeader className="pb-2">
         <CardTitle className="text-sm">Physical progress — works completed</CardTitle>
         <p className="text-xs text-muted-foreground">
-          Work sections from the BEME sheet · to-date = previous + stored weeks
-          (kobo-exact vs the workbook&apos;s own cumulative)
+          Work sections from the BEME sheet, all amounts ₦m · to-date =
+          previous + stored weeks (kobo-exact vs the workbook&apos;s own cumulative)
         </p>
       </CardHeader>
-      <CardContent className="grid gap-4 p-0 lg:grid-cols-[1fr_360px] lg:items-start">
+      <CardContent className="grid gap-4 p-0 lg:grid-cols-[1fr_350px] lg:items-start">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[600px] text-sm">
             <thead>
-              <tr className="border-b text-left text-xs text-muted-foreground">
-                <th className="px-4 py-2 font-medium">Work Section</th>
-                <th className="px-4 py-2 text-right font-medium">BEME (₦m)</th>
-                <th className="px-4 py-2 text-right font-medium">Last Week (₦m)</th>
-                <th className="px-4 py-2 text-right font-medium">This Week (₦m)</th>
-                <th className="px-4 py-2 text-right font-medium">To Date (₦m)</th>
-                <th className="px-4 py-2 text-right font-medium">% Complete</th>
+              <tr className="border-b bg-muted/40 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+                <th className="whitespace-nowrap px-4 py-2 font-medium">Work Section</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">BEME</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">Last Wk</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">This Wk</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">To Date</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">% Complete</th>
               </tr>
             </thead>
             <tbody>
-              {bills.map((b) => (
-                <tr key={b.bill_code ?? b.name} className="border-b">
+              {bills.map((b, i) => (
+                <tr key={b.bill_code ?? b.name}
+                  className={`border-b ${i % 2 ? 'bg-muted/20' : ''}`}>
                   <td className="max-w-[280px] truncate px-4 py-1.5">{titleCase(b.name)}</td>
                   <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(b.beme_amount)}</td>
                   <td className="px-4 py-1.5 text-right tabular-nums text-muted-foreground">{nairaM(b.last_week)}</td>
-                  <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(b.this_week)}</td>
+                  <td className={`px-4 py-1.5 text-right tabular-nums ${b.this_week > 0 ? 'font-medium text-amber-700 dark:text-amber-400' : ''}`}>
+                    {nairaM(b.this_week)}
+                  </td>
                   <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(b.to_date)}</td>
-                  <td className={`px-4 py-1.5 text-right tabular-nums ${(b.pct_complete ?? 0) > 1 ? 'font-semibold text-red-600' : ''}`}>
-                    {pctFmt(b.pct_complete)}
+                  <td className="px-4 py-1.5">
+                    <PctCell pct={b.pct_complete} />
                   </td>
                 </tr>
               ))}
-              <LadderRow label="Sub-Total" r={L.works} bold />
+              <LadderRow label="Sub-Total" r={L.works} tone="subtotal" />
               <LadderRow label="Add VAT & State Levies (7.5%)" r={L.vat} />
-              <LadderRow label="Total Works Completed (Incl. VAT)" r={L.works_incl_vat} bold />
+              <LadderRow label="Total Works Completed (Incl. VAT)" r={L.works_incl_vat} tone="subtotal" />
               <LadderRow label="Contingency (Incl. VAT)" r={L.contingency_incl_vat}
                 note="accrual: BEME tail sub-total₂ − sub-total₁, × 1.075" />
-              <LadderRow label="TOTAL WORKS DONE (Incl. VAT & Contingency)" r={L.total_incl_contingency} bold />
+              <LadderRow label="TOTAL WORKS DONE (Incl. VAT & Contingency)"
+                r={L.total_incl_contingency} tone="total" />
             </tbody>
           </table>
         </div>
         <div className="px-4 pb-4 lg:pt-2">
-          <p className="mb-1 text-xs font-medium text-muted-foreground">% Complete by Work Section</p>
-          <ECharts option={chartOption} style={{ height: Math.max(200, bills.length * 34 + 30) }} notMerge />
+          <p className="mb-2 text-xs font-medium text-muted-foreground">% Complete by Work Section</p>
+          <ECharts option={chartOption} style={{ height: Math.max(200, bills.length * 32 + 20) }} notMerge />
         </div>
       </CardContent>
     </Card>
   )
 }
 
-function LadderRow({ label, r, bold, note }: {
+function PctCell({ pct }: { pct: number | null }) {
+  const over = (pct ?? 0) > 1
+  return (
+    <div className="flex items-center justify-end gap-2">
+      <div className="h-1.5 w-14 overflow-hidden rounded-full bg-muted">
+        <div className={`h-full rounded-full ${over ? 'bg-red-500' : 'bg-amber-500'}`}
+          style={{ width: `${Math.min(100, (pct ?? 0) * 100)}%` }} />
+      </div>
+      <span className={`w-12 text-right tabular-nums ${over ? 'font-semibold text-red-600' : ''}`}>
+        {pctFmt(pct)}
+      </span>
+    </div>
+  )
+}
+
+function LadderRow({ label, r, tone, note }: {
   label: string
   r: { beme: number | null; last_week: number | null; this_week: number | null; to_date: number | null }
-  bold?: boolean
+  tone?: 'subtotal' | 'total'
   note?: string
 }) {
   const pct = r.beme && r.to_date != null ? r.to_date / r.beme : null
+  const rowClass = tone === 'total'
+    ? 'border-t-2 border-amber-500/50 bg-amber-500/10 font-bold'
+    : tone === 'subtotal'
+      ? 'bg-amber-500/5 font-semibold'
+      : ''
   return (
-    <tr className={`border-b last:border-0 ${bold ? 'bg-muted/40 font-semibold' : ''}`}>
-      <td className="px-4 py-1.5" title={note}>{label}</td>
-      <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(r.beme)}</td>
-      <td className="px-4 py-1.5 text-right tabular-nums text-muted-foreground">{nairaM(r.last_week)}</td>
-      <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(r.this_week)}</td>
-      <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(r.to_date)}</td>
-      <td className="px-4 py-1.5 text-right tabular-nums">{pctFmt(pct)}</td>
+    <tr className={`border-b last:border-0 ${rowClass}`}>
+      <td className="px-4 py-2" title={note}>{label}</td>
+      <td className="px-4 py-2 text-right tabular-nums">{nairaM(r.beme)}</td>
+      <td className="px-4 py-2 text-right tabular-nums text-muted-foreground">{nairaM(r.last_week)}</td>
+      <td className="px-4 py-2 text-right tabular-nums">{nairaM(r.this_week)}</td>
+      <td className="px-4 py-2 text-right tabular-nums">{nairaM(r.to_date)}</td>
+      <td className="px-4 py-2 text-right tabular-nums">{pctFmt(pct)}</td>
     </tr>
   )
 }
@@ -361,7 +482,10 @@ function CertsPaymentsCard({ o }: { o: ProjectOverview }) {
   return (
     <Card className="lg:col-span-2">
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm">Certificates &amp; payments</CardTitle>
+        <CardTitle className="flex items-center gap-2 text-sm">
+          <Banknote className="h-4 w-4 text-muted-foreground" />
+          Certificates &amp; payments
+        </CardTitle>
         <p className="text-xs text-muted-foreground">
           Certificate + payments ledgers only — never the Contract Summary&apos;s
           frozen client block
@@ -399,7 +523,10 @@ function ResourcesCard({ o }: { o: ProjectOverview }) {
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm">Resources · this week</CardTitle>
+        <CardTitle className="flex items-center gap-2 text-sm">
+          <HardHat className="h-4 w-4 text-muted-foreground" />
+          Resources · this week
+        </CardTitle>
         <p className="text-xs text-muted-foreground">Labour Strength + Diesel sheets, latest week</p>
       </CardHeader>
       <CardContent className="space-y-1.5 text-sm">
@@ -415,7 +542,23 @@ function ResourcesCard({ o }: { o: ProjectOverview }) {
 
 /* ── Cost & profitability ────────────────────────────────────────────── */
 
-const DONUT_COLORS = ['#94a3b8', '#f59e0b', '#3b82f6', '#10b981', '#8b5cf6', '#f43f5e', '#14b8a6', '#eab308']
+// FIXED per-category colors — the donut and the table dots share them,
+// and a filter or new week never repaints survivors.
+const CATEGORY_COLORS: Record<string, string> = {
+  'Materials': '#3b82f6',
+  'Plant': '#f59e0b',
+  'AGO': '#8b5cf6',
+  'Local Labour': '#10b981',
+  'Site Level Expenses': '#06b6d4',
+  'Overheads': '#f43f5e',
+  'Sub Contractors': '#14b8a6',
+  'Uncategorised': '#94a3b8',
+}
+const FALLBACK_COLORS = ['#eab308', '#64748b', '#ec4899', '#84cc16']
+
+function categoryColor(name: string, i: number): string {
+  return CATEGORY_COLORS[name] ?? FALLBACK_COLORS[i % FALLBACK_COLORS.length]
+}
 
 function CostProfitabilityCard({ o }: { o: ProjectOverview }) {
   const cp = o.cost_profitability
@@ -428,44 +571,60 @@ function CostProfitabilityCard({ o }: { o: ProjectOverview }) {
     legend: {
       orient: 'vertical' as const, right: 0, top: 'middle',
       textStyle: { fontSize: 11 }, itemWidth: 10, itemHeight: 10,
+      formatter: (name: string) => {
+        const cat = cp.categories.find((c) => c.category === name)
+        return cat?.pct_of_total != null
+          ? `${name}  ${(cat.pct_of_total * 100).toFixed(1)}%`
+          : name
+      },
+    },
+    title: {
+      text: naira(cp.total_to_date, true),
+      subtext: 'cost to date',
+      left: '30%', top: '40%', textAlign: 'center' as const,
+      textStyle: { fontSize: 15, fontWeight: 700 as const },
+      subtextStyle: { fontSize: 10 },
     },
     series: [{
-      type: 'pie' as const, radius: ['52%', '78%'], center: ['32%', '50%'],
-      itemStyle: { borderWidth: 2, borderColor: 'transparent' },
+      type: 'pie' as const, radius: ['58%', '80%'], center: ['31%', '50%'],
+      itemStyle: { borderWidth: 2, borderColor: 'transparent', borderRadius: 3 },
       label: { show: false },
       data: cp.categories.map((c, i) => ({
         name: c.category, value: Math.round(c.to_date),
-        itemStyle: { color: DONUT_COLORS[i % DONUT_COLORS.length] },
+        itemStyle: { color: categoryColor(c.category, i) },
       })),
     }],
-  }), [cp.categories])
+  }), [cp])
 
   return (
     <Card>
       <CardHeader className="pb-2">
         <CardTitle className="text-sm">Cost &amp; profitability</CardTitle>
         <p className="text-xs text-muted-foreground">
-          Cost Report categories · to-date = previous + stored weeks ·
-          net earnings = work done incl VAT (excl contingency) − costs — the
-          Weekly Summary definition
+          Cost Report categories, all amounts ₦m · net earnings = work done
+          incl VAT (excl contingency) − costs — the Weekly Summary definition
         </p>
       </CardHeader>
-      <CardContent className="grid gap-4 p-0 lg:grid-cols-[1fr_380px] lg:items-center">
+      <CardContent className="grid gap-4 p-0 lg:grid-cols-[1fr_400px] lg:items-center">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[560px] text-sm">
             <thead>
-              <tr className="border-b text-left text-xs text-muted-foreground">
-                <th className="px-4 py-2 font-medium">Cost Category</th>
-                <th className="px-4 py-2 text-right font-medium">Last Week (₦m)</th>
-                <th className="px-4 py-2 text-right font-medium">This Week (₦m)</th>
-                <th className="px-4 py-2 text-right font-medium">To Date (₦m)</th>
-                <th className="px-4 py-2 text-right font-medium">% of Total Cost</th>
+              <tr className="border-b bg-muted/40 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+                <th className="whitespace-nowrap px-4 py-2 font-medium">Cost Category</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">Last Wk</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">This Wk</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">To Date</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">% of Total</th>
               </tr>
             </thead>
             <tbody>
-              {cp.categories.map((c) => (
-                <tr key={c.category} className="border-b">
-                  <td className="px-4 py-1.5">{c.category}</td>
+              {cp.categories.map((c, i) => (
+                <tr key={c.category} className={`border-b ${i % 2 ? 'bg-muted/20' : ''}`}>
+                  <td className="px-4 py-1.5">
+                    <span className="mr-2 inline-block h-2.5 w-2.5 rounded-full align-middle"
+                      style={{ backgroundColor: categoryColor(c.category, i) }} />
+                    {c.category}
+                  </td>
                   <td className="px-4 py-1.5 text-right tabular-nums text-muted-foreground">{nairaM(c.last_week)}</td>
                   <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(c.this_week)}</td>
                   <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(c.to_date)}</td>
@@ -473,45 +632,49 @@ function CostProfitabilityCard({ o }: { o: ProjectOverview }) {
                 </tr>
               ))}
               <tr className="border-b bg-muted/40 font-semibold">
-                <td className="px-4 py-1.5">Total Costs to Date</td>
-                <td className="px-4 py-1.5 text-right tabular-nums text-muted-foreground">{nairaM(cp.total_last_week)}</td>
-                <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(cp.total_this_week)}</td>
-                <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(cp.total_to_date)}</td>
-                <td className="px-4 py-1.5 text-right tabular-nums">100.0%</td>
+                <td className="px-4 py-2">Total Costs to Date</td>
+                <td className="px-4 py-2 text-right tabular-nums text-muted-foreground">{nairaM(cp.total_last_week)}</td>
+                <td className="px-4 py-2 text-right tabular-nums">{nairaM(cp.total_this_week)}</td>
+                <td className="px-4 py-2 text-right tabular-nums">{nairaM(cp.total_to_date)}</td>
+                <td className="px-4 py-2 text-right tabular-nums">100.0%</td>
               </tr>
               <tr className="border-b">
-                <td className="px-4 py-1.5">Value of Work Done — Incl. VAT, Excl. Contingency</td>
-                <td className="px-4 py-1.5 text-right tabular-nums text-muted-foreground">{nairaM(cp.works_incl_vat_last_week)}</td>
-                <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(cp.works_incl_vat_this_week)}</td>
-                <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(cp.works_incl_vat_to_date)}</td>
-                <td className="px-4 py-1.5" />
+                <td className="px-4 py-2">Value of Work Done — Incl. VAT, Excl. Contingency</td>
+                <td className="px-4 py-2 text-right tabular-nums text-muted-foreground">{nairaM(cp.works_incl_vat_last_week)}</td>
+                <td className="px-4 py-2 text-right tabular-nums">{nairaM(cp.works_incl_vat_this_week)}</td>
+                <td className="px-4 py-2 text-right tabular-nums">{nairaM(cp.works_incl_vat_to_date)}</td>
+                <td className="px-4 py-2" />
               </tr>
-              <tr className="border-b bg-muted/40 font-semibold">
-                <td className="px-4 py-1.5">Net Earnings (₦m)</td>
-                <td className={`px-4 py-1.5 text-right tabular-nums ${cp.net_last_week != null && cp.net_last_week < 0 ? 'text-red-600' : 'text-muted-foreground'}`}>
+              <tr className="border-b bg-emerald-500/5 font-semibold">
+                <td className="px-4 py-2">Net Earnings</td>
+                <td className={`px-4 py-2 text-right tabular-nums ${cp.net_last_week != null && cp.net_last_week < 0 ? 'text-red-600' : 'text-muted-foreground'}`}>
                   {nairaM(cp.net_last_week)}
                 </td>
-                <td className={`px-4 py-1.5 text-right tabular-nums ${cp.net_this_week < 0 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-400'}`}>
+                <td className={`px-4 py-2 text-right tabular-nums ${cp.net_this_week < 0 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-400'}`}>
                   {nairaM(cp.net_this_week)}
                 </td>
-                <td className={`px-4 py-1.5 text-right tabular-nums ${cp.net_to_date < 0 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-400'}`}>
+                <td className={`px-4 py-2 text-right tabular-nums ${cp.net_to_date < 0 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-400'}`}>
                   {nairaM(cp.net_to_date)}
                 </td>
-                <td className="px-4 py-1.5" />
+                <td className="px-4 py-2" />
               </tr>
-              <tr>
-                <td className="px-4 py-1.5 font-semibold">Net Margin %</td>
-                <td className="px-4 py-1.5 text-right font-semibold tabular-nums text-muted-foreground">{pctFmt(cp.margin_last_week)}</td>
-                <td className="px-4 py-1.5 text-right font-semibold tabular-nums">{pctFmt(cp.margin_this_week)}</td>
-                <td className="px-4 py-1.5 text-right font-semibold tabular-nums">{pctFmt(cp.margin_to_date)}</td>
-                <td className="px-4 py-1.5" />
+              <tr className="bg-emerald-500/5 font-bold">
+                <td className="px-4 py-2">Net Margin %</td>
+                <td className="px-4 py-2 text-right tabular-nums text-muted-foreground">{pctFmt(cp.margin_last_week)}</td>
+                <td className={`px-4 py-2 text-right tabular-nums ${cp.margin_this_week != null && cp.margin_this_week < 0 ? 'text-red-600' : ''}`}>
+                  {pctFmt(cp.margin_this_week)}
+                </td>
+                <td className={`px-4 py-2 text-right tabular-nums ${cp.margin_to_date != null && cp.margin_to_date < 0 ? 'text-red-600' : ''}`}>
+                  {pctFmt(cp.margin_to_date)}
+                </td>
+                <td className="px-4 py-2" />
               </tr>
             </tbody>
           </table>
         </div>
         <div className="px-4 pb-4">
-          <p className="mb-1 text-xs font-medium text-muted-foreground">Cost to Date by Category (₦m)</p>
-          <ECharts option={donutOption} style={{ height: 230 }} notMerge />
+          <p className="mb-1 text-xs font-medium text-muted-foreground">Cost to Date by Category</p>
+          <ECharts option={donutOption} style={{ height: 240 }} notMerge />
         </div>
       </CardContent>
     </Card>
@@ -539,9 +702,24 @@ function Kpi({ label, value, sub, lineage, tone }: {
 
 function Fact({ label, value, wide }: { label: string; value: string; wide?: boolean }) {
   return (
-    <div className={wide ? 'col-span-2 md:col-span-3 xl:col-span-2' : ''}>
+    <div className={wide ? 'sm:col-span-2 xl:col-span-3' : ''}>
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className="font-medium tabular-nums">{value}</p>
+    </div>
+  )
+}
+
+function FactIcon({ icon: Icon, label, value }: {
+  icon: React.ComponentType<{ className?: string }>
+  label: string; value: string
+}) {
+  return (
+    <div className="flex items-start gap-2">
+      <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      <div>
+        <p className="text-xs text-muted-foreground">{label}</p>
+        <p className="font-medium tabular-nums">{value}</p>
+      </div>
     </div>
   )
 }
@@ -563,12 +741,12 @@ const titleCase = (s: string): string =>
 function OverviewSkeleton() {
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-24" />)}
+      <Skeleton className="h-44" />
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
+        {Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-24" />)}
       </div>
-      <Skeleton className="h-40" />
+      <Skeleton className="h-56" />
       <Skeleton className="h-96" />
-      <Skeleton className="h-64" />
     </div>
   )
 }
