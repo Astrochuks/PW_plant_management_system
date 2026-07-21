@@ -873,6 +873,14 @@ export interface ProjectOverview {
     week_ending_date: string;
     works_this_week: number;
     cost_this_week: number;
+    pct_added: number | null;
+  } | null;
+  prev_week: {
+    year: number;
+    week_number: number;
+    week_ending_date: string;
+    works_this_week: number;
+    cost_this_week: number;
   } | null;
   headline: {
     contract_sum: number;

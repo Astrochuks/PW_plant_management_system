@@ -44,6 +44,11 @@ WITH latest AS (
     FROM project_weekly_reports WHERE project_id = $1::uuid
     ORDER BY year DESC, week_number DESC LIMIT 1
 ),
+prev AS (
+    SELECT id, year, week_number, week_ending_date
+    FROM project_weekly_reports WHERE project_id = $1::uuid
+    ORDER BY year DESC, week_number DESC OFFSET 1 LIMIT 1
+),
 last_cert AS (
     SELECT * FROM project_certificates WHERE project_id = $1::uuid
     ORDER BY gross_value_works_done DESC NULLS LAST LIMIT 1
@@ -74,6 +79,13 @@ SELECT
   (SELECT coalesce(sum(amount_this_week), 0)
      FROM project_cost_report
     WHERE weekly_report_id = (SELECT id FROM latest))            AS cost_this_week,
+  (SELECT row_to_json(p) FROM prev p)                            AS prev_week,
+  (SELECT coalesce(sum(amount_this_week), 0)
+     FROM project_beme_progress
+    WHERE weekly_report_id = (SELECT id FROM prev))              AS works_prev_week,
+  (SELECT coalesce(sum(amount_this_week), 0)
+     FROM project_cost_report
+    WHERE weekly_report_id = (SELECT id FROM prev))              AS cost_prev_week,
   (SELECT row_to_json(x) FROM (
      SELECT count(*)::int AS total, count(date_vetted)::int AS vetted
      FROM project_certificates WHERE project_id = $1::uuid) x)   AS certs,
@@ -272,6 +284,15 @@ async def compute_project_overview(project_id: str) -> dict[str, Any]:
             "week_ending_date": latest["week_ending_date"],
             "works_this_week": works_tw,
             "cost_this_week": costs_tw,
+            # this week's contribution to overall completion
+            "pct_added": round(works_tw / scope, 4) if scope else None,
+        },
+        "prev_week": None if row["prev_week"] is None else {
+            "year": row["prev_week"]["year"],
+            "week_number": row["prev_week"]["week_number"],
+            "week_ending_date": row["prev_week"]["week_ending_date"],
+            "works_this_week": _f(row["works_prev_week"]),
+            "cost_this_week": _f(row["cost_prev_week"]),
         },
         "headline": {
             "contract_sum": contract,

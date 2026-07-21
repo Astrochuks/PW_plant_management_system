@@ -65,6 +65,7 @@ export default function ProjectOverviewPage() {
           tone={o.headline.net_margin_pct != null && o.headline.net_margin_pct < 0 ? 'bad' : 'good'} />
       </div>
 
+      <ThisWeekCard o={o} />
       <ScheduleCard o={o} />
       <PhysicalProgressCard o={o} />
 
@@ -75,6 +76,130 @@ export default function ProjectOverviewPage() {
 
       <CostProfitabilityCard o={o} />
       <FinancialPositionCard o={o} />
+    </div>
+  )
+}
+
+/* ── This week — the pulse ───────────────────────────────────────────── */
+
+const VAT = 1.075
+
+function Delta({ now, prev, prevLabel, downIsGood, pts }: {
+  now: number; prev: number | null; prevLabel: string
+  downIsGood?: boolean; pts?: boolean
+}) {
+  if (prev == null) return null
+  const diff = now - prev
+  if (pts ? Math.abs(diff) < 0.0005 : prev === 0) {
+    return <span className="text-[11px] text-muted-foreground">vs {prevLabel}: —</span>
+  }
+  const up = diff > 0
+  const good = downIsGood ? !up : up
+  const label = pts
+    ? `${up ? '+' : ''}${(diff * 100).toFixed(1)} pts`
+    : `${up ? '+' : ''}${((diff / prev) * 100).toFixed(1)}%`
+  return (
+    <span className={`text-[11px] font-medium tabular-nums ${good ? 'text-emerald-600' : 'text-red-600'}`}>
+      {up ? '▲' : '▼'} {label} vs {prevLabel}
+    </span>
+  )
+}
+
+function ThisWeekCard({ o }: { o: ProjectOverview }) {
+  const cp = o.cost_profitability
+  const lw = o.latest_week!
+  const pw = o.prev_week
+  const prevLabel = pw ? `W${String(pw.week_number).padStart(2, '0')}` : ''
+  const prevEarnings = pw ? pw.works_this_week * VAT : null
+  const prevNet = pw ? pw.works_this_week * VAT - pw.cost_this_week : null
+  const prevMargin = pw && pw.works_this_week > 0
+    ? prevNet! / (pw.works_this_week * VAT) : null
+  const gapWeeks = pw
+    ? lw.year === pw.year && lw.week_number - pw.week_number > 1
+      ? lw.week_number - pw.week_number - 1 : 0
+    : 0
+
+  const compare = [
+    { label: 'Work Done (Incl. VAT)', now: cp.works_incl_vat_this_week, prev: prevEarnings },
+    { label: 'Cost', now: cp.total_this_week, prev: pw?.cost_this_week ?? null },
+  ]
+  const maxVal = Math.max(...compare.flatMap((c) => [c.now, c.prev ?? 0]), 1)
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm">
+          This week · {weekLabel(lw.year, lw.week_number)}
+          <span className="ml-2 font-normal text-muted-foreground">
+            w/e {fmtDate(lw.week_ending_date)}
+          </span>
+        </CardTitle>
+        {pw && gapWeeks > 0 && (
+          <p className="text-xs text-amber-700">
+            Previous stored week is {prevLabel} — {gapWeeks} week{gapWeeks > 1 ? 's' : ''} missing in between
+          </p>
+        )}
+      </CardHeader>
+      <CardContent className="grid gap-4 lg:grid-cols-[1fr_340px]">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <MiniKpi label="Work Done + VAT" value={naira(cp.works_incl_vat_this_week, true)}
+            sub={naira(cp.works_incl_vat_this_week)}
+            delta={<Delta now={cp.works_incl_vat_this_week} prev={prevEarnings} prevLabel={prevLabel} />} />
+          <MiniKpi label="Cost" value={naira(cp.total_this_week, true)}
+            sub={naira(cp.total_this_week)}
+            delta={<Delta now={cp.total_this_week} prev={pw?.cost_this_week ?? null} prevLabel={prevLabel} downIsGood />} />
+          <MiniKpi label="Work Added" value={pctFmt(lw.pct_added, 2)}
+            sub="of BEME scope, this week alone"
+            delta={pw && lw.pct_added != null
+              ? <Delta now={lw.pct_added} prev={o.physical.ladder.works.beme ? pw.works_this_week / o.physical.ladder.works.beme : null} prevLabel={prevLabel} pts />
+              : null} />
+          <MiniKpi label="Net Margin" value={pctFmt(cp.margin_this_week)}
+            sub={`net ${naira(cp.net_this_week, true)} this week`}
+            delta={<Delta now={cp.margin_this_week ?? 0} prev={prevMargin} prevLabel={prevLabel} pts />} />
+        </div>
+        <div className="space-y-3">
+          <p className="text-xs font-medium text-muted-foreground">
+            {pw ? `This week vs ${prevLabel}` : 'No previous week stored yet'}
+          </p>
+          {pw && compare.map((c) => (
+            <div key={c.label} className="space-y-1">
+              <p className="text-xs">{c.label}</p>
+              <CompareBar label={weekLabel(lw.year, lw.week_number)} value={c.now} max={maxVal} strong />
+              <CompareBar label={prevLabel} value={c.prev ?? 0} max={maxVal} />
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function MiniKpi({ label, value, sub, delta }: {
+  label: string; value: string; sub?: string; delta?: React.ReactNode
+}) {
+  return (
+    <div className="rounded-lg border p-3">
+      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="mt-0.5 text-lg font-bold tabular-nums">{value}</p>
+      {sub && <p className="truncate text-[11px] tabular-nums text-muted-foreground" title={sub}>{sub}</p>}
+      {delta && <div className="mt-0.5">{delta}</div>}
+    </div>
+  )
+}
+
+function CompareBar({ label, value, max, strong }: {
+  label: string; value: number; max: number; strong?: boolean
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-16 shrink-0 text-[11px] tabular-nums text-muted-foreground">{label}</span>
+      <div className="h-3.5 flex-1 overflow-hidden rounded-sm bg-muted">
+        <div
+          className={`h-full rounded-sm ${strong ? 'bg-amber-500' : 'bg-muted-foreground/40'}`}
+          style={{ width: `${Math.max(1.5, (value / max) * 100)}%` }}
+        />
+      </div>
+      <span className="w-20 shrink-0 text-right text-[11px] tabular-nums">{naira(value, true)}</span>
     </div>
   )
 }
