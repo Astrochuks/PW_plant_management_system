@@ -17,7 +17,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
 import { useAuth } from '@/providers/auth-provider'
-import { useProject, useDeleteProject, useProjectIssues } from '@/hooks/use-projects'
+import { useProject, useDeleteProject, useProjectIssues, useProjectSubmissions } from '@/hooks/use-projects'
 import { STATUS_STYLES } from '@/components/projects/projects-table'
 
 const PAGES: Array<{ seg: string; label: string; ready: boolean; adminOnly?: boolean }> = [
@@ -40,6 +40,10 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
 
   const { data: project } = useProject(projectId)
   const { data: issues } = useProjectIssues(projectId, isAdmin)
+  // Watches for workbooks finishing in the background worker: polls only
+  // while one is queued/parsing, then invalidates every projects query so
+  // the dashboard updates without a manual refresh.
+  useProjectSubmissions({ project_id: projectId, limit: 20 }, { watch: true })
   const deleteMutation = useDeleteProject()
   const [confirmDelete, setConfirmDelete] = useState(false)
 

@@ -2,7 +2,7 @@
  * Projects data hooks using React Query
  */
 
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import {
   useMutation,
   useQuery,
@@ -343,17 +343,54 @@ export const submissionKeys = {
   unmapped: () => ['projects', 'unmapped-fleet'] as const,
 };
 
+const ACTIVE_STATUSES = new Set(['queued', 'parsing']);
+const TERMINAL_STATUSES = new Set(['success', 'partial', 'failed']);
+
 export function useProjectSubmissions(params: {
   status?: SubmissionStatus; project_id?: string; page?: number; limit?: number;
-} = {}, opts: { poll?: boolean } = {}) {
-  return useQuery({
+} = {}, opts: { poll?: boolean; watch?: boolean } = {}) {
+  const queryClient = useQueryClient();
+  const query = useQuery({
     queryKey: submissionKeys.list(params),
     queryFn: () => getProjectSubmissions(params),
     staleTime: 30 * 1000,
     networkMode: 'always',
     retry: 2,
-    refetchInterval: opts.poll ? 4000 : undefined,
+    // poll: steady 4s (submission tables). watch: 4s only while a
+    // submission is queued/parsing, silent otherwise (hub layout).
+    refetchInterval: opts.poll
+      ? 4000
+      : opts.watch
+        ? (q) => ((q.state.data?.data ?? []).some(
+            (sub) => ACTIVE_STATUSES.has(sub.status)) ? 4000 : false)
+        : undefined,
   });
+
+  // The moment a workbook finishes processing (queued/parsing -> done),
+  // every projects query — overview, tables, issues, lists — is stale.
+  // Invalidate the whole 'projects' root so the dashboard updates on the
+  // next poll tick instead of waiting out staleTime or a hard refresh.
+  const prevStatuses = useRef<Map<string, string>>(new Map());
+  useEffect(() => {
+    const rows = query.data?.data ?? [];
+    const prev = prevStatuses.current;
+    const next = new Map<string, string>();
+    let finished = false;
+    for (const sub of rows) {
+      next.set(sub.id, sub.status);
+      const was = prev.get(sub.id);
+      if (TERMINAL_STATUSES.has(sub.status)
+          && (was ? ACTIVE_STATUSES.has(was) : prev.size > 0 && !prev.has(sub.id))) {
+        finished = true;
+      }
+    }
+    prevStatuses.current = next;
+    if (finished) {
+      queryClient.invalidateQueries({ queryKey: projectsKeys.all });
+    }
+  }, [query.data, queryClient]);
+
+  return query;
 }
 
 export function useUploadWeeklyReport() {
@@ -380,7 +417,9 @@ export function useDeleteProjectSubmission() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => deleteProjectSubmission(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: submissionKeys.all }),
+    // deletion (incl. adjustments recompute) completes inside the request —
+    // every dashboard figure is already different, so drop the whole root
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: projectsKeys.all }),
   });
 }
 
