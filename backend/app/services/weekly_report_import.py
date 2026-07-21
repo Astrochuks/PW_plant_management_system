@@ -359,14 +359,16 @@ async def persist_weekly_report(
         report_id = str(await conn.fetchval(
             """INSERT INTO project_weekly_reports
                (project_id, year, week_number, week_ending_date, status,
-                submitted_by, beme_pct_complete, sheets_processed, sheet_hashes)
+                submitted_by, beme_pct_complete, sheets_processed, sheet_hashes,
+                beme_tail)
                VALUES ($1::uuid, $2, $3, $4, 'completed', $5::uuid, $6,
-                       $7::jsonb, $8::jsonb)
+                       $7::jsonb, $8::jsonb, $9::jsonb)
                RETURNING id""",
             project_id, year, week_number, week_ending, user_id,
             _pct_from_summary(parsed),
             {n: s["status"] for n, s in sheets.items()},
             sheet_hashes,
+            sheets.get("BEME & Works Completed Fd", {}).get("tail") or None,
         ))
 
         # ── fleet resolution across plant + diesel sheets ────────────────

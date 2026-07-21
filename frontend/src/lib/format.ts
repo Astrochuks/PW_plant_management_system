@@ -16,6 +16,13 @@ export const naira = (v: number | null | undefined, compact = false): string => 
 export const pctFmt = (v: number | null | undefined, dp = 1): string =>
   v == null ? '—' : `${(v * 100).toFixed(dp)}%`
 
+/** ₦ millions, the KPI-dashboard unit: 12,798.4 means ₦12,798,400,000. */
+export const nairaM = (v: number | null | undefined, dp = 1): string =>
+  v == null ? '—'
+  : (v / 1e6).toLocaleString('en-NG', {
+      minimumFractionDigits: dp, maximumFractionDigits: dp,
+    })
+
 export const num = (v: number | null | undefined, dp = 0): string =>
   v == null ? '—' : v.toLocaleString('en-NG', { maximumFractionDigits: dp })
 

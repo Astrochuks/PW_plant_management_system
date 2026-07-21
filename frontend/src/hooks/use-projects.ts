@@ -13,6 +13,7 @@ import {
   getProjects,
   getProject,
   getProjectOverview,
+  getProjectIssues,
   getProjectWorkDone,
   getProjectCostsSummary,
   getProjectSite,
@@ -73,6 +74,15 @@ export function useProjectOverview(id: string | null) {
     queryFn: () => getProjectOverview(id!),
     enabled: !!id,
     staleTime: 2 * 60 * 1000,
+  });
+}
+
+export function useProjectIssues(id: string | null, enabled = true) {
+  return useQuery({
+    queryKey: [...projectsKeys.detail(id!), 'issues'],
+    queryFn: () => getProjectIssues(id!),
+    enabled: !!id && enabled,
+    staleTime: 60 * 1000,
   });
 }
 

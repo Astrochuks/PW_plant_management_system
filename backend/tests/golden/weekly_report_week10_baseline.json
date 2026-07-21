@@ -1639,33 +1639,47 @@
    "tail": {
     "contingency": {
      "contract": 541473578.105625,
-     "this_week": 0.0
+     "previous": 0.0,
+     "this_week": 0.0,
+     "total": 0.0
     },
     "contingency_vop_total": {
      "contract": 1082947156.21125,
-     "this_week": 0.0
+     "previous": 0.0,
+     "this_week": 0.0,
+     "total": 0.0
     },
     "grand_total": {
      "contract": 24447532051.468967,
-     "this_week": 332473707.5625
+     "previous": 15017438973.262688,
+     "this_week": 332473707.5625,
+     "total": 15349912680.825188
     },
     "subtotals": [
      {
       "contract": 21658943124.225,
-      "this_week": 294550350.0
+      "previous": 13304486355.05,
+      "this_week": 294550350.0,
+      "total": 13599036705.05
      },
      {
       "contract": 22741890280.43625,
-      "this_week": 309277867.5
+      "previous": 13969710672.8025,
+      "this_week": 309277867.5,
+      "total": 14278988540.3025
      }
     ],
     "vat": {
      "contract": 1705641771.0327187,
-     "this_week": 23195840.0625
+     "previous": 1047728300.4601874,
+     "this_week": 23195840.0625,
+     "total": 1070924140.5226874
     },
     "vop": {
      "contract": 541473578.105625,
-     "this_week": 0.0
+     "previous": 0.0,
+     "this_week": 0.0,
+     "total": 0.0
     }
    },
    "warnings": [

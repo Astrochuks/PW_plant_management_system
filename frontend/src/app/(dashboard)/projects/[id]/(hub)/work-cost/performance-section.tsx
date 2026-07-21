@@ -145,8 +145,8 @@ export default function PerformancePage() {
         <Kpi label="Net · stored weeks" value={naira(totals.net, true)}
           sub={`${totals.weeks_gaining} gaining · ${totals.weeks_losing} losing`}
           lineage={`across ${fin.weeks.length} stored weeks`} />
-        <Kpi label="Net earnings · to date" value={naira(overview?.net_earnings.value ?? null, true)}
-          sub={overview ? pctFmt(overview.net_earnings.pct) : undefined}
+        <Kpi label="Net earnings · to date" value={naira(overview?.cost_profitability.net_to_date ?? null, true)}
+          sub={overview ? pctFmt(overview.cost_profitability.margin_to_date) : undefined}
           lineage="incl. baseline · Weekly Summary definition" />
       </div>
 

@@ -39,14 +39,14 @@ export default function FinancialsPage() {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        <Kpi label="Certified · cumulative" value={naira(o?.ladder.certified_ex_vat ?? null, true)}
-          sub={`${certs.length} certificates`} lineage="cert ledger gross, excl VAT" />
-        <Kpi label="Paid · gross" value={naira(o?.ladder.paid_gross ?? null, true)}
+        <Kpi label="Certified · cumulative" value={naira(o?.certs_payments.certified_to_date ?? null, true)}
+          sub={`${certs.length} certificates`} lineage="cert ledger cumulative, as recorded" />
+        <Kpi label="Paid · gross" value={naira(o?.certs_payments.payments_gross ?? null, true)}
           sub={`${payments.length} payments`} lineage="latest ledger, incl VAT" />
-        <Kpi label="Certified, not yet paid" value={naira(o?.ladder.certified_not_paid ?? null, true)}
-          lineage="certified × 1.075 − paid" />
-        <Kpi label="Retention held" value={naira(o?.certificates.retention_held ?? null, true)}
-          sub={`released ${naira(o?.certificates.retention_released ?? null, true)}`}
+        <Kpi label="Certified, not yet paid" value={naira(o?.certs_payments.certified_not_paid ?? null, true)}
+          lineage="certified − cert-type payments" />
+        <Kpi label="Retention held" value={naira(o?.certs_payments.retention_held ?? null, true)}
+          sub={`released ${naira(o?.certs_payments.retention_released ?? null, true)}`}
           lineage="5% of cumulative gross" />
       </div>
 

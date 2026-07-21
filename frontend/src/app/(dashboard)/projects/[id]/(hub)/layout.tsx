@@ -17,16 +17,17 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
 import { useAuth } from '@/providers/auth-provider'
-import { useProject, useDeleteProject } from '@/hooks/use-projects'
+import { useProject, useDeleteProject, useProjectIssues } from '@/hooks/use-projects'
 import { STATUS_STYLES } from '@/components/projects/projects-table'
 
-const PAGES = [
+const PAGES: Array<{ seg: string; label: string; ready: boolean; adminOnly?: boolean }> = [
   { seg: '', label: 'Overview', ready: true },
   { seg: 'work-cost', label: 'Work & Cost', ready: true },
   { seg: 'plant', label: 'Plant & Diesel', ready: true },
   { seg: 'financials', label: 'Financials', ready: true },
   { seg: 'report', label: 'Report', ready: true },
   { seg: 'submissions', label: 'Submissions', ready: true },
+  { seg: 'issues', label: 'Issues', ready: true, adminOnly: true },
 ]
 
 export default function ProjectHubLayout({ children }: { children: React.ReactNode }) {
@@ -38,6 +39,7 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
   const projectId = params.id
 
   const { data: project } = useProject(projectId)
+  const { data: issues } = useProjectIssues(projectId, isAdmin)
   const deleteMutation = useDeleteProject()
   const [confirmDelete, setConfirmDelete] = useState(false)
 
@@ -102,18 +104,23 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
 
       {/* Pill navigation */}
       <div className="flex flex-wrap items-center gap-1 border-b pb-2">
-        {PAGES.map((p) =>
+        {PAGES.filter((p) => !p.adminOnly || isAdmin).map((p) =>
           p.ready ? (
             <Link
               key={p.seg}
               href={p.seg ? `${base}/${p.seg}` : base}
-              className={`rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${
+              className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${
                 activeSeg === p.seg
                   ? 'bg-primary/20 text-foreground'
                   : 'text-muted-foreground hover:bg-muted hover:text-foreground'
               }`}
             >
               {p.label}
+              {p.seg === 'issues' && (issues?.open_count ?? 0) > 0 && (
+                <span className="rounded-full bg-amber-500/90 px-1.5 text-[11px] font-semibold leading-4 text-white tabular-nums">
+                  {issues!.open_count}
+                </span>
+              )}
             </Link>
           ) : (
             <span

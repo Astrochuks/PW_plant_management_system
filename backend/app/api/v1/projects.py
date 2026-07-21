@@ -788,6 +788,172 @@ async def get_project_overview(
     return {"success": True, "data": data}
 
 
+_ISSUES_SQL = """
+SELECT
+  (SELECT json_agg(json_build_array(year, week_number) ORDER BY year, week_number)
+     FROM project_weekly_reports WHERE project_id = $1::uuid)     AS stored_weeks,
+  (SELECT json_agg(DISTINCT jsonb_build_array(
+            covers_from_year, covers_from_week, covers_to_year, covers_to_week))
+     FROM project_ledger_adjustments
+    WHERE project_id = $1::uuid AND kind = 'gap')                 AS gap_ranges,
+  (SELECT json_agg(row_to_json(u)) FROM (
+     SELECT t.fleet_number_raw, count(*)::int AS occurrences,
+            min(t.year * 100 + t.week_number) AS first_wk,
+            max(t.year * 100 + t.week_number) AS last_wk
+     FROM (
+       SELECT fleet_number_raw, year, week_number
+         FROM project_plant_utilization
+        WHERE project_id = $1::uuid AND plant_id IS NULL
+       UNION ALL
+       SELECT fleet_number_raw, year, week_number
+         FROM project_diesel_consumption
+        WHERE project_id = $1::uuid AND plant_id IS NULL
+          AND NOT coalesce(is_cost_centre, false)) t
+     WHERE t.fleet_number_raw IS NOT NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM project_fleet_aliases a
+         WHERE a.raw_normalized =
+               upper(replace(trim(t.fleet_number_raw), ' ', '')))
+     GROUP BY t.fleet_number_raw
+     ORDER BY count(*) DESC) u)                                   AS fleet,
+  (SELECT sum(contract_amount) FROM project_beme_items
+    WHERE project_id = $1::uuid)                                  AS scope,
+  (SELECT row_to_json(p) FROM (
+     SELECT current_contract_sum, original_contract_sum, award_date,
+            commencement_date, revised_completion_date
+     FROM projects WHERE id = $1::uuid) p)                        AS proj,
+  (SELECT json_agg(o.short_name) FROM projects o, projects me
+    WHERE me.id = $1::uuid AND o.id <> me.id
+      AND o.award_date IS NOT NULL
+      AND o.award_date = me.award_date
+      AND o.commencement_date = me.commencement_date
+      AND o.revised_completion_date = me.revised_completion_date) AS date_twins,
+  (SELECT count(*)::int FROM project_certificates
+    WHERE project_id = $1::uuid)                                  AS cert_count,
+  (SELECT count(*)::int FROM v_project_payments_latest
+    WHERE project_id = $1::uuid)                                  AS pay_count
+"""
+
+
+@router.get("/{project_id}/issues")
+async def get_project_issues(
+    project_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(require_projects_access)],
+) -> dict[str, Any]:
+    """Everything wrong or unverified about this project's data, in one
+    place. Derived issues (missing weeks, unresolved fleet, scope >
+    contract, template-copied register dates) clear themselves when the
+    underlying data is fixed; sheet flags clear when an admin resolves
+    them (stamped, never deleted)."""
+    pid = str(project_id)
+    row = await fetchrow(_ISSUES_SQL, pid)
+    if row is None or row["proj"] is None:
+        raise NotFoundError("Project", pid)
+
+    # Missing weeks: holes inside the stored range + gap-adjustment
+    # ranges. Weeks before the first stored week live in the baseline.
+    stored = [(w[0], w[1]) for w in (row["stored_weeks"] or [])]
+    missing: set[tuple[int, int]] = set()
+    by_year: dict[int, list[int]] = {}
+    for y, w in stored:
+        by_year.setdefault(y, []).append(w)
+    for y, ws in by_year.items():
+        missing.update((y, w) for w in range(min(ws), max(ws)) if w not in set(ws))
+    for g in (row["gap_ranges"] or []):
+        y1, w1, y2, w2 = g[0], g[1], g[2] or g[0], g[3] or g[1]
+        if y1 == y2:
+            missing.update((y1, w) for w in range(w1, w2 + 1))
+    missing -= set(stored)
+
+    flags = await fetch(
+        """SELECT f.id, f.sheet_name, f.flag_type, f.severity, f.message,
+                  f.detail, f.created_at, f.resolved_at, f.resolved_by,
+                  f.resolution_note, wr.year, wr.week_number
+           FROM project_sheet_flags f
+           JOIN project_weekly_reports wr ON wr.id = f.weekly_report_id
+           WHERE f.project_id = $1::uuid
+           ORDER BY (f.resolved_at IS NULL) DESC,
+                    CASE f.severity WHEN 'error' THEN 0
+                                    WHEN 'warning' THEN 1 ELSE 2 END,
+                    wr.year DESC, wr.week_number DESC, f.created_at DESC
+           LIMIT 300""",
+        pid,
+    )
+
+    proj = row["proj"]
+    scope = float(row["scope"] or 0)
+    contract = float(proj.get("current_contract_sum")
+                     or proj.get("original_contract_sum") or 0)
+    open_flags = sum(1 for f in flags if f["resolved_at"] is None)
+    fleet = row["fleet"] or []
+    twins = row["date_twins"] or []
+
+    open_count = (
+        len(missing) + open_flags + len(fleet)
+        + (1 if scope > contract > 0 else 0)
+        + (1 if twins else 0)
+    )
+
+    return {"success": True, "data": {
+        "open_count": open_count,
+        "missing_weeks": sorted(missing),
+        "flags": flags,
+        "open_flags": open_flags,
+        "unresolved_fleet": fleet,
+        "scope_exceeds_contract": (
+            {"scope": scope, "contract": contract}
+            if scope > contract > 0 else None),
+        "register_dates_suspect": (
+            {"twins": twins,
+             "award_date": proj.get("award_date"),
+             "commencement_date": proj.get("commencement_date"),
+             "revised_completion_date": proj.get("revised_completion_date")}
+            if twins else None),
+        "young_ledger": {
+            "certificates": (row["cert_count"] or 0) == 0,
+            "payments": (row["pay_count"] or 0) == 0,
+        },
+    }}
+
+
+@router.post("/flags/{flag_id}/resolve")
+async def resolve_sheet_flag(
+    flag_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+    note: str | None = Query(None, max_length=500),
+) -> dict[str, Any]:
+    """Mark a sheet flag resolved — stamped with who/when/why, never
+    deleted, so the evidence trail survives."""
+    row = await fetchrow(
+        """UPDATE project_sheet_flags
+           SET resolved_at = now(), resolved_by = $2, resolution_note = $3
+           WHERE id = $1::uuid AND resolved_at IS NULL
+           RETURNING id""",
+        str(flag_id), current_user.email, note,
+    )
+    if row is None:
+        raise NotFoundError("Unresolved flag", str(flag_id))
+    return {"success": True}
+
+
+@router.post("/flags/{flag_id}/unresolve")
+async def unresolve_sheet_flag(
+    flag_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+) -> dict[str, Any]:
+    """Reopen a resolved flag (mis-click insurance)."""
+    row = await fetchrow(
+        """UPDATE project_sheet_flags
+           SET resolved_at = NULL, resolved_by = NULL, resolution_note = NULL
+           WHERE id = $1::uuid AND resolved_at IS NOT NULL
+           RETURNING id""",
+        str(flag_id),
+    )
+    if row is None:
+        raise NotFoundError("Resolved flag", str(flag_id))
+    return {"success": True}
+
+
 @router.get("/{project_id}/work-done")
 async def get_project_work_done(
     project_id: UUID,

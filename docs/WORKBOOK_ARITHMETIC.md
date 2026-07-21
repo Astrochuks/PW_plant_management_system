@@ -117,11 +117,11 @@ template was copied project-to-project with the client block frozen.
 |---|---|---|
 | Contract details (names, sums) | LIVE ✓ | Trust — identity anchor |
 | Dates / EOT | suspect (identical across projects) | Verify vs award letters; register holds truth |
-| Client position (certified, retention) | FOSSIL | Certificate ledger: certified = latest cumulative gross; ×1.075 for incl-VAT; retention/releases/advance from cert columns |
+| Client position (certified, retention) | FOSSIL | Certificate ledger: certified = latest cumulative gross AS RECORDED (no ×1.075 re-grossing — the company's own KPI dashboard reconciles 98%-paid and certified-not-paid against the raw ledger figure, 2026-07-21); retention/releases/advance from cert columns |
 | PW position (works done) | FOSSIL | BEME/Weekly-Summary chain (reconciled) |
 | Total work in progress | FOSSIL | works incl VAT − certified incl VAT (real KPI: uncertified work) |
 | Payment status | `#VALUE!` broken | Payments ledger by payment_type: advances / certs paid / on account; gross & net; % of contract |
-| Certified not yet paid | `#VALUE!` | certified × 1.075 − paid (gross) |
+| Certified not yet paid | `#VALUE!` | certified − CERT-TYPE payments only (subtracting total gross incl. advances goes negative once advances outrun the gap; verified: 11,171.2 − 10,944.5 = 226.7 = the dashboard's own figure) |
 | APG | FOSSIL (2018) | Register fields — commercial team input, no derivation exists |
 | Bill 1 | FOSSIL | Bill 1 Summary + Bill 1 Payments sheets (dormant — promotion required) + certs' General Bill 1 column. Standing contradiction: certs claim ₦250.9M vs this block's ₦49.9M |
 | Cost & revenue summary | LIVE | = Weekly Summary restated — but see contradiction below |
@@ -150,6 +150,7 @@ living Contract Summary** from the ledgers and show drift-vs-sheet as flags.
 | Subcontractors | total qty (J) = previous (H) + this week (I); values same chain | per-name ledgers; latest report carries the cumulative truth |
 | Materials & Civils | available = opening + received − closing; total used = works+precast+mobilisation+other; sheet's own Variance = available − used (cols O/P, verbatim) | our recomputed discrepancy when stock is maintained (Kaduna yes, Akwa no) |
 | Certificates | cumulative per row; retention = 5% × cumulative gross; increments ≥ 0 | zero-increment (resubmission) flag; New Total / Less Previously Certified tail columns stored |
+| BEME tail (beme_tail jsonb, migration 027) | contingency+VOP accrual = subtotal₂ − subtotal₁ per column (the ADD rows carry blank to-date cells; the second SUB-TOTAL embeds the accrual); grand_total = subtotal₂ × 1.075, kobo-exact on Akwa W05: (12,091.7 + 604.6) × 1.075 = 13,648.5 | dashboard's Contingency (Incl. VAT) row = accrual × 1.075 (649.9 at W05 ✓); sheet's per-bill totals beat Σ items (Airfield Lighting: 498.4 sheet vs 609.5 Σ items) |
 | Payments | net = gross − (WHT + VAT + vetting + stamp + other); rate columns L–P are display constants (labels misaligned in template: 'VAT %' holds 2.5%) | rows must sum to 'Total All' (gross AND net) |
 | Lists | company calendar (date → week no) = week-ending authority; reference vocabularies | byte-identical across projects (hash-checked) |
 

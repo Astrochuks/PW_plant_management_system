@@ -828,6 +828,28 @@ export async function getSubmissionDownloadUrl(
 
 // ── Project hub: Overview (living contract summary) ────────────────────
 
+export interface LadderRung {
+  beme: number | null;
+  this_week: number | null;
+  to_date: number | null;
+}
+
+export interface OverviewBill {
+  bill_code: string | null;
+  name: string;
+  beme_amount: number;
+  this_week: number;
+  to_date: number;
+  pct_complete: number | null;
+}
+
+export interface OverviewCostCategory {
+  category: string;
+  this_week: number;
+  to_date: number;
+  pct_of_total: number | null;
+}
+
 export interface ProjectOverview {
   project: {
     id: string;
@@ -843,6 +865,7 @@ export interface ProjectOverview {
     award_date: string | null;
     commencement_date: string | null;
     revised_completion_date: string | null;
+    original_duration_months: number | null;
   };
   latest_week: {
     year: number;
@@ -851,66 +874,131 @@ export interface ProjectOverview {
     works_this_week: number;
     cost_this_week: number;
   } | null;
-  ladder: {
+  headline: {
     contract_sum: number;
-    beme_scope: number;
-    works_to_date: number;
-    earnings_to_date: number;
-    certified_ex_vat: number;
-    certified_incl_vat: number;
+    pct_complete: number | null;
+    certified_to_date: number;
     paid_gross: number;
-    paid_net: number;
-    wip_incl_vat: number;
-    certified_not_paid: number;
+    cost_to_date: number;
+    net_margin_pct: number | null;
   };
-  net_earnings: {
-    value: number;
-    pct: number | null;
-    earnings: number;
-    costs_to_date: number;
+  schedule: {
+    client: string | null;
+    award_date: string | null;
+    commencement_date: string | null;
+    revised_completion_date: string | null;
+    duration_months: number | null;
+    months_elapsed: number | null;
+    months_overdue: number | null;
+    time_elapsed_pct: number | null;
+    status: 'overdue' | 'on_track' | null;
+  };
+  physical: {
+    bills: OverviewBill[];
+    ladder: {
+      works: LadderRung;
+      vat: LadderRung;
+      works_incl_vat: LadderRung;
+      contingency_incl_vat: LadderRung;
+      total_incl_contingency: LadderRung;
+    };
+    workbook_cumulative: number | null;
+  };
+  certs_payments: {
+    certificates_total: number;
+    certificates_vetted: number;
+    certified_to_date: number;
+    payments_gross: number;
+    payments_net: number;
+    payments_count: number;
+    certified_not_paid: number;
+    pct_certified_paid: number | null;
+    advance_received: number;
+    advance_recovered: number;
+    advance_outstanding: number;
+    retention_held: number;
+    retention_released: number;
+  };
+  cost_profitability: {
+    categories: OverviewCostCategory[];
+    total_this_week: number;
+    total_to_date: number;
+    works_incl_vat_this_week: number;
+    works_incl_vat_to_date: number;
+    net_this_week: number;
+    net_to_date: number;
+    margin_this_week: number | null;
+    margin_to_date: number | null;
+  };
+  resources: {
+    labour_direct: number;
+    labour_casual: number;
+    diesel_litres_week: number;
+    diesel_cost_week: number;
   };
   progress: {
     physical_pct: number | null;
     commercial_pct: number | null;
     reported_pct: number | null;
   };
-  payment_status: {
-    count: number;
-    advances: number;
-    certs_paid: number;
-    on_account: number;
-    total_gross: number;
-    total_net: number;
-  };
-  certificates: {
-    count: number;
-    cumulative_gross: number;
-    retention_held: number;
-    retention_released: number;
-    advance_recovery: number;
-  };
-  alerts: {
-    scope_exceeds_contract: boolean;
-    missing_weeks: Array<[number, number]>;
-    flags_latest_week: number;
-    flags_serious: number;
-    flags_total: number;
-    unresolved_fleet: number;
-  };
-  recent_weeks: Array<{
-    year: number;
-    week_number: number;
-    week_ending_date: string;
-    flags: number;
-    works_this_week: number;
-    cost_this_week: number;
-    submission_id: string | null;
-  }>;
 }
 
 export async function getProjectOverview(projectId: string): Promise<ProjectOverview> {
   const response = await apiClient.get(`/projects/${projectId}/overview`);
   return response.data.data;
+}
+
+// ── Project hub: Issues (admin data-quality tab) ─────────────────────────
+
+export interface SheetFlag {
+  id: string;
+  sheet_name: string;
+  flag_type: string;
+  severity: 'info' | 'warning' | 'error';
+  message: string;
+  detail: Record<string, unknown> | null;
+  created_at: string;
+  resolved_at: string | null;
+  resolved_by: string | null;
+  resolution_note: string | null;
+  year: number;
+  week_number: number;
+}
+
+export interface ProjectIssues {
+  open_count: number;
+  missing_weeks: Array<[number, number]>;
+  flags: SheetFlag[];
+  open_flags: number;
+  unresolved_fleet: Array<{
+    fleet_number_raw: string;
+    occurrences: number;
+    first_wk: number;
+    last_wk: number;
+  }>;
+  scope_exceeds_contract: { scope: number; contract: number } | null;
+  register_dates_suspect: {
+    twins: string[];
+    award_date: string | null;
+    commencement_date: string | null;
+    revised_completion_date: string | null;
+  } | null;
+  young_ledger: { certificates: boolean; payments: boolean };
+}
+
+export async function getProjectIssues(projectId: string): Promise<ProjectIssues> {
+  const response = await apiClient.get(`/projects/${projectId}/issues`);
+  return response.data.data;
+}
+
+export async function resolveSheetFlag(flagId: string, note?: string): Promise<void> {
+  await apiClient.post(`/projects/flags/${flagId}/resolve`, null, {
+    params: note ? { note } : undefined,
+  });
+}
+
+export async function unresolveSheetFlag(flagId: string): Promise<void> {
+  await apiClient.post(`/projects/flags/${flagId}/unresolve`);
 }
 
 // ── Project hub: Work done / Costs / Site / Financial ledgers ───────────

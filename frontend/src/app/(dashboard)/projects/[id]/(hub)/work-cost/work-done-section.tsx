@@ -48,7 +48,8 @@ export default function WorkDonePage() {
         <Kpi label="Work done · to date" value={naira(totals?.done ?? null, true)}
           sub={naira(totals?.done ?? null)} lineage="stored weeks + baseline" />
         <Kpi label="BEME scope" value={naira(totals?.contract ?? null, true)}
-          sub={overview?.alerts.scope_exceeds_contract ? 'exceeds contract — variation pending' : undefined}
+          sub={overview && totals && totals.contract > (overview.headline.contract_sum || Infinity)
+            ? 'exceeds contract — variation pending' : undefined}
           lineage="Σ item contract amounts" />
         <Kpi label="Quantity over-runs" value={String(totals?.overruns ?? 0)}
           lineage="qty done > contract qty · flagged, never capped" />

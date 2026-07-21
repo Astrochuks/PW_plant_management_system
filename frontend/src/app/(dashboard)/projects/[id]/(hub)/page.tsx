@@ -1,38 +1,22 @@
 'use client'
 
 /**
- * Overview — the living Contract Summary. Every figure computed from
- * ledgers and atomic weekly facts (docs/WORKBOOK_ARITHMETIC.md); each
- * card shows its working, the way the workbook shows its ladders.
+ * Overview — the PROJECT KPI DASHBOARD. Mirrors the company's Excel
+ * dashboard block-for-block; every figure computed from ledgers and
+ * atomic weekly facts (docs/WORKBOOK_ARITHMETIC.md). All money in ₦m
+ * (millions), like the workbook. Data-quality alerts live on the
+ * admin Issues tab, not here.
  */
 
-import Link from 'next/link'
+import { useMemo } from 'react'
 import { useParams } from 'next/navigation'
-import {
-  AlertTriangle, CalendarDays, FileSpreadsheet, Wallet, HardHat, Percent,
-} from 'lucide-react'
+import ECharts from 'echarts-for-react'
+import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useProjectOverview } from '@/hooks/use-projects'
 import type { ProjectOverview } from '@/lib/api/projects'
-
-const naira = (v: number | null | undefined, compact = false): string => {
-  if (v == null) return '—'
-  if (compact) {
-    const abs = Math.abs(v)
-    if (abs >= 1e9) return `₦${(v / 1e9).toFixed(2)}B`
-    if (abs >= 1e6) return `₦${(v / 1e6).toFixed(1)}M`
-  }
-  return new Intl.NumberFormat('en-NG', {
-    style: 'currency', currency: 'NGN', maximumFractionDigits: 0,
-  }).format(v)
-}
-const pct = (v: number | null | undefined): string =>
-  v == null ? '—' : `${(v * 100).toFixed(1)}%`
-const fmtDate = (d: string | null | undefined): string =>
-  d ? new Date(d + (d.length === 10 ? 'T00:00:00' : '')).toLocaleDateString('en-GB', {
-    day: '2-digit', month: 'short', year: 'numeric',
-  }) : '—'
+import { fmtDate, naira, nairaM, num, pctFmt, weekLabel } from '@/lib/format'
 
 export default function ProjectOverviewPage() {
   const params = useParams<{ id: string }>()
@@ -41,323 +25,465 @@ export default function ProjectOverviewPage() {
   if (isLoading || !o) return <OverviewSkeleton />
   if (!o.latest_week) return <NoReportsYet />
 
-  const L = o.ladder
-  const young = o.certificates.count === 0 && o.payment_status.count === 0
-
   return (
     <div className="space-y-4">
-      {/* Headline KPIs */}
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        <Kpi
-          icon={HardHat} label="Work done · to date"
-          value={naira(L.works_to_date, true)} sub={naira(L.works_to_date)}
-          lineage="BEME works, excl VAT"
-        />
-        <Kpi
-          icon={FileSpreadsheet} label="Certified · ledger"
-          value={o.certificates.count ? naira(L.certified_ex_vat, true) : 'None yet'}
-          sub={o.certificates.count ? `${o.certificates.count} certs · ${naira(L.certified_ex_vat)}` : 'no certificates recorded'}
-          lineage="cumulative gross, excl VAT"
-        />
-        <Kpi
-          icon={Wallet} label="Paid · latest ledger"
-          value={o.payment_status.count ? naira(L.paid_gross, true) : 'None yet'}
-          sub={o.payment_status.count ? `${o.payment_status.count} payments · ${naira(L.paid_gross)}` : 'no payments recorded'}
-          lineage="gross incl VAT"
-        />
-        <Kpi
-          icon={Percent} label="Physical progress"
-          value={pct(o.progress.physical_pct)}
-          sub={`workbook reports ${pct(o.progress.reported_pct)}`}
-          lineage="works ÷ BEME scope"
-        />
+      {/* Week banner */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-muted-foreground">
+          All money in <b>₦m</b> (millions) — the workbook&apos;s own unit
+        </p>
+        <p className="text-sm">
+          <span className="text-muted-foreground">Week No:</span>{' '}
+          <b className="tabular-nums">{o.latest_week.week_number}</b>
+          <span className="mx-2 text-muted-foreground">·</span>
+          <span className="text-muted-foreground">Report Date:</span>{' '}
+          <b className="tabular-nums">{fmtDate(o.latest_week.week_ending_date)}</b>
+        </p>
       </div>
 
-      <Alerts o={o} />
+      {/* Headline strip */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <Kpi label="Contract Value (₦m)" value={nairaM(o.headline.contract_sum, 0)}
+          lineage="register" />
+        <Kpi label="Overall % Complete" value={pctFmt(o.headline.pct_complete)}
+          lineage="works ÷ BEME sub-total" />
+        <Kpi label="Certified to Date (₦m)" value={nairaM(o.headline.certified_to_date)}
+          lineage="cert ledger cumulative" />
+        <Kpi label="Paid – Gross (₦m)" value={nairaM(o.headline.paid_gross)}
+          lineage="payments ledger" />
+        <Kpi label="Cost to Date (₦m)" value={nairaM(o.headline.cost_to_date)}
+          lineage="previous + stored weeks" />
+        <Kpi label="Net Margin %" value={pctFmt(o.headline.net_margin_pct)}
+          lineage="net ÷ work done incl VAT"
+          tone={o.headline.net_margin_pct != null && o.headline.net_margin_pct < 0 ? 'bad' : 'good'} />
+      </div>
 
-      {/* Money ladder */}
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">Money ladder</CardTitle>
-          <p className="text-xs text-muted-foreground">
-            Every line shows its working — sources per WORKBOOK_ARITHMETIC.md
-          </p>
-        </CardHeader>
-        <CardContent className="p-0">
-          <div className="divide-y text-sm">
-            <Rung label="Contract sum" value={L.contract_sum} note="register · Contract Summary" />
-            <Rung label="BEME scope" value={L.beme_scope}
-              note={`Σ item contract amounts${o.alerts.scope_exceeds_contract ? ' · exceeds contract — variation pending' : ''}`}
-              warn={o.alerts.scope_exceeds_contract} />
-            <Rung label="Work done to date" value={L.works_to_date} note="previous + stored weeks (kobo-exact vs workbook)" />
-            <Rung label="Earnings (works + VAT 7.5%)" value={L.earnings_to_date} note="excl contingency · Weekly Summary convention" />
-            <Rung label="Certified (incl VAT)" value={young ? null : L.certified_incl_vat}
-              note={young ? 'no certificates recorded yet' : 'cert ledger gross × 1.075'} />
-            <Rung label="Paid to date" value={young ? null : L.paid_gross}
-              note={young ? 'no payments recorded yet' : "payments ledger 'Total All' · gross incl VAT"} />
-            <Rung label="Work in progress (uncertified)" value={young ? null : L.wip_incl_vat}
-              note="earnings − certified" bold />
-            <Rung label="Certified, not yet paid" value={young ? null : L.certified_not_paid}
-              note="certified incl VAT − paid" bold />
-          </div>
-        </CardContent>
-      </Card>
+      <ScheduleCard o={o} />
+      <PhysicalProgressCard o={o} />
 
       <div className="grid gap-3 lg:grid-cols-3">
-        {/* Net earnings */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Net earnings · to date</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-1">
-            <p className="text-2xl font-bold tabular-nums">
-              {naira(o.net_earnings.value, true)}
-              {o.net_earnings.pct != null && (
-                <span className={`ml-2 text-sm font-medium ${o.net_earnings.value >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                  {pct(o.net_earnings.pct)}
-                </span>
-              )}
-            </p>
-            <p className="text-xs text-muted-foreground tabular-nums">
-              earnings {naira(o.net_earnings.earnings, true)} − costs {naira(o.net_earnings.costs_to_date, true)}
-            </p>
-            <p className="text-[11px] text-muted-foreground">
-              Weekly Summary definition · excl contingency
-            </p>
-          </CardContent>
-        </Card>
-
-        {/* Payment status */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Payment status · latest ledger</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-1.5 text-sm">
-            {young ? (
-              <p className="text-muted-foreground text-xs py-2">
-                No payments recorded yet — young ledger.
-              </p>
-            ) : (
-              <>
-                <MoneyRow label="Advances" v={o.payment_status.advances} />
-                <MoneyRow label="Certificates paid" v={o.payment_status.certs_paid} />
-                {Math.abs(o.payment_status.on_account) > 0.5 && (
-                  <MoneyRow label="On account / other" v={o.payment_status.on_account} />
-                )}
-                <div className="border-t pt-1.5">
-                  <MoneyRow label="Total gross" v={o.payment_status.total_gross} bold />
-                  <MoneyRow label="Total net (after deductions)" v={o.payment_status.total_net} />
-                </div>
-              </>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Retention & certificates */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Certificates &amp; retention</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-1.5 text-sm">
-            {young ? (
-              <p className="text-muted-foreground text-xs py-2">
-                No certificates recorded yet — young ledger.
-              </p>
-            ) : (
-              <>
-                <MoneyRow label={`Certified (${o.certificates.count} certs)`} v={o.certificates.cumulative_gross} />
-                <MoneyRow label="Retention held (5%)" v={o.certificates.retention_held} />
-                <MoneyRow label="Retention released" v={o.certificates.retention_released} />
-                <MoneyRow label="Advance recovered" v={o.certificates.advance_recovery} />
-              </>
-            )}
-          </CardContent>
-        </Card>
+        <CertsPaymentsCard o={o} />
+        <ResourcesCard o={o} />
       </div>
 
-      {/* Latest week + recent weeks */}
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">
-            Recent weeks
-            <span className="text-muted-foreground ml-2 font-normal text-xs">
-              latest: W{String(o.latest_week.week_number).padStart(2, '0')} · w/e {fmtDate(o.latest_week.week_ending_date)}
-            </span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b text-left text-xs text-muted-foreground">
-                  <th className="px-4 py-2 font-medium">Week</th>
-                  <th className="px-4 py-2 font-medium">Ending</th>
-                  <th className="px-4 py-2 text-right font-medium">Works this week</th>
-                  <th className="px-4 py-2 text-right font-medium">Cost this week</th>
-                  <th className="px-4 py-2 text-right font-medium">Flags</th>
-                </tr>
-              </thead>
-              <tbody>
-                {o.recent_weeks.map((w) => (
-                  <tr key={`${w.year}-${w.week_number}`} className="border-b last:border-0">
-                    <td className="px-4 py-2 tabular-nums">{w.year} · W{String(w.week_number).padStart(2, '0')}</td>
-                    <td className="px-4 py-2 text-muted-foreground">{fmtDate(w.week_ending_date)}</td>
-                    <td className="px-4 py-2 text-right tabular-nums">{naira(w.works_this_week)}</td>
-                    <td className="px-4 py-2 text-right tabular-nums">{naira(w.cost_this_week)}</td>
-                    <td className="px-4 py-2 text-right">
-                      {w.flags > 0 ? (
-                        <span className="text-amber-700 text-xs">{w.flags}</span>
-                      ) : (
-                        <span className="text-muted-foreground text-xs">0</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <p className="border-t px-4 py-2 text-xs text-muted-foreground">
-            Full history, flags and original files on the{' '}
-            <Link href={`/projects/${o.project.id}/submissions`} className="underline hover:text-foreground">
-              Submissions tab
-            </Link>.
-          </p>
-        </CardContent>
-      </Card>
-
-      {/* Contract details (register) */}
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Contract details · register</CardTitle>
-        </CardHeader>
-        <CardContent className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm md:grid-cols-3">
-          <Fact label="Client" value={o.project.client} />
-          <Fact label="State" value={o.project.state_name ?? '—'} />
-          <Fact label="Type" value={[o.project.project_type, o.project.work_nature].filter(Boolean).join(' · ') || '—'} />
-          <Fact label="Original contract sum" value={naira(o.project.original_contract_sum)} />
-          <Fact label="Current contract sum" value={naira(o.project.current_contract_sum)} />
-          <Fact label="Award date" value={fmtDate(o.project.award_date)} />
-          <Fact label="Commencement" value={fmtDate(o.project.commencement_date)} />
-          <Fact label="Revised completion" value={fmtDate(o.project.revised_completion_date)} />
-        </CardContent>
-      </Card>
+      <CostProfitabilityCard o={o} />
+      <FinancialPositionCard o={o} />
     </div>
   )
 }
 
-function Kpi({ icon: Icon, label, value, sub, lineage }: {
-  icon: React.ElementType; label: string; value: string; sub?: string; lineage: string
-}) {
+/* ── Contract & Schedule ─────────────────────────────────────────────── */
+
+function ScheduleCard({ o }: { o: ProjectOverview }) {
+  const s = o.schedule
   return (
-    <Card className="py-0">
-      <CardContent className="px-4 py-3">
-        <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-          <Icon className="h-3.5 w-3.5" />
-          {label}
-        </p>
-        <p className="mt-0.5 text-xl font-bold tabular-nums">{value}</p>
-        {sub && <p className="text-[11px] text-muted-foreground tabular-nums truncate">{sub}</p>}
-        <p className="text-[10px] text-muted-foreground/70">{lineage}</p>
+    <Card>
+      <CardHeader className="flex-row items-center justify-between pb-2">
+        <CardTitle className="text-sm">Contract &amp; schedule</CardTitle>
+        {s.status && (
+          <Badge className={s.status === 'overdue'
+            ? 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300'
+            : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'}>
+            {s.status === 'overdue' ? 'OVERDUE' : 'ON TRACK'}
+          </Badge>
+        )}
+      </CardHeader>
+      <CardContent className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm md:grid-cols-3 xl:grid-cols-4">
+        <Fact label="Client" value={s.client ?? '—'} wide />
+        <Fact label="Original contract (₦m)" value={nairaM(o.project.original_contract_sum)} />
+        <Fact label="Current contract (₦m)" value={nairaM(o.project.current_contract_sum)} />
+        <Fact label="Contract award date" value={fmtDate(s.award_date)} />
+        <Fact label="Commencement date" value={fmtDate(s.commencement_date)} />
+        <Fact label="Revised completion" value={fmtDate(s.revised_completion_date)} />
+        <Fact label="Contract duration" value={s.duration_months != null ? `${num(s.duration_months, 1)} months` : '—'} />
+        <Fact label="Months elapsed" value={s.months_elapsed != null ? num(s.months_elapsed, 1) : '—'} />
+        <Fact label="Time elapsed vs duration" value={pctFmt(s.time_elapsed_pct, 0)} />
+        <Fact label="Months overdue" value={s.months_overdue != null && s.months_overdue > 0 ? num(s.months_overdue, 1) : '—'} />
       </CardContent>
     </Card>
   )
 }
 
-function Rung({ label, value, note, bold, warn }: {
-  label: string; value: number | null; note: string; bold?: boolean; warn?: boolean
+/* ── Physical progress — works completed ─────────────────────────────── */
+
+function PhysicalProgressCard({ o }: { o: ProjectOverview }) {
+  const L = o.physical.ladder
+  const bills = o.physical.bills
+
+  const chartOption = useMemo(() => {
+    const rows = [...bills].reverse()
+    return {
+      tooltip: {
+        trigger: 'axis' as const,
+        valueFormatter: (v: number) => `${v.toFixed(1)}%`,
+      },
+      grid: { left: 8, right: 44, top: 8, bottom: 8, containLabel: true },
+      xAxis: {
+        type: 'value' as const, max: 100,
+        axisLabel: { formatter: '{value}%' },
+        splitLine: { lineStyle: { opacity: 0.3 } },
+      },
+      yAxis: {
+        type: 'category' as const,
+        data: rows.map((b) => titleCase(b.name)),
+        axisLabel: { width: 170, overflow: 'truncate' as const, fontSize: 11 },
+      },
+      series: [{
+        type: 'bar' as const,
+        data: rows.map((b) => Math.round((b.pct_complete ?? 0) * 1000) / 10),
+        barMaxWidth: 14,
+        itemStyle: { color: '#f59e0b', borderRadius: [0, 4, 4, 0] },
+        label: {
+          show: true, position: 'right' as const, fontSize: 11,
+          formatter: ({ value }: { value: number }) => `${value}%`,
+        },
+      }],
+    }
+  }, [bills])
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm">Physical progress — works completed</CardTitle>
+        <p className="text-xs text-muted-foreground">
+          Work sections from the BEME sheet · to-date = previous + stored weeks
+          (kobo-exact vs the workbook&apos;s own cumulative)
+        </p>
+      </CardHeader>
+      <CardContent className="grid gap-4 p-0 lg:grid-cols-[1fr_360px] lg:items-start">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b text-left text-xs text-muted-foreground">
+                <th className="px-4 py-2 font-medium">Work Section</th>
+                <th className="px-4 py-2 text-right font-medium">BEME (₦m)</th>
+                <th className="px-4 py-2 text-right font-medium">This Week (₦m)</th>
+                <th className="px-4 py-2 text-right font-medium">To Date (₦m)</th>
+                <th className="px-4 py-2 text-right font-medium">% Complete</th>
+              </tr>
+            </thead>
+            <tbody>
+              {bills.map((b) => (
+                <tr key={b.bill_code ?? b.name} className="border-b">
+                  <td className="max-w-[280px] truncate px-4 py-1.5">{titleCase(b.name)}</td>
+                  <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(b.beme_amount)}</td>
+                  <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(b.this_week)}</td>
+                  <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(b.to_date)}</td>
+                  <td className={`px-4 py-1.5 text-right tabular-nums ${(b.pct_complete ?? 0) > 1 ? 'font-semibold text-red-600' : ''}`}>
+                    {pctFmt(b.pct_complete)}
+                  </td>
+                </tr>
+              ))}
+              <LadderRow label="Sub-Total" r={L.works} bold />
+              <LadderRow label="Add VAT & State Levies (7.5%)" r={L.vat} />
+              <LadderRow label="Total Works Completed (Incl. VAT)" r={L.works_incl_vat} bold />
+              <LadderRow label="Contingency (Incl. VAT)" r={L.contingency_incl_vat}
+                note="accrual: BEME tail sub-total₂ − sub-total₁, × 1.075" />
+              <LadderRow label="TOTAL WORKS DONE (Incl. VAT & Contingency)" r={L.total_incl_contingency} bold />
+            </tbody>
+          </table>
+        </div>
+        <div className="px-4 pb-4 lg:pt-2">
+          <p className="mb-1 text-xs font-medium text-muted-foreground">% Complete by Work Section</p>
+          <ECharts option={chartOption} style={{ height: Math.max(200, bills.length * 34 + 30) }} notMerge />
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function LadderRow({ label, r, bold, note }: {
+  label: string
+  r: { beme: number | null; this_week: number | null; to_date: number | null }
+  bold?: boolean
+  note?: string
+}) {
+  const pct = r.beme && r.to_date != null ? r.to_date / r.beme : null
+  return (
+    <tr className={`border-b last:border-0 ${bold ? 'bg-muted/40 font-semibold' : ''}`}>
+      <td className="px-4 py-1.5" title={note}>{label}</td>
+      <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(r.beme)}</td>
+      <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(r.this_week)}</td>
+      <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(r.to_date)}</td>
+      <td className="px-4 py-1.5 text-right tabular-nums">{pctFmt(pct)}</td>
+    </tr>
+  )
+}
+
+/* ── Certificates & payments ─────────────────────────────────────────── */
+
+function CertsPaymentsCard({ o }: { o: ProjectOverview }) {
+  const c = o.certs_payments
+  const young = c.certificates_total === 0 && c.payments_count === 0
+  return (
+    <Card className="lg:col-span-2">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm">Certificates &amp; payments</CardTitle>
+        <p className="text-xs text-muted-foreground">
+          Certificate + payments ledgers only — never the Contract Summary&apos;s
+          frozen client block
+        </p>
+      </CardHeader>
+      <CardContent>
+        {young ? (
+          <p className="py-3 text-xs text-muted-foreground">
+            No certificates or payments recorded yet — young ledger.
+          </p>
+        ) : (
+          <div className="grid gap-x-8 gap-y-1.5 text-sm md:grid-cols-2">
+            <MoneyRow label="Certificates (No.)" text={String(c.certificates_total)} />
+            <MoneyRow label="Advance Received (₦m)" v={c.advance_received} />
+            <MoneyRow label="Total Certified (₦m)" v={c.certified_to_date} />
+            <MoneyRow label="Advance Recovered (₦m)" v={c.advance_recovered} />
+            <MoneyRow label="Payments Received – Gross (₦m)" v={c.payments_gross} />
+            <MoneyRow label="Advance Outstanding (₦m)" v={c.advance_outstanding} />
+            <MoneyRow label="Payments Received – Net (₦m)" v={c.payments_net} />
+            <MoneyRow label="Retention Held (₦m)" v={c.retention_held} />
+            <MoneyRow label="Certified – Not Yet Paid (₦m)" v={c.certified_not_paid}
+              note="certified − cert-type payments (advances excluded)" />
+            <MoneyRow label="% of Certified Value Paid" text={pctFmt(c.pct_certified_paid)} />
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+/* ── Resources (this week) ───────────────────────────────────────────── */
+
+function ResourcesCard({ o }: { o: ProjectOverview }) {
+  const r = o.resources
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm">Resources · this week</CardTitle>
+        <p className="text-xs text-muted-foreground">Labour Strength + Diesel sheets, latest week</p>
+      </CardHeader>
+      <CardContent className="space-y-1.5 text-sm">
+        <MoneyRow label="Direct Labour Headcount" text={num(r.labour_direct)} />
+        <MoneyRow label="Casual Labour Headcount" text={num(r.labour_casual)} />
+        <MoneyRow label="Diesel Used This Week (L)" text={num(r.diesel_litres_week)} />
+        <MoneyRow label="Diesel Cost This Week (₦m)" v={r.diesel_cost_week}
+          note="Cost Report AGO row — the money truth" />
+      </CardContent>
+    </Card>
+  )
+}
+
+/* ── Cost & profitability ────────────────────────────────────────────── */
+
+const DONUT_COLORS = ['#94a3b8', '#f59e0b', '#3b82f6', '#10b981', '#8b5cf6', '#f43f5e', '#14b8a6', '#eab308']
+
+function CostProfitabilityCard({ o }: { o: ProjectOverview }) {
+  const cp = o.cost_profitability
+
+  const donutOption = useMemo(() => ({
+    tooltip: {
+      trigger: 'item' as const,
+      valueFormatter: (v: number) => `₦${nairaM(v)}m`,
+    },
+    legend: {
+      orient: 'vertical' as const, right: 0, top: 'middle',
+      textStyle: { fontSize: 11 }, itemWidth: 10, itemHeight: 10,
+    },
+    series: [{
+      type: 'pie' as const, radius: ['52%', '78%'], center: ['32%', '50%'],
+      itemStyle: { borderWidth: 2, borderColor: 'transparent' },
+      label: { show: false },
+      data: cp.categories.map((c, i) => ({
+        name: c.category, value: Math.round(c.to_date),
+        itemStyle: { color: DONUT_COLORS[i % DONUT_COLORS.length] },
+      })),
+    }],
+  }), [cp.categories])
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm">Cost &amp; profitability</CardTitle>
+        <p className="text-xs text-muted-foreground">
+          Cost Report categories · to-date = previous + stored weeks ·
+          net earnings = work done incl VAT (excl contingency) − costs — the
+          Weekly Summary definition
+        </p>
+      </CardHeader>
+      <CardContent className="grid gap-4 p-0 lg:grid-cols-[1fr_380px] lg:items-center">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b text-left text-xs text-muted-foreground">
+                <th className="px-4 py-2 font-medium">Cost Category</th>
+                <th className="px-4 py-2 text-right font-medium">This Week (₦m)</th>
+                <th className="px-4 py-2 text-right font-medium">To Date (₦m)</th>
+                <th className="px-4 py-2 text-right font-medium">% of Total Cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              {cp.categories.map((c) => (
+                <tr key={c.category} className="border-b">
+                  <td className="px-4 py-1.5">{c.category}</td>
+                  <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(c.this_week)}</td>
+                  <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(c.to_date)}</td>
+                  <td className="px-4 py-1.5 text-right tabular-nums">{pctFmt(c.pct_of_total)}</td>
+                </tr>
+              ))}
+              <tr className="border-b bg-muted/40 font-semibold">
+                <td className="px-4 py-1.5">Total Costs to Date</td>
+                <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(cp.total_this_week)}</td>
+                <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(cp.total_to_date)}</td>
+                <td className="px-4 py-1.5 text-right tabular-nums">100.0%</td>
+              </tr>
+              <tr className="border-b">
+                <td className="px-4 py-1.5">Value of Work Done — Incl. VAT, Excl. Contingency</td>
+                <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(cp.works_incl_vat_this_week)}</td>
+                <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(cp.works_incl_vat_to_date)}</td>
+                <td className="px-4 py-1.5" />
+              </tr>
+              <tr className="border-b bg-muted/40 font-semibold">
+                <td className="px-4 py-1.5">Net Earnings (₦m)</td>
+                <td className={`px-4 py-1.5 text-right tabular-nums ${cp.net_this_week < 0 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-400'}`}>
+                  {nairaM(cp.net_this_week)}
+                </td>
+                <td className={`px-4 py-1.5 text-right tabular-nums ${cp.net_to_date < 0 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-400'}`}>
+                  {nairaM(cp.net_to_date)}
+                </td>
+                <td className="px-4 py-1.5" />
+              </tr>
+              <tr>
+                <td className="px-4 py-1.5 font-semibold">Net Margin %</td>
+                <td className="px-4 py-1.5 text-right font-semibold tabular-nums">{pctFmt(cp.margin_this_week)}</td>
+                <td className="px-4 py-1.5 text-right font-semibold tabular-nums">{pctFmt(cp.margin_to_date)}</td>
+                <td className="px-4 py-1.5" />
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div className="px-4 pb-4">
+          <p className="mb-1 text-xs font-medium text-muted-foreground">Cost to Date by Category (₦m)</p>
+          <ECharts option={donutOption} style={{ height: 230 }} notMerge />
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+/* ── Financial position ──────────────────────────────────────────────── */
+
+function FinancialPositionCard({ o }: { o: ProjectOverview }) {
+  const cp = o.cost_profitability
+  const bars = useMemo(() => ([
+    { label: 'Contract Value', value: o.headline.contract_sum },
+    { label: 'Work Done (Incl. VAT)', value: cp.works_incl_vat_to_date },
+    { label: 'Certified', value: o.certs_payments.certified_to_date },
+    { label: 'Paid – Gross', value: o.certs_payments.payments_gross },
+    { label: 'Cost to Date', value: cp.total_to_date },
+    { label: 'Net Earnings', value: cp.net_to_date },
+  ]), [o, cp])
+
+  const option = useMemo(() => ({
+    tooltip: {
+      trigger: 'axis' as const,
+      valueFormatter: (v: number) => `₦${nairaM(v)}m`,
+    },
+    grid: { left: 8, right: 8, top: 28, bottom: 8, containLabel: true },
+    xAxis: {
+      type: 'category' as const,
+      data: bars.map((b) => b.label),
+      axisLabel: { fontSize: 11, interval: 0 },
+    },
+    yAxis: {
+      type: 'value' as const,
+      axisLabel: { formatter: (v: number) => num(v / 1e6) },
+      splitLine: { lineStyle: { opacity: 0.3 } },
+    },
+    series: [{
+      type: 'bar' as const,
+      data: bars.map((b) => Math.round(b.value)),
+      barMaxWidth: 46,
+      itemStyle: { color: '#f59e0b', borderRadius: [4, 4, 0, 0] },
+      label: {
+        show: true, position: 'top' as const, fontSize: 11,
+        formatter: ({ value }: { value: number }) => nairaM(value, 0),
+      },
+    }],
+  }), [bars])
+
+  return (
+    <Card>
+      <CardHeader className="pb-0">
+        <CardTitle className="text-sm">Financial position (₦m)</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <ECharts option={option} style={{ height: 280 }} notMerge />
+      </CardContent>
+    </Card>
+  )
+}
+
+/* ── shared bits ─────────────────────────────────────────────────────── */
+
+function Kpi({ label, value, lineage, tone }: {
+  label: string; value: string; lineage: string; tone?: 'good' | 'bad'
 }) {
   return (
-    <div className="flex flex-wrap items-baseline gap-x-4 px-4 py-2">
-      <span className={`w-64 shrink-0 ${bold ? 'font-semibold' : 'text-muted-foreground'}`}>{label}</span>
-      <span className={`tabular-nums ${bold ? 'font-semibold' : ''}`}>
-        {value == null ? <span className="text-muted-foreground">—</span> : naira(value)}
-      </span>
-      <span className={`ml-auto text-[11px] ${warn ? 'text-amber-700' : 'text-muted-foreground/70'}`}>{note}</span>
+    <Card>
+      <CardContent className="p-3.5">
+        <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+        <p className={`mt-0.5 text-xl font-bold tabular-nums ${
+          tone === 'bad' ? 'text-red-600' : tone === 'good' ? 'text-emerald-700 dark:text-emerald-400' : ''
+        }`}>{value}</p>
+        <p className="mt-0.5 truncate text-[11px] text-muted-foreground" title={lineage}>{lineage}</p>
+      </CardContent>
+    </Card>
+  )
+}
+
+function Fact({ label, value, wide }: { label: string; value: string; wide?: boolean }) {
+  return (
+    <div className={wide ? 'col-span-2 md:col-span-3 xl:col-span-2' : ''}>
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="font-medium tabular-nums">{value}</p>
     </div>
   )
 }
 
-function MoneyRow({ label, v, bold }: { label: string; v: number; bold?: boolean }) {
+function MoneyRow({ label, v, text, note }: {
+  label: string; v?: number; text?: string; note?: string
+}) {
   return (
-    <p className={`flex justify-between gap-2 ${bold ? 'font-semibold' : ''}`}>
-      <span className={bold ? '' : 'text-muted-foreground'}>{label}</span>
-      <span className="tabular-nums">{naira(v)}</span>
-    </p>
-  )
-}
-
-function Fact({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <p className="text-[11px] text-muted-foreground">{label}</p>
-      <p className="truncate">{value}</p>
+    <div className="flex items-baseline justify-between gap-3 border-b border-dashed pb-1 last:border-0" title={note}>
+      <span className="text-muted-foreground">{label}</span>
+      <span className="font-medium tabular-nums">{text ?? nairaM(v)}</span>
     </div>
   )
 }
 
-function Alerts({ o }: { o: ProjectOverview }) {
-  const items: string[] = []
-  if (o.alerts.scope_exceeds_contract) {
-    items.push(`Scope ${naira(o.ladder.beme_scope, true)} exceeds contract ${naira(o.ladder.contract_sum, true)} — variation pending`)
-  }
-  if (o.alerts.missing_weeks.length > 0) {
-    items.push(`Missing weeks: ${o.alerts.missing_weeks.map(([y, w]) => `${y}-W${String(w).padStart(2, '0')}`).join(', ')}`)
-  }
-  if (o.alerts.flags_latest_week > 0) {
-    items.push(`${o.alerts.flags_latest_week} flags in the latest week`)
-  }
-  if (o.alerts.unresolved_fleet > 0) {
-    items.push(`${o.alerts.unresolved_fleet} fleet numbers awaiting a verdict`)
-  }
-  if (items.length === 0) return null
+const titleCase = (s: string): string =>
+  s.replace(/\w\S*/g, (w) => w[0].toUpperCase() + w.slice(1).toLowerCase())
+
+function OverviewSkeleton() {
   return (
-    <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
-      <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-        {items.map((t, i) => (
-          <span key={i}>{t}{i < items.length - 1 ? ' · ' : ''}</span>
-        ))}
-      </p>
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-24" />)}
+      </div>
+      <Skeleton className="h-40" />
+      <Skeleton className="h-96" />
+      <Skeleton className="h-64" />
     </div>
   )
 }
 
 function NoReportsYet() {
   return (
-    <div className="rounded-lg border py-12 text-center text-muted-foreground">
-      <CalendarDays className="mx-auto mb-3 h-10 w-10 opacity-50" />
-      <p className="text-lg font-medium text-foreground">No weekly reports yet</p>
-      <p className="mt-1 text-sm">
-        Upload this project&apos;s first weekly report and the overview builds itself.
-      </p>
-      <Link
-        href="/projects/upload"
-        className="mt-4 inline-block rounded-md border px-4 py-2 text-sm hover:bg-muted"
-      >
-        Upload a weekly report
-      </Link>
-    </div>
-  )
-}
-
-function OverviewSkeleton() {
-  return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        {[...Array(4)].map((_, i) => (
-          <Card key={i} className="py-0">
-            <CardContent className="px-4 py-3 space-y-2">
-              <Skeleton className="h-3 w-24" />
-              <Skeleton className="h-6 w-20" />
-              <Skeleton className="h-3 w-28" />
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-      <Skeleton className="h-64 w-full" />
-      <div className="grid gap-3 lg:grid-cols-3">
-        {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-40" />)}
-      </div>
-    </div>
+    <Card>
+      <CardContent className="py-12 text-center">
+        <p className="font-medium">No weekly reports yet</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Upload the first 16-sheet workbook on the Submissions tab — the
+          dashboard builds itself from the parsed ledgers.
+        </p>
+      </CardContent>
+    </Card>
   )
 }
