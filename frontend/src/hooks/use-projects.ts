@@ -2,7 +2,7 @@
  * Projects data hooks using React Query
  */
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect } from 'react';
 import {
   useMutation,
   useQuery,
@@ -346,6 +346,14 @@ export const submissionKeys = {
 const ACTIVE_STATUSES = new Set(['queued', 'parsing']);
 const TERMINAL_STATUSES = new Set(['success', 'partial', 'failed']);
 
+// Submissions whose processing outcome hasn't been reflected in the UI
+// yet. Module-level on purpose: it survives route changes, so a workbook
+// that finishes parsing while NO submissions view is mounted still
+// triggers the global refresh the next time any of them fetches.
+// Seeded by the upload/retry mutations (they know the submission id)
+// and by any fetch that sees a submission queued/parsing.
+const PENDING_SUBMISSIONS = new Set<string>();
+
 export function useProjectSubmissions(params: {
   status?: SubmissionStatus; project_id?: string; page?: number; limit?: number;
 } = {}, opts: { poll?: boolean; watch?: boolean } = {}) {
@@ -356,35 +364,33 @@ export function useProjectSubmissions(params: {
     staleTime: 30 * 1000,
     networkMode: 'always',
     retry: 2,
-    // poll: steady 4s (submission tables). watch: 4s only while a
-    // submission is queued/parsing, silent otherwise (hub layout).
+    // poll: steady 4s (submission tables). watch (hub layout): 4s while
+    // anything is processing, slow 15s heartbeat otherwise so changes
+    // made elsewhere still surface without a manual refresh.
     refetchInterval: opts.poll
       ? 4000
       : opts.watch
-        ? (q) => ((q.state.data?.data ?? []).some(
-            (sub) => ACTIVE_STATUSES.has(sub.status)) ? 4000 : false)
+        ? (q) => (PENDING_SUBMISSIONS.size > 0
+            || (q.state.data?.data ?? []).some(
+              (sub) => ACTIVE_STATUSES.has(sub.status)) ? 4000 : 15000)
         : undefined,
   });
 
-  // The moment a workbook finishes processing (queued/parsing -> done),
-  // every projects query — overview, tables, issues, lists — is stale.
-  // Invalidate the whole 'projects' root so the dashboard updates on the
-  // next poll tick instead of waiting out staleTime or a hard refresh.
-  const prevStatuses = useRef<Map<string, string>>(new Map());
+  // The moment a pending workbook lands (queued/parsing -> done), every
+  // projects query — overview, tables, issues, lists — is stale.
+  // Invalidate the whole 'projects' root so the dashboard updates within
+  // one poll tick instead of waiting out staleTime or a hard refresh.
   useEffect(() => {
     const rows = query.data?.data ?? [];
-    const prev = prevStatuses.current;
-    const next = new Map<string, string>();
     let finished = false;
     for (const sub of rows) {
-      next.set(sub.id, sub.status);
-      const was = prev.get(sub.id);
-      if (TERMINAL_STATUSES.has(sub.status)
-          && (was ? ACTIVE_STATUSES.has(was) : prev.size > 0 && !prev.has(sub.id))) {
+      if (ACTIVE_STATUSES.has(sub.status)) {
+        PENDING_SUBMISSIONS.add(sub.id);
+      } else if (TERMINAL_STATUSES.has(sub.status) && PENDING_SUBMISSIONS.has(sub.id)) {
+        PENDING_SUBMISSIONS.delete(sub.id);
         finished = true;
       }
     }
-    prevStatuses.current = next;
     if (finished) {
       queryClient.invalidateQueries({ queryKey: projectsKeys.all });
     }
@@ -399,7 +405,11 @@ export function useUploadWeeklyReport() {
     mutationFn: ({ file, projectId, year, weekNumber }: {
       file: File; projectId: string; year: number; weekNumber: number;
     }) => uploadWeeklyReport(file, projectId, year, weekNumber),
-    onSuccess: () => {
+    onSuccess: (data) => {
+      // remember the id NOW — even if parsing finishes before any
+      // submissions view takes its first look, the terminal sighting
+      // still triggers the global refresh
+      if (data?.submission_id) PENDING_SUBMISSIONS.add(data.submission_id);
       queryClient.invalidateQueries({ queryKey: submissionKeys.all });
     },
   });
@@ -409,7 +419,10 @@ export function useRetryProjectSubmission() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => retryProjectSubmission(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: submissionKeys.all }),
+    onSuccess: (_data, id) => {
+      PENDING_SUBMISSIONS.add(id);
+      queryClient.invalidateQueries({ queryKey: submissionKeys.all });
+    },
   });
 }
 
