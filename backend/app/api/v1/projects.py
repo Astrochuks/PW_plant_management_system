@@ -648,6 +648,15 @@ async def delete_project_submission(
             "DELETE FROM project_report_submissions WHERE id = $1::uuid",
             str(submission_id),
         )
+        # Re-derive baseline/gap facts from the remaining weeks in the SAME
+        # transaction. Without this, a deleted middle week leaves to-date
+        # understated until the next upload, and deleting the first week
+        # cascade-deletes its derived baseline (derived_from_report FK).
+        if deleted_report:
+            from app.services.weekly_report_import import recompute_adjustments
+            adj_stats = await recompute_adjustments(conn, str(sub["project_id"]))
+        else:
+            adj_stats = None
 
     # Storage cleanup is best-effort — data consistency doesn't depend on it.
     try:
@@ -673,6 +682,7 @@ async def delete_project_submission(
     )
     return {"success": True,
             "data": {"deleted_week_data": bool(deleted_report),
+                     "adjustments_recomputed": adj_stats,
                      "year": sub["year"], "week_number": sub["week_number"]}}
 
 
