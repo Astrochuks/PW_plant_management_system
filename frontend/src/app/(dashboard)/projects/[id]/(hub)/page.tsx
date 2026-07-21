@@ -42,6 +42,8 @@ export default function ProjectOverviewPage() {
         </p>
       </div>
 
+      <ScheduleCard o={o} />
+
       {/* Headline strip */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
         <Kpi label="Contract Value" value={naira(o.headline.contract_sum, true)}
@@ -74,7 +76,6 @@ export default function ProjectOverviewPage() {
       </div>
 
       <ThisWeekCard o={o} />
-      <ScheduleCard o={o} />
       <PhysicalProgressCard o={o} />
 
       <div className="grid gap-3 lg:grid-cols-3">
@@ -83,7 +84,6 @@ export default function ProjectOverviewPage() {
       </div>
 
       <CostProfitabilityCard o={o} />
-      <FinancialPositionCard o={o} />
     </div>
   )
 }
@@ -502,59 +502,6 @@ function CostProfitabilityCard({ o }: { o: ProjectOverview }) {
           <p className="mb-1 text-xs font-medium text-muted-foreground">Cost to Date by Category (₦m)</p>
           <ECharts option={donutOption} style={{ height: 230 }} notMerge />
         </div>
-      </CardContent>
-    </Card>
-  )
-}
-
-/* ── Financial position ──────────────────────────────────────────────── */
-
-function FinancialPositionCard({ o }: { o: ProjectOverview }) {
-  const cp = o.cost_profitability
-  const bars = useMemo(() => ([
-    { label: 'Contract Value', value: o.headline.contract_sum },
-    { label: 'Work Done (Incl. VAT)', value: cp.works_incl_vat_to_date },
-    { label: 'Certified', value: o.certs_payments.certified_to_date },
-    { label: 'Paid – Gross', value: o.certs_payments.payments_gross },
-    { label: 'Cost to Date', value: cp.total_to_date },
-    { label: 'Net Earnings', value: cp.net_to_date },
-  ]), [o, cp])
-
-  const option = useMemo(() => ({
-    tooltip: {
-      trigger: 'axis' as const,
-      valueFormatter: (v: number) => `₦${nairaM(v)}m`,
-    },
-    grid: { left: 8, right: 8, top: 28, bottom: 8, containLabel: true },
-    xAxis: {
-      type: 'category' as const,
-      data: bars.map((b) => b.label),
-      axisLabel: { fontSize: 11, interval: 0 },
-    },
-    yAxis: {
-      type: 'value' as const,
-      axisLabel: { formatter: (v: number) => num(v / 1e6) },
-      splitLine: { lineStyle: { opacity: 0.3 } },
-    },
-    series: [{
-      type: 'bar' as const,
-      data: bars.map((b) => Math.round(b.value)),
-      barMaxWidth: 46,
-      itemStyle: { color: '#f59e0b', borderRadius: [4, 4, 0, 0] },
-      label: {
-        show: true, position: 'top' as const, fontSize: 11,
-        formatter: ({ value }: { value: number }) => nairaM(value, 0),
-      },
-    }],
-  }), [bars])
-
-  return (
-    <Card>
-      <CardHeader className="pb-0">
-        <CardTitle className="text-sm">Financial position (₦m)</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <ECharts option={option} style={{ height: 280 }} notMerge />
       </CardContent>
     </Card>
   )
