@@ -35,11 +35,7 @@ export default function ProjectOverviewPage() {
   return (
     <div className="space-y-4">
       {/* Week banner */}
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs text-muted-foreground">
-          Tables in <b>₦m</b> (millions), the workbook&apos;s unit — cards show
-          the full figure
-        </p>
+      <div className="flex flex-wrap items-center justify-end gap-2">
         <p className="text-sm">
           <span className="text-muted-foreground">Week No:</span>{' '}
           <b className="tabular-nums">{o.latest_week.week_number}</b>
