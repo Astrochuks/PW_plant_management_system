@@ -141,6 +141,9 @@ export interface CreateProjectRequest {
   original_duration_months?: number;
   original_completion_date?: string;
   extension_of_time_months?: number;
+  eot_requested_months?: number;
+  works_commenced_date?: string;
+  retc?: boolean;
   revised_completion_date?: string;
   substantial_completion_cert?: string;
   substantial_completion_date?: string;
@@ -869,6 +872,11 @@ export interface ProjectOverview {
     commencement_date: string | null;
     revised_completion_date: string | null;
     original_duration_months: number | null;
+    original_completion_date: string | null;
+    extension_of_time_months: number | null;
+    eot_requested_months: number | null;
+    works_commenced_date: string | null;
+    retc: boolean | null;
   };
   latest_week: {
     year: number;
@@ -897,11 +905,16 @@ export interface ProjectOverview {
     client: string | null;
     award_date: string | null;
     commencement_date: string | null;
+    original_duration_months: number | null;
+    original_completion_date: string | null;
+    eot_requested_months: number | null;
+    eot_granted_months: number | null;
+    revised_duration_months: number | null;
     revised_completion_date: string | null;
-    duration_months: number | null;
-    months_elapsed: number | null;
-    months_overdue: number | null;
-    time_elapsed_pct: number | null;
+    works_commenced_date: string | null;
+    duration_on_site_months: number | null;
+    overdue_original_months: number | null;
+    overdue_revised_months: number | null;
     status: 'overdue' | 'on_track' | null;
   };
   physical: {

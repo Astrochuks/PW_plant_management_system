@@ -59,6 +59,8 @@ SELECT
             p.project_type, p.work_nature, p.current_contract_sum,
             p.original_contract_sum, p.award_date, p.commencement_date,
             p.revised_completion_date, p.original_duration_months,
+            p.original_completion_date, p.extension_of_time_months,
+            p.eot_requested_months, p.works_commenced_date, p.retc,
             s.name AS state_name
      FROM projects p LEFT JOIN states s ON s.id = p.state_id
      WHERE p.id = $1::uuid) x)                                   AS project,
@@ -177,6 +179,19 @@ def _fn(v: Any) -> float | None:
     return float(v) if v is not None else None
 
 
+def _add_months(d: date, months: float) -> date:
+    """Calendar-month addition (the workbook's own convention:
+    18-Dec-20 + 12 = 18-Dec-21). Fractional months fall back to days."""
+    import calendar
+    whole = int(months)
+    if abs(months - whole) > 1e-9:
+        from datetime import timedelta
+        return d + timedelta(days=round(months * DAYS_PER_MONTH))
+    total = d.month - 1 + whole
+    y, m = d.year + total // 12, total % 12 + 1
+    return date(y, m, min(d.day, calendar.monthrange(y, m)[1]))
+
+
 def _as_date(v: Any) -> date | None:
     if v is None:
         return None
@@ -263,17 +278,28 @@ async def compute_project_overview(project_id: str) -> dict[str, Any]:
     net = round(earnings - costs, 2)
     net_tw = round(earnings_tw - costs_tw, 2)
 
-    # ── schedule ────────────────────────────────────────────────────────
+    # ── schedule — the workbook's Contract Schedules block, verbatim ────
     report_date = _as_date((latest or {}).get("week_ending_date"))
     commence = _as_date(project.get("commencement_date"))
-    completion = _as_date(project.get("revised_completion_date"))
+    revised_completion = _as_date(project.get("revised_completion_date"))
     duration = _fn(project.get("original_duration_months"))
-    if duration is None and commence and completion:
-        duration = round((completion - commence).days / DAYS_PER_MONTH, 1)
-    months_elapsed = (round((report_date - commence).days / DAYS_PER_MONTH, 1)
-                      if report_date and commence else None)
-    months_overdue = (round((report_date - completion).days / DAYS_PER_MONTH, 1)
-                      if report_date and completion else None)
+    if duration is None and commence and revised_completion:
+        duration = round((revised_completion - commence).days / DAYS_PER_MONTH, 1)
+    orig_completion = _as_date(project.get("original_completion_date"))
+    if orig_completion is None and commence and duration is not None:
+        orig_completion = _add_months(commence, duration)
+    eot_requested = _fn(project.get("eot_requested_months"))
+    eot_granted = _fn(project.get("extension_of_time_months"))
+    revised_duration = (round(duration + (eot_granted or 0), 1)
+                        if duration is not None else None)
+    works_commenced = _as_date(project.get("works_commenced_date"))
+    # workbook shows 0.0 Mths while the commenced cell is blank
+    duration_on_site = (round((report_date - works_commenced).days / DAYS_PER_MONTH, 1)
+                        if report_date and works_commenced else 0.0)
+    overdue_original = (round((report_date - orig_completion).days / DAYS_PER_MONTH, 1)
+                        if report_date and orig_completion else None)
+    months_overdue = (round((report_date - revised_completion).days / DAYS_PER_MONTH, 1)
+                      if report_date and revised_completion else None)
 
     bills = []
     for b in (row["bills"] or []):
@@ -328,13 +354,17 @@ async def compute_project_overview(project_id: str) -> dict[str, Any]:
             "client": project.get("client"),
             "award_date": project.get("award_date"),
             "commencement_date": project.get("commencement_date"),
+            "original_duration_months": duration,
+            "original_completion_date": (orig_completion.isoformat()
+                                         if orig_completion else None),
+            "eot_requested_months": eot_requested,
+            "eot_granted_months": eot_granted,
+            "revised_duration_months": revised_duration,
             "revised_completion_date": project.get("revised_completion_date"),
-            "duration_months": duration,
-            "months_elapsed": months_elapsed,
-            "months_overdue": months_overdue,
-            "time_elapsed_pct": (round(months_elapsed / duration, 4)
-                                 if months_elapsed is not None and duration
-                                 else None),
+            "works_commenced_date": project.get("works_commenced_date"),
+            "duration_on_site_months": duration_on_site,
+            "overdue_original_months": overdue_original,
+            "overdue_revised_months": months_overdue,
             "status": ("overdue" if months_overdue is not None and months_overdue > 0
                        else "on_track" if report_date else None),
         },

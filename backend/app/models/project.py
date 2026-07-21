@@ -92,7 +92,10 @@ class ProjectUpdate(BaseModel):
     original_duration_months: int | None = None
     original_completion_date: date | None = None
     extension_of_time_months: int | None = None
+    eot_requested_months: float | None = None
     revised_completion_date: date | None = None
+    works_commenced_date: date | None = None
+    retc: bool | None = None
 
     substantial_completion_cert: str | None = None
     substantial_completion_date: date | None = None
