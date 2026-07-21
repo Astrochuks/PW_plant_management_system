@@ -182,7 +182,9 @@ async def compute_project_overview(project_id: str) -> dict[str, Any]:
         "progress": {
             "physical_pct": round(works / scope, 4) if scope else None,
             "commercial_pct": round(certified_incl_vat / contract, 4) if contract else None,
-            "reported_pct": _f(latest["beme_pct_complete"])
+            # beme_pct_complete is stored as the workbook shows it (32.15
+            # meaning 32.15%) — scale to a fraction like the other pcts.
+            "reported_pct": _f(latest["beme_pct_complete"]) / 100.0
                 if latest and latest.get("beme_pct_complete") is not None else None,
         },
         "payment_status": {

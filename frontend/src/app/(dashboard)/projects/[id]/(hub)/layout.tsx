@@ -22,12 +22,11 @@ import { STATUS_STYLES } from '@/components/projects/projects-table'
 
 const PAGES = [
   { seg: '', label: 'Overview', ready: true },
-  { seg: 'performance', label: 'Performance', ready: true },
-  { seg: 'work-done', label: 'Work done', ready: true },
-  { seg: 'costs', label: 'Costs', ready: true },
-  { seg: 'plant', label: 'Plant & diesel', ready: true },
-  { seg: 'site', label: 'Site', ready: true },
+  { seg: 'work-cost', label: 'Work & Cost', ready: true },
+  { seg: 'plant', label: 'Plant & Diesel', ready: true },
   { seg: 'financials', label: 'Financials', ready: true },
+  { seg: 'report', label: 'Report', ready: true },
+  { seg: 'submissions', label: 'Submissions', ready: true },
 ]
 
 export default function ProjectHubLayout({ children }: { children: React.ReactNode }) {

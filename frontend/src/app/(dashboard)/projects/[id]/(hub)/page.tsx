@@ -218,8 +218,8 @@ export default function ProjectOverviewPage() {
           </div>
           <p className="border-t px-4 py-2 text-xs text-muted-foreground">
             Full history, flags and original files on the{' '}
-            <Link href="/projects/submissions" className="underline hover:text-foreground">
-              weekly reports page
+            <Link href={`/projects/${o.project.id}/submissions`} className="underline hover:text-foreground">
+              Submissions tab
             </Link>.
           </p>
         </CardContent>
