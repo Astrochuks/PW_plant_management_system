@@ -297,6 +297,7 @@ function PhysicalProgressCard({ o }: { o: ProjectOverview }) {
               <tr className="border-b text-left text-xs text-muted-foreground">
                 <th className="px-4 py-2 font-medium">Work Section</th>
                 <th className="px-4 py-2 text-right font-medium">BEME (₦m)</th>
+                <th className="px-4 py-2 text-right font-medium">Last Week (₦m)</th>
                 <th className="px-4 py-2 text-right font-medium">This Week (₦m)</th>
                 <th className="px-4 py-2 text-right font-medium">To Date (₦m)</th>
                 <th className="px-4 py-2 text-right font-medium">% Complete</th>
@@ -307,6 +308,7 @@ function PhysicalProgressCard({ o }: { o: ProjectOverview }) {
                 <tr key={b.bill_code ?? b.name} className="border-b">
                   <td className="max-w-[280px] truncate px-4 py-1.5">{titleCase(b.name)}</td>
                   <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(b.beme_amount)}</td>
+                  <td className="px-4 py-1.5 text-right tabular-nums text-muted-foreground">{nairaM(b.last_week)}</td>
                   <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(b.this_week)}</td>
                   <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(b.to_date)}</td>
                   <td className={`px-4 py-1.5 text-right tabular-nums ${(b.pct_complete ?? 0) > 1 ? 'font-semibold text-red-600' : ''}`}>
@@ -334,7 +336,7 @@ function PhysicalProgressCard({ o }: { o: ProjectOverview }) {
 
 function LadderRow({ label, r, bold, note }: {
   label: string
-  r: { beme: number | null; this_week: number | null; to_date: number | null }
+  r: { beme: number | null; last_week: number | null; this_week: number | null; to_date: number | null }
   bold?: boolean
   note?: string
 }) {
@@ -343,6 +345,7 @@ function LadderRow({ label, r, bold, note }: {
     <tr className={`border-b last:border-0 ${bold ? 'bg-muted/40 font-semibold' : ''}`}>
       <td className="px-4 py-1.5" title={note}>{label}</td>
       <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(r.beme)}</td>
+      <td className="px-4 py-1.5 text-right tabular-nums text-muted-foreground">{nairaM(r.last_week)}</td>
       <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(r.this_week)}</td>
       <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(r.to_date)}</td>
       <td className="px-4 py-1.5 text-right tabular-nums">{pctFmt(pct)}</td>
@@ -453,6 +456,7 @@ function CostProfitabilityCard({ o }: { o: ProjectOverview }) {
             <thead>
               <tr className="border-b text-left text-xs text-muted-foreground">
                 <th className="px-4 py-2 font-medium">Cost Category</th>
+                <th className="px-4 py-2 text-right font-medium">Last Week (₦m)</th>
                 <th className="px-4 py-2 text-right font-medium">This Week (₦m)</th>
                 <th className="px-4 py-2 text-right font-medium">To Date (₦m)</th>
                 <th className="px-4 py-2 text-right font-medium">% of Total Cost</th>
@@ -462,6 +466,7 @@ function CostProfitabilityCard({ o }: { o: ProjectOverview }) {
               {cp.categories.map((c) => (
                 <tr key={c.category} className="border-b">
                   <td className="px-4 py-1.5">{c.category}</td>
+                  <td className="px-4 py-1.5 text-right tabular-nums text-muted-foreground">{nairaM(c.last_week)}</td>
                   <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(c.this_week)}</td>
                   <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(c.to_date)}</td>
                   <td className="px-4 py-1.5 text-right tabular-nums">{pctFmt(c.pct_of_total)}</td>
@@ -469,18 +474,23 @@ function CostProfitabilityCard({ o }: { o: ProjectOverview }) {
               ))}
               <tr className="border-b bg-muted/40 font-semibold">
                 <td className="px-4 py-1.5">Total Costs to Date</td>
+                <td className="px-4 py-1.5 text-right tabular-nums text-muted-foreground">{nairaM(cp.total_last_week)}</td>
                 <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(cp.total_this_week)}</td>
                 <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(cp.total_to_date)}</td>
                 <td className="px-4 py-1.5 text-right tabular-nums">100.0%</td>
               </tr>
               <tr className="border-b">
                 <td className="px-4 py-1.5">Value of Work Done — Incl. VAT, Excl. Contingency</td>
+                <td className="px-4 py-1.5 text-right tabular-nums text-muted-foreground">{nairaM(cp.works_incl_vat_last_week)}</td>
                 <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(cp.works_incl_vat_this_week)}</td>
                 <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(cp.works_incl_vat_to_date)}</td>
                 <td className="px-4 py-1.5" />
               </tr>
               <tr className="border-b bg-muted/40 font-semibold">
                 <td className="px-4 py-1.5">Net Earnings (₦m)</td>
+                <td className={`px-4 py-1.5 text-right tabular-nums ${cp.net_last_week != null && cp.net_last_week < 0 ? 'text-red-600' : 'text-muted-foreground'}`}>
+                  {nairaM(cp.net_last_week)}
+                </td>
                 <td className={`px-4 py-1.5 text-right tabular-nums ${cp.net_this_week < 0 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-400'}`}>
                   {nairaM(cp.net_this_week)}
                 </td>
@@ -491,6 +501,7 @@ function CostProfitabilityCard({ o }: { o: ProjectOverview }) {
               </tr>
               <tr>
                 <td className="px-4 py-1.5 font-semibold">Net Margin %</td>
+                <td className="px-4 py-1.5 text-right font-semibold tabular-nums text-muted-foreground">{pctFmt(cp.margin_last_week)}</td>
                 <td className="px-4 py-1.5 text-right font-semibold tabular-nums">{pctFmt(cp.margin_this_week)}</td>
                 <td className="px-4 py-1.5 text-right font-semibold tabular-nums">{pctFmt(cp.margin_to_date)}</td>
                 <td className="px-4 py-1.5" />

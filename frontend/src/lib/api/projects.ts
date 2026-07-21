@@ -830,6 +830,7 @@ export async function getSubmissionDownloadUrl(
 
 export interface LadderRung {
   beme: number | null;
+  last_week: number | null;
   this_week: number | null;
   to_date: number | null;
 }
@@ -838,6 +839,7 @@ export interface OverviewBill {
   bill_code: string | null;
   name: string;
   beme_amount: number;
+  last_week: number | null;
   this_week: number;
   to_date: number;
   pct_complete: number | null;
@@ -845,6 +847,7 @@ export interface OverviewBill {
 
 export interface OverviewCostCategory {
   category: string;
+  last_week: number | null;
   this_week: number;
   to_date: number;
   pct_of_total: number | null;
@@ -930,12 +933,16 @@ export interface ProjectOverview {
   cost_profitability: {
     categories: OverviewCostCategory[];
     total_this_week: number;
+    total_last_week: number | null;
     total_to_date: number;
     works_incl_vat_this_week: number;
+    works_incl_vat_last_week: number | null;
     works_incl_vat_to_date: number;
     net_this_week: number;
+    net_last_week: number | null;
     net_to_date: number;
     margin_this_week: number | null;
+    margin_last_week: number | null;
     margin_to_date: number | null;
   };
   resources: {

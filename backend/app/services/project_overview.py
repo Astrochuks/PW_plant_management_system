@@ -45,7 +45,7 @@ WITH latest AS (
     ORDER BY year DESC, week_number DESC LIMIT 1
 ),
 prev AS (
-    SELECT id, year, week_number, week_ending_date
+    SELECT id, year, week_number, week_ending_date, beme_tail
     FROM project_weekly_reports WHERE project_id = $1::uuid
     ORDER BY year DESC, week_number DESC OFFSET 1 LIMIT 1
 ),
@@ -109,7 +109,8 @@ SELECT
               coalesce(max(bb.contract_amount),
                        sum(c.contract_amount)) AS beme_amount,
               sum(c.amount_done) AS to_date,
-              coalesce(sum(tw.amt), 0) AS this_week
+              coalesce(sum(tw.amt), 0) AS this_week,
+              coalesce(sum(pv.amt), 0) AS last_week
        FROM v_project_beme_cumulative c
        LEFT JOIN project_beme_bills bb
          ON bb.project_id = c.project_id AND bb.bill_code = c.bill_code
@@ -118,22 +119,30 @@ SELECT
          FROM project_beme_progress p
          WHERE p.item_id = c.item_id
            AND p.weekly_report_id = (SELECT id FROM latest)) tw ON true
+       LEFT JOIN LATERAL (
+         SELECT sum(p.amount_this_week) AS amt
+         FROM project_beme_progress p
+         WHERE p.item_id = c.item_id
+           AND p.weekly_report_id = (SELECT id FROM prev)) pv ON true
        WHERE c.project_id = $1::uuid
        GROUP BY c.bill_code) x)                                  AS bills,
   (SELECT json_agg(row_to_json(x) ORDER BY x.to_date DESC)
      FROM (
-       SELECT u.cat, sum(u.tw) AS this_week, sum(u.td) AS to_date
+       SELECT u.cat, sum(u.tw) AS this_week, sum(u.lw) AS last_week,
+              sum(u.td) AS to_date
        FROM (
          SELECT coalesce(cost_category, 'Uncategorised') AS cat,
                 coalesce(sum(amount_this_week) FILTER (
                   WHERE weekly_report_id = (SELECT id FROM latest)), 0) AS tw,
+                coalesce(sum(amount_this_week) FILTER (
+                  WHERE weekly_report_id = (SELECT id FROM prev)), 0) AS lw,
                 coalesce(sum(amount_this_week), 0) AS td
          FROM project_cost_report
          WHERE project_id = $1::uuid GROUP BY 1
          UNION ALL
          SELECT coalesce(nullif(split_part(cost_key, '|', 2), ''),
                          'Uncategorised'),
-                0, coalesce(sum(amount), 0)
+                0, 0, coalesce(sum(amount), 0)
          FROM project_ledger_adjustments
          WHERE project_id = $1::uuid AND ledger = 'cost'
          GROUP BY 1
@@ -234,6 +243,17 @@ async def compute_project_overview(project_id: str) -> dict[str, Any]:
     cont_td = round(_f(accrual["total"]) * VAT, 2) if accrual["total"] is not None else None
     grand = tail.get("grand_total") or {}
 
+    has_prev = row["prev_week"] is not None
+    works_lw = _f(row["works_prev_week"]) if has_prev else None
+    costs_lw = _f(row["cost_prev_week"]) if has_prev else None
+    earnings_lw = round(works_lw * VAT, 2) if works_lw is not None else None
+    prev_tail = (row["prev_week"] or {}).get("beme_tail") or {}
+    prev_accrual = _tail_accrual(prev_tail) if has_prev else {"this_week": None}
+    cont_lw = (round(_f(prev_accrual["this_week"]) * VAT, 2)
+               if has_prev and prev_accrual["this_week"] is not None else None)
+    net_lw = (round(earnings_lw - costs_lw, 2)
+              if earnings_lw is not None and costs_lw is not None else None)
+
     certified = _f(row["cert_gross"])          # ledger cumulative, as recorded
     paid_gross = _f(pay.get("gross"))
     advances = _f(pay.get("advances"))
@@ -264,12 +284,14 @@ async def compute_project_overview(project_id: str) -> dict[str, Any]:
             "name": b.get("name") or b.get("bill_code"),
             "beme_amount": beme,
             "this_week": _f(b.get("this_week")),
+            "last_week": _f(b.get("last_week")) if has_prev else None,
             "to_date": td,
             "pct_complete": round(td / beme, 4) if beme else None,
         })
 
     cost_categories = [
         {"category": c["cat"], "this_week": _f(c.get("this_week")),
+         "last_week": _f(c.get("last_week")) if has_prev else None,
          "to_date": _f(c.get("to_date")),
          "pct_of_total": round(_f(c.get("to_date")) / costs, 4) if costs else None}
         for c in (row["cost_categories"] or [])
@@ -287,7 +309,7 @@ async def compute_project_overview(project_id: str) -> dict[str, Any]:
             # this week's contribution to overall completion
             "pct_added": round(works_tw / scope, 4) if scope else None,
         },
-        "prev_week": None if row["prev_week"] is None else {
+        "prev_week": None if not has_prev else {
             "year": row["prev_week"]["year"],
             "week_number": row["prev_week"]["week_number"],
             "week_ending_date": row["prev_week"]["week_ending_date"],
@@ -319,21 +341,28 @@ async def compute_project_overview(project_id: str) -> dict[str, Any]:
         "physical": {
             "bills": bills,
             "ladder": {
-                # every rung: beme (contract column), this_week, to_date
+                # every rung: beme (contract column), last_week, this_week, to_date
                 "works": {"beme": scope or None, "this_week": works_tw,
+                          "last_week": works_lw,
                           "to_date": round(works, 2)},
                 "vat": {"beme": round(scope * (VAT - 1), 2) if scope else None,
                         "this_week": round(works_tw * (VAT - 1), 2),
+                        "last_week": (round(works_lw * (VAT - 1), 2)
+                                      if works_lw is not None else None),
                         "to_date": round(works * (VAT - 1), 2)},
                 "works_incl_vat": {"beme": round(scope * VAT, 2) if scope else None,
                                    "this_week": earnings_tw,
+                                   "last_week": earnings_lw,
                                    "to_date": earnings},
                 "contingency_incl_vat": {"beme": cont_beme, "this_week": cont_tw,
+                                         "last_week": cont_lw,
                                          "to_date": cont_td},
                 "total_incl_contingency": {
                     "beme": _fn(grand.get("contract")) or (
                         round(scope * VAT + (cont_beme or 0), 2) if scope else None),
                     "this_week": round(earnings_tw + (cont_tw or 0), 2),
+                    "last_week": (round(earnings_lw + (cont_lw or 0), 2)
+                                  if earnings_lw is not None else None),
                     "to_date": round(earnings + (cont_td or 0), 2),
                 },
             },
@@ -359,13 +388,18 @@ async def compute_project_overview(project_id: str) -> dict[str, Any]:
         "cost_profitability": {
             "categories": cost_categories,
             "total_this_week": costs_tw,
+            "total_last_week": costs_lw,
             "total_to_date": round(costs, 2),
             "works_incl_vat_this_week": earnings_tw,
+            "works_incl_vat_last_week": earnings_lw,
             "works_incl_vat_to_date": earnings,
             "net_this_week": net_tw,
+            "net_last_week": net_lw,
             "net_to_date": net,
             "margin_this_week": (round(net_tw / earnings_tw, 4)
                                  if earnings_tw else None),
+            "margin_last_week": (round(net_lw / earnings_lw, 4)
+                                 if net_lw is not None and earnings_lw else None),
             "margin_to_date": round(net / earnings, 4) if earnings else None,
         },
         "resources": {
