@@ -75,7 +75,10 @@ function buildInitialForm(project?: Project): Record<string, any> {
     original_duration_months: project?.original_duration_months ?? '',
     original_completion_date: project?.original_completion_date ?? '',
     extension_of_time_months: project?.extension_of_time_months ?? '',
+    eot_requested_months: project?.eot_requested_months ?? '',
     revised_completion_date: project?.revised_completion_date ?? '',
+    works_commenced_date: project?.works_commenced_date ?? '',
+    retc: project?.retc == null ? '' : String(project.retc),
     substantial_completion_cert: project?.substantial_completion_cert ?? '',
     substantial_completion_date: project?.substantial_completion_date ?? '',
     final_completion_cert: project?.final_completion_cert ?? '',
@@ -96,7 +99,7 @@ function buildInitialForm(project?: Project): Record<string, any> {
 
 const NUMERIC_FIELDS = [
   'original_contract_sum', 'variation_sum', 'current_contract_sum',
-  'original_duration_months', 'extension_of_time_months',
+  'original_duration_months', 'extension_of_time_months', 'eot_requested_months',
   'retention_amount_paid', 'works_vetted_certified', 'payment_received',
   'outstanding_payment', 'cost_to_date', 'revenue_to_date',
 ]
@@ -167,6 +170,10 @@ export function ProjectForm({ project, mode }: ProjectFormProps) {
       if (NUMERIC_FIELDS.includes(key)) {
         const num = Number(value)
         if (!isNaN(num)) payload[key] = num
+        continue
+      }
+      if (key === 'retc') {
+        payload.retc = value === 'true'
         continue
       }
       payload[key] = value
@@ -390,6 +397,23 @@ export function ProjectForm({ project, mode }: ProjectFormProps) {
                   </p>
                 )}
               </div>
+              <div className="relative">
+                <FieldDot field="retc" />
+                <Label htmlFor="retc">RETC</Label>
+                <Select
+                  value={form.retc === '' ? 'unset' : form.retc}
+                  onValueChange={(v) => handleChange('retc', v === 'unset' ? '' : v)}
+                >
+                  <SelectTrigger id="retc">
+                    <SelectValue placeholder="—" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="unset">—</SelectItem>
+                    <SelectItem value="false">No</SelectItem>
+                    <SelectItem value="true">Yes</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </CardContent>
         )}
@@ -442,8 +466,18 @@ export function ProjectForm({ project, mode }: ProjectFormProps) {
                 />
               </div>
               <div className="relative">
+                <FieldDot field="eot_requested_months" />
+                <Label htmlFor="eot_requested_months">Extension of Time Requested (months)</Label>
+                <Input
+                  id="eot_requested_months"
+                  type="number"
+                  value={form.eot_requested_months}
+                  onChange={(e) => handleChange('eot_requested_months', e.target.value)}
+                />
+              </div>
+              <div className="relative">
                 <FieldDot field="extension_of_time_months" />
-                <Label htmlFor="extension_of_time_months">Extension of Time (months)</Label>
+                <Label htmlFor="extension_of_time_months">Extension of Time Granted (months)</Label>
                 <Input
                   id="extension_of_time_months"
                   type="number"
@@ -459,6 +493,16 @@ export function ProjectForm({ project, mode }: ProjectFormProps) {
                   type="date"
                   value={form.revised_completion_date}
                   onChange={(e) => handleChange('revised_completion_date', e.target.value)}
+                />
+              </div>
+              <div className="relative">
+                <FieldDot field="works_commenced_date" />
+                <Label htmlFor="works_commenced_date">Works Actually Commenced on Site</Label>
+                <Input
+                  id="works_commenced_date"
+                  type="date"
+                  value={form.works_commenced_date}
+                  onChange={(e) => handleChange('works_commenced_date', e.target.value)}
                 />
               </div>
             </div>
@@ -695,8 +739,8 @@ export function ProjectForm({ project, mode }: ProjectFormProps) {
 // Maps section IDs to their field names for change tracking
 const SECTION_FIELDS: Record<string, string[]> = {
   identification: ['project_name', 'client', 'short_name', 'state_id', 'status', 'is_legacy'],
-  contract: ['original_contract_sum', 'variation_sum', 'current_contract_sum'],
-  dates: ['award_date', 'commencement_date', 'original_duration_months', 'original_completion_date', 'extension_of_time_months', 'revised_completion_date'],
+  contract: ['original_contract_sum', 'variation_sum', 'current_contract_sum', 'retc'],
+  dates: ['award_date', 'commencement_date', 'original_duration_months', 'original_completion_date', 'eot_requested_months', 'extension_of_time_months', 'revised_completion_date', 'works_commenced_date'],
   certification: ['has_award_letter', 'substantial_completion_cert', 'substantial_completion_date', 'final_completion_cert', 'final_completion_date', 'maintenance_cert', 'maintenance_cert_date'],
   retention: ['retention_application_date', 'retention_paid', 'retention_amount_paid'],
   financial: ['works_vetted_certified', 'payment_received', 'outstanding_payment', 'cost_to_date', 'revenue_to_date'],

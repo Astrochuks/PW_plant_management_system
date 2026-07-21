@@ -15,27 +15,14 @@
 import { useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
 import ECharts from 'echarts-for-react'
-import { toast } from 'sonner'
-import { Banknote, Edit2, HardHat, Percent, TrendingUp, Wallet } from 'lucide-react'
-import { useQueryClient } from '@tanstack/react-query'
+import {
+  Banknote, ChevronDown, HardHat, Percent, TrendingUp, Wallet,
+} from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import {
-  Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
-} from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Textarea } from '@/components/ui/textarea'
-import { useAuth } from '@/providers/auth-provider'
-import {
-  projectsKeys, useProjectOverview, useUpdateProject,
-} from '@/hooks/use-projects'
-import type { CreateProjectRequest, ProjectOverview } from '@/lib/api/projects'
+import { useProjectOverview } from '@/hooks/use-projects'
+import type { ProjectOverview } from '@/lib/api/projects'
 import { fmtDate, naira, nairaM, num, pctFmt, weekLabel } from '@/lib/format'
 
 export default function ProjectOverviewPage() {
@@ -107,12 +94,9 @@ export default function ProjectOverviewPage() {
 /* ── Contract details & schedule — the workbook's own blocks ────────── */
 
 function ContractCard({ o }: { o: ProjectOverview }) {
-  const { user } = useAuth()
-  const isAdmin = user?.role === 'admin'
   const s = o.schedule
   const overdue = s.status === 'overdue'
   const pct = o.headline.pct_complete ?? 0
-  const [editOpen, setEditOpen] = useState(false)
 
   return (
     <Card>
@@ -127,12 +111,6 @@ function ContractCard({ o }: { o: ProjectOverview }) {
             </Badge>
           )}
         </div>
-        {isAdmin && (
-          <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
-            <Edit2 className="mr-2 h-3.5 w-3.5" />
-            Edit details
-          </Button>
-        )}
       </CardHeader>
       <CardContent className="space-y-5">
         {/* Overall progress */}
@@ -161,30 +139,38 @@ function ContractCard({ o }: { o: ProjectOverview }) {
           </p>
         </div>
 
-        <div className="grid gap-x-10 gap-y-5 lg:grid-cols-2">
+        <div className="grid items-start gap-x-10 gap-y-5 lg:grid-cols-2">
           {/* CONTRACT DETAILS — workbook block */}
-          <div>
-            <p className="mb-2 border-b pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-              Contract details
-            </p>
-            <div className="space-y-2 text-sm">
-              <KvBlock label="Client:" value={s.client ?? '—'} />
-              <KvBlock label="Name of Contract:" value={o.project.project_name} />
-              <KvBlock label="Short Name:" value={o.project.short_name ?? '—'} />
-              <KvRow label="Original Contract Amount:" value={naira(o.project.original_contract_sum)} />
-              <KvRow label="Current Contract Amount:" value={naira(o.project.current_contract_sum)}
-                extra={<Badge variant="outline" className="ml-2 text-[10px]">RETC: {o.project.retc == null ? '—' : o.project.retc ? 'Yes' : 'No'}</Badge>} />
-            </div>
-          </div>
+          <CollapsibleBlock
+            title="Contract details"
+            preview={
+              <>
+                <KvBlock label="Client:" value={s.client ?? '—'} />
+                <KvBlock label="Name of Contract:" value={o.project.project_name} />
+              </>
+            }
+          >
+            <KvBlock label="Short Name:" value={o.project.short_name ?? '—'} />
+            <KvRow label="Original Contract Amount:" value={naira(o.project.original_contract_sum)} />
+            <KvRow label="Current Contract Amount:" value={naira(o.project.current_contract_sum)}
+              extra={<Badge variant="outline" className="ml-2 text-[10px]">RETC: {o.project.retc == null ? '—' : o.project.retc ? 'Yes' : 'No'}</Badge>} />
+          </CollapsibleBlock>
 
           {/* CONTRACT SCHEDULES — workbook block */}
-          <div>
-            <p className="mb-2 border-b pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-              Contract schedules
-            </p>
-            <div className="grid gap-x-8 sm:grid-cols-2">
-              <div className="space-y-2 text-sm">
+          <CollapsibleBlock
+            title="Contract schedules"
+            preview={
+              <>
                 <KvRow label="Date of Contract Award:" value={fmtDate(s.award_date)} />
+                <KvRow label="Overdue to Revised Completion Date:"
+                  value={s.overdue_revised_months != null && s.overdue_revised_months > 0
+                    ? `${num(s.overdue_revised_months, 1)} Mths` : '—'}
+                  bad={s.overdue_revised_months != null && s.overdue_revised_months > 0} />
+              </>
+            }
+          >
+            <div className="grid gap-x-8 gap-y-2 sm:grid-cols-2">
+              <div className="space-y-2">
                 <KvRow label="Contract Commencement Date:" value={fmtDate(s.commencement_date)} />
                 <KvRow label="Original Contract Duration (Months):"
                   value={s.original_duration_months != null ? num(s.original_duration_months, 0) : '—'} />
@@ -193,11 +179,11 @@ function ContractCard({ o }: { o: ProjectOverview }) {
                   value={s.eot_requested_months != null ? num(s.eot_requested_months, 0) : '0'} />
                 <KvRow label="Extension of Time Granted (Months):"
                   value={s.eot_granted_months != null ? num(s.eot_granted_months, 0) : '0'} />
+              </div>
+              <div className="space-y-2">
                 <KvRow label="Revised Contract Duration (Months):"
                   value={s.revised_duration_months != null ? num(s.revised_duration_months, 0) : '—'} />
                 <KvRow label="Revised Completion Date:" value={fmtDate(s.revised_completion_date)} />
-              </div>
-              <div className="mt-2 space-y-2 text-sm sm:mt-0">
                 <KvRow label="Works Actually Commenced on Site:" value={fmtDate(s.works_commenced_date)} />
                 <KvRow label="Duration Already on Site:"
                   value={`${(s.duration_on_site_months ?? 0).toFixed(1)} Mths`} />
@@ -205,19 +191,50 @@ function ContractCard({ o }: { o: ProjectOverview }) {
                   value={s.overdue_original_months != null && s.overdue_original_months > 0
                     ? `${num(s.overdue_original_months, 1)} Mths` : '—'}
                   bad={s.overdue_original_months != null && s.overdue_original_months > 0} />
-                <KvRow label="Overdue to Revised Completion Date:"
-                  value={s.overdue_revised_months != null && s.overdue_revised_months > 0
-                    ? `${num(s.overdue_revised_months, 1)} Mths` : '—'}
-                  bad={s.overdue_revised_months != null && s.overdue_revised_months > 0} />
               </div>
             </div>
-          </div>
+          </CollapsibleBlock>
         </div>
       </CardContent>
-      {isAdmin && (
-        <EditContractDialog o={o} open={editOpen} onOpenChange={setEditOpen} />
-      )}
     </Card>
+  )
+}
+
+/* Collapsed by default: the preview rows show, the rest slides open.
+   Grid-rows animation — smooth height without max-height guesswork. */
+function CollapsibleBlock({ title, preview, children }: {
+  title: string
+  preview: React.ReactNode
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="mb-2 flex w-full items-center justify-between border-b pb-1 text-left"
+        aria-expanded={open}
+      >
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {title}
+        </span>
+        <span className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground">
+          {open ? 'Hide' : 'Show all'}
+          <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-300 ${open ? 'rotate-180' : ''}`} />
+        </span>
+      </button>
+      <div className="space-y-2 text-sm">{preview}</div>
+      <div
+        className={`grid transition-all duration-300 ease-in-out ${
+          open ? 'mt-2 grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
+        }`}
+      >
+        <div className="overflow-hidden">
+          <div className="space-y-2 text-sm">{children}</div>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -239,156 +256,6 @@ function KvBlock({ label, value }: { label: string; value: string }) {
     <div className="border-b border-dashed pb-1">
       <span className="text-muted-foreground">{label}</span>{' '}
       <span className="font-medium">{value}</span>
-    </div>
-  )
-}
-
-/* Edit dialog — writes through the existing PATCH /projects/{id} */
-
-function EditContractDialog({ o, open, onOpenChange }: {
-  o: ProjectOverview; open: boolean; onOpenChange: (v: boolean) => void
-}) {
-  const s = o.schedule
-  const update = useUpdateProject(o.project.id)
-  const qc = useQueryClient()
-  const [f, setF] = useState<Record<string, string>>({})
-
-  // seed the form each time the dialog opens
-  const seed = (): Record<string, string> => ({
-    client: s.client ?? '',
-    project_name: o.project.project_name ?? '',
-    short_name: o.project.short_name ?? '',
-    original_contract_sum: o.project.original_contract_sum != null ? String(o.project.original_contract_sum) : '',
-    current_contract_sum: o.project.current_contract_sum != null ? String(o.project.current_contract_sum) : '',
-    retc: o.project.retc == null ? 'unset' : o.project.retc ? 'yes' : 'no',
-    award_date: s.award_date ?? '',
-    commencement_date: s.commencement_date ?? '',
-    original_duration_months: s.original_duration_months != null ? String(s.original_duration_months) : '',
-    original_completion_date: s.original_completion_date ?? '',
-    eot_requested_months: s.eot_requested_months != null ? String(s.eot_requested_months) : '',
-    extension_of_time_months: s.eot_granted_months != null ? String(s.eot_granted_months) : '',
-    revised_completion_date: s.revised_completion_date ?? '',
-    works_commenced_date: s.works_commenced_date ?? '',
-  })
-
-  const openChange = (v: boolean) => {
-    if (v) setF(seed())
-    onOpenChange(v)
-  }
-
-  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
-    setF((prev) => ({ ...prev, [k]: e.target.value }))
-
-  const submit = () => {
-    const p: Partial<CreateProjectRequest> = {}
-    const str = (k: keyof CreateProjectRequest & string) => {
-      if (f[k]?.trim()) (p as Record<string, unknown>)[k] = f[k].trim()
-    }
-    const numF = (k: keyof CreateProjectRequest & string, int = false) => {
-      if (f[k]?.trim() !== '' && f[k] != null && !Number.isNaN(Number(f[k]))) {
-        (p as Record<string, unknown>)[k] = int ? Math.round(Number(f[k])) : Number(f[k])
-      }
-    }
-    str('client'); str('project_name'); str('short_name')
-    numF('original_contract_sum'); numF('current_contract_sum')
-    numF('original_duration_months', true)
-    numF('eot_requested_months'); numF('extension_of_time_months', true)
-    str('award_date'); str('commencement_date'); str('original_completion_date')
-    str('revised_completion_date'); str('works_commenced_date')
-    if (f.retc === 'yes') p.retc = true
-    if (f.retc === 'no') p.retc = false
-
-    update.mutate(p, {
-      onSuccess: () => {
-        toast.success('Contract details saved')
-        qc.invalidateQueries({ queryKey: projectsKeys.detail(o.project.id) })
-        onOpenChange(false)
-      },
-      onError: (err: Error) => toast.error('Save failed', { description: err.message }),
-    })
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={openChange}>
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Edit contract details &amp; schedule</DialogTitle>
-        </DialogHeader>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Client" full>
-            <Input value={f.client ?? ''} onChange={set('client')} />
-          </Field>
-          <Field label="Name of Contract" full>
-            <Textarea rows={2} value={f.project_name ?? ''} onChange={set('project_name')} />
-          </Field>
-          <Field label="Short Name">
-            <Input value={f.short_name ?? ''} onChange={set('short_name')} />
-          </Field>
-          <Field label="RETC">
-            <Select value={f.retc ?? 'unset'}
-              onValueChange={(v) => setF((prev) => ({ ...prev, retc: v }))}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="unset">—</SelectItem>
-                <SelectItem value="no">No</SelectItem>
-                <SelectItem value="yes">Yes</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
-          <Field label="Original Contract Amount (₦)">
-            <Input type="number" value={f.original_contract_sum ?? ''} onChange={set('original_contract_sum')} />
-          </Field>
-          <Field label="Current Contract Amount (₦)">
-            <Input type="number" value={f.current_contract_sum ?? ''} onChange={set('current_contract_sum')} />
-          </Field>
-          <Field label="Date of Contract Award">
-            <Input type="date" value={f.award_date ?? ''} onChange={set('award_date')} />
-          </Field>
-          <Field label="Contract Commencement Date">
-            <Input type="date" value={f.commencement_date ?? ''} onChange={set('commencement_date')} />
-          </Field>
-          <Field label="Original Contract Duration (Months)">
-            <Input type="number" value={f.original_duration_months ?? ''} onChange={set('original_duration_months')} />
-          </Field>
-          <Field label="Original Contract Completion Date">
-            <Input type="date" value={f.original_completion_date ?? ''} onChange={set('original_completion_date')} />
-          </Field>
-          <Field label="Extension of Time Requested (Months)">
-            <Input type="number" value={f.eot_requested_months ?? ''} onChange={set('eot_requested_months')} />
-          </Field>
-          <Field label="Extension of Time Granted (Months)">
-            <Input type="number" value={f.extension_of_time_months ?? ''} onChange={set('extension_of_time_months')} />
-          </Field>
-          <Field label="Revised Completion Date">
-            <Input type="date" value={f.revised_completion_date ?? ''} onChange={set('revised_completion_date')} />
-          </Field>
-          <Field label="Works Actually Commenced on Site">
-            <Input type="date" value={f.works_commenced_date ?? ''} onChange={set('works_commenced_date')} />
-          </Field>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          Revised Contract Duration and the overdue figures are computed —
-          original duration + EOT granted, and report date vs the completion
-          dates.
-        </p>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={submit} disabled={update.isPending}>
-            {update.isPending ? 'Saving…' : 'Save changes'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-function Field({ label, children, full }: {
-  label: string; children: React.ReactNode; full?: boolean
-}) {
-  return (
-    <div className={`space-y-1.5 ${full ? 'sm:col-span-2' : ''}`}>
-      <Label className="text-xs">{label}</Label>
-      {children}
     </div>
   )
 }

@@ -34,6 +34,9 @@ export interface Project {
   original_duration_months: number | null;
   original_completion_date: string | null;
   extension_of_time_months: number | null;
+  eot_requested_months: number | null;
+  works_commenced_date: string | null;
+  retc: boolean | null;
   revised_completion_date: string | null;
 
   substantial_completion_cert: string | null;
