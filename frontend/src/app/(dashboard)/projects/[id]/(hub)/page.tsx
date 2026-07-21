@@ -43,12 +43,20 @@ export default function ProjectOverviewPage() {
       </div>
 
       {/* Headline strip */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
         <Kpi label="Contract Value" value={naira(o.headline.contract_sum, true)}
           sub={naira(o.headline.contract_sum)} lineage="register" />
+        <Kpi label="Total BEME" value={naira(o.physical.ladder.works.beme, true)}
+          sub={naira(o.physical.ladder.works.beme)}
+          lineage="BEME sub-total · priced scope, excl VAT" />
+        <Kpi label="Work Done to Date" value={naira(o.physical.ladder.works.to_date, true)}
+          sub={naira(o.physical.ladder.works.to_date)}
+          lineage="BEME works, excl VAT · previous + stored weeks" />
         <Kpi label="Overall % Complete" value={pctFmt(o.headline.pct_complete)}
-          sub={`${naira(o.physical.ladder.works.to_date, true)} of ${naira(o.physical.ladder.works.beme, true)}`}
-          lineage="works ÷ BEME sub-total" />
+          sub={o.progress.reported_pct != null
+            ? `workbook reports ${pctFmt(o.progress.reported_pct)}`
+            : `${naira(o.physical.ladder.works.to_date, true)} of ${naira(o.physical.ladder.works.beme, true)}`}
+          lineage="work done ÷ Total BEME" />
         <Kpi label="Certified to Date"
           value={o.certs_payments.certificates_total ? naira(o.headline.certified_to_date, true) : 'None yet'}
           sub={o.certs_payments.certificates_total ? naira(o.headline.certified_to_date) : 'no certificates recorded'}
