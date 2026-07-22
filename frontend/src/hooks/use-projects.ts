@@ -554,6 +554,47 @@ import { previewWeeklyReport, type ReportPreview, type SheetPreview } from '@/li
 
 export type { ReportPreview, SheetPreview };
 
+/**
+ * Warm every hub tab's queries in the background as soon as a project
+ * hub opens. Each entry mirrors its hook's queryKey + staleTime
+ * EXACTLY, so the later mount is a pure cache hit. Delayed slightly so
+ * the visible page's own requests win the connection first.
+ */
+export function usePrefetchHubData(id: string | null) {
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (!id) return;
+    const t = setTimeout(() => {
+      const two = 2 * 60 * 1000;
+      queryClient.prefetchQuery({
+        queryKey: [...operationsKeys.all, 'financials', id] as const,
+        queryFn: () => getProjectFinancials(id), staleTime: two,
+      });
+      queryClient.prefetchQuery({
+        queryKey: [...projectsKeys.detail(id), 'work-done', 'latest', 'latest'],
+        queryFn: () => getProjectWorkDone(id), staleTime: two,
+      });
+      queryClient.prefetchQuery({
+        queryKey: [...projectsKeys.detail(id), 'site'],
+        queryFn: () => getProjectSite(id), staleTime: two,
+      });
+      queryClient.prefetchQuery({
+        queryKey: [...projectsKeys.detail(id), 'ledgers'],
+        queryFn: () => getProjectLedgers(id), staleTime: two,
+      });
+      queryClient.prefetchQuery({
+        queryKey: [...operationsKeys.all, 'plants', id] as const,
+        queryFn: () => getProjectPlantRollups(id), staleTime: two,
+      });
+      queryClient.prefetchQuery({
+        queryKey: submissionKeys.unmapped(),
+        queryFn: getUnmappedFleetNumbers, staleTime: 5 * 60 * 1000,
+      });
+    }, 800);
+    return () => clearTimeout(t);
+  }, [id, queryClient]);
+}
+
 export function usePreviewWeeklyReport() {
   return useMutation({
     mutationFn: ({ file, projectId }: { file: File; projectId?: string }) =>

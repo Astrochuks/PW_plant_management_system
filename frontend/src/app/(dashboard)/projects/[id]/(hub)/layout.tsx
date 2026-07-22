@@ -16,7 +16,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
 import { useAuth } from '@/providers/auth-provider'
-import { useProject, useDeleteProject, useProjectIssues, useProjectOverview, useProjectSubmissions } from '@/hooks/use-projects'
+import { useProject, useDeleteProject, usePrefetchHubData, useProjectIssues, useProjectOverview, useProjectSubmissions } from '@/hooks/use-projects'
 import { STATUS_STYLES } from '@/components/projects/projects-table'
 import { InfoChip } from '@/components/projects/hub-ui'
 import { fmtDate, num } from '@/lib/format'
@@ -59,6 +59,8 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
   // shared cache with the Overview page — powers the OVERDUE badge here
   const { data: overview } = useProjectOverview(projectId)
   const scheduleStatus = overview?.schedule.status
+  // warm every tab's data so switching tabs is instant
+  usePrefetchHubData(projectId)
   const deleteMutation = useDeleteProject()
   const [confirmDelete, setConfirmDelete] = useState(false)
 

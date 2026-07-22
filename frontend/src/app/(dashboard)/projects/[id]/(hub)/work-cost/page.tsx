@@ -51,7 +51,7 @@ export default function WorkCostPage() {
   return (
     <div className="space-y-5">
       <div
-        className="sticky z-10 -mx-6 flex flex-wrap items-center justify-between gap-2 bg-background px-6 py-2 shadow-sm"
+        className="sticky z-[15] -mx-6 flex flex-wrap items-center justify-between gap-2 bg-background px-6 py-2 shadow-sm"
         style={{ top }}
       >
         <Select value={view} onValueChange={(v) => setView(v as ViewKey)}>
