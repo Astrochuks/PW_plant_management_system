@@ -82,7 +82,10 @@ function usePager<T>(items: T[], size = 10) {
   }
 }
 
-export default function AnalyticsSection({ gran }: { gran: Granularity }) {
+export default function AnalyticsSection({ gran, year }: {
+  gran: Granularity
+  year: number | 'all'
+}) {
   const params = useParams<{ id: string }>()
   const { data: fin, isLoading } = useProjectFinancials(params.id)
   const [workBill, setWorkBill] = useState('all')
@@ -90,10 +93,14 @@ export default function AnalyticsSection({ gran }: { gran: Granularity }) {
   const [vsBill, setVsBill] = useState('all')
   const [vsCat, setVsCat] = useState('all')
 
+  const scopedWeeks = useMemo(
+    () => (fin?.weeks ?? []).filter((w) => year === 'all' || w.year === year),
+    [fin, year],
+  )
+
   const buckets: Bucket[] = useMemo(() => {
-    if (!fin?.weeks) return []
     const map = new Map<string, Bucket>()
-    for (const w of fin.weeks) {
+    for (const w of scopedWeeks) {
       const key = bucketKey(w, gran)
       const b = map.get(key) ?? {
         label: key, works: 0, earnings: 0, cost: 0, net: 0, weeks: 0,
@@ -113,13 +120,15 @@ export default function AnalyticsSection({ gran }: { gran: Granularity }) {
       map.set(key, b)
     }
     return [...map.values()]
-  }, [fin, gran])
+  }, [scopedWeeks, gran])
 
   if (isLoading) return <SectionSkeleton />
-  if (!fin || fin.weeks.length === 0) {
+  if (!fin || fin.weeks.length === 0 || buckets.length === 0) {
     return (
       <div className="rounded-lg border py-12 text-center text-muted-foreground">
-        <p className="text-lg font-medium text-foreground">No weekly reports yet</p>
+        <p className="text-lg font-medium text-foreground">
+          {fin && fin.weeks.length > 0 ? `No stored weeks in ${year}` : 'No weekly reports yet'}
+        </p>
         <p className="mt-1 text-sm">Analytics builds itself from uploaded weeks.</p>
       </div>
     )
@@ -153,7 +162,8 @@ export default function AnalyticsSection({ gran }: { gran: Granularity }) {
   return (
     <div className="space-y-6">
       <p className="text-xs text-muted-foreground">
-        {fin.weeks.length} stored weeks · all work figures Incl. VAT (× 1.075), excl contingency
+        {scopedWeeks.length} stored week{scopedWeeks.length === 1 ? '' : 's'}
+        {year !== 'all' ? ` in ${year}` : ''} · all work figures Incl. VAT (× 1.075), excl contingency
       </p>
 
       {/* Period KPIs, each vs the previous bucket */}
