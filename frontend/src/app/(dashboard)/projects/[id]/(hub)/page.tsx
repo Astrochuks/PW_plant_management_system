@@ -107,13 +107,13 @@ function ContractCard({ o }: { o: ProjectOverview }) {
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Overall % Complete
             </p>
-            <p className="text-2xl font-bold tabular-nums text-amber-600 dark:text-amber-400">
+            <p className="text-2xl font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
               {pctFmt(o.headline.pct_complete)}
             </p>
           </div>
           <div className="relative h-3.5 w-full overflow-hidden rounded-full bg-muted">
             <div
-              className="h-full rounded-full bg-gradient-to-r from-amber-400 to-amber-500 transition-all"
+              className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-emerald-500 transition-all"
               style={{ width: `${Math.min(100, pct * 100)}%` }}
             />
             <div

@@ -138,7 +138,7 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
               href={p.seg ? `${base}/${p.seg}` : base}
               className={`relative -mb-px inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-t-lg border px-3 py-1.5 text-[13px] font-medium transition-all duration-200 ${
                 activeSeg === p.seg
-                  ? 'border-border border-b-background border-t-2 border-t-primary bg-primary/15 text-foreground shadow-[0_-4px_10px_-4px_rgba(0,0,0,0.2)]'
+                  ? 'border-primary border-b-transparent bg-primary font-semibold text-primary-foreground shadow-[0_-4px_10px_-4px_rgba(0,0,0,0.25)]'
                   : 'border-border/40 border-b-border bg-muted/50 text-muted-foreground shadow-sm hover:-translate-y-0.5 hover:bg-muted hover:text-foreground hover:shadow-md'
               }`}
             >
