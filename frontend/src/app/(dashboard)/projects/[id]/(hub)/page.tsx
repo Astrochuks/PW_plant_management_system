@@ -594,8 +594,8 @@ function ResourcesCard({ o }: { o: ProjectOverview }) {
         Resources · this week
       </Legend>
       <CardContent className="space-y-1.5 pt-5 text-sm">
-        <MoneyRow label="Direct Labour Headcount" text={num(r.labour_direct)} />
-        <MoneyRow label="Casual Labour Headcount" text={num(r.labour_casual)} />
+        <MoneyRow label="Total Headcount" text={num(r.labour_direct + r.labour_casual)} />
+        <MoneyRow label="Total Casual Headcount" text={num(r.labour_casual)} />
         <MoneyRow label="Diesel Used This Week (L)" text={num(r.diesel_litres_week)} />
         <MoneyRow label="Diesel Cost This Week" v={r.diesel_cost_week}
           note="Cost Report AGO row — the money truth" />

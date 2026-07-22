@@ -172,7 +172,7 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
         <div className="mt-6 mb-8 flex flex-wrap items-center gap-x-6 gap-y-1">
           <InfoChip icon={CalendarDays} label="Latest report"
             value={`W${String(overview.latest_week.week_number).padStart(2, '0')} · Date: ${fmtDate(overview.latest_week.week_ending_date)}`} />
-          <InfoChip icon={Users} label="Labour on site"
+          <InfoChip icon={Users} label="Total headcount"
             value={num(overview.resources.labour_direct + overview.resources.labour_casual)} />
         </div>
       )}
