@@ -35,9 +35,9 @@ export default function ProjectOverviewPage() {
   return (
     <div className="space-y-4">
       {/* Context chips: which report feeds this page + who's on site */}
-      <div className="flex flex-wrap items-center justify-end gap-2">
+      <div className="mt-1 flex flex-wrap items-center justify-start gap-2">
         <InfoChip icon={CalendarDays} label="Latest report"
-          value={`W${String(o.latest_week.week_number).padStart(2, '0')} · w/e ${fmtDate(o.latest_week.week_ending_date)}`} />
+          value={`W${String(o.latest_week.week_number).padStart(2, '0')} · Date: ${fmtDate(o.latest_week.week_ending_date)}`} />
         <InfoChip icon={Users} label="Labour on site"
           value={num(o.resources.labour_direct + o.resources.labour_casual)} />
       </div>

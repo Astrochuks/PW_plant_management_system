@@ -66,22 +66,22 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
 
   return (
     <div className="space-y-4">
-      {/* Three zones: identity · status trio · actions */}
-      <div className="grid items-center gap-3 lg:grid-cols-[1fr_auto_1fr]">
-        <div className="flex min-w-0 items-center gap-3">
+      {/* Three zones: identity · status trio (centered in the leftover space) · actions */}
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+        <div className="flex items-center gap-3">
           <Button variant="ghost" size="sm" onClick={() => router.push('/projects')}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
-          <div className="min-w-0">
-            <h1 className="truncate text-xl font-bold tracking-tight">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">
               {project?.short_name || project?.project_name || '…'}
             </h1>
-            <p className="truncate text-xs text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               {project?.client}{project?.state_name ? ` · ${project.state_name}` : ''}
             </p>
           </div>
         </div>
-        <div className="flex flex-wrap items-center justify-start gap-2 lg:justify-center">
+        <div className="flex flex-1 flex-wrap items-center justify-start gap-2 lg:justify-center">
           {statusStyle && (
             <Badge variant={statusStyle.variant} className={statusStyle.className}>
               {statusStyle.label}
@@ -101,7 +101,7 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
           )}
         </div>
         {isAdmin ? (
-          <div className="flex items-center gap-2 lg:justify-end">
+          <div className="flex shrink-0 items-center gap-2">
             <Button variant="outline" size="sm" asChild>
               <Link href={`${base}/edit`}>
                 <Edit2 className="h-4 w-4 mr-2" />
@@ -120,7 +120,7 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
       </div>
 
       {/* Tab bar — button-styled, animated; scrolls sideways on mobile */}
-      <div className="flex items-center gap-1.5 overflow-x-auto border-b pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className="mt-3 flex items-center gap-1.5 overflow-x-auto border-b pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {PAGES.filter((p) => !p.adminOnly || isAdmin).map((p) =>
           p.ready ? (
             <Link
