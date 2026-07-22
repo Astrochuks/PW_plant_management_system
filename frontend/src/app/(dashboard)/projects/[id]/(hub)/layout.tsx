@@ -169,7 +169,7 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
 
       {/* Latest-report context strip — visible on every hub tab */}
       {overview?.latest_week && (
-        <div className="mt-3 mb-4 flex flex-wrap items-center gap-x-6 gap-y-1">
+        <div className="mt-6 mb-8 flex flex-wrap items-center gap-x-6 gap-y-1">
           <InfoChip icon={CalendarDays} label="Latest report"
             value={`W${String(overview.latest_week.week_number).padStart(2, '0')} · Date: ${fmtDate(overview.latest_week.week_ending_date)}`} />
           <InfoChip icon={Users} label="Labour on site"
