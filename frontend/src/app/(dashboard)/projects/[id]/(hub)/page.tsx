@@ -35,7 +35,7 @@ export default function ProjectOverviewPage() {
   return (
     <div className="space-y-4">
       {/* Context chips: which report feeds this page + who's on site */}
-      <div className="mt-1 flex flex-wrap items-center justify-start gap-2">
+      <div className="mt-1 flex flex-wrap items-center justify-start gap-x-6 gap-y-1">
         <InfoChip icon={CalendarDays} label="Latest report"
           value={`W${String(o.latest_week.week_number).padStart(2, '0')} · Date: ${fmtDate(o.latest_week.week_ending_date)}`} />
         <InfoChip icon={Users} label="Labour on site"
@@ -373,7 +373,7 @@ function MiniKpi({ icon: Icon, iconClass, label, value, sub, delta }: {
   label: string; value: string; sub?: string; delta?: React.ReactNode
 }) {
   return (
-    <div className="rounded-lg border p-3">
+    <div className="rounded-lg bg-muted/40 p-3">
       <div className="flex items-center gap-2">
         <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${iconClass}`}>
           <Icon className="h-4 w-4" />
@@ -755,7 +755,7 @@ function Kpi({ label, value, sub, lineage, tone }: {
   label: string; value: string; sub?: string; lineage: string; tone?: 'good' | 'bad'
 }) {
   return (
-    <Card>
+    <Card className="border-0 bg-muted/40 shadow-none">
       <CardContent className="p-3.5">
         <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
         <p className={`mt-0.5 text-xl font-bold tabular-nums ${
@@ -773,7 +773,7 @@ function InfoChip({ icon: Icon, label, value }: {
   label: string; value: string
 }) {
   return (
-    <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-1.5">
+    <div className="flex items-center gap-2">
       <Icon className="h-4 w-4 text-amber-600" />
       <span className="text-xs text-muted-foreground">{label}</span>
       <span className="text-sm font-semibold tabular-nums">{value}</span>

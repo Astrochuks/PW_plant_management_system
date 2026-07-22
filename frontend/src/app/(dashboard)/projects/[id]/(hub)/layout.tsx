@@ -11,7 +11,6 @@ import { useParams, usePathname, useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { ArrowLeft, Edit2, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
@@ -29,6 +28,17 @@ const PAGES: Array<{ seg: string; label: string; ready: boolean; adminOnly?: boo
   { seg: 'submissions', label: 'Submissions', ready: true },
   { seg: 'issues', label: 'Issues', ready: true, adminOnly: true },
 ]
+
+function StatusDot({ dot, label, className = '' }: {
+  dot: string; label: string; className?: string
+}) {
+  return (
+    <span className={`inline-flex items-center gap-1.5 text-sm font-medium ${className}`}>
+      <span className={`h-2 w-2 shrink-0 rounded-full ${dot}`} />
+      {label}
+    </span>
+  )
+}
 
 export default function ProjectHubLayout({ children }: { children: React.ReactNode }) {
   const params = useParams<{ id: string }>()
@@ -81,23 +91,22 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
             </p>
           </div>
         </div>
-        <div className="flex flex-1 flex-wrap items-center justify-start gap-2 lg:justify-center">
+        <div className="flex flex-1 flex-wrap items-center justify-start gap-x-5 gap-y-1 lg:justify-center">
           {statusStyle && (
-            <Badge variant={statusStyle.variant} className={statusStyle.className}>
-              {statusStyle.label}
-            </Badge>
+            <StatusDot
+              dot={project?.status === 'active' ? 'bg-emerald-500' : 'bg-slate-400'}
+              label={statusStyle.label}
+            />
           )}
           {project?.project_type && (
-            <Badge variant="outline" className="capitalize">
-              {project.project_type}
-            </Badge>
+            <StatusDot dot="bg-sky-500" label={project.project_type} className="capitalize" />
           )}
           {scheduleStatus && (
-            <Badge className={scheduleStatus === 'overdue'
-              ? 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300'
-              : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'}>
-              {scheduleStatus === 'overdue' ? 'OVERDUE' : 'ON TRACK'}
-            </Badge>
+            <StatusDot
+              dot={scheduleStatus === 'overdue' ? 'bg-red-500' : 'bg-emerald-500'}
+              label={scheduleStatus === 'overdue' ? 'Overdue' : 'On track'}
+              className={scheduleStatus === 'overdue' ? 'font-semibold text-red-600' : ''}
+            />
           )}
         </div>
         {isAdmin ? (
@@ -121,7 +130,7 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
 
       {/* Tab bar — folder-style: tabs sit ON the line; the active one
           opens into the page (bottom border removed, background merged) */}
-      <div className="ml-12 mt-7 flex items-end gap-0.5 overflow-x-auto border-b [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className="mt-7 flex items-end gap-0.5 overflow-x-auto border-b [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {PAGES.filter((p) => !p.adminOnly || isAdmin).map((p) =>
           p.ready ? (
             <Link
@@ -129,7 +138,7 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
               href={p.seg ? `${base}/${p.seg}` : base}
               className={`relative -mb-px inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-t-lg border px-3 py-1.5 text-[13px] font-medium transition-all duration-200 ${
                 activeSeg === p.seg
-                  ? 'border-border border-b-background border-t-2 border-t-amber-500 bg-background text-foreground shadow-[0_-4px_10px_-4px_rgba(0,0,0,0.2)]'
+                  ? 'border-border border-b-background border-t-2 border-t-primary bg-primary/15 text-foreground shadow-[0_-4px_10px_-4px_rgba(0,0,0,0.2)]'
                   : 'border-border/40 border-b-border bg-muted/50 text-muted-foreground shadow-sm hover:-translate-y-0.5 hover:bg-muted hover:text-foreground hover:shadow-md'
               }`}
             >
