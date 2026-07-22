@@ -978,28 +978,68 @@ async def unresolve_sheet_flag(
 async def get_project_work_done(
     project_id: UUID,
     current_user: Annotated[CurrentUser, Depends(require_projects_access)],
+    year: int | None = Query(None, ge=2015, le=2100),
+    week: int | None = Query(None, ge=1, le=53),
 ) -> dict[str, Any]:
     """BEME drill-down: per-item cumulative (stored weeks + baseline/gap
-    adjustments, == workbook to-date) + latest-week movement, grouped by
-    bill. Quantity and amount progress are independent facts."""
+    adjustments, == workbook to-date) + that-week movement, grouped by
+    bill. Pass year+week for an AS-OF snapshot of any stored week —
+    cumulative counts only movement and adjustments up to that week;
+    default is the latest stored week."""
     pid = str(project_id)
+
+    weeks_avail = await fetch(
+        """SELECT year, week_number, week_ending_date
+           FROM project_weekly_reports WHERE project_id = $1::uuid
+           ORDER BY year DESC, week_number DESC""",
+        pid,
+    )
+    if not weeks_avail:
+        return {"success": True, "data": {"bills": [], "weeks": [],
+                                          "selected": None}}
+    if year is None or week is None:
+        year, week = weeks_avail[0]["year"], weeks_avail[0]["week_number"]
+
     rows = await fetch(
-        """SELECT v.*, lm.qty_this_week AS latest_qty, lm.amount_this_week AS latest_amount
-           FROM v_project_beme_cumulative v
+        """SELECT b.bill_no, b.bill_code, b.sort_order, b.name AS bill_name,
+                  i.id AS item_id, i.item_code, i.description, i.unit,
+                  i.contract_qty, i.rate, i.contract_amount,
+                  COALESCE(m.qty, 0) + COALESCE(a.qty, 0)   AS qty_done,
+                  COALESCE(m.amt, 0) + COALESCE(a.amt, 0)   AS amount_done,
+                  CASE WHEN COALESCE(i.contract_amount, 0) <> 0
+                       THEN round(((COALESCE(m.amt, 0) + COALESCE(a.amt, 0))
+                                   / i.contract_amount) * 100, 2) END AS pct_complete,
+                  (COALESCE(i.contract_qty, 0) <> 0 AND
+                   COALESCE(m.qty, 0) + COALESCE(a.qty, 0) > i.contract_qty * 1.001)
+                      AS is_overrun,
+                  (i.contract_qty IS NULL OR i.contract_qty = 0) AS no_contract_qty,
+                  lm.qty_this_week AS latest_qty,
+                  lm.amount_this_week AS latest_amount
+           FROM project_beme_items i
+           JOIN project_beme_bills b ON b.id = i.bill_id
+           LEFT JOIN LATERAL (
+               SELECT sum(qty_this_week) AS qty, sum(amount_this_week) AS amt
+               FROM project_beme_progress p
+               WHERE p.item_id = i.id AND (p.year, p.week_number) <= ($2, $3)
+           ) m ON TRUE
+           LEFT JOIN LATERAL (
+               SELECT sum(qty) AS qty, sum(amount) AS amt
+               FROM project_ledger_adjustments a
+               WHERE a.beme_item_id = i.id AND a.ledger = 'beme'
+                 AND (a.covers_to_year, a.covers_to_week) <= ($2, $3)
+           ) a ON TRUE
            LEFT JOIN LATERAL (
                SELECT qty_this_week, amount_this_week
                FROM project_beme_progress p
-               WHERE p.item_id = v.item_id
-                 AND p.weekly_report_id = (
-                     SELECT id FROM project_weekly_reports
-                     WHERE project_id = $1::uuid
-                     ORDER BY year DESC, week_number DESC LIMIT 1)
+               WHERE p.item_id = i.id AND p.year = $2 AND p.week_number = $3
+               LIMIT 1
            ) lm ON TRUE
-           WHERE v.project_id = $1::uuid""",
-        pid,
+           WHERE i.project_id = $1::uuid""",
+        pid, year, week,
     )
     if not rows:
-        return {"success": True, "data": {"bills": []}}
+        return {"success": True, "data": {"bills": [], "weeks": weeks_avail,
+                                          "selected": {"year": year, "week_number": week}}}
 
     def code_key(code: str | None) -> tuple:
         parts = []
@@ -1045,7 +1085,9 @@ async def get_project_work_done(
             round(b["amount_done"] / b["contract_amount"], 4)
             if b["contract_amount"] else None
         )
-    return {"success": True, "data": {"bills": out}}
+    return {"success": True, "data": {
+        "bills": out, "weeks": weeks_avail,
+        "selected": {"year": year, "week_number": week}}}
 
 
 @router.get("/{project_id}/costs/summary")
@@ -1438,6 +1480,7 @@ async def get_project_operations_financials(
         """
         SELECT wr.year, wr.week_number, wr.week_ending_date,
                COALESCE(beme.works, 0)                          AS works_value,
+               works_bill.by_bill                               AS works_by_bill,
                cost.by_category                                 AS cost_by_category,
                COALESCE(cost.total, 0)                          AS cost_total,
                ws_net.value                                     AS sheet_net,
@@ -1453,6 +1496,16 @@ async def get_project_operations_financials(
             SELECT sum(amount_this_week) AS works
             FROM project_beme_progress WHERE weekly_report_id = wr.id
         ) beme ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT jsonb_object_agg(bb.bill_code, b.amt) AS by_bill
+            FROM (
+                SELECT i.bill_id, sum(p.amount_this_week) AS amt
+                FROM project_beme_progress p
+                JOIN project_beme_items i ON i.id = p.item_id
+                WHERE p.weekly_report_id = wr.id
+                GROUP BY i.bill_id
+            ) b JOIN project_beme_bills bb ON bb.id = b.bill_id
+        ) works_bill ON TRUE
         LEFT JOIN LATERAL (
             SELECT value FROM project_weekly_summary
             WHERE weekly_report_id = wr.id AND section = 'Costs to Date'
@@ -1525,6 +1578,7 @@ async def get_project_operations_financials(
             "week_number": r["week_number"],
             "week_ending_date": r["week_ending_date"],
             "works_value": works,
+            "works_by_bill": r["works_by_bill"] or {},
             "vat": vat,
             "earnings": earnings,
             "cost_total": cost_total,
@@ -1556,6 +1610,18 @@ async def get_project_operations_financials(
     totals["cost_by_category"] = {k: round(v, 2) for k, v in
                                   sorted(cat_totals.items(), key=lambda x: -x[1])}
 
+    bills_meta = await fetch(
+        """SELECT bb.bill_code, coalesce(bb.name, bb.bill_code) AS name,
+                  coalesce(bb.contract_amount, i.sum_items) AS contract_amount
+           FROM project_beme_bills bb
+           LEFT JOIN LATERAL (
+               SELECT sum(contract_amount) AS sum_items
+               FROM project_beme_items WHERE bill_id = bb.id) i ON TRUE
+           WHERE bb.project_id = $1::uuid
+           ORDER BY bb.sort_order NULLS LAST, bb.bill_code""",
+        pid,
+    )
+
     # BEME bill-level progress from the latest week's Works Completed section
     bills = await fetch(
         """
@@ -1581,6 +1647,7 @@ async def get_project_operations_financials(
     return {"success": True, "data": {
         "weeks": weeks,
         "totals": totals,
+        "bills_meta": bills_meta,
         "bills": bills,
         "cross_check_warnings": warnings,
     }}

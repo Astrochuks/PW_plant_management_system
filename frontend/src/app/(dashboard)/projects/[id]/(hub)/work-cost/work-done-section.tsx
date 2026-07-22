@@ -11,15 +11,19 @@ import { useParams } from 'next/navigation'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Legend } from '@/components/projects/hub-ui'
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { useProjectWorkDone } from '@/hooks/use-projects'
 import type { WorkDoneBill } from '@/lib/api/projects'
-import { naira, pctFmt, num } from '@/lib/format'
+import { fmtDate, naira, num, pctFmt, weekLabel } from '@/lib/format'
 
 export default function WorkDonePage() {
   const params = useParams<{ id: string }>()
-  const { data, isLoading } = useProjectWorkDone(params.id)
+  const [sel, setSel] = useState<{ y: number; w: number } | null>(null)
+  const { data, isLoading } = useProjectWorkDone(params.id, sel?.y, sel?.w)
   const [open, setOpen] = useState<Record<string, boolean>>({})
 
   const totals = useMemo(() => {
@@ -43,7 +47,28 @@ export default function WorkDonePage() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs font-bold uppercase tracking-wide">Work done — bills &amp; items</p>
+        <div className="flex flex-wrap items-center gap-3">
+          <p className="text-xs font-bold uppercase tracking-wide">Bill of Quantities — as of</p>
+          <Select
+            value={data.selected ? `${data.selected.year}-${data.selected.week_number}` : ''}
+            onValueChange={(v) => {
+              const [y, w] = v.split('-').map(Number)
+              setSel({ y, w })
+            }}
+          >
+            <SelectTrigger className="h-8 w-56 text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {data.weeks.map((wk) => (
+                <SelectItem key={`${wk.year}-${wk.week_number}`} value={`${wk.year}-${wk.week_number}`}>
+                  {weekLabel(wk.year, wk.week_number)} · w/e {fmtDate(wk.week_ending_date)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-[11px] text-muted-foreground">
+            to-date counts everything up to the chosen week; &quot;this wk&quot; is that week&apos;s own movement
+          </p>
+        </div>
         {(totals?.overruns ?? 0) > 0 && (
           <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-800 dark:text-amber-300">
             {totals!.overruns} quantity over-run{totals!.overruns > 1 ? 's' : ''} flagged — qty done &gt; contract qty, never capped

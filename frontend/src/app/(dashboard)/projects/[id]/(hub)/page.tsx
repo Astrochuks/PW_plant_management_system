@@ -23,7 +23,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useProjectOverview } from '@/hooks/use-projects'
 import type { ProjectOverview } from '@/lib/api/projects'
-import { Delta, Kpi, Legend, LegendSm } from '@/components/projects/hub-ui'
+import { categoryColor, Delta, Kpi, Legend, LegendSm } from '@/components/projects/hub-ui'
 import { fmtDate, naira, nairaM, num, pctFmt, weekLabel } from '@/lib/format'
 
 type MoneyUnit = 'm' | 'full'
@@ -578,23 +578,6 @@ function ResourcesCard({ o }: { o: ProjectOverview }) {
 
 /* ── Cost & profitability ────────────────────────────────────────────── */
 
-// FIXED per-category colors — the donut and the table dots share them,
-// and a filter or new week never repaints survivors.
-const CATEGORY_COLORS: Record<string, string> = {
-  'Materials': '#3b82f6',
-  'Plant': '#f59e0b',
-  'AGO': '#8b5cf6',
-  'Local Labour': '#10b981',
-  'Site Level Expenses': '#06b6d4',
-  'Overheads': '#f43f5e',
-  'Sub Contractors': '#14b8a6',
-  'Uncategorised': '#94a3b8',
-}
-const FALLBACK_COLORS = ['#eab308', '#64748b', '#ec4899', '#84cc16']
-
-function categoryColor(name: string, i: number): string {
-  return CATEGORY_COLORS[name] ?? FALLBACK_COLORS[i % FALLBACK_COLORS.length]
-}
 
 function CostProfitabilityCard({ o, unit, onUnit }: {
   o: ProjectOverview; unit: MoneyUnit; onUnit: (v: MoneyUnit) => void

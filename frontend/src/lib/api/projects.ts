@@ -679,11 +679,18 @@ export interface WeekFlag {
   message: string;
 }
 
+export interface BillMeta {
+  bill_code: string | null;
+  name: string;
+  contract_amount: number | null;
+}
+
 export interface FinancialWeek {
   year: number;
   week_number: number;
   week_ending_date: string;
   works_value: number;
+  works_by_bill: Record<string, number>;
   vat: number;
   earnings: number;
   cost_total: number;
@@ -700,6 +707,7 @@ export interface FinancialWeek {
 
 export interface ProjectFinancials {
   weeks: FinancialWeek[];
+  bills_meta: BillMeta[];
   totals: {
     earnings: number;
     cost_total: number;
@@ -720,6 +728,11 @@ export async function getProjectFinancials(projectId: string): Promise<ProjectFi
   const numRec = (o: Record<string, unknown> | null | undefined) =>
     Object.fromEntries(Object.entries(o ?? {}).map(([k, v]) => [k, Number(v ?? 0)]));
   return {
+    bills_meta: (d.bills_meta ?? []).map((b: Record<string, unknown>) => ({
+      bill_code: (b.bill_code ?? null) as string | null,
+      name: String(b.name ?? b.bill_code ?? '—'),
+      contract_amount: b.contract_amount == null ? null : Number(b.contract_amount),
+    })),
     weeks: (d.weeks ?? []).map((w: Record<string, unknown>) => ({
       ...w,
       works_value: Number(w.works_value ?? 0),
@@ -727,6 +740,7 @@ export async function getProjectFinancials(projectId: string): Promise<ProjectFi
       earnings: Number(w.earnings ?? 0),
       cost_total: Number(w.cost_total ?? 0),
       cost_by_category: numRec(w.cost_by_category as Record<string, unknown>),
+      works_by_bill: numRec(w.works_by_bill as Record<string, unknown>),
       diesel_cost: Number(w.diesel_cost ?? 0),
       diesel_rate: w.diesel_rate == null ? null : Number(w.diesel_rate),
       diesel_litres: Number(w.diesel_litres ?? 0),
@@ -1061,25 +1075,19 @@ export interface WorkDoneBill {
   items: WorkDoneItem[];
 }
 
-export async function getProjectWorkDone(projectId: string): Promise<{ bills: WorkDoneBill[] }> {
-  const response = await apiClient.get(`/projects/${projectId}/work-done`);
-  const n = (v: unknown) => (v == null ? null : Number(v));
-  return {
-    bills: (response.data.data.bills ?? []).map((b: Record<string, unknown>) => ({
-      ...b,
-      contract_amount: Number(b.contract_amount ?? 0),
-      amount_done: Number(b.amount_done ?? 0),
-      latest_amount: Number(b.latest_amount ?? 0),
-      pct_complete: n(b.pct_complete),
-      items: (b.items as Record<string, unknown>[]).map((i) => ({
-        ...i,
-        contract_qty: n(i.contract_qty), rate: n(i.rate),
-        contract_amount: n(i.contract_amount), qty_done: n(i.qty_done),
-        amount_done: n(i.amount_done), pct_complete: n(i.pct_complete),
-        latest_qty: n(i.latest_qty), latest_amount: n(i.latest_amount),
-      })),
-    })),
-  };
+export interface WorkDoneData {
+  bills: WorkDoneBill[];
+  weeks: Array<{ year: number; week_number: number; week_ending_date: string }>;
+  selected: { year: number; week_number: number } | null;
+}
+
+export async function getProjectWorkDone(
+  projectId: string, year?: number, week?: number,
+): Promise<WorkDoneData> {
+  const response = await apiClient.get(`/projects/${projectId}/work-done`, {
+    params: year != null && week != null ? { year, week } : undefined,
+  });
+  return response.data.data;
 }
 
 export interface CostCategoryRow {

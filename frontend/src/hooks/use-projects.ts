@@ -86,11 +86,12 @@ export function useProjectIssues(id: string | null, enabled = true) {
   });
 }
 
-export function useProjectWorkDone(id: string | null) {
+export function useProjectWorkDone(id: string | null, year?: number, week?: number) {
   return useQuery({
-    queryKey: [...projectsKeys.detail(id!), 'work-done'],
-    queryFn: () => getProjectWorkDone(id!),
+    queryKey: [...projectsKeys.detail(id!), 'work-done', year ?? 'latest', week ?? 'latest'],
+    queryFn: () => getProjectWorkDone(id!, year, week),
     enabled: !!id, staleTime: 2 * 60 * 1000,
+    placeholderData: keepPreviousData,
   });
 }
 

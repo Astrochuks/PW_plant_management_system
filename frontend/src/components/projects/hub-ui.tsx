@@ -92,3 +92,21 @@ export function InfoChip({ icon: Icon, label, value }: {
     </div>
   )
 }
+
+// FIXED per-category cost colors — shared by the Overview donut, its
+// table dots, and the analytics charts. Never index-cycled.
+export const CATEGORY_COLORS: Record<string, string> = {
+  'Materials': '#3b82f6',
+  'Plant': '#f59e0b',
+  'AGO': '#8b5cf6',
+  'Local Labour': '#10b981',
+  'Site Level Expenses': '#06b6d4',
+  'Overheads': '#f43f5e',
+  'Sub Contractors': '#14b8a6',
+  'Uncategorised': '#94a3b8',
+}
+const FALLBACK_COLORS = ['#eab308', '#64748b', '#ec4899', '#84cc16']
+
+export function categoryColor(name: string, i: number): string {
+  return CATEGORY_COLORS[name] ?? FALLBACK_COLORS[i % FALLBACK_COLORS.length]
+}
