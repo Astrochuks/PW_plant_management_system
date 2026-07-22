@@ -70,13 +70,15 @@ const zoomProps = (count: number) =>
 const pctChange = (now: number, prev: number | null): number | null =>
   prev == null || prev === 0 ? null : ((now - prev) / prev) * 100
 
-function ChangeCell({ value, downIsGood }: { value: number | null; downIsGood?: boolean }) {
+function ChangeCell({ value, downIsGood, pts }: {
+  value: number | null; downIsGood?: boolean; pts?: boolean
+}) {
   if (value == null) return <span className="text-muted-foreground">—</span>
   const up = value > 0
   const good = downIsGood ? !up : up
   return (
     <span className={`font-medium tabular-nums ${good ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-600'}`}>
-      {up ? '▲' : '▼'} {Math.abs(value).toFixed(1)}%
+      {up ? '▲' : '▼'} {Math.abs(value).toFixed(1)}{pts ? ' pts' : '%'}
     </span>
   )
 }
@@ -178,11 +180,6 @@ export default function AnalyticsSection({ gran, year }: {
 
   return (
     <div className="space-y-6">
-      <p className="text-xs text-muted-foreground">
-        {scopedWeeks.length} stored week{scopedWeeks.length === 1 ? '' : 's'}
-        {year !== 'all' ? ` in ${year}` : ''} · all work figures Incl. VAT (× 1.075), excl contingency
-      </p>
-
       {/* Period KPIs, each vs the previous bucket */}
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <Kpi label={`Work + VAT · ${latest.label}`} value={naira(latest.earnings, true)}
@@ -266,10 +263,7 @@ function WorkCard({ gran, buckets, series, scopeInclVat, bill, onBill, bills, bi
     <Card className="relative">
       <Legend>Work (Incl. VAT) · per {gran}</Legend>
       <CardContent className="space-y-4 pt-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-xs text-muted-foreground">
-            {bill === 'all' ? 'all work sections' : billName(bill)} · % of scope = period work ÷ BEME scope (Incl. VAT)
-          </p>
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <Select value={bill} onValueChange={onBill}>
             <SelectTrigger className="h-8 w-64 text-xs"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -358,10 +352,7 @@ function CostCard({ gran, buckets, series, cat, onCat, cats }: {
     <Card className="relative">
       <Legend>Cost · per {gran}</Legend>
       <CardContent className="space-y-4 pt-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-xs text-muted-foreground">
-            {cat === 'all' ? 'all categories, stacked' : `${cat} only`} · Cost Report categories
-          </p>
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <Select value={cat} onValueChange={onCat}>
             <SelectTrigger className="h-8 w-56 text-xs"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -419,17 +410,24 @@ function VsCard({ gran, buckets, workSeries, costSeries, bill, onBill, bills, bi
   cats: string[]
 }) {
   const filtered = bill !== 'all' || cat !== 'all'
-  const rows = useMemo(() => buckets.map((b, i) => {
-    const w = workSeries[i]
-    const c = costSeries[i]
-    return {
-      label: b.label,
-      work: w, cost: c, net: w - c,
-      margin: w ? (w - c) / w : null,
-      dWork: pctChange(w, i > 0 ? workSeries[i - 1] : null),
-      dCost: pctChange(c, i > 0 ? costSeries[i - 1] : null),
-    }
-  }).reverse(), [buckets, workSeries, costSeries])
+  const rows = useMemo(() => {
+    const margins = buckets.map((_, i) =>
+      workSeries[i] ? (workSeries[i] - costSeries[i]) / workSeries[i] : null)
+    return buckets.map((b, i) => {
+      const w = workSeries[i]
+      const c = costSeries[i]
+      const m = margins[i]
+      const pm = i > 0 ? margins[i - 1] : null
+      return {
+        label: b.label,
+        work: w, cost: c, net: w - c,
+        margin: m,
+        dMargin: m != null && pm != null ? (m - pm) * 100 : null,
+        dWork: pctChange(w, i > 0 ? workSeries[i - 1] : null),
+        dCost: pctChange(c, i > 0 ? costSeries[i - 1] : null),
+      }
+    }).reverse()
+  }, [buckets, workSeries, costSeries])
   const pager = usePager(rows)
 
   const workLabel = bill === 'all' ? 'Work + VAT' : `${billName(bill)} (Incl. VAT)`
@@ -462,11 +460,12 @@ function VsCard({ gran, buckets, workSeries, costSeries, bill, onBill, bills, bi
       <Legend>Work vs Cost · per {gran}</Legend>
       <CardContent className="space-y-4 pt-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="max-w-xl text-xs text-muted-foreground">
-            {filtered
-              ? 'Filtered view — costs are recorded project-wide, not per work section, so this is a correlation, not an allocation.'
-              : 'Work done (Incl. VAT) against cost, period by period — gain, margin and movement.'}
-          </p>
+          {filtered ? (
+            <p className="max-w-xl text-xs text-muted-foreground">
+              Filtered view — costs are recorded project-wide, not per work
+              section, so this is a correlation, not an allocation.
+            </p>
+          ) : <span />}
           <div className="flex flex-wrap items-center gap-2">
             <Select value={bill} onValueChange={onBill}>
               <SelectTrigger className="h-8 w-56 text-xs"><SelectValue /></SelectTrigger>
@@ -497,6 +496,7 @@ function VsCard({ gran, buckets, workSeries, costSeries, bill, onBill, bills, bi
                 <th className="whitespace-nowrap px-4 py-2 text-right font-medium">{costLabel} (₦)</th>
                 <th className="whitespace-nowrap px-4 py-2 text-right font-medium">Net (₦)</th>
                 <th className="whitespace-nowrap px-4 py-2 text-right font-medium">Margin</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">Margin Δ</th>
                 <th className="whitespace-nowrap px-4 py-2 text-right font-medium">Work Δ</th>
                 <th className="whitespace-nowrap px-4 py-2 text-right font-medium">Cost Δ</th>
               </tr>
@@ -511,6 +511,7 @@ function VsCard({ gran, buckets, workSeries, costSeries, bill, onBill, bills, bi
                     {naira(r.net)}
                   </td>
                   <td className="px-4 py-1.5 text-right tabular-nums">{pctFmt(r.margin)}</td>
+                  <td className="px-4 py-1.5 text-right"><ChangeCell value={r.dMargin} pts /></td>
                   <td className="px-4 py-1.5 text-right"><ChangeCell value={r.dWork} /></td>
                   <td className="px-4 py-1.5 text-right"><ChangeCell value={r.dCost} downIsGood /></td>
                 </tr>
