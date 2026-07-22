@@ -10,17 +10,16 @@ import { useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
-import { Kpi, Legend } from '@/components/projects/hub-ui'
+import { Legend } from '@/components/projects/hub-ui'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
-import { useProjectWorkDone, useProjectOverview } from '@/hooks/use-projects'
+import { useProjectWorkDone } from '@/hooks/use-projects'
 import type { WorkDoneBill } from '@/lib/api/projects'
 import { naira, pctFmt, num } from '@/lib/format'
 
 export default function WorkDonePage() {
   const params = useParams<{ id: string }>()
   const { data, isLoading } = useProjectWorkDone(params.id)
-  const { data: overview } = useProjectOverview(params.id)
   const [open, setOpen] = useState<Record<string, boolean>>({})
 
   const totals = useMemo(() => {
@@ -43,23 +42,14 @@ export default function WorkDonePage() {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        <Kpi label="Physical progress" value={pctFmt(totals?.pct)}
-          lineage="amount done ÷ BEME scope" />
-        <Kpi label="Work done · to date" value={naira(totals?.done ?? null, true)}
-          sub={naira(totals?.done ?? null)} lineage="stored weeks + baseline" />
-        <Kpi label="BEME scope" value={naira(totals?.contract ?? null, true)}
-          sub={overview && totals && totals.contract > (overview.headline.contract_sum || Infinity)
-            ? 'exceeds contract — variation pending' : undefined}
-          lineage="Σ item contract amounts" />
-        <Kpi label="Quantity over-runs" value={String(totals?.overruns ?? 0)}
-          lineage="qty done > contract qty · flagged, never capped" />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-bold uppercase tracking-wide">Work done — bills &amp; items</p>
+        {(totals?.overruns ?? 0) > 0 && (
+          <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-800 dark:text-amber-300">
+            {totals!.overruns} quantity over-run{totals!.overruns > 1 ? 's' : ''} flagged — qty done &gt; contract qty, never capped
+          </span>
+        )}
       </div>
-
-      <p className="text-xs text-muted-foreground">
-        % complete uses amounts, never quantities — the sites value work independently of
-        measuring it. Bills use the workbook&apos;s own 14-column vocabulary.
-      </p>
 
       {data.bills.map((bill) => (
         <BillCard

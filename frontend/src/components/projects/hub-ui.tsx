@@ -27,12 +27,13 @@ export function LegendSm({ children }: { children: React.ReactNode }) {
   )
 }
 
-export function Kpi({ label, value, sub, lineage, tone }: {
+export function Kpi({ label, value, sub, lineage, tone, extra }: {
   label: string
   value: string
   sub?: string
   lineage?: string
   tone?: 'good' | 'bad'
+  extra?: React.ReactNode
 }) {
   return (
     <Card className="border-0 bg-muted/40 shadow-none">
@@ -43,8 +44,38 @@ export function Kpi({ label, value, sub, lineage, tone }: {
         }`}>{value}</p>
         {sub && <p className="truncate text-xs tabular-nums text-muted-foreground" title={sub}>{sub}</p>}
         {lineage && <p className="mt-0.5 truncate text-[11px] text-muted-foreground" title={lineage}>{lineage}</p>}
+        {extra && <div className="mt-1.5">{extra}</div>}
       </CardContent>
     </Card>
+  )
+}
+
+/** Change chip vs a previous period — % for money, points for ratios. */
+export function Delta({ now, prev, prevLabel, downIsGood, pts, dp = 1 }: {
+  now: number; prev: number | null; prevLabel: string
+  downIsGood?: boolean; pts?: boolean; dp?: number
+}) {
+  if (prev == null) return null
+  const diff = now - prev
+  const raw = pts ? diff * 100 : prev !== 0 ? (diff / prev) * 100 : null
+  if (raw == null || Math.abs(raw) < 0.5 / 10 ** dp) {
+    return (
+      <span className="inline-flex rounded-full bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
+        no change vs {prevLabel}
+      </span>
+    )
+  }
+  const up = diff > 0
+  const good = downIsGood ? !up : up
+  const label = `${up ? '+' : ''}${raw.toFixed(dp)}${pts ? ' pts' : '%'}`
+  return (
+    <span className={`inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] font-medium tabular-nums ${
+      good
+        ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+        : 'bg-red-500/10 text-red-600'
+    }`}>
+      {up ? '▲' : '▼'} {label} vs {prevLabel}
+    </span>
   )
 }
 

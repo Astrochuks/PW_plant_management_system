@@ -9,11 +9,11 @@
 import { useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
 import ECharts from 'echarts-for-react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Kpi, Legend } from '@/components/projects/hub-ui'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import { Legend } from '@/components/projects/hub-ui'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useProjectCostsSummary, useProjectFinancials } from '@/hooks/use-projects'
-import { naira, pctFmt, weekLabel } from '@/lib/format'
+import { naira, weekLabel } from '@/lib/format'
 
 type Granularity = 'week' | 'month'
 
@@ -52,21 +52,6 @@ export default function CostsPage() {
     )
   }
 
-  const cats = summary.categories
-  const total = summary.total_to_date
-  const catBarOption = {
-    tooltip: { valueFormatter: (v: number) => naira(v, true) },
-    grid: { left: 130, right: 40, top: 10, bottom: 24 },
-    xAxis: { type: 'value', axisLabel: { formatter: (v: number) => naira(v, true) } },
-    yAxis: { type: 'category', data: [...cats].reverse().map((c) => c.cost_category) },
-    series: [{
-      type: 'bar',
-      data: [...cats].reverse().map((c) => Math.round(c.to_date)),
-      itemStyle: { color: '#f59e0b' },
-      barMaxWidth: 22,
-    }],
-  }
-
   const stackOption = {
     tooltip: { trigger: 'axis', valueFormatter: (v: number) => naira(v, true) },
     legend: { bottom: 0, type: 'scroll' },
@@ -80,66 +65,10 @@ export default function CostsPage() {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        <Kpi label="Cost · project to date" value={naira(total, true)} sub={naira(total)}
-          lineage="latest week's cumulative column" />
-        <Kpi label="Cost · latest week"
-          value={naira(cats.reduce((a, c) => a + c.this_week, 0), true)}
-          lineage="Σ this-week amounts" />
-        <Kpi label="Biggest category" value={cats[0]?.cost_category ?? '—'}
-          sub={`${naira(cats[0]?.to_date ?? null, true)} · ${pctFmt(total ? (cats[0]?.to_date ?? 0) / total : null)} of costs`}
-          lineage="to date" />
-        <Kpi label="Cost per ₦ of works"
-          value={fin && fin.totals.earnings > 0
-            ? `₦${(fin.totals.cost_total / (fin.totals.earnings / 1.075)).toFixed(2)}`
-            : '—'}
-          lineage="stored weeks · cost ÷ works (ex-VAT)" />
-      </div>
-
-      <div className="grid gap-3 lg:grid-cols-2">
-        <Card className="relative">
-          <Legend>Cost to date · by category</Legend>
-          <CardHeader className="pb-1 pt-5">
-            <p className="text-xs text-muted-foreground">workbook cumulative, latest week</p>
-          </CardHeader>
-          <CardContent>
-            <ECharts option={catBarOption} style={{ height: 260 }} notMerge />
-          </CardContent>
-        </Card>
-
-        <Card className="relative">
-          <Legend>Category positions</Legend>
-          <CardContent className="p-0">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b text-left text-xs text-muted-foreground">
-                  <th className="px-4 py-2 font-medium">Category</th>
-                  <th className="px-4 py-2 text-right font-medium">To date</th>
-                  <th className="px-4 py-2 text-right font-medium">This week</th>
-                  <th className="px-4 py-2 text-right font-medium">% of costs</th>
-                </tr>
-              </thead>
-              <tbody>
-                {cats.map((c) => (
-                  <tr key={c.cost_category} className="border-b last:border-0">
-                    <td className="px-4 py-1.5">{c.cost_category}</td>
-                    <td className="px-4 py-1.5 text-right tabular-nums">{naira(c.to_date)}</td>
-                    <td className="px-4 py-1.5 text-right tabular-nums">{naira(c.this_week)}</td>
-                    <td className="px-4 py-1.5 text-right tabular-nums">{pctFmt(total ? c.to_date / total : null)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card>
-        <CardHeader className="flex-row items-center justify-between pb-0">
-          <div>
-            <CardTitle className="text-sm">Cost movement · stacked by category</CardTitle>
-            <p className="text-xs text-muted-foreground">stored weeks only — gaps show as holes</p>
-          </div>
+      <Card className="relative">
+        <Legend>Cost movement · stacked by category</Legend>
+        <CardHeader className="flex-row items-center justify-between pb-0 pt-5">
+          <p className="text-xs text-muted-foreground">stored weeks only — gaps show as holes</p>
           <div className="flex items-center gap-1 rounded-lg bg-muted p-1">
             {(['week', 'month'] as const).map((g) => (
               <button key={g} onClick={() => setGran(g)}

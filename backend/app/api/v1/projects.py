@@ -1086,74 +1086,68 @@ async def get_project_site(
 ) -> dict[str, Any]:
     """Site resources, latest week + trends: labour by department,
     subcontractor ledgers (latest report carries the truth), materials
-    usage/stock, hired vehicles."""
-    pid = str(project_id)
-    latest_id = await fetchval(
-        """SELECT id FROM project_weekly_reports WHERE project_id = $1::uuid
-           ORDER BY year DESC, week_number DESC LIMIT 1""",
-        pid,
-    )
-    if latest_id is None:
-        return {"success": True, "data": None}
+    usage/stock, hired vehicles.
 
-    labour = await fetch(
-        """SELECT block, dept_slot, department, manning_this_week,
-                  manning_previous_week, movement, comment
-           FROM project_labour_strength
-           WHERE weekly_report_id = $1::uuid
-           ORDER BY block DESC, dept_slot""",
-        str(latest_id),
-    )
-    labour_trend = await fetch(
-        """SELECT wr.year, wr.week_number, wr.week_ending_date,
-                  coalesce(sum(l.manning_this_week), 0)::int AS total
-           FROM project_weekly_reports wr
-           LEFT JOIN project_labour_strength l ON l.weekly_report_id = wr.id
-           WHERE wr.project_id = $1::uuid
-           GROUP BY wr.year, wr.week_number, wr.week_ending_date
-           ORDER BY wr.year, wr.week_number""",
+    ONE query, one round trip — five sequential fetches took 10-13s on
+    Supavisor RTTs and blew the frontend's client timeout."""
+    pid = str(project_id)
+    row = await fetchrow(
+        """WITH latest AS (
+             SELECT id FROM project_weekly_reports WHERE project_id = $1::uuid
+             ORDER BY year DESC, week_number DESC LIMIT 1
+           )
+           SELECT
+             (SELECT id FROM latest)                                  AS latest_id,
+             (SELECT json_agg(row_to_json(x)
+                              ORDER BY x.block DESC, x.dept_slot) FROM (
+                SELECT block, dept_slot, department, manning_this_week,
+                       manning_previous_week, movement, comment
+                FROM project_labour_strength
+                WHERE weekly_report_id = (SELECT id FROM latest)) x)  AS labour,
+             (SELECT json_agg(row_to_json(x)
+                              ORDER BY x.year, x.week_number) FROM (
+                SELECT wr.year, wr.week_number, wr.week_ending_date,
+                       coalesce(sum(l.manning_this_week), 0)::int AS total
+                FROM project_weekly_reports wr
+                LEFT JOIN project_labour_strength l ON l.weekly_report_id = wr.id
+                WHERE wr.project_id = $1::uuid
+                GROUP BY wr.year, wr.week_number, wr.week_ending_date) x) AS labour_trend,
+             (SELECT json_agg(row_to_json(x)
+                              ORDER BY x.subcontractor_name, x.description) FROM (
+                SELECT subcontractor_name, description, location, unit,
+                       agreed_rate, assigned_qty, qty_to_date, balance_remaining,
+                       qty_this_week, amount_this_week, amount_to_date,
+                       value_to_completion
+                FROM v_project_subcontractors_latest
+                WHERE project_id = $1::uuid) x)                       AS subcontractors,
+             (SELECT json_agg(row_to_json(x)
+                              ORDER BY x.sheet_source, x.material_name) FROM (
+                SELECT sheet_source, material_name, unit, unit_cost,
+                       opening_stock, received, closing_stock, available_for_use,
+                       used_works, used_precast, used_mobilisation, used_other,
+                       used, variance_qty, variance_value, stock_maintained
+                FROM project_materials_stock
+                WHERE weekly_report_id = (SELECT id FROM latest)) x)  AS materials,
+             (SELECT json_agg(row_to_json(x)
+                              ORDER BY x.section, x.description) FROM (
+                SELECT registration_no, description, section, owners,
+                       days_worked, rate_ngn, amount_ngn, remarks
+                FROM project_hired_vehicles
+                WHERE weekly_report_id = (SELECT id FROM latest)) x)  AS hired,
+             (SELECT coalesce(sum(amount_ngn), 0) FROM project_hired_vehicles
+              WHERE project_id = $1::uuid)                            AS hired_to_date
+        """,
         pid,
     )
-    subs = await fetch(
-        """SELECT subcontractor_name, description, location, unit,
-                  agreed_rate, assigned_qty, qty_to_date, balance_remaining,
-                  qty_this_week, amount_this_week, amount_to_date,
-                  value_to_completion
-           FROM v_project_subcontractors_latest
-           WHERE project_id = $1::uuid
-           ORDER BY subcontractor_name, description""",
-        pid,
-    )
-    materials = await fetch(
-        """SELECT sheet_source, material_name, unit, unit_cost,
-                  opening_stock, received, closing_stock, available_for_use,
-                  used_works, used_precast, used_mobilisation, used_other,
-                  used, variance_qty, variance_value, stock_maintained
-           FROM project_materials_stock
-           WHERE weekly_report_id = $1::uuid
-           ORDER BY sheet_source, material_name""",
-        str(latest_id),
-    )
-    hired = await fetch(
-        """SELECT registration_no, description, section, owners,
-                  days_worked, rate_ngn, amount_ngn, remarks
-           FROM project_hired_vehicles
-           WHERE weekly_report_id = $1::uuid
-           ORDER BY section, description""",
-        str(latest_id),
-    )
-    hired_to_date = await fetchval(
-        """SELECT coalesce(sum(amount_ngn), 0) FROM project_hired_vehicles
-           WHERE project_id = $1::uuid""",
-        pid,
-    )
+    if row is None or row["latest_id"] is None:
+        return {"success": True, "data": None}
     return {"success": True, "data": {
-        "labour": labour,
-        "labour_trend": labour_trend,
-        "subcontractors": subs,
-        "materials": materials,
-        "hired_vehicles": hired,
-        "hired_to_date_stored": float(hired_to_date or 0),
+        "labour": row["labour"] or [],
+        "labour_trend": row["labour_trend"] or [],
+        "subcontractors": row["subcontractors"] or [],
+        "materials": row["materials"] or [],
+        "hired_vehicles": row["hired"] or [],
+        "hired_to_date_stored": float(row["hired_to_date"] or 0),
     }}
 
 

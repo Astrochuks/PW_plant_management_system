@@ -11,9 +11,9 @@ import { useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
 import ECharts from 'echarts-for-react'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
-import { Kpi, Legend } from '@/components/projects/hub-ui'
+import { Delta, Kpi, Legend } from '@/components/projects/hub-ui'
 import { Skeleton } from '@/components/ui/skeleton'
-import { useProjectFinancials, useProjectOverview } from '@/hooks/use-projects'
+import { useProjectFinancials } from '@/hooks/use-projects'
 import type { FinancialWeek } from '@/hooks/use-projects'
 import { naira, pctFmt, weekLabel } from '@/lib/format'
 
@@ -39,7 +39,6 @@ function bucketKey(w: FinancialWeek, g: Granularity): string {
 export default function PerformancePage() {
   const params = useParams<{ id: string }>()
   const { data: fin, isLoading } = useProjectFinancials(params.id)
-  const { data: overview } = useProjectOverview(params.id)
   const [gran, setGran] = useState<Granularity>('week')
 
   const buckets: Bucket[] = useMemo(() => {
@@ -69,7 +68,9 @@ export default function PerformancePage() {
   }
 
   const latest = buckets[buckets.length - 1]
-  const totals = fin.totals
+  const prev = buckets.length > 1 ? buckets[buckets.length - 2] : null
+  const latestMargin = latest.earnings ? latest.net / latest.earnings : null
+  const prevMargin = prev && prev.earnings ? prev.net / prev.earnings : null
 
   const chartOption = {
     tooltip: {
@@ -136,19 +137,20 @@ export default function PerformancePage() {
         </p>
       </div>
 
-      {/* KPI cards: latest bucket + stored range + project to date */}
+      {/* Latest bucket at the chosen granularity, each vs the previous one */}
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        <Kpi label={`Works · latest ${gran}`} value={naira(latest.works, true)}
-          sub={latest.label} lineage="Σ BEME this-week amounts" />
-        <Kpi label={`Net · latest ${gran}`} value={naira(latest.net, true)}
-          sub={`earnings − costs · ${latest.label}`}
-          lineage="works × 1.075 − costs" tone={latest.net >= 0 ? 'good' : 'bad'} />
-        <Kpi label="Net · stored weeks" value={naira(totals.net, true)}
-          sub={`${totals.weeks_gaining} gaining · ${totals.weeks_losing} losing`}
-          lineage={`across ${fin.weeks.length} stored weeks`} />
-        <Kpi label="Net earnings · to date" value={naira(overview?.cost_profitability.net_to_date ?? null, true)}
-          sub={overview ? pctFmt(overview.cost_profitability.margin_to_date) : undefined}
-          lineage="incl. baseline · Weekly Summary definition" />
+        <Kpi label={`Works · ${latest.label}`} value={naira(latest.works, true)}
+          sub={naira(latest.works)}
+          extra={<Delta now={latest.works} prev={prev?.works ?? null} prevLabel={prev?.label ?? ''} />} />
+        <Kpi label={`Cost · ${latest.label}`} value={naira(latest.cost, true)}
+          sub={naira(latest.cost)}
+          extra={<Delta now={latest.cost} prev={prev?.cost ?? null} prevLabel={prev?.label ?? ''} downIsGood />} />
+        <Kpi label={`Net · ${latest.label}`} value={naira(latest.net, true)}
+          sub={naira(latest.net)} tone={latest.net >= 0 ? 'good' : 'bad'}
+          extra={<Delta now={latest.net} prev={prev?.net ?? null} prevLabel={prev?.label ?? ''} />} />
+        <Kpi label={`Margin · ${latest.label}`} value={pctFmt(latestMargin)}
+          tone={latestMargin != null && latestMargin < 0 ? 'bad' : 'good'}
+          extra={<Delta now={latestMargin ?? 0} prev={prevMargin} prevLabel={prev?.label ?? ''} pts />} />
       </div>
 
       {/* Earnings vs costs */}

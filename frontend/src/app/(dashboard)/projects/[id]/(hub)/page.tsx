@@ -23,7 +23,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useProjectOverview } from '@/hooks/use-projects'
 import type { ProjectOverview } from '@/lib/api/projects'
-import { Kpi, Legend, LegendSm } from '@/components/projects/hub-ui'
+import { Delta, Kpi, Legend, LegendSm } from '@/components/projects/hub-ui'
 import { fmtDate, naira, nairaM, num, pctFmt, weekLabel } from '@/lib/format'
 
 type MoneyUnit = 'm' | 'full'
@@ -247,34 +247,6 @@ function KvBlock({ label, value }: { label: string; value: string }) {
 /* ── This week — the pulse ───────────────────────────────────────────── */
 
 const VAT = 1.075
-
-function Delta({ now, prev, prevLabel, downIsGood, pts, dp = 1 }: {
-  now: number; prev: number | null; prevLabel: string
-  downIsGood?: boolean; pts?: boolean; dp?: number
-}) {
-  if (prev == null) return null
-  const diff = now - prev
-  const raw = pts ? diff * 100 : prev !== 0 ? (diff / prev) * 100 : null
-  if (raw == null || Math.abs(raw) < 0.5 / 10 ** dp) {
-    return (
-      <span className="inline-flex rounded-full bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
-        no change vs {prevLabel}
-      </span>
-    )
-  }
-  const up = diff > 0
-  const good = downIsGood ? !up : up
-  const label = `${up ? '+' : ''}${raw.toFixed(dp)}${pts ? ' pts' : '%'}`
-  return (
-    <span className={`inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] font-medium tabular-nums ${
-      good
-        ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
-        : 'bg-red-500/10 text-red-600'
-    }`}>
-      {up ? '▲' : '▼'} {label} vs {prevLabel}
-    </span>
-  )
-}
 
 function ThisWeekCard({ o }: { o: ProjectOverview }) {
   const cp = o.cost_profitability
