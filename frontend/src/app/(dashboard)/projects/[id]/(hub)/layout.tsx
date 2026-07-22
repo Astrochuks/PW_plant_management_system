@@ -119,17 +119,18 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
         ) : <div />}
       </div>
 
-      {/* Tab bar — button-styled, animated; scrolls sideways on mobile */}
-      <div className="mt-3 flex items-center gap-1.5 overflow-x-auto border-b pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      {/* Tab bar — folder-style: tabs sit ON the line; the active one
+          opens into the page (bottom border removed, background merged) */}
+      <div className="mt-5 flex items-end gap-1 overflow-x-auto border-b [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {PAGES.filter((p) => !p.adminOnly || isAdmin).map((p) =>
           p.ready ? (
             <Link
               key={p.seg}
               href={p.seg ? `${base}/${p.seg}` : base}
-              className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border px-4 py-2 text-sm font-medium transition-all duration-200 active:scale-95 ${
+              className={`relative -mb-px inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-t-lg border px-4 py-2 text-sm font-medium transition-all duration-200 ${
                 activeSeg === p.seg
-                  ? 'border-amber-500/50 bg-amber-500/15 text-foreground shadow-sm'
-                  : 'border-transparent text-muted-foreground hover:-translate-y-0.5 hover:border-border hover:bg-muted hover:text-foreground hover:shadow-sm'
+                  ? 'border-border border-b-background border-t-2 border-t-amber-500 bg-background text-foreground'
+                  : 'border-transparent text-muted-foreground hover:border-border/60 hover:border-b-transparent hover:bg-muted/60 hover:text-foreground'
               }`}
             >
               {p.label}
@@ -143,7 +144,7 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
             <span
               key={p.seg}
               title="Coming soon"
-              className="cursor-default whitespace-nowrap rounded-lg border border-transparent px-4 py-2 text-sm text-muted-foreground/50"
+              className="-mb-px cursor-default whitespace-nowrap rounded-t-lg border border-transparent px-4 py-2 text-sm text-muted-foreground/50"
             >
               {p.label}
             </span>
