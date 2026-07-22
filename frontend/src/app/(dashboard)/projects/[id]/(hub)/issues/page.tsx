@@ -18,7 +18,8 @@ import {
 import { useQueryClient } from '@tanstack/react-query'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import { Legend } from '@/components/projects/hub-ui'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useAuth } from '@/providers/auth-provider'
 import { useProjectIssues, projectsKeys } from '@/hooks/use-projects'
@@ -239,12 +240,9 @@ function IssueCard({ icon: Icon, title, subtitle, children }: {
   children: React.ReactNode
 }) {
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="flex items-center gap-2 text-sm">
-          <Icon className="h-4 w-4 text-amber-600" />
-          {title}
-        </CardTitle>
+    <Card className="relative">
+      <Legend><Icon className="h-4 w-4 text-amber-600" /> {title}</Legend>
+      <CardHeader className="pb-1 pt-5">
         <p className="text-xs text-muted-foreground">{subtitle}</p>
       </CardHeader>
       <CardContent>{children}</CardContent>

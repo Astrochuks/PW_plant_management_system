@@ -10,6 +10,7 @@ import { useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
 import ECharts from 'echarts-for-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Kpi, Legend } from '@/components/projects/hub-ui'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useProjectCostsSummary, useProjectFinancials } from '@/hooks/use-projects'
 import { naira, pctFmt, weekLabel } from '@/lib/format'
@@ -96,9 +97,9 @@ export default function CostsPage() {
       </div>
 
       <div className="grid gap-3 lg:grid-cols-2">
-        <Card>
-          <CardHeader className="pb-0">
-            <CardTitle className="text-sm">Cost to date · by category</CardTitle>
+        <Card className="relative">
+          <Legend>Cost to date · by category</Legend>
+          <CardHeader className="pb-1 pt-5">
             <p className="text-xs text-muted-foreground">workbook cumulative, latest week</p>
           </CardHeader>
           <CardContent>
@@ -106,10 +107,8 @@ export default function CostsPage() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Category positions</CardTitle>
-          </CardHeader>
+        <Card className="relative">
+          <Legend>Category positions</Legend>
           <CardContent className="p-0">
             <table className="w-full text-sm">
               <thead>
@@ -160,18 +159,6 @@ export default function CostsPage() {
   )
 }
 
-function Kpi({ label, value, sub, lineage }: { label: string; value: string; sub?: string; lineage: string }) {
-  return (
-    <Card className="py-0">
-      <CardContent className="px-4 py-3">
-        <p className="text-[11px] text-muted-foreground">{label}</p>
-        <p className="mt-0.5 text-xl font-bold tabular-nums truncate">{value}</p>
-        {sub && <p className="truncate text-[11px] text-muted-foreground">{sub}</p>}
-        <p className="text-[10px] text-muted-foreground/70">{lineage}</p>
-      </CardContent>
-    </Card>
-  )
-}
 
 function PageSkeleton() {
   return (

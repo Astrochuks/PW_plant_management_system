@@ -9,7 +9,8 @@
 import { useMemo } from 'react'
 import { useParams } from 'next/navigation'
 import ECharts from 'echarts-for-react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import { Kpi, Legend } from '@/components/projects/hub-ui'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useProjectSite } from '@/hooks/use-projects'
 import { naira, num, weekLabel } from '@/lib/format'
@@ -72,19 +73,15 @@ export default function SitePage() {
       </div>
 
       <div className="grid gap-3 lg:grid-cols-2">
-        <Card>
-          <CardHeader className="pb-0">
-            <CardTitle className="text-sm">Labour strength · trend</CardTitle>
-          </CardHeader>
+        <Card className="relative">
+          <Legend>Labour strength · trend</Legend>
           <CardContent>
             <ECharts option={trendOption} style={{ height: 220 }} notMerge />
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Departments · latest week</CardTitle>
-          </CardHeader>
+        <Card className="relative">
+          <Legend>Departments · latest week</Legend>
           <CardContent className="max-h-[260px] overflow-y-auto p-0">
             <table className="w-full text-xs">
               <thead className="sticky top-0 bg-background">
@@ -117,9 +114,9 @@ export default function SitePage() {
         </Card>
       </div>
 
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Subcontractors · latest ledger</CardTitle>
+      <Card className="relative">
+        <Legend>Subcontractors · latest ledger</Legend>
+        <CardHeader className="pb-1 pt-5">
           <p className="text-xs text-muted-foreground">the latest report carries each ledger&apos;s cumulative truth</p>
         </CardHeader>
         <CardContent className="p-0">
@@ -146,9 +143,9 @@ export default function SitePage() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Materials · latest week</CardTitle>
+      <Card className="relative">
+        <Legend>Materials · latest week</Legend>
+        <CardHeader className="pb-1 pt-5">
           <p className="text-xs text-muted-foreground">
             Variance is the sheet&apos;s own loss detector (available − used), shown verbatim
           </p>
@@ -202,10 +199,8 @@ export default function SitePage() {
       </Card>
 
       {site.hired_vehicles.length > 0 && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Hired vehicles · latest week</CardTitle>
-          </CardHeader>
+        <Card className="relative">
+          <Legend>Hired vehicles · latest week</Legend>
           <CardContent className="p-0">
             <table className="w-full text-xs">
               <thead>
@@ -261,18 +256,6 @@ function SubGroup({ name, rows }: { name: string; rows: Array<Record<string, unk
   )
 }
 
-function Kpi({ label, value, sub, lineage }: { label: string; value: string; sub?: string; lineage: string }) {
-  return (
-    <Card className="py-0">
-      <CardContent className="px-4 py-3">
-        <p className="text-[11px] text-muted-foreground">{label}</p>
-        <p className="mt-0.5 text-xl font-bold tabular-nums">{value}</p>
-        {sub && <p className="truncate text-[11px] text-muted-foreground">{sub}</p>}
-        <p className="text-[10px] text-muted-foreground/70">{lineage}</p>
-      </CardContent>
-    </Card>
-  )
-}
 
 function PageSkeleton() {
   return (

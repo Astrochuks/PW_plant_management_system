@@ -9,7 +9,7 @@
 import Link from 'next/link'
 import { useParams, usePathname, useRouter } from 'next/navigation'
 import { useState } from 'react'
-import { ArrowLeft, Edit2, Trash2 } from 'lucide-react'
+import { ArrowLeft, CalendarDays, Edit2, Trash2, Users } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import {
@@ -18,6 +18,8 @@ import {
 import { useAuth } from '@/providers/auth-provider'
 import { useProject, useDeleteProject, useProjectIssues, useProjectOverview, useProjectSubmissions } from '@/hooks/use-projects'
 import { STATUS_STYLES } from '@/components/projects/projects-table'
+import { InfoChip } from '@/components/projects/hub-ui'
+import { fmtDate, num } from '@/lib/format'
 
 const PAGES: Array<{ seg: string; label: string; ready: boolean; adminOnly?: boolean }> = [
   { seg: '', label: 'Overview', ready: true },
@@ -76,6 +78,8 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
 
   return (
     <div className="space-y-4">
+      {/* Sticky context header: identity + nav + latest-report strip */}
+      <div className="sticky top-16 z-20 -mx-6 bg-background px-6 pt-1 shadow-sm">
       {/* Three zones: identity · status trio (centered in the leftover space) · actions */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
         <div className="flex items-center gap-3">
@@ -130,7 +134,7 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
 
       {/* Tab bar — folder-style: tabs sit ON the line; the active one
           opens into the page (bottom border removed, background merged) */}
-      <div className="mt-7 flex items-end gap-0.5 overflow-x-auto border-b [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className="mt-5 flex items-end gap-0.5 overflow-x-auto border-b [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {PAGES.filter((p) => !p.adminOnly || isAdmin).map((p) =>
           p.ready ? (
             <Link
@@ -159,6 +163,17 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
             </span>
           )
         )}
+      </div>
+
+      {/* Latest-report context strip — visible on every hub tab */}
+      {overview?.latest_week && (
+        <div className="my-3 flex flex-wrap items-center gap-x-6 gap-y-1">
+          <InfoChip icon={CalendarDays} label="Latest report"
+            value={`W${String(overview.latest_week.week_number).padStart(2, '0')} · Date: ${fmtDate(overview.latest_week.week_ending_date)}`} />
+          <InfoChip icon={Users} label="Labour on site"
+            value={num(overview.resources.labour_direct + overview.resources.labour_casual)} />
+        </div>
+      )}
       </div>
 
       {children}

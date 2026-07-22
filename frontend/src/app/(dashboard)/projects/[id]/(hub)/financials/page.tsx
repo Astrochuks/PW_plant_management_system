@@ -7,7 +7,8 @@
  */
 
 import { useParams } from 'next/navigation'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import { Kpi, Legend } from '@/components/projects/hub-ui'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useProjectLedgers, useProjectOverview } from '@/hooks/use-projects'
 import { naira, fmtDate } from '@/lib/format'
@@ -51,9 +52,9 @@ export default function FinancialsPage() {
       </div>
 
       {certs.length > 0 && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Certificate ledger</CardTitle>
+        <Card className="relative">
+          <Legend>Certificate ledger</Legend>
+          <CardHeader className="pb-1 pt-5">
             <p className="text-xs text-muted-foreground">
               cumulative per certificate, workbook columns verbatim · scroll for the full 19
             </p>
@@ -104,9 +105,9 @@ export default function FinancialsPage() {
       )}
 
       {payments.length > 0 && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Payments · latest ledger</CardTitle>
+        <Card className="relative">
+          <Legend>Payments · latest ledger</Legend>
+          <CardHeader className="pb-1 pt-5">
             <p className="text-xs text-muted-foreground">
               the latest workbook re-states the full history — earlier copies are never summed
             </p>
@@ -167,18 +168,6 @@ export default function FinancialsPage() {
   )
 }
 
-function Kpi({ label, value, sub, lineage }: { label: string; value: string; sub?: string; lineage: string }) {
-  return (
-    <Card className="py-0">
-      <CardContent className="px-4 py-3">
-        <p className="text-[11px] text-muted-foreground">{label}</p>
-        <p className="mt-0.5 text-xl font-bold tabular-nums">{value}</p>
-        {sub && <p className="truncate text-[11px] text-muted-foreground">{sub}</p>}
-        <p className="text-[10px] text-muted-foreground/70">{lineage}</p>
-      </CardContent>
-    </Card>
-  )
-}
 
 function PageSkeleton() {
   return (

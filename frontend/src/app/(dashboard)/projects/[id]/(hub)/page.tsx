@@ -16,13 +16,14 @@ import { useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
 import ECharts from 'echarts-for-react'
 import {
-  Banknote, CalendarDays, ChevronDown, HardHat, Percent, TrendingUp, Users, Wallet,
+  Banknote, ChevronDown, HardHat, Percent, TrendingUp, Wallet,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useProjectOverview } from '@/hooks/use-projects'
 import type { ProjectOverview } from '@/lib/api/projects'
+import { Kpi, Legend } from '@/components/projects/hub-ui'
 import { fmtDate, naira, nairaM, num, pctFmt, weekLabel } from '@/lib/format'
 
 export default function ProjectOverviewPage() {
@@ -34,14 +35,6 @@ export default function ProjectOverviewPage() {
 
   return (
     <div className="space-y-6">
-      {/* Context chips: which report feeds this page + who's on site */}
-      <div className="mt-4 flex flex-wrap items-center justify-start gap-x-6 gap-y-1">
-        <InfoChip icon={CalendarDays} label="Latest report"
-          value={`W${String(o.latest_week.week_number).padStart(2, '0')} · Date: ${fmtDate(o.latest_week.week_ending_date)}`} />
-        <InfoChip icon={Users} label="Labour on site"
-          value={num(o.resources.labour_direct + o.resources.labour_casual)} />
-      </div>
-
       <ContractCard o={o} />
 
       {/* Headline strip */}
@@ -744,44 +737,8 @@ function CostProfitabilityCard({ o }: { o: ProjectOverview }) {
 
 /* ── shared bits ─────────────────────────────────────────────────────── */
 
-function Kpi({ label, value, sub, lineage, tone }: {
-  label: string; value: string; sub?: string; lineage: string; tone?: 'good' | 'bad'
-}) {
-  return (
-    <Card className="border-0 bg-muted/40 shadow-none">
-      <CardContent className="p-3.5">
-        <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-        <p className={`mt-0.5 text-xl font-bold tabular-nums ${
-          tone === 'bad' ? 'text-red-600' : tone === 'good' ? 'text-emerald-700 dark:text-emerald-400' : ''
-        }`}>{value}</p>
-        {sub && <p className="truncate text-xs tabular-nums text-muted-foreground" title={sub}>{sub}</p>}
-        <p className="mt-0.5 truncate text-[11px] text-muted-foreground" title={lineage}>{lineage}</p>
-      </CardContent>
-    </Card>
-  )
-}
 
-/* Fieldset-style card title: embedded in the border line, breaking it */
-function Legend({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="absolute -top-2.5 left-4 z-10 inline-flex max-w-[85%] items-center gap-1.5 truncate rounded bg-card px-2 text-sm font-semibold">
-      {children}
-    </span>
-  )
-}
 
-function InfoChip({ icon: Icon, label, value }: {
-  icon: React.ComponentType<{ className?: string }>
-  label: string; value: string
-}) {
-  return (
-    <div className="flex items-center gap-2">
-      <Icon className="h-4 w-4 text-amber-600" />
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <span className="text-sm font-semibold tabular-nums">{value}</span>
-    </div>
-  )
-}
 
 function MoneyRow({ label, v, text, note }: {
   label: string; v?: number; text?: string; note?: string

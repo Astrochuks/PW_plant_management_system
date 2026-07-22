@@ -8,7 +8,8 @@
 import { useState } from 'react'
 import { FileSpreadsheet, FileText } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import { Legend, LegendSm } from '@/components/projects/hub-ui'
 
 const PERIODS = [
   { key: 'week', label: 'Week' },
@@ -59,9 +60,9 @@ export default function ReportPage() {
         </div>
       </div>
 
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Report pack — coming soon</CardTitle>
+      <Card className="relative">
+        <Legend>Report pack — coming soon</Legend>
+        <CardHeader className="pb-1 pt-5">
           <p className="text-xs text-muted-foreground">
             A formatted document you can print or hand over — reads like the
             workbook, generated from the same ledgers the tabs use. Pick a
@@ -70,9 +71,9 @@ export default function ReportPage() {
         </CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-2">
           {PACK_SECTIONS.map((s) => (
-            <div key={s.title} className="rounded-lg border border-dashed p-3">
-              <p className="text-sm font-medium">{s.title}</p>
-              <p className="mt-0.5 text-xs text-muted-foreground">{s.body}</p>
+            <div key={s.title} className="relative rounded-lg border border-dashed p-3 pt-4">
+              <LegendSm>{s.title}</LegendSm>
+              <p className="text-xs text-muted-foreground">{s.body}</p>
             </div>
           ))}
         </CardContent>

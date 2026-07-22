@@ -13,7 +13,8 @@ import { toast } from 'sonner'
 import { RefreshCcw } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import { Kpi, Legend } from '@/components/projects/hub-ui'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useQueryClient } from '@tanstack/react-query'
@@ -119,9 +120,9 @@ export default function PlantDieselPage() {
           lineage="Cost Report AGO row = money truth" />
       </div>
 
-      <Card>
-        <CardHeader className="pb-0">
-          <CardTitle className="text-sm">Diesel · charged vs logged, per week</CardTitle>
+      <Card className="relative">
+        <Legend>Diesel · charged vs logged, per week</Legend>
+        <CardHeader className="pb-1 pt-5">
           <p className="text-xs text-muted-foreground">
             The AGO row is what the site pays for; the log is which plants it went into.
             The gap is unattributed fuel.
@@ -133,10 +134,10 @@ export default function PlantDieselPage() {
       </Card>
 
       {(unmapped?.length ?? 0) > 0 && (
-        <Card className="border-amber-300 dark:border-amber-700">
-          <CardHeader className="flex-row items-center justify-between pb-2">
+        <Card className="relative border-amber-300 dark:border-amber-700">
+          <Legend>Fleet numbers awaiting a verdict</Legend>
+          <CardHeader className="flex-row items-center justify-between pb-2 pt-5">
             <div>
-              <CardTitle className="text-sm">Fleet numbers awaiting a verdict</CardTitle>
               <p className="text-xs text-muted-foreground">
                 Rows are saved either way — a verdict links them to the register (or settles
                 them as external) for every past and future week.
@@ -187,9 +188,9 @@ export default function PlantDieselPage() {
         </Card>
       )}
 
-      <Card>
-        <CardHeader className="flex-row items-center justify-between gap-3 pb-2">
-          <CardTitle className="text-sm">Per-plant totals · stored weeks</CardTitle>
+      <Card className="relative">
+        <Legend>Per-plant totals · stored weeks</Legend>
+        <CardHeader className="pb-1 pt-5">
           <Input
             placeholder="Search fleet number or description…"
             value={search}
@@ -251,18 +252,6 @@ export default function PlantDieselPage() {
   )
 }
 
-function Kpi({ label, value, sub, lineage }: { label: string; value: string; sub?: string; lineage: string }) {
-  return (
-    <Card className="py-0">
-      <CardContent className="px-4 py-3">
-        <p className="text-[11px] text-muted-foreground">{label}</p>
-        <p className="mt-0.5 text-xl font-bold tabular-nums">{value}</p>
-        {sub && <p className="truncate text-[11px] text-muted-foreground">{sub}</p>}
-        <p className="text-[10px] text-muted-foreground/70">{lineage}</p>
-      </CardContent>
-    </Card>
-  )
-}
 
 function PageSkeleton() {
   return (

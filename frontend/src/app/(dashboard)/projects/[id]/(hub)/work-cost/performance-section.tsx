@@ -10,7 +10,8 @@
 import { useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
 import ECharts from 'echarts-for-react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import { Kpi, Legend } from '@/components/projects/hub-ui'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useProjectFinancials, useProjectOverview } from '@/hooks/use-projects'
 import type { FinancialWeek } from '@/hooks/use-projects'
@@ -151,9 +152,9 @@ export default function PerformancePage() {
       </div>
 
       {/* Earnings vs costs */}
-      <Card>
-        <CardHeader className="pb-0">
-          <CardTitle className="text-sm">Earnings vs costs · per {gran}</CardTitle>
+      <Card className="relative">
+        <Legend>Earnings vs costs · per {gran}</Legend>
+        <CardHeader className="pb-1 pt-5">
           <p className="text-xs text-muted-foreground">earnings = works × 1.075, excl contingency</p>
         </CardHeader>
         <CardContent>
@@ -161,20 +162,16 @@ export default function PerformancePage() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader className="pb-0">
-          <CardTitle className="text-sm">Net (gain / loss) · per {gran}</CardTitle>
-        </CardHeader>
+      <Card className="relative">
+        <Legend>Net (gain / loss) · per {gran}</Legend>
         <CardContent>
           <ECharts option={marginOption} style={{ height: 220 }} notMerge />
         </CardContent>
       </Card>
 
       {/* Period table */}
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Movement by {gran}</CardTitle>
-        </CardHeader>
+      <Card className="relative">
+        <Legend>Movement by {gran}</Legend>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -221,22 +218,6 @@ export default function PerformancePage() {
   )
 }
 
-function Kpi({ label, value, sub, lineage, tone }: {
-  label: string; value: string; sub?: string; lineage: string; tone?: 'good' | 'bad'
-}) {
-  return (
-    <Card className="py-0">
-      <CardContent className="px-4 py-3">
-        <p className="text-[11px] text-muted-foreground">{label}</p>
-        <p className={`mt-0.5 text-xl font-bold tabular-nums ${
-          tone === 'good' ? 'text-emerald-700' : tone === 'bad' ? 'text-red-600' : ''
-        }`}>{value}</p>
-        {sub && <p className="text-[11px] text-muted-foreground truncate">{sub}</p>}
-        <p className="text-[10px] text-muted-foreground/70">{lineage}</p>
-      </CardContent>
-    </Card>
-  )
-}
 
 function PageSkeleton() {
   return (

@@ -12,7 +12,8 @@ import { useParams } from 'next/navigation'
 import { UploadCloud } from 'lucide-react'
 import { useAuth } from '@/providers/auth-provider'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import { Legend } from '@/components/projects/hub-ui'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
@@ -45,11 +46,11 @@ export default function ProjectSubmissionsTab() {
 
   return (
     <div className="space-y-4">
-      <Card>
-        <CardHeader className="pb-3">
+      <Card className="relative">
+        <Legend>Weekly report submissions</Legend>
+        <CardHeader className="pb-3 pt-5">
           <div className="flex flex-wrap items-center gap-3">
             <div>
-              <CardTitle className="text-base">Weekly report submissions</CardTitle>
               <p className="text-xs text-muted-foreground">
                 Every workbook uploaded for this project — click a row for
                 sheets, row counts and warnings.
