@@ -33,9 +33,9 @@ export default function ProjectOverviewPage() {
   if (!o.latest_week) return <NoReportsYet />
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       {/* Context chips: which report feeds this page + who's on site */}
-      <div className="mt-1 flex flex-wrap items-center justify-start gap-x-6 gap-y-1">
+      <div className="mt-4 flex flex-wrap items-center justify-start gap-x-6 gap-y-1">
         <InfoChip icon={CalendarDays} label="Latest report"
           value={`W${String(o.latest_week.week_number).padStart(2, '0')} · Date: ${fmtDate(o.latest_week.week_ending_date)}`} />
         <InfoChip icon={Users} label="Labour on site"
@@ -96,11 +96,9 @@ function ContractCard({ o }: { o: ProjectOverview }) {
   const pct = o.headline.pct_complete ?? 0
 
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-sm">Contract details &amp; schedule</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-5">
+    <Card className="relative">
+      <Legend>Contract details &amp; schedule</Legend>
+      <CardContent className="space-y-4 pt-6">
         {/* Overall progress */}
         <div>
           <div className="mb-1.5 flex items-baseline justify-between">
@@ -302,21 +300,15 @@ function ThisWeekCard({ o }: { o: ProjectOverview }) {
   const maxVal = Math.max(...compare.flatMap((c) => [c.now, c.prev ?? 0]), 1)
 
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm">
-          This week · {weekLabel(lw.year, lw.week_number)}
-          <span className="ml-2 font-normal text-muted-foreground">
-            w/e {fmtDate(lw.week_ending_date)}
-          </span>
-        </CardTitle>
+    <Card className="relative">
+      <Legend>This week · {weekLabel(lw.year, lw.week_number)}</Legend>
+      <CardContent className="space-y-3 pt-6">
         {pw && gapWeeks > 0 && (
           <p className="text-xs text-amber-700">
             Previous stored week is {prevLabel} — {gapWeeks} week{gapWeeks > 1 ? 's' : ''} missing in between
           </p>
         )}
-      </CardHeader>
-      <CardContent className="grid gap-4 lg:grid-cols-[1fr_360px]">
+        <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
         <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
           <MiniKpi icon={HardHat} iconClass="bg-amber-500/10 text-amber-600"
             label="Work Done + VAT" value={naira(cp.works_incl_vat_this_week, true)}
@@ -361,6 +353,7 @@ function ThisWeekCard({ o }: { o: ProjectOverview }) {
               )
             })}
           </div>
+        </div>
         </div>
       </CardContent>
     </Card>
@@ -447,9 +440,9 @@ function PhysicalProgressCard({ o }: { o: ProjectOverview }) {
   }, [bills])
 
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm">Physical progress — works completed</CardTitle>
+    <Card className="relative">
+      <Legend>Physical progress — works completed</Legend>
+      <CardHeader className="pb-1 pt-5">
         <p className="text-xs text-muted-foreground">
           Work sections from the BEME sheet, all amounts ₦m · to-date =
           previous + stored weeks (kobo-exact vs the workbook&apos;s own cumulative)
@@ -548,12 +541,12 @@ function CertsPaymentsCard({ o }: { o: ProjectOverview }) {
   const c = o.certs_payments
   const young = c.certificates_total === 0 && c.payments_count === 0
   return (
-    <Card className="lg:col-span-2">
-      <CardHeader className="pb-2">
-        <CardTitle className="flex items-center gap-2 text-sm">
-          <Banknote className="h-4 w-4 text-muted-foreground" />
-          Certificates &amp; payments
-        </CardTitle>
+    <Card className="relative lg:col-span-2">
+      <Legend>
+        <Banknote className="h-4 w-4 text-muted-foreground" />
+        Certificates &amp; payments
+      </Legend>
+      <CardHeader className="pb-1 pt-5">
         <p className="text-xs text-muted-foreground">
           Certificate + payments ledgers only — never the Contract Summary&apos;s
           frozen client block
@@ -589,12 +582,12 @@ function CertsPaymentsCard({ o }: { o: ProjectOverview }) {
 function ResourcesCard({ o }: { o: ProjectOverview }) {
   const r = o.resources
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="flex items-center gap-2 text-sm">
-          <HardHat className="h-4 w-4 text-muted-foreground" />
-          Resources · this week
-        </CardTitle>
+    <Card className="relative">
+      <Legend>
+        <HardHat className="h-4 w-4 text-muted-foreground" />
+        Resources · this week
+      </Legend>
+      <CardHeader className="pb-1 pt-5">
         <p className="text-xs text-muted-foreground">Labour Strength + Diesel sheets, latest week</p>
       </CardHeader>
       <CardContent className="space-y-1.5 text-sm">
@@ -665,9 +658,9 @@ function CostProfitabilityCard({ o }: { o: ProjectOverview }) {
   }), [cp])
 
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm">Cost &amp; profitability</CardTitle>
+    <Card className="relative">
+      <Legend>Cost &amp; profitability</Legend>
+      <CardHeader className="pb-1 pt-5">
         <p className="text-xs text-muted-foreground">
           Cost Report categories, all amounts ₦m · net earnings = work done
           incl VAT (excl contingency) − costs — the Weekly Summary definition
@@ -765,6 +758,15 @@ function Kpi({ label, value, sub, lineage, tone }: {
         <p className="mt-0.5 truncate text-[11px] text-muted-foreground" title={lineage}>{lineage}</p>
       </CardContent>
     </Card>
+  )
+}
+
+/* Fieldset-style card title: embedded in the border line, breaking it */
+function Legend({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="absolute -top-2.5 left-4 z-10 inline-flex max-w-[85%] items-center gap-1.5 truncate rounded bg-card px-2 text-sm font-semibold">
+      {children}
+    </span>
   )
 }
 
