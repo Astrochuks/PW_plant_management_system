@@ -14,6 +14,7 @@ from typing import Any
 import openpyxl
 
 from app.core.database import get_supabase_admin_client  # Storage only
+from app.core.events import broadcast
 from app.core.pool import fetchrow, get_pool
 from app.monitoring.logging import get_logger
 from app.services.weekly_report_import import persist_weekly_report
@@ -115,6 +116,9 @@ async def process_project_weekly_report(submission_id: str) -> None:
             duration_ms=int((time.monotonic() - started) * 1000),
             warnings=len(warnings),
         )
+        # push to every connected browser — dashboards refresh instantly
+        broadcast("projects", "report_processed",
+                  f"{sub['short_name']} W{sub['week_number']}/{sub['year']}: {status}")
 
     except Exception as exc:
         logger.error(
@@ -129,6 +133,7 @@ async def process_project_weekly_report(submission_id: str) -> None:
                 error_message=f"{type(exc).__name__}: {str(exc)[:800]}",
                 parse_duration_ms=int((time.monotonic() - started) * 1000),
             )
+            broadcast("projects", "report_failed")
         except Exception:
             logger.error("Could not even mark submission failed",
                          submission_id=submission_id)

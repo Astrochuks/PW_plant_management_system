@@ -131,6 +131,7 @@ async def upload_weekly_report(
     from app.workers.project_report_worker import process_project_weekly_report
 
     background_tasks.add_task(process_project_weekly_report, str(submission_id))
+    broadcast("projects", "report_queued")
 
     background_tasks.add_task(
         audit_service.log,
@@ -356,6 +357,7 @@ async def retry_project_submission(
     from app.workers.project_report_worker import process_project_weekly_report
 
     background_tasks.add_task(process_project_weekly_report, str(submission_id))
+    broadcast("projects", "report_queued")
     return {"success": True, "data": {"status": "queued"}}
 
 
