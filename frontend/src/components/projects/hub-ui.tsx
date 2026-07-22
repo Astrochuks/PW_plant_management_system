@@ -12,7 +12,7 @@ import { Card, CardContent } from '@/components/ui/card'
 
 export function Legend({ children }: { children: React.ReactNode }) {
   return (
-    <span className="absolute -top-2.5 left-4 z-10 inline-flex max-w-[85%] items-center gap-1.5 truncate rounded bg-card px-2 text-sm font-semibold">
+    <span className="absolute -top-2.5 left-4 z-10 inline-flex max-w-[85%] items-center gap-1.5 truncate rounded bg-card px-2 text-sm font-bold">
       {children}
     </span>
   )
