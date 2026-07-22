@@ -467,6 +467,7 @@ async def link_unmapped_fleet_number(
         ip_address=get_client_ip(request),
         description=f"Linked fleet {raw} → {plant['fleet_number']} ({updated} rows)",
     )
+    broadcast("projects", "fleet_verdict")
     return {"success": True,
             "data": {"linked_to": plant["fleet_number"], "rows_backfilled": updated}}
 
@@ -513,6 +514,7 @@ async def mark_fleet_number_external(
         ip_address=get_client_ip(request),
         description=f"Marked fleet {raw} as external ({label})",
     )
+    broadcast("projects", "fleet_verdict")
     return {"success": True, "data": {"raw_normalized": norm, "kind": "external"}}
 
 
@@ -543,6 +545,7 @@ async def delete_fleet_alias(
         ip_address=get_client_ip(request),
         description=f"Removed fleet verdict for {row['raw_normalized']}",
     )
+    broadcast("projects", "fleet_verdict")
     return {"success": True, "data": {"raw_normalized": row["raw_normalized"]}}
 
 
@@ -580,6 +583,7 @@ async def re_resolve_fleet_numbers(
             ip_address=get_client_ip(request),
             description=f"Re-resolved fleet numbers ({updated} rows linked)",
         )
+    broadcast("projects", "fleet_verdict")
     return {"success": True, "data": {"rows_backfilled": updated}}
 
 
@@ -682,6 +686,8 @@ async def delete_project_submission(
                      f"{sub['short_name']}"
                      + (" incl. weekly report data" if deleted_report else "")),
     )
+    broadcast("projects", "week_deleted",
+              f"{sub['short_name']} W{sub['week_number']}/{sub['year']}")
     return {"success": True,
             "data": {"deleted_week_data": bool(deleted_report),
                      "adjustments_recomputed": adj_stats,
@@ -945,6 +951,7 @@ async def resolve_sheet_flag(
     )
     if row is None:
         raise NotFoundError("Unresolved flag", str(flag_id))
+    broadcast("projects", "flag_resolved")
     return {"success": True}
 
 
@@ -963,6 +970,7 @@ async def unresolve_sheet_flag(
     )
     if row is None:
         raise NotFoundError("Resolved flag", str(flag_id))
+    broadcast("projects", "flag_reopened")
     return {"success": True}
 
 
@@ -1711,6 +1719,7 @@ async def resolve_review_queue_item(
         ip_address=get_client_ip(request),
         description=f"Resolved review item ({'dismissed' if result['dismissed'] else 'applied'})",
     )
+    broadcast("projects", "review_resolved")
     return {"success": True, "data": result}
 
 
@@ -1745,6 +1754,7 @@ async def bulk_dismiss_review_items(
         ip_address=get_client_ip(request),
         description=f"Bulk-dismissed {count} review items (reason={reason})",
     )
+    broadcast("projects", "review_resolved")
     return {"success": True, "data": {"dismissed": count}}
 
 
