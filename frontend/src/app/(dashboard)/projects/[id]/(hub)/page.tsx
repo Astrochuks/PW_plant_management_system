@@ -91,7 +91,7 @@ function ContractCard({ o }: { o: ProjectOverview }) {
   return (
     <Card className="relative">
       <Legend>Contract details &amp; schedule</Legend>
-      <CardContent className="space-y-6 pt-3">
+      <CardContent className="space-y-6 pt-2">
         {/* Overall progress */}
         <div>
           <div className="mb-1.5 flex items-baseline justify-between">
@@ -195,7 +195,7 @@ function CollapsibleBlock({ title, preview, children }: {
         className="mb-2 flex w-full items-center justify-between border-b pb-1 text-left"
         aria-expanded={open}
       >
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
           {title}
         </span>
         <span className="flex items-center gap-1 rounded-md border bg-background px-2 py-0.5 text-[11px] font-bold shadow-sm transition-all hover:-translate-y-px hover:bg-muted hover:shadow">
