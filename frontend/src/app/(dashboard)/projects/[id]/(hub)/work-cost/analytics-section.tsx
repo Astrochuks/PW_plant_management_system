@@ -29,7 +29,7 @@ import type { FinancialWeek } from '@/hooks/use-projects'
 import { naira, pctFmt, weekLabel } from '@/lib/format'
 
 const VAT = 1.075
-type Granularity = 'week' | 'month' | 'quarter' | 'year'
+export type Granularity = 'week' | 'month' | 'quarter' | 'year'
 
 interface Bucket {
   label: string
@@ -82,10 +82,9 @@ function usePager<T>(items: T[], size = 10) {
   }
 }
 
-export default function AnalyticsSection() {
+export default function AnalyticsSection({ gran }: { gran: Granularity }) {
   const params = useParams<{ id: string }>()
   const { data: fin, isLoading } = useProjectFinancials(params.id)
-  const [gran, setGran] = useState<Granularity>('week')
   const [workBill, setWorkBill] = useState('all')
   const [costCat, setCostCat] = useState('all')
   const [vsBill, setVsBill] = useState('all')
@@ -153,25 +152,9 @@ export default function AnalyticsSection() {
 
   return (
     <div className="space-y-6">
-      {/* Period lens */}
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex w-fit items-center gap-1 rounded-lg bg-muted p-1">
-          {(['week', 'month', 'quarter', 'year'] as const).map((g) => (
-            <button
-              key={g}
-              onClick={() => setGran(g)}
-              className={`rounded-md px-3 py-1.5 text-sm font-medium capitalize transition-colors ${
-                gran === g ? 'bg-primary/20 text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              {g === 'week' ? 'Weekly' : g === 'month' ? 'Monthly' : g === 'quarter' ? 'Quarterly' : 'Yearly'}
-            </button>
-          ))}
-        </div>
-        <p className="text-xs text-muted-foreground">
-          {fin.weeks.length} stored weeks · all work figures Incl. VAT (× 1.075), excl contingency
-        </p>
-      </div>
+      <p className="text-xs text-muted-foreground">
+        {fin.weeks.length} stored weeks · all work figures Incl. VAT (× 1.075), excl contingency
+      </p>
 
       {/* Period KPIs, each vs the previous bucket */}
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">

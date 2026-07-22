@@ -79,7 +79,7 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
   return (
     <div className="space-y-4">
       {/* Sticky context header: identity + nav + latest-report strip */}
-      <div className="sticky top-16 z-20 -mx-6 bg-background px-6 pt-1 shadow-sm">
+      <div id="hub-sticky" className="sticky top-16 z-20 -mx-6 bg-background px-6 pt-1 shadow-sm">
       {/* Three zones: identity · status trio (centered in the leftover space) · actions */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
         <div className="flex items-center gap-3">
