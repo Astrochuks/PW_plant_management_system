@@ -23,7 +23,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useProjectOverview } from '@/hooks/use-projects'
 import type { ProjectOverview } from '@/lib/api/projects'
-import { Kpi, Legend } from '@/components/projects/hub-ui'
+import { Kpi, Legend, LegendSm } from '@/components/projects/hub-ui'
 import { fmtDate, naira, nairaM, num, pctFmt, weekLabel } from '@/lib/format'
 
 export default function ProjectOverviewPage() {
@@ -323,10 +323,8 @@ function ThisWeekCard({ o }: { o: ProjectOverview }) {
             sub={`net ${naira(cp.net_this_week, true)} this week`}
             delta={<Delta now={cp.margin_this_week ?? 0} prev={prevMargin} prevLabel={prevLabel} pts />} />
         </div>
-        <div className="rounded-lg border bg-muted/30 p-4">
-          <p className="mb-3 text-xs font-medium text-muted-foreground">
-            {pw ? `This week vs ${prevLabel}` : 'No previous week stored yet'}
-          </p>
+        <div className="relative rounded-lg border bg-muted/30 p-4 pt-5">
+          <LegendSm>{pw ? `This week vs ${prevLabel}` : 'No previous week yet'}</LegendSm>
           <div className="space-y-4">
             {pw && compare.map((c) => {
               const change = c.prev ? ((c.now - c.prev) / c.prev) * 100 : null
