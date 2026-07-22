@@ -16,7 +16,7 @@ import { useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
 import ECharts from 'echarts-for-react'
 import {
-  Banknote, ChevronDown, HardHat, Percent, TrendingUp, Wallet,
+  Banknote, CalendarDays, ChevronDown, HardHat, Percent, TrendingUp, Users, Wallet,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -34,15 +34,12 @@ export default function ProjectOverviewPage() {
 
   return (
     <div className="space-y-4">
-      {/* Week banner */}
+      {/* Context chips: which report feeds this page + who's on site */}
       <div className="flex flex-wrap items-center justify-end gap-2">
-        <p className="text-sm">
-          <span className="text-muted-foreground">Week No:</span>{' '}
-          <b className="tabular-nums">{o.latest_week.week_number}</b>
-          <span className="mx-2 text-muted-foreground">·</span>
-          <span className="text-muted-foreground">Report Date:</span>{' '}
-          <b className="tabular-nums">{fmtDate(o.latest_week.week_ending_date)}</b>
-        </p>
+        <InfoChip icon={CalendarDays} label="Latest report"
+          value={`W${String(o.latest_week.week_number).padStart(2, '0')} · w/e ${fmtDate(o.latest_week.week_ending_date)}`} />
+        <InfoChip icon={Users} label="Labour on site"
+          value={num(o.resources.labour_direct + o.resources.labour_casual)} />
       </div>
 
       <ContractCard o={o} />
@@ -100,17 +97,8 @@ function ContractCard({ o }: { o: ProjectOverview }) {
 
   return (
     <Card>
-      <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
-        <div className="flex items-center gap-3">
-          <CardTitle className="text-sm">Contract details &amp; schedule</CardTitle>
-          {s.status && (
-            <Badge className={overdue
-              ? 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300'
-              : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'}>
-              {overdue ? 'OVERDUE' : 'ON TRACK'}
-            </Badge>
-          )}
-        </div>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm">Contract details &amp; schedule</CardTitle>
       </CardHeader>
       <CardContent className="space-y-5">
         {/* Overall progress */}
@@ -777,6 +765,19 @@ function Kpi({ label, value, sub, lineage, tone }: {
         <p className="mt-0.5 truncate text-[11px] text-muted-foreground" title={lineage}>{lineage}</p>
       </CardContent>
     </Card>
+  )
+}
+
+function InfoChip({ icon: Icon, label, value }: {
+  icon: React.ComponentType<{ className?: string }>
+  label: string; value: string
+}) {
+  return (
+    <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-1.5">
+      <Icon className="h-4 w-4 text-amber-600" />
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className="text-sm font-semibold tabular-nums">{value}</span>
+    </div>
   )
 }
 

@@ -17,7 +17,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
 import { useAuth } from '@/providers/auth-provider'
-import { useProject, useDeleteProject, useProjectIssues, useProjectSubmissions } from '@/hooks/use-projects'
+import { useProject, useDeleteProject, useProjectIssues, useProjectOverview, useProjectSubmissions } from '@/hooks/use-projects'
 import { STATUS_STYLES } from '@/components/projects/projects-table'
 
 const PAGES: Array<{ seg: string; label: string; ready: boolean; adminOnly?: boolean }> = [
@@ -44,6 +44,9 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
   // while one is queued/parsing, then invalidates every projects query so
   // the dashboard updates without a manual refresh.
   useProjectSubmissions({ project_id: projectId, limit: 20 }, { watch: true })
+  // shared cache with the Overview page — powers the OVERDUE badge here
+  const { data: overview } = useProjectOverview(projectId)
+  const scheduleStatus = overview?.schedule.status
   const deleteMutation = useDeleteProject()
   const [confirmDelete, setConfirmDelete] = useState(false)
 
@@ -63,7 +66,8 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+      {/* Three zones: identity · status trio · actions */}
+      <div className="grid items-center gap-3 lg:grid-cols-[1fr_auto_1fr]">
         <div className="flex min-w-0 items-center gap-3">
           <Button variant="ghost" size="sm" onClick={() => router.push('/projects')}>
             <ArrowLeft className="h-4 w-4" />
@@ -76,19 +80,28 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
               {project?.client}{project?.state_name ? ` · ${project.state_name}` : ''}
             </p>
           </div>
+        </div>
+        <div className="flex flex-wrap items-center justify-start gap-2 lg:justify-center">
           {statusStyle && (
             <Badge variant={statusStyle.variant} className={statusStyle.className}>
               {statusStyle.label}
             </Badge>
           )}
           {project?.project_type && (
-            <Badge variant="outline" className="capitalize hidden sm:inline-flex">
+            <Badge variant="outline" className="capitalize">
               {project.project_type}
             </Badge>
           )}
+          {scheduleStatus && (
+            <Badge className={scheduleStatus === 'overdue'
+              ? 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300'
+              : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'}>
+              {scheduleStatus === 'overdue' ? 'OVERDUE' : 'ON TRACK'}
+            </Badge>
+          )}
         </div>
-        {isAdmin && (
-          <div className="flex items-center gap-2">
+        {isAdmin ? (
+          <div className="flex items-center gap-2 lg:justify-end">
             <Button variant="outline" size="sm" asChild>
               <Link href={`${base}/edit`}>
                 <Edit2 className="h-4 w-4 mr-2" />
@@ -103,20 +116,20 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
               <Trash2 className="h-4 w-4" />
             </Button>
           </div>
-        )}
+        ) : <div />}
       </div>
 
-      {/* Pill navigation */}
-      <div className="flex flex-wrap items-center gap-1 border-b pb-2">
+      {/* Tab bar — button-styled, animated; scrolls sideways on mobile */}
+      <div className="flex items-center gap-1.5 overflow-x-auto border-b pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {PAGES.filter((p) => !p.adminOnly || isAdmin).map((p) =>
           p.ready ? (
             <Link
               key={p.seg}
               href={p.seg ? `${base}/${p.seg}` : base}
-              className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${
+              className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border px-4 py-2 text-sm font-medium transition-all duration-200 active:scale-95 ${
                 activeSeg === p.seg
-                  ? 'bg-primary/20 text-foreground'
-                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                  ? 'border-amber-500/50 bg-amber-500/15 text-foreground shadow-sm'
+                  : 'border-transparent text-muted-foreground hover:-translate-y-0.5 hover:border-border hover:bg-muted hover:text-foreground hover:shadow-sm'
               }`}
             >
               {p.label}
@@ -130,7 +143,7 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
             <span
               key={p.seg}
               title="Coming soon"
-              className="cursor-default rounded-full px-3.5 py-1.5 text-sm text-muted-foreground/50"
+              className="cursor-default whitespace-nowrap rounded-lg border border-transparent px-4 py-2 text-sm text-muted-foreground/50"
             >
               {p.label}
             </span>
