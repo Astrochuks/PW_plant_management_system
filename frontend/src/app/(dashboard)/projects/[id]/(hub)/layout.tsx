@@ -108,8 +108,10 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
           {scheduleStatus && (
             <StatusDot
               dot={scheduleStatus === 'overdue' ? 'bg-red-500' : 'bg-emerald-500'}
-              label={scheduleStatus === 'overdue' ? 'Overdue' : 'On track'}
-              className={scheduleStatus === 'overdue' ? 'font-semibold text-red-600' : ''}
+              label={scheduleStatus === 'overdue' ? 'Overdue'
+                : scheduleStatus === 'completed' ? 'Completed' : 'On track'}
+              className={scheduleStatus === 'overdue' ? 'font-semibold text-red-600'
+                : scheduleStatus === 'completed' ? 'text-emerald-700 dark:text-emerald-400' : ''}
             />
           )}
         </div>
@@ -167,7 +169,7 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
 
       {/* Latest-report context strip — visible on every hub tab */}
       {overview?.latest_week && (
-        <div className="my-3 flex flex-wrap items-center justify-end gap-x-6 gap-y-1">
+        <div className="mt-3 mb-4 flex flex-wrap items-center gap-x-6 gap-y-1">
           <InfoChip icon={CalendarDays} label="Latest report"
             value={`W${String(overview.latest_week.week_number).padStart(2, '0')} · Date: ${fmtDate(overview.latest_week.week_ending_date)}`} />
           <InfoChip icon={Users} label="Labour on site"

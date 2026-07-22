@@ -61,6 +61,7 @@ SELECT
             p.revised_completion_date, p.original_duration_months,
             p.original_completion_date, p.extension_of_time_months,
             p.eot_requested_months, p.works_commenced_date, p.retc,
+            p.substantial_completion_date, p.final_completion_date,
             s.name AS state_name
      FROM projects p LEFT JOIN states s ON s.id = p.state_id
      WHERE p.id = $1::uuid) x)                                   AS project,
@@ -293,13 +294,26 @@ async def compute_project_overview(project_id: str) -> dict[str, Any]:
     revised_duration = (round(duration + (eot_granted or 0), 1)
                         if duration is not None else None)
     works_commenced = _as_date(project.get("works_commenced_date"))
+
+    # Completed: register says so (status / completion certificates) or the
+    # BEME is physically done. Overdue arithmetic then freezes at the
+    # completion date instead of growing with every late report.
+    completed_date = (_as_date(project.get("substantial_completion_date"))
+                      or _as_date(project.get("final_completion_date")))
+    is_completed = (
+        completed_date is not None
+        or project.get("status") in ("completed", "retention_period")
+        or (bool(scope) and works / scope >= 0.9999)
+    )
+    end_date = completed_date or report_date
+
     # workbook shows 0.0 Mths while the commenced cell is blank
-    duration_on_site = (round((report_date - works_commenced).days / DAYS_PER_MONTH, 1)
-                        if report_date and works_commenced else 0.0)
-    overdue_original = (round((report_date - orig_completion).days / DAYS_PER_MONTH, 1)
-                        if report_date and orig_completion else None)
-    months_overdue = (round((report_date - revised_completion).days / DAYS_PER_MONTH, 1)
-                      if report_date and revised_completion else None)
+    duration_on_site = (round((end_date - works_commenced).days / DAYS_PER_MONTH, 1)
+                        if end_date and works_commenced else 0.0)
+    overdue_original = (round((end_date - orig_completion).days / DAYS_PER_MONTH, 1)
+                        if end_date and orig_completion else None)
+    months_overdue = (round((end_date - revised_completion).days / DAYS_PER_MONTH, 1)
+                      if end_date and revised_completion else None)
 
     bills = []
     for b in (row["bills"] or []):
@@ -365,7 +379,9 @@ async def compute_project_overview(project_id: str) -> dict[str, Any]:
             "duration_on_site_months": duration_on_site,
             "overdue_original_months": overdue_original,
             "overdue_revised_months": months_overdue,
-            "status": ("overdue" if months_overdue is not None and months_overdue > 0
+            "completed_date": completed_date.isoformat() if completed_date else None,
+            "status": ("completed" if is_completed
+                       else "overdue" if months_overdue is not None and months_overdue > 0
                        else "on_track" if report_date else None),
         },
         "physical": {

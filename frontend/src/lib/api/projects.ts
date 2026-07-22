@@ -918,7 +918,8 @@ export interface ProjectOverview {
     duration_on_site_months: number | null;
     overdue_original_months: number | null;
     overdue_revised_months: number | null;
-    status: 'overdue' | 'on_track' | null;
+    completed_date: string | null;
+    status: 'overdue' | 'on_track' | 'completed' | null;
   };
   physical: {
     bills: OverviewBill[];
