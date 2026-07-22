@@ -426,22 +426,16 @@ function PhysicalProgressCard({ o }: { o: ProjectOverview }) {
   return (
     <Card className="relative">
       <Legend>Physical progress — works completed</Legend>
-      <CardHeader className="pb-1 pt-5">
-        <p className="text-xs text-muted-foreground">
-          Work sections from the BEME sheet, all amounts ₦m · to-date =
-          previous + stored weeks (kobo-exact vs the workbook&apos;s own cumulative)
-        </p>
-      </CardHeader>
-      <CardContent className="grid gap-4 p-0 lg:grid-cols-[1fr_350px] lg:items-start">
+      <CardContent className="p-0 pt-4">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[600px] text-sm">
             <thead>
               <tr className="border-b bg-muted/40 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
                 <th className="whitespace-nowrap px-4 py-2 font-medium">Work Section</th>
-                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">BEME</th>
-                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">Last Wk</th>
-                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">This Wk</th>
-                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">To Date</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">BEME (₦m)</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">Last Wk (₦m)</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">This Wk (₦m)</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">To Date (₦m)</th>
                 <th className="whitespace-nowrap px-4 py-2 text-right font-medium">% Complete</th>
               </tr>
             </thead>
@@ -456,8 +450,8 @@ function PhysicalProgressCard({ o }: { o: ProjectOverview }) {
                     {nairaM(b.this_week)}
                   </td>
                   <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(b.to_date)}</td>
-                  <td className="px-4 py-1.5">
-                    <PctCell pct={b.pct_complete} />
+                  <td className={`px-4 py-1.5 text-right tabular-nums ${(b.pct_complete ?? 0) > 1 ? 'font-semibold text-red-600' : ''}`}>
+                    {pctFmt(b.pct_complete)}
                   </td>
                 </tr>
               ))}
@@ -471,8 +465,8 @@ function PhysicalProgressCard({ o }: { o: ProjectOverview }) {
             </tbody>
           </table>
         </div>
-        <div className="px-4 pb-4 lg:pt-2">
-          <p className="mb-2 text-xs font-medium text-muted-foreground">% Complete by Work Section</p>
+        <div className="px-4 pb-4 pt-5">
+          <p className="mb-2 text-xs font-bold uppercase tracking-wide">% Complete by Work Section</p>
           <ECharts option={chartOption} style={{ height: Math.max(200, bills.length * 32 + 20) }} notMerge />
         </div>
       </CardContent>
@@ -480,20 +474,6 @@ function PhysicalProgressCard({ o }: { o: ProjectOverview }) {
   )
 }
 
-function PctCell({ pct }: { pct: number | null }) {
-  const over = (pct ?? 0) > 1
-  return (
-    <div className="flex items-center justify-end gap-2">
-      <div className="h-1.5 w-14 overflow-hidden rounded-full bg-muted">
-        <div className={`h-full rounded-full ${over ? 'bg-red-500' : 'bg-amber-500'}`}
-          style={{ width: `${Math.min(100, (pct ?? 0) * 100)}%` }} />
-      </div>
-      <span className={`w-12 text-right tabular-nums ${over ? 'font-semibold text-red-600' : ''}`}>
-        {pctFmt(pct)}
-      </span>
-    </div>
-  )
-}
 
 function LadderRow({ label, r, tone, note }: {
   label: string
