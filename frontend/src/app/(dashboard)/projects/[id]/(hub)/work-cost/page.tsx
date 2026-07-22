@@ -38,7 +38,8 @@ export default function WorkCostPage() {
   const params = useParams<{ id: string }>()
   const [view, setView] = useState<ViewKey>('analytics')
   const [gran, setGran] = useState<Granularity>('week')
-  const [year, setYear] = useState<string>('all')
+  // 'auto' resolves to the latest stored year once data arrives
+  const [year, setYear] = useState<string>('auto')
 
   // shared cache with the analytics section — zero extra requests
   const { data: fin } = useProjectFinancials(params.id)
@@ -46,6 +47,9 @@ export default function WorkCostPage() {
     () => [...new Set((fin?.weeks ?? []).map((w) => w.year))].sort((a, b) => b - a),
     [fin],
   )
+  const effectiveYear = year === 'auto'
+    ? (years[0] != null ? String(years[0]) : 'all')
+    : year
 
   // pin the control row exactly below the hub's sticky header
   const [top, setTop] = useState(64)
@@ -78,7 +82,7 @@ export default function WorkCostPage() {
 
         {view === 'analytics' && (
           <div className="flex items-center gap-2">
-            <Select value={year} onValueChange={setYear}>
+            <Select value={effectiveYear} onValueChange={setYear}>
               <SelectTrigger className="h-9 w-32 font-semibold">
                 <SelectValue />
               </SelectTrigger>
@@ -103,7 +107,7 @@ export default function WorkCostPage() {
         )}
       </div>
 
-      {view === 'analytics' && <AnalyticsSection gran={gran} year={year === 'all' ? 'all' : Number(year)} />}
+      {view === 'analytics' && <AnalyticsSection gran={gran} year={effectiveYear === 'all' ? 'all' : Number(effectiveYear)} />}
       {view === 'beme' && <WorkDoneSection />}
       {view === 'site' && <SiteSection />}
     </div>

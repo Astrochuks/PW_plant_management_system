@@ -50,6 +50,23 @@ function bucketKey(w: FinancialWeek, g: Granularity): string {
   return String(d.getFullYear())
 }
 
+// Charts stay readable at any history length: past this many buckets a
+// drag/scroll zoom appears, defaulting to the most recent stretch.
+const ZOOM_AFTER = 30
+
+const zoomProps = (count: number) =>
+  count > ZOOM_AFTER
+    ? {
+        dataZoom: [
+          {
+            type: 'slider', height: 16, bottom: 4,
+            start: (1 - ZOOM_AFTER / count) * 100, end: 100,
+          },
+          { type: 'inside' },
+        ],
+      }
+    : {}
+
 const pctChange = (now: number, prev: number | null): number | null =>
   prev == null || prev === 0 ? null : ((now - prev) / prev) * 100
 
@@ -232,15 +249,17 @@ function WorkCard({ gran, buckets, series, scopeInclVat, bill, onBill, bills, bi
   })).reverse(), [buckets, series, scopeInclVat])
   const pager = usePager(rows)
 
+  const zoomed = buckets.length > ZOOM_AFTER
   const option = {
     tooltip: { trigger: 'axis', valueFormatter: (v: number) => naira(v, true) },
-    grid: { left: 70, right: 20, top: 16, bottom: 28 },
+    grid: { left: 70, right: 20, top: 16, bottom: zoomed ? 52 : 28 },
     xAxis: { type: 'category', data: buckets.map((b) => b.label) },
     yAxis: { type: 'value', axisLabel: { formatter: (v: number) => naira(v, true) } },
     series: [{
       name: 'Work + VAT', type: 'bar', data: series.map(Math.round),
       barMaxWidth: 34, itemStyle: { color: '#f59e0b', borderRadius: [4, 4, 0, 0] },
     }],
+    ...zoomProps(buckets.length),
   }
 
   return (
@@ -308,11 +327,12 @@ function CostCard({ gran, buckets, series, cat, onCat, cats }: {
   })).reverse(), [buckets, series, cat])
   const pager = usePager(rows)
 
+  const zoomed = buckets.length > ZOOM_AFTER
   const option = cat === 'all'
     ? {
         tooltip: { trigger: 'axis', valueFormatter: (v: number) => naira(v, true) },
-        legend: { bottom: 0, type: 'scroll' },
-        grid: { left: 70, right: 20, top: 16, bottom: 44 },
+        legend: { bottom: zoomed ? 24 : 0, type: 'scroll' },
+        grid: { left: 70, right: 20, top: 16, bottom: zoomed ? 68 : 44 },
         xAxis: { type: 'category', data: buckets.map((b) => b.label) },
         yAxis: { type: 'value', axisLabel: { formatter: (v: number) => naira(v, true) } },
         series: cats.map((c, i) => ({
@@ -320,16 +340,18 @@ function CostCard({ gran, buckets, series, cat, onCat, cats }: {
           itemStyle: { color: categoryColor(c, i) },
           data: buckets.map((b) => Math.round(b.costByCat[c] ?? 0)),
         })),
+        ...zoomProps(buckets.length),
       }
     : {
         tooltip: { trigger: 'axis', valueFormatter: (v: number) => naira(v, true) },
-        grid: { left: 70, right: 20, top: 16, bottom: 28 },
+        grid: { left: 70, right: 20, top: 16, bottom: zoomed ? 52 : 28 },
         xAxis: { type: 'category', data: buckets.map((b) => b.label) },
         yAxis: { type: 'value', axisLabel: { formatter: (v: number) => naira(v, true) } },
         series: [{
           name: cat, type: 'bar', data: series.map(Math.round), barMaxWidth: 34,
           itemStyle: { color: categoryColor(cat, 0), borderRadius: [4, 4, 0, 0] },
         }],
+        ...zoomProps(buckets.length),
       }
 
   return (
@@ -413,10 +435,11 @@ function VsCard({ gran, buckets, workSeries, costSeries, bill, onBill, bills, bi
   const workLabel = bill === 'all' ? 'Work + VAT' : `${billName(bill)} (Incl. VAT)`
   const costLabel = cat === 'all' ? 'Total cost' : cat
 
+  const zoomed = buckets.length > ZOOM_AFTER
   const option = {
     tooltip: { trigger: 'axis', valueFormatter: (v: number) => naira(v, true) },
-    legend: { bottom: 0 },
-    grid: { left: 70, right: 20, top: 16, bottom: 44 },
+    legend: { bottom: zoomed ? 24 : 0 },
+    grid: { left: 70, right: 20, top: 16, bottom: zoomed ? 68 : 44 },
     xAxis: { type: 'category', data: buckets.map((b) => b.label) },
     yAxis: { type: 'value', axisLabel: { formatter: (v: number) => naira(v, true) } },
     series: [
@@ -431,6 +454,7 @@ function VsCard({ gran, buckets, workSeries, costSeries, bill, onBill, bills, bi
         itemStyle: { color: '#dc2626', borderRadius: [4, 4, 0, 0] },
       },
     ],
+    ...zoomProps(buckets.length),
   }
 
   return (
