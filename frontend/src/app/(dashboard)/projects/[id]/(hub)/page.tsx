@@ -40,31 +40,25 @@ export default function ProjectOverviewPage() {
       {/* Headline strip */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
         <Kpi label="Contract Value" value={naira(o.headline.contract_sum, true)}
-          sub={naira(o.headline.contract_sum)} lineage="register" />
+          sub={naira(o.headline.contract_sum)} />
         <Kpi label="Total BEME (Incl. VAT)" value={naira(o.physical.ladder.works_incl_vat.beme, true)}
-          sub={naira(o.physical.ladder.works_incl_vat.beme)}
-          lineage="BEME sub-total × 1.075 · excl contingency" />
+          sub={naira(o.physical.ladder.works_incl_vat.beme)} />
         <Kpi label="Work Done to Date (Incl. VAT)" value={naira(o.physical.ladder.works_incl_vat.to_date, true)}
-          sub={naira(o.physical.ladder.works_incl_vat.to_date)}
-          lineage="works × 1.075 · previous + stored weeks" />
+          sub={naira(o.physical.ladder.works_incl_vat.to_date)} />
         <Kpi label="Overall % Complete" value={pctFmt(o.headline.pct_complete)}
           sub={o.progress.reported_pct != null
             ? `workbook reports ${pctFmt(o.progress.reported_pct)}`
-            : `${naira(o.physical.ladder.works.to_date, true)} of ${naira(o.physical.ladder.works.beme, true)}`}
-          lineage="work done ÷ Total BEME" />
+            : `${naira(o.physical.ladder.works.to_date, true)} of ${naira(o.physical.ladder.works.beme, true)}`} />
         <Kpi label="Certified to Date"
           value={o.certs_payments.certificates_total ? naira(o.headline.certified_to_date, true) : 'None yet'}
-          sub={o.certs_payments.certificates_total ? naira(o.headline.certified_to_date) : 'no certificates recorded'}
-          lineage="cert ledger cumulative" />
+          sub={o.certs_payments.certificates_total ? naira(o.headline.certified_to_date) : 'no certificates recorded'} />
         <Kpi label="Paid – Gross"
           value={o.certs_payments.payments_count ? naira(o.headline.paid_gross, true) : 'None yet'}
-          sub={o.certs_payments.payments_count ? naira(o.headline.paid_gross) : 'no payments recorded'}
-          lineage="payments ledger" />
+          sub={o.certs_payments.payments_count ? naira(o.headline.paid_gross) : 'no payments recorded'} />
         <Kpi label="Cost to Date" value={naira(o.headline.cost_to_date, true)}
-          sub={naira(o.headline.cost_to_date)} lineage="previous + stored weeks" />
+          sub={naira(o.headline.cost_to_date)} />
         <Kpi label="Net Margin %" value={pctFmt(o.headline.net_margin_pct)}
           sub={`net ${naira(o.cost_profitability.net_to_date, true)} to date`}
-          lineage="net ÷ work done incl VAT"
           tone={o.headline.net_margin_pct != null && o.headline.net_margin_pct < 0 ? 'bad' : 'good'} />
       </div>
 
@@ -243,24 +237,23 @@ function KvBlock({ label, value }: { label: string; value: string }) {
 
 const VAT = 1.075
 
-function Delta({ now, prev, prevLabel, downIsGood, pts }: {
+function Delta({ now, prev, prevLabel, downIsGood, pts, dp = 1 }: {
   now: number; prev: number | null; prevLabel: string
-  downIsGood?: boolean; pts?: boolean
+  downIsGood?: boolean; pts?: boolean; dp?: number
 }) {
   if (prev == null) return null
   const diff = now - prev
-  if (pts ? Math.abs(diff) < 0.0005 : prev === 0) {
+  const raw = pts ? diff * 100 : prev !== 0 ? (diff / prev) * 100 : null
+  if (raw == null || Math.abs(raw) < 0.5 / 10 ** dp) {
     return (
       <span className="inline-flex rounded-full bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
-        vs {prevLabel}: —
+        no change vs {prevLabel}
       </span>
     )
   }
   const up = diff > 0
   const good = downIsGood ? !up : up
-  const label = pts
-    ? `${up ? '+' : ''}${(diff * 100).toFixed(1)} pts`
-    : `${up ? '+' : ''}${((diff / prev) * 100).toFixed(1)}%`
+  const label = `${up ? '+' : ''}${raw.toFixed(dp)}${pts ? ' pts' : '%'}`
   return (
     <span className={`inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] font-medium tabular-nums ${
       good
@@ -301,8 +294,8 @@ function ThisWeekCard({ o }: { o: ProjectOverview }) {
             Previous stored week is {prevLabel} — {gapWeeks} week{gapWeeks > 1 ? 's' : ''} missing in between
           </p>
         )}
-        <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
-        <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <div className="space-y-4">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <MiniKpi icon={HardHat} iconClass="bg-amber-500/10 text-amber-600"
             label="Work Done + VAT" value={naira(cp.works_incl_vat_this_week, true)}
             sub={naira(cp.works_incl_vat_this_week)}
@@ -315,7 +308,7 @@ function ThisWeekCard({ o }: { o: ProjectOverview }) {
             label="Work Added" value={pctFmt(lw.pct_added, 2)}
             sub="of BEME scope, this week alone"
             delta={pw && lw.pct_added != null
-              ? <Delta now={lw.pct_added} prev={o.physical.ladder.works.beme ? pw.works_this_week / o.physical.ladder.works.beme : null} prevLabel={prevLabel} pts />
+              ? <Delta now={lw.pct_added} prev={o.physical.ladder.works.beme ? pw.works_this_week / o.physical.ladder.works.beme : null} prevLabel={prevLabel} pts dp={2} />
               : null} />
           <MiniKpi icon={Percent}
             iconClass={cp.net_this_week < 0 ? 'bg-red-500/10 text-red-600' : 'bg-emerald-500/10 text-emerald-600'}
