@@ -510,13 +510,7 @@ function CertsPaymentsCard({ o }: { o: ProjectOverview }) {
         <Banknote className="h-4 w-4 text-muted-foreground" />
         Certificates &amp; payments
       </Legend>
-      <CardHeader className="pb-1 pt-5">
-        <p className="text-xs text-muted-foreground">
-          Certificate + payments ledgers only — never the Contract Summary&apos;s
-          frozen client block
-        </p>
-      </CardHeader>
-      <CardContent>
+      <CardContent className="pt-5">
         {young ? (
           <p className="py-3 text-xs text-muted-foreground">
             No certificates or payments recorded yet — young ledger.
@@ -551,10 +545,7 @@ function ResourcesCard({ o }: { o: ProjectOverview }) {
         <HardHat className="h-4 w-4 text-muted-foreground" />
         Resources · this week
       </Legend>
-      <CardHeader className="pb-1 pt-5">
-        <p className="text-xs text-muted-foreground">Labour Strength + Diesel sheets, latest week</p>
-      </CardHeader>
-      <CardContent className="space-y-1.5 text-sm">
+      <CardContent className="space-y-1.5 pt-5 text-sm">
         <MoneyRow label="Direct Labour Headcount" text={num(r.labour_direct)} />
         <MoneyRow label="Casual Labour Headcount" text={num(r.labour_casual)} />
         <MoneyRow label="Diesel Used This Week (L)" text={num(r.diesel_litres_week)} />
@@ -594,7 +585,7 @@ function CostProfitabilityCard({ o }: { o: ProjectOverview }) {
       valueFormatter: (v: number) => `₦${nairaM(v)}m`,
     },
     legend: {
-      orient: 'vertical' as const, right: 0, top: 'middle',
+      orient: 'vertical' as const, right: '8%', top: 'middle',
       textStyle: { fontSize: 11 }, itemWidth: 10, itemHeight: 10,
       formatter: (name: string) => {
         const cat = cp.categories.find((c) => c.category === name)
@@ -606,12 +597,12 @@ function CostProfitabilityCard({ o }: { o: ProjectOverview }) {
     title: {
       text: naira(cp.total_to_date, true),
       subtext: 'cost to date',
-      left: '30%', top: '40%', textAlign: 'center' as const,
+      left: '49.5%', top: '40%', textAlign: 'center' as const,
       textStyle: { fontSize: 15, fontWeight: 700 as const },
       subtextStyle: { fontSize: 10 },
     },
     series: [{
-      type: 'pie' as const, radius: ['58%', '80%'], center: ['31%', '50%'],
+      type: 'pie' as const, radius: ['58%', '80%'], center: ['50%', '50%'],
       itemStyle: { borderWidth: 2, borderColor: 'transparent', borderRadius: 3 },
       label: { show: false },
       data: cp.categories.map((c, i) => ({
@@ -624,21 +615,15 @@ function CostProfitabilityCard({ o }: { o: ProjectOverview }) {
   return (
     <Card className="relative">
       <Legend>Cost &amp; profitability</Legend>
-      <CardHeader className="pb-1 pt-5">
-        <p className="text-xs text-muted-foreground">
-          Cost Report categories, all amounts ₦m · net earnings = work done
-          incl VAT (excl contingency) − costs — the Weekly Summary definition
-        </p>
-      </CardHeader>
-      <CardContent className="grid gap-4 p-0 lg:grid-cols-[1fr_400px] lg:items-center">
+      <CardContent className="p-0 pt-4">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[560px] text-sm">
             <thead>
               <tr className="border-b bg-muted/40 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
                 <th className="whitespace-nowrap px-4 py-2 font-medium">Cost Category</th>
-                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">Last Wk</th>
-                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">This Wk</th>
-                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">To Date</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">Last Wk (₦m)</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">This Wk (₦m)</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">To Date (₦m)</th>
                 <th className="whitespace-nowrap px-4 py-2 text-right font-medium">% of Total</th>
               </tr>
             </thead>
@@ -697,9 +682,9 @@ function CostProfitabilityCard({ o }: { o: ProjectOverview }) {
             </tbody>
           </table>
         </div>
-        <div className="px-4 pb-4">
-          <p className="mb-1 text-xs font-medium text-muted-foreground">Cost to Date by Category</p>
-          <ECharts option={donutOption} style={{ height: 240 }} notMerge />
+        <div className="px-4 pb-4 pt-5">
+          <p className="mb-2 text-xs font-bold uppercase tracking-wide">Cost to Date by Category</p>
+          <ECharts option={donutOption} style={{ height: 260 }} notMerge />
         </div>
       </CardContent>
     </Card>
