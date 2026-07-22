@@ -12,7 +12,7 @@
  * (never index-cycled) shared by the donut and its table dots.
  */
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
 import ECharts from 'echarts-for-react'
 import {
@@ -26,9 +26,20 @@ import type { ProjectOverview } from '@/lib/api/projects'
 import { Kpi, Legend, LegendSm } from '@/components/projects/hub-ui'
 import { fmtDate, naira, nairaM, num, pctFmt, weekLabel } from '@/lib/format'
 
+type MoneyUnit = 'm' | 'full'
+
 export default function ProjectOverviewPage() {
   const params = useParams<{ id: string }>()
   const { data: o, isLoading } = useProjectOverview(params.id)
+  const [unit, setUnitState] = useState<MoneyUnit>('full')
+  useEffect(() => {
+    const v = localStorage.getItem('hub-money-unit')
+    if (v === 'm' || v === 'full') setUnitState(v)
+  }, [])
+  const setUnit = (v: MoneyUnit) => {
+    setUnitState(v)
+    localStorage.setItem('hub-money-unit', v)
+  }
 
   if (isLoading || !o) return <OverviewSkeleton />
   if (!o.latest_week) return <NoReportsYet />
@@ -63,14 +74,14 @@ export default function ProjectOverviewPage() {
       </div>
 
       <ThisWeekCard o={o} />
-      <PhysicalProgressCard o={o} />
+      <PhysicalProgressCard o={o} unit={unit} onUnit={setUnit} />
 
       <div className="grid gap-3 lg:grid-cols-3">
         <CertsPaymentsCard o={o} />
         <ResourcesCard o={o} />
       </div>
 
-      <CostProfitabilityCard o={o} />
+      <CostProfitabilityCard o={o} unit={unit} onUnit={setUnit} />
     </div>
   )
 }
@@ -383,11 +394,46 @@ function CompareBar({ label, value, max, strong }: {
   )
 }
 
+/* ── money-unit machinery for the tables ─────────────────────────────── */
+
+const tableMoney = (unit: MoneyUnit) =>
+  (v: number | null | undefined): string =>
+    v == null ? '—'
+    : unit === 'm' ? nairaM(v)
+    : Math.round(v).toLocaleString('en-NG')
+
+const unitLabel = (unit: MoneyUnit) => (unit === 'm' ? '₦m' : '₦')
+
+function UnitToggle({ unit, onUnit }: {
+  unit: MoneyUnit; onUnit: (v: MoneyUnit) => void
+}) {
+  return (
+    <span className="absolute -top-3 right-4 z-10 inline-flex overflow-hidden rounded-md border bg-card text-[11px] font-bold shadow-sm">
+      {(['m', 'full'] as const).map((u) => (
+        <button
+          key={u}
+          type="button"
+          onClick={() => onUnit(u)}
+          className={`px-2 py-0.5 transition-colors ${
+            unit === u ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
+          }`}
+        >
+          {u === 'm' ? '₦m' : 'Full'}
+        </button>
+      ))}
+    </span>
+  )
+}
+
 /* ── Physical progress — works completed ─────────────────────────────── */
 
-function PhysicalProgressCard({ o }: { o: ProjectOverview }) {
+function PhysicalProgressCard({ o, unit, onUnit }: {
+  o: ProjectOverview; unit: MoneyUnit; onUnit: (v: MoneyUnit) => void
+}) {
   const L = o.physical.ladder
   const bills = o.physical.bills
+  const fm = tableMoney(unit)
+  const ul = unitLabel(unit)
 
   const chartOption = useMemo(() => {
     const rows = [...bills].reverse()
@@ -426,16 +472,17 @@ function PhysicalProgressCard({ o }: { o: ProjectOverview }) {
   return (
     <Card className="relative">
       <Legend>Physical progress — works completed</Legend>
+      <UnitToggle unit={unit} onUnit={onUnit} />
       <CardContent className="p-0 pt-4">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[600px] text-sm">
             <thead>
               <tr className="border-b bg-muted/40 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
                 <th className="whitespace-nowrap px-4 py-2 font-medium">Work Section</th>
-                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">BEME (₦m)</th>
-                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">Last Wk (₦m)</th>
-                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">This Wk (₦m)</th>
-                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">To Date (₦m)</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">BEME ({ul})</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">Last Wk ({ul})</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">This Wk ({ul})</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">To Date ({ul})</th>
                 <th className="whitespace-nowrap px-4 py-2 text-right font-medium">% Complete</th>
               </tr>
             </thead>
@@ -444,23 +491,23 @@ function PhysicalProgressCard({ o }: { o: ProjectOverview }) {
                 <tr key={b.bill_code ?? b.name}
                   className={`border-b ${i % 2 ? 'bg-muted/20' : ''}`}>
                   <td className="max-w-[280px] truncate px-4 py-1.5">{titleCase(b.name)}</td>
-                  <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(b.beme_amount)}</td>
-                  <td className="px-4 py-1.5 text-right tabular-nums text-muted-foreground">{nairaM(b.last_week)}</td>
+                  <td className="px-4 py-1.5 text-right tabular-nums">{fm(b.beme_amount)}</td>
+                  <td className="px-4 py-1.5 text-right tabular-nums text-muted-foreground">{fm(b.last_week)}</td>
                   <td className={`px-4 py-1.5 text-right tabular-nums ${b.this_week > 0 ? 'font-medium text-amber-700 dark:text-amber-400' : ''}`}>
-                    {nairaM(b.this_week)}
+                    {fm(b.this_week)}
                   </td>
-                  <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(b.to_date)}</td>
+                  <td className="px-4 py-1.5 text-right tabular-nums">{fm(b.to_date)}</td>
                   <td className={`px-4 py-1.5 text-right tabular-nums ${(b.pct_complete ?? 0) > 1 ? 'font-semibold text-red-600' : ''}`}>
                     {pctFmt(b.pct_complete)}
                   </td>
                 </tr>
               ))}
-              <LadderRow label="Sub-Total" r={L.works} tone="subtotal" />
-              <LadderRow label="Add VAT & State Levies (7.5%)" r={L.vat} />
-              <LadderRow label="Total Works Completed (Incl. VAT)" r={L.works_incl_vat} tone="subtotal" />
-              <LadderRow label="Contingency (Incl. VAT)" r={L.contingency_incl_vat}
+              <LadderRow fm={fm} label="Sub-Total" r={L.works} tone="subtotal" />
+              <LadderRow fm={fm} label="Add VAT & State Levies (7.5%)" r={L.vat} />
+              <LadderRow fm={fm} label="Total Works Completed (Incl. VAT)" r={L.works_incl_vat} tone="subtotal" />
+              <LadderRow fm={fm} label="Contingency (Incl. VAT)" r={L.contingency_incl_vat}
                 note="accrual: BEME tail sub-total₂ − sub-total₁, × 1.075" />
-              <LadderRow label="TOTAL WORKS DONE (Incl. VAT & Contingency)"
+              <LadderRow fm={fm} label="TOTAL WORKS DONE (Incl. VAT & Contingency)"
                 r={L.total_incl_contingency} tone="total" />
             </tbody>
           </table>
@@ -475,7 +522,8 @@ function PhysicalProgressCard({ o }: { o: ProjectOverview }) {
 }
 
 
-function LadderRow({ label, r, tone, note }: {
+function LadderRow({ fm, label, r, tone, note }: {
+  fm: (v: number | null | undefined) => string
   label: string
   r: { beme: number | null; last_week: number | null; this_week: number | null; to_date: number | null }
   tone?: 'subtotal' | 'total'
@@ -490,10 +538,10 @@ function LadderRow({ label, r, tone, note }: {
   return (
     <tr className={`border-b last:border-0 ${rowClass}`}>
       <td className="px-4 py-2" title={note}>{label}</td>
-      <td className="px-4 py-2 text-right tabular-nums">{nairaM(r.beme)}</td>
-      <td className="px-4 py-2 text-right tabular-nums text-muted-foreground">{nairaM(r.last_week)}</td>
-      <td className="px-4 py-2 text-right tabular-nums">{nairaM(r.this_week)}</td>
-      <td className="px-4 py-2 text-right tabular-nums">{nairaM(r.to_date)}</td>
+      <td className="px-4 py-2 text-right tabular-nums">{fm(r.beme)}</td>
+      <td className="px-4 py-2 text-right tabular-nums text-muted-foreground">{fm(r.last_week)}</td>
+      <td className="px-4 py-2 text-right tabular-nums">{fm(r.this_week)}</td>
+      <td className="px-4 py-2 text-right tabular-nums">{fm(r.to_date)}</td>
       <td className="px-4 py-2 text-right tabular-nums">{pctFmt(pct)}</td>
     </tr>
   )
@@ -576,13 +624,17 @@ function categoryColor(name: string, i: number): string {
   return CATEGORY_COLORS[name] ?? FALLBACK_COLORS[i % FALLBACK_COLORS.length]
 }
 
-function CostProfitabilityCard({ o }: { o: ProjectOverview }) {
+function CostProfitabilityCard({ o, unit, onUnit }: {
+  o: ProjectOverview; unit: MoneyUnit; onUnit: (v: MoneyUnit) => void
+}) {
   const cp = o.cost_profitability
+  const fm = tableMoney(unit)
+  const ul = unitLabel(unit)
 
   const donutOption = useMemo(() => ({
     tooltip: {
       trigger: 'item' as const,
-      valueFormatter: (v: number) => `₦${nairaM(v)}m`,
+      valueFormatter: (v: number) => `₦${fm(v)}m`,
     },
     legend: {
       orient: 'vertical' as const, right: '8%', top: 'middle',
@@ -615,15 +667,16 @@ function CostProfitabilityCard({ o }: { o: ProjectOverview }) {
   return (
     <Card className="relative">
       <Legend>Cost &amp; profitability</Legend>
+      <UnitToggle unit={unit} onUnit={onUnit} />
       <CardContent className="p-0 pt-4">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[560px] text-sm">
             <thead>
               <tr className="border-b bg-muted/40 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
                 <th className="whitespace-nowrap px-4 py-2 font-medium">Cost Category</th>
-                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">Last Wk (₦m)</th>
-                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">This Wk (₦m)</th>
-                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">To Date (₦m)</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">Last Wk ({ul})</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">This Wk ({ul})</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">To Date ({ul})</th>
                 <th className="whitespace-nowrap px-4 py-2 text-right font-medium">% of Total</th>
               </tr>
             </thead>
@@ -635,36 +688,36 @@ function CostProfitabilityCard({ o }: { o: ProjectOverview }) {
                       style={{ backgroundColor: categoryColor(c.category, i) }} />
                     {c.category}
                   </td>
-                  <td className="px-4 py-1.5 text-right tabular-nums text-muted-foreground">{nairaM(c.last_week)}</td>
-                  <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(c.this_week)}</td>
-                  <td className="px-4 py-1.5 text-right tabular-nums">{nairaM(c.to_date)}</td>
+                  <td className="px-4 py-1.5 text-right tabular-nums text-muted-foreground">{fm(c.last_week)}</td>
+                  <td className="px-4 py-1.5 text-right tabular-nums">{fm(c.this_week)}</td>
+                  <td className="px-4 py-1.5 text-right tabular-nums">{fm(c.to_date)}</td>
                   <td className="px-4 py-1.5 text-right tabular-nums">{pctFmt(c.pct_of_total)}</td>
                 </tr>
               ))}
               <tr className="border-b bg-muted/40 font-semibold">
                 <td className="px-4 py-2">Total Costs to Date</td>
-                <td className="px-4 py-2 text-right tabular-nums text-muted-foreground">{nairaM(cp.total_last_week)}</td>
-                <td className="px-4 py-2 text-right tabular-nums">{nairaM(cp.total_this_week)}</td>
-                <td className="px-4 py-2 text-right tabular-nums">{nairaM(cp.total_to_date)}</td>
+                <td className="px-4 py-2 text-right tabular-nums text-muted-foreground">{fm(cp.total_last_week)}</td>
+                <td className="px-4 py-2 text-right tabular-nums">{fm(cp.total_this_week)}</td>
+                <td className="px-4 py-2 text-right tabular-nums">{fm(cp.total_to_date)}</td>
                 <td className="px-4 py-2 text-right tabular-nums">100.0%</td>
               </tr>
               <tr className="border-b">
                 <td className="px-4 py-2">Value of Work Done — Incl. VAT, Excl. Contingency</td>
-                <td className="px-4 py-2 text-right tabular-nums text-muted-foreground">{nairaM(cp.works_incl_vat_last_week)}</td>
-                <td className="px-4 py-2 text-right tabular-nums">{nairaM(cp.works_incl_vat_this_week)}</td>
-                <td className="px-4 py-2 text-right tabular-nums">{nairaM(cp.works_incl_vat_to_date)}</td>
+                <td className="px-4 py-2 text-right tabular-nums text-muted-foreground">{fm(cp.works_incl_vat_last_week)}</td>
+                <td className="px-4 py-2 text-right tabular-nums">{fm(cp.works_incl_vat_this_week)}</td>
+                <td className="px-4 py-2 text-right tabular-nums">{fm(cp.works_incl_vat_to_date)}</td>
                 <td className="px-4 py-2" />
               </tr>
               <tr className="border-b bg-emerald-500/5 font-semibold">
                 <td className="px-4 py-2">Net Earnings</td>
                 <td className={`px-4 py-2 text-right tabular-nums ${cp.net_last_week != null && cp.net_last_week < 0 ? 'text-red-600' : 'text-muted-foreground'}`}>
-                  {nairaM(cp.net_last_week)}
+                  {fm(cp.net_last_week)}
                 </td>
                 <td className={`px-4 py-2 text-right tabular-nums ${cp.net_this_week < 0 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-400'}`}>
-                  {nairaM(cp.net_this_week)}
+                  {fm(cp.net_this_week)}
                 </td>
                 <td className={`px-4 py-2 text-right tabular-nums ${cp.net_to_date < 0 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-400'}`}>
-                  {nairaM(cp.net_to_date)}
+                  {fm(cp.net_to_date)}
                 </td>
                 <td className="px-4 py-2" />
               </tr>
