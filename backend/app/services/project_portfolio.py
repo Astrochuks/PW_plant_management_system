@@ -51,6 +51,7 @@ ranked AS (
 SELECT p.id, p.short_name, p.project_name, p.client, p.status,
        p.project_type, p.current_contract_sum,
        l.name AS location_name,
+       s.name AS state_name,
        -- schedule inputs (date arithmetic happens in Python, once, shared)
        p.commencement_date, p.works_commenced_date,
        p.original_completion_date, p.revised_completion_date,
@@ -98,6 +99,7 @@ SELECT p.id, p.short_name, p.project_name, p.client, p.status,
        pay.paid_gross, pay.cert_paid, pay.last_payment_date, pay.payments_count
 FROM projects p
 LEFT JOIN locations l ON l.id = p.location_id
+LEFT JOIN states s ON s.id = l.state_id
 JOIN LATERAL (
     SELECT * FROM ranked WHERE ranked.project_id = p.id AND rn = 1
 ) lw ON TRUE
@@ -121,30 +123,24 @@ LEFT JOIN LATERAL (
 ORDER BY p.short_name NULLS LAST, p.project_name
 """
 
+# per project per week — the frontend buckets this by the page's period
+# lens to build BOTH the portfolio trend and the site × period output
+# matrix (the shape PW's own "General Summary Per Site Output" uses)
 _SERIES_SQL = """
-WITH wk AS (
-    SELECT r.year, r.week_number, r.week_ending_date,
-           COALESCE(b.works, 0) AS works,
-           COALESCE(c.cost, 0)  AS cost
-    FROM project_weekly_reports r
-    LEFT JOIN LATERAL (
-        SELECT sum(amount_this_week) AS works
-        FROM project_beme_progress WHERE weekly_report_id = r.id
-    ) b ON TRUE
-    LEFT JOIN LATERAL (
-        SELECT sum(amount_this_week) AS cost
-        FROM project_cost_report
-        WHERE weekly_report_id = r.id AND cost_category IS NOT NULL
-    ) c ON TRUE
-)
-SELECT year, week_number,
-       min(week_ending_date)          AS week_ending_date,
-       COALESCE(sum(works), 0)        AS works,
-       COALESCE(sum(cost), 0)         AS cost,
-       count(*)::int                  AS projects_reporting
-FROM wk
-GROUP BY year, week_number
-ORDER BY year, week_number
+SELECT r.project_id, r.year, r.week_number, r.week_ending_date,
+       COALESCE(b.works, 0) AS works,
+       COALESCE(c.cost, 0)  AS cost
+FROM project_weekly_reports r
+LEFT JOIN LATERAL (
+    SELECT sum(amount_this_week) AS works
+    FROM project_beme_progress WHERE weekly_report_id = r.id
+) b ON TRUE
+LEFT JOIN LATERAL (
+    SELECT sum(amount_this_week) AS cost
+    FROM project_cost_report
+    WHERE weekly_report_id = r.id AND cost_category IS NOT NULL
+) c ON TRUE
+ORDER BY r.year, r.week_number
 """
 
 
@@ -225,6 +221,7 @@ async def build_portfolio(today: date) -> dict[str, Any]:
             "status": r["status"],
             "project_type": r["project_type"],
             "location_name": r["location_name"],
+            "state_name": r["state_name"],
             "contract_sum": _fn(r["current_contract_sum"]),
             "scope": scope,
             "scope_incl_vat": scope * VAT,
@@ -336,13 +333,13 @@ async def build_portfolio(today: date) -> dict[str, Any]:
         "projects": projects,
         "series": [
             {
+                "project_id": str(s["project_id"]),
                 "year": s["year"], "week_number": s["week_number"],
                 "week_ending_date": s["week_ending_date"],
                 "works": _f(s["works"]),
                 "works_incl_vat": _f(s["works"]) * VAT,
                 "cost": _f(s["cost"]),
                 "net": _f(s["works"]) * VAT - _f(s["cost"]),
-                "projects_reporting": s["projects_reporting"],
             }
             for s in series
         ],

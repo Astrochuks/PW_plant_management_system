@@ -1205,6 +1205,7 @@ export interface PortfolioProject {
   status: string;
   project_type: string | null;
   location_name: string | null;
+  state_name: string | null;
   contract_sum: number | null;
   scope: number;
   scope_incl_vat: number;
@@ -1249,6 +1250,7 @@ export interface AttentionItem {
 }
 
 export interface PortfolioWeek {
+  project_id: string;
   year: number;
   week_number: number;
   week_ending_date: string;
@@ -1256,7 +1258,6 @@ export interface PortfolioWeek {
   works_incl_vat: number;
   cost: number;
   net: number;
-  projects_reporting: number;
 }
 
 export interface ExecutiveSummary {
