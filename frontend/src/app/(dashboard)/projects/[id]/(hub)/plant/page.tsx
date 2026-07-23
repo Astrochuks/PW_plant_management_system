@@ -129,13 +129,7 @@ export default function PlantDieselPage() {
       {(unmapped?.length ?? 0) > 0 && (
         <Card className="relative border-amber-300 dark:border-amber-700">
           <Legend>Fleet numbers awaiting a verdict</Legend>
-          <CardHeader className="flex-row items-center justify-between pb-2 pt-5">
-            <div>
-              <p className="text-xs text-muted-foreground">
-                Rows are saved either way — a verdict links them to the register (or settles
-                them as external) for every past and future week.
-              </p>
-            </div>
+          <CardHeader className="flex-row items-center justify-end pb-2 pt-5">
             <Button variant="outline" size="sm" onClick={handleReResolve} disabled={busy === '__re'}>
               <RefreshCcw className="mr-2 h-3.5 w-3.5" />
               Re-resolve
