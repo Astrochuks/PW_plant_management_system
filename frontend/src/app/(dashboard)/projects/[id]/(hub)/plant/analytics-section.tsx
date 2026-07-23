@@ -280,7 +280,7 @@ export default function PlantAnalyticsSection({ gran, year }: {
                   <th className="px-4 py-2 font-medium">Fleet</th>
                   <th className="px-4 py-2 font-medium">Description</th>
                   <th className="px-4 py-2 font-medium">Type</th>
-                  <th className="px-4 py-2 text-right font-medium">Hours</th>
+                  <th className="px-4 py-2 text-right font-medium">Hours worked</th>
                   <th className="px-4 py-2 text-right font-medium">Diesel L</th>
                   <th className="px-4 py-2 text-right font-medium">L/hr</th>
                   <th className="px-4 py-2 text-right font-medium">Type avg</th>

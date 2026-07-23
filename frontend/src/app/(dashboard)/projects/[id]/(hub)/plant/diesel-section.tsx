@@ -170,7 +170,7 @@ export default function DieselSection({ year }: { year: number | 'all' }) {
                   <th className="px-4 py-2 font-medium">Description</th>
                   <th className="px-4 py-2 text-right font-medium">Diesel L</th>
                   <th className="px-4 py-2 text-right font-medium">Share</th>
-                  <th className="px-4 py-2 text-right font-medium">Hours</th>
+                  <th className="px-4 py-2 text-right font-medium">Hours worked</th>
                   <th className="px-4 py-2 text-right font-medium">L/hr</th>
                 </tr>
               </thead>
