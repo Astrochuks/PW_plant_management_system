@@ -43,63 +43,253 @@ export default function ReportPage() {
     onError: (err) => toast.error(getErrorMessage(err)),
   })
 
-  // Print via a throwaway iframe holding ONLY the document. The old
-  // body-visibility trick printed text fine but several print engines
-  // cull <img> layers inside visibility-restored subtrees — the logo
-  // never survived. An iframe is its own page: images print.
+  // Export PDF builds a real .pdf file in the browser (pdfmake) and
+  // downloads it — same flow as Excel. No print dialog, no printer,
+  // no engine deciding which images to keep: the logo is embedded data.
   const handleExportPdf = useCallback(async () => {
-    const doc = document.getElementById('report-doc')
-    if (!doc) return
-    const iframe = document.createElement('iframe')
-    iframe.style.position = 'fixed'
-    iframe.style.right = '100%'
-    iframe.style.width = '0'
-    iframe.style.height = '0'
-    iframe.style.border = '0'
-    document.body.appendChild(iframe)
-    const idoc = iframe.contentDocument
-    if (!idoc) return
-    // carry the app's stylesheets so Tailwind classes keep working;
-    // the iframe root has no dark class, so light tokens apply
-    const styles = [...document.querySelectorAll('style, link[rel="stylesheet"]')]
-      .map((el) => el.outerHTML).join('')
-    idoc.open()
-    idoc.write(`<!doctype html><html><head><meta charset="utf-8">
-      <title>Project Report</title>${styles}
-      <style>
-        @page { size: A4; margin: 14mm; }
-        html, body { background: #fff !important; }
-        body { margin: 0; }
-        #report-doc, #report-doc * {
-          color: #000 !important;
-          border-color: #000 !important;
-          background: transparent !important;
-        }
-        #report-doc .text-muted-foreground,
-        #report-doc .text-muted-foreground * { color: #52525b !important; }
-        #report-doc .text-red-600,
-        #report-doc .text-red-600 * { color: #dc2626 !important; }
-        #report-doc .report-section { break-inside: avoid; }
-      </style></head><body>${doc.outerHTML}</body></html>`)
-    idoc.close()
-    // wait for stylesheets and images before opening the dialog
-    await Promise.all([
-      ...[...idoc.querySelectorAll('link[rel="stylesheet"]')].map((l) =>
-        new Promise((res) => {
-          const el = l as HTMLLinkElement
-          if (el.sheet) res(null)
-          else { el.onload = el.onerror = () => res(null) }
-        })),
-      ...[...idoc.images].map((img) =>
-        img.complete ? Promise.resolve(null) : new Promise((res) => {
-          img.onload = img.onerror = () => res(null)
-        })),
-    ])
-    iframe.contentWindow?.focus()
-    iframe.contentWindow?.print()
-    // the dialog blocks; clean up well after it closes
-    setTimeout(() => iframe.remove(), 60_000)
-  }, [])
+    if (!report) return
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    const pdfMakeMod: any = await import('pdfmake/build/pdfmake')
+    const pdfMake = pdfMakeMod.default ?? pdfMakeMod
+    const vfsMod: any = await import('pdfmake/build/vfs_fonts')
+    pdfMake.addVirtualFileSystem(vfsMod.default ?? vfsMod)
+    /* eslint-enable @typescript-eslint/no-explicit-any */
+
+    const m = report.meta
+    const cs = report.contract_summary
+    const ps = report.period_summary
+    const pd = report.plant_diesel
+    const fin = report.financials
+
+    let logoDataUrl: string | null = null
+    try {
+      const blob = await (await fetch('/images/logo.png')).blob()
+      logoDataUrl = await new Promise<string>((res, rej) => {
+        const r = new FileReader()
+        r.onload = () => res(r.result as string)
+        r.onerror = rej
+        r.readAsDataURL(blob)
+      })
+    } catch {
+      // the logo is decoration — never block the export over it
+    }
+
+    const periodLine =
+      `${m.period === 'to-date' ? `Project start to ${fmtDate(m.date_to)}` : `Period ${fmtDate(m.date_from)} to ${fmtDate(m.date_to)}`}` +
+      `${m.weeks_covered.length > 0 ? ` · ${m.weeks_covered.length} stored week${m.weeks_covered.length > 1 ? 's' : ''}` : ''}` +
+      `${m.as_of ? ` · to-date figures as of ${weekLabel(m.as_of.year, m.as_of.week_number)}` : ''}`
+
+    const MUTED = '#52525b'
+    const RULE = '#d4d4d8'
+    const RED = '#dc2626'
+
+    const kv = (pairs: Array<[string, string, boolean?]>) => ({
+      table: {
+        widths: ['*', 'auto'],
+        body: pairs.map(([label, value, strong]) => [
+          { text: label, color: MUTED },
+          { text: value, alignment: 'right', bold: !!strong },
+        ]),
+      },
+      layout: {
+        hLineWidth: (i: number) => (i === 0 ? 0 : 0.5),
+        hLineColor: () => RULE,
+        vLineWidth: () => 0,
+        paddingLeft: () => 0,
+        paddingRight: () => 0,
+        paddingTop: () => 3,
+        paddingBottom: () => 3,
+      },
+    })
+
+    const section = (title: string) => ({
+      text: title.toUpperCase(),
+      bold: true,
+      fontSize: 10.5,
+      margin: [0, 14, 0, 5],
+    })
+
+    const thinTable = (
+      widths: (string | number)[],
+      body: unknown[][],
+      opts: { lastRowBold?: boolean } = {},
+    ) => ({
+      table: { headerRows: 1, widths, body },
+      layout: {
+        hLineWidth: (i: number, node: { table: { body: unknown[][] } }) =>
+          i === 1 || (opts.lastRowBold && i === node.table.body.length - 1) ? 0.9 : 0.5,
+        hLineColor: (i: number, node: { table: { body: unknown[][] } }) =>
+          i === 1 || (opts.lastRowBold && i === node.table.body.length - 1) ? '#000000' : RULE,
+        vLineWidth: () => 0,
+        paddingLeft: () => 2,
+        paddingRight: () => 2,
+        paddingTop: () => 2.5,
+        paddingBottom: () => 2.5,
+      },
+      fontSize: 8,
+    })
+
+    const th = (t: string, right = false) =>
+      ({ text: t, bold: true, color: MUTED, alignment: right ? 'right' : 'left' })
+    const td = (t: string, right = true, extra: Record<string, unknown> = {}) =>
+      ({ text: t, alignment: right ? 'right' : 'left', ...extra })
+
+    const docDefinition = {
+      pageSize: 'A4',
+      pageMargins: [40, 36, 40, 40] as [number, number, number, number],
+      defaultStyle: { fontSize: 9 },
+      content: [
+        ...(logoDataUrl
+          ? [{ image: logoDataUrl, width: 46, alignment: 'center', margin: [0, 0, 0, 6] }]
+          : []),
+        { text: 'P.W. NIGERIA LTD.', bold: true, fontSize: 14, alignment: 'center' },
+        { text: m.project_name, bold: true, fontSize: 11, alignment: 'center', margin: [0, 3, 0, 0] },
+        ...(m.client ? [{ text: m.client, color: MUTED, fontSize: 8.5, alignment: 'center', margin: [0, 2, 0, 0] }] : []),
+        { text: `Project Report — ${m.label}`, bold: true, fontSize: 10, alignment: 'center', margin: [0, 6, 0, 0] },
+        { text: periodLine, color: MUTED, fontSize: 8.5, alignment: 'center', margin: [0, 2, 0, 0] },
+        { text: `Generated ${fmtDate(m.generated_at)} — computed from stored weekly ledgers`, color: MUTED, fontSize: 7.5, alignment: 'center', margin: [0, 2, 0, 6] },
+        { canvas: [{ type: 'line', x1: 0, y1: 0, x2: 515, y2: 0, lineWidth: 1.4 }] },
+        { canvas: [{ type: 'line', x1: 0, y1: 2, x2: 515, y2: 2, lineWidth: 0.6 }], margin: [0, 0, 0, 4] },
+
+        section('Contract Summary'),
+        {
+          columns: [
+            kv([
+              ['Contract Sum', naira(cs.contract_sum)],
+              ['Total BEME (Incl. VAT)', naira(cs.beme_incl_vat)],
+              ['Work Done to Date (Incl. VAT)', naira(cs.works_incl_vat), true],
+              ['% Complete', pctFmt(cs.pct_complete), true],
+              ['Cost to Date', naira(cs.cost_to_date)],
+              ['Net to Date', naira(cs.net_to_date), true],
+              ['Margin', pctFmt(cs.margin)],
+            ]),
+            kv([
+              ['Certified (cumulative)', naira(cs.certified)],
+              ['Paid (gross)', naira(cs.paid_gross)],
+              ['Certified, Not Yet Paid', naira(cs.certified_not_paid), true],
+              ['Retention Held', naira(cs.retention_held)],
+              ['Retention Released', naira(cs.retention_released)],
+            ]),
+          ],
+          columnGap: 24,
+        },
+
+        section(`Period Summary — ${m.label}`),
+        ps.weeks.length === 0
+          ? { text: 'No stored weeks fall inside this period.', color: MUTED }
+          : thinTable(
+              ['auto', 'auto', '*', '*', '*', '*'],
+              [
+                [th('Week'), th('Ending'), th('Works', true), th('Works Incl. VAT', true), th('Cost', true), th('Net', true)],
+                ...ps.weeks.map((w) => [
+                  td(weekLabel(w.year, w.week_number), false),
+                  td(fmtDate(w.week_ending_date), false, { color: MUTED }),
+                  td(naira(w.works)),
+                  td(naira(w.earnings)),
+                  td(naira(w.cost)),
+                  td(naira(w.net), true, w.net < 0 ? { color: RED } : {}),
+                ]),
+                [
+                  td('Total', false, { bold: true }), td('', false),
+                  td(naira(ps.totals.works), true, { bold: true }),
+                  td(naira(ps.totals.earnings), true, { bold: true }),
+                  td(naira(ps.totals.cost), true, { bold: true }),
+                  td(naira(ps.totals.net), true, { bold: true, ...(ps.totals.net < 0 ? { color: RED } : {}) }),
+                ],
+              ],
+              { lastRowBold: true },
+            ),
+
+        section('Work Done — by Bill'),
+        thinTable(
+          ['auto', '*', 'auto', 'auto', 'auto', 'auto'],
+          [
+            [th('Bill'), th('Description'), th('Contract Amount', true), th('This Period', true), th('To Date', true), th('% Complete', true)],
+            ...report.work_done.bills.map((b) => [
+              td(String(b.bill_code ?? '—'), false),
+              td(b.name ?? '—', false),
+              td(naira(b.contract_amount)),
+              td(naira(b.period_amount)),
+              td(naira(b.to_date_amount)),
+              td(pctFmt(b.pct_complete), true, { bold: true }),
+            ]),
+          ],
+        ),
+
+        section('Costs — by Category'),
+        thinTable(
+          ['*', 'auto', 'auto', 'auto'],
+          [
+            [th('Category'), th('This Period', true), th('To Date', true), th('Share of Cost to Date', true)],
+            ...report.costs.categories.map((c) => [
+              td(c.category, false),
+              td(naira(c.period_amount)),
+              td(naira(c.to_date_amount)),
+              td(pctFmt(c.share_to_date)),
+            ]),
+          ],
+        ),
+
+        section(`Plant & Diesel — ${m.label}`),
+        {
+          columns: [
+            kv([
+              ['Plants Seen', String(pd.plants_seen)],
+              ['Hours Worked', `${num(Math.round(pd.worked))} h`],
+              ['Standby Hours', `${num(Math.round(pd.standby))} h`],
+              ['Breakdown Hours', `${num(Math.round(pd.breakdown))} h`],
+              ['Fleet Availability', pctFmt(pd.availability), true],
+              ['Utilisation', pctFmt(pd.utilisation), true],
+            ]),
+            kv([
+              ['Plant Cost', naira(pd.plant_cost)],
+              ['Diesel (AGO)', naira(pd.diesel_cost)],
+              ['Diesel Charged', `${num(Math.round(pd.diesel_charged))} L`],
+              ['Diesel Logged to Plants', `${num(Math.round(pd.diesel_logged))} L`],
+              ['Attribution', pctFmt(pd.attribution, 0)],
+            ]),
+          ],
+          columnGap: 24,
+        },
+
+        section(`Financials — as at ${fmtDate(m.date_to)}`),
+        {
+          columns: [
+            kv([
+              ['Certified (cumulative)', naira(fin.certified)],
+              ['Paid Gross (to period end)', naira(fin.paid_gross)],
+              ['Payments Recorded', String(fin.payments_count)],
+            ]),
+            kv([
+              ['Retention Held', naira(fin.retention_held)],
+              ['Retention Released', naira(fin.retention_released)],
+            ]),
+          ],
+          columnGap: 24,
+        },
+        ...(fin.unpaid_certificates.length > 0
+          ? [
+              { text: 'UNPAID CERTIFICATES (PAYMENTS APPLIED OLDEST-FIRST)', bold: true, fontSize: 8, color: MUTED, margin: [0, 10, 0, 4] },
+              thinTable(
+                ['auto', '*', '*', '*'],
+                [
+                  [th('Cert'), th('This Certificate', true), th('Paid Against It', true), th('Outstanding', true)],
+                  ...fin.unpaid_certificates.map((u) => [
+                    td(u.cert, false),
+                    td(naira(u.this_certificate)),
+                    td(naira(u.paid_against)),
+                    td(naira(u.outstanding), true, { bold: true, color: RED }),
+                  ]),
+                ],
+              ),
+            ]
+          : []),
+      ],
+    }
+
+    const fileName = `PW_${(m.short_name || m.project_name).replace(/[^\w]+/g, '_')}_Report_${m.label.replace(/[\s,·]+/g, '_')}.pdf`
+    pdfMake.createPdf(docDefinition).download(fileName)
+  }, [report])
 
   const handleExportExcel = useCallback(async () => {
     if (!report) return
