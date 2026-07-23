@@ -10,7 +10,6 @@
  */
 
 import { useCallback, useState } from 'react'
-import Image from 'next/image'
 import { useParams } from 'next/navigation'
 import { FileBarChart, FileSpreadsheet, FileText, Loader2 } from 'lucide-react'
 import { useMutation } from '@tanstack/react-query'
@@ -46,31 +45,51 @@ export default function ReportPage() {
 
   const handleExportExcel = useCallback(async () => {
     if (!report) return
-    const XLSX = await import('xlsx')
-    const { utils, writeFile } = XLSX
-    const wb = utils.book_new()
+    // exceljs (not SheetJS) — the community xlsx library cannot embed
+    // images, and the letterhead needs the logo on every sheet
+    const { Workbook } = await import('exceljs')
+    const wb = new Workbook()
     const m = report.meta
 
-    const header = (section: string): (string | number)[][] => [
-      ['P.W. NIGERIA LTD.'],
-      [`${m.short_name || m.project_name} — Project Report · ${m.label}`],
-      [`${m.period === 'to-date' ? `Project start to ${m.date_to}` : `Period: ${m.date_from} to ${m.date_to}`}${m.as_of ? `  |  To-date figures as of ${weekLabel(m.as_of.year, m.as_of.week_number)}` : ''}`],
-      [`Generated: ${m.generated_at}`],
-      [],
-      [section],
-      [],
-    ]
+    let logoBuf: ArrayBuffer | null = null
+    try {
+      logoBuf = await (await fetch('/images/logo.png')).arrayBuffer()
+    } catch {
+      // the logo is decoration — never block the export over it
+    }
+
+    const periodLine =
+      `${m.period === 'to-date' ? `Project start to ${m.date_to}` : `Period: ${m.date_from} to ${m.date_to}`}` +
+      `${m.as_of ? `  |  To-date figures as of ${weekLabel(m.as_of.year, m.as_of.week_number)}` : ''}`
 
     const sheet = (
       name: string, section: string, headers: string[],
       rows: (string | number)[][], widths: number[],
     ) => {
-      const aoa = [...header(section), headers, ...rows]
-      const ws = utils.aoa_to_sheet(aoa)
-      ws['!cols'] = widths.map((w) => ({ wch: w }))
-      const nc = headers.length
-      ws['!merges'] = [0, 1, 2, 3, 5].map((r) => ({ s: { r, c: 0 }, e: { r, c: Math.max(nc - 1, 1) } }))
-      utils.book_append_sheet(wb, ws, name)
+      const ws = wb.addWorksheet(name)
+      ws.columns = widths.map((w) => ({ width: w }))
+      if (logoBuf) {
+        const imgId = wb.addImage({ buffer: logoBuf as never, extension: 'png' })
+        ws.addImage(imgId, { tl: { col: 0, row: 0 }, ext: { width: 58, height: 56 } })
+      }
+      const nc = Math.max(headers.length, 2)
+      // rows 1–3 stay empty — the logo floats over them
+      ws.addRow([]); ws.addRow([]); ws.addRow([])
+      const title = ws.addRow(['P.W. NIGERIA LTD.'])
+      title.font = { bold: true, size: 13 }
+      const sub = ws.addRow([`${m.short_name || m.project_name} — Project Report · ${m.label}`])
+      sub.font = { bold: true }
+      ws.addRow([periodLine])
+      ws.addRow([`Generated: ${m.generated_at}`])
+      ws.addRow([])
+      const sec = ws.addRow([section])
+      sec.font = { bold: true, size: 12 }
+      ws.addRow([])
+      ;[4, 5, 6, 7, 9].forEach((r) => ws.mergeCells(r, 1, r, nc))
+      const head = ws.addRow(headers)
+      head.font = { bold: true }
+      head.eachCell((c) => { c.border = { bottom: { style: 'thin' } } })
+      rows.forEach((r) => ws.addRow(r))
     }
 
     const cs = report.contract_summary
@@ -147,7 +166,16 @@ export default function ReportPage() {
       ], [30, 24])
 
     const fileName = `PW_${(m.short_name || m.project_name).replace(/[^\w]+/g, '_')}_Report_${m.label.replace(/[\s,·]+/g, '_')}.xlsx`
-    writeFile(wb, fileName)
+    const out = await wb.xlsx.writeBuffer()
+    const blob = new Blob([out as BlobPart], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = fileName
+    a.click()
+    URL.revokeObjectURL(url)
   }, [report])
 
   return (
@@ -261,8 +289,11 @@ function ReportDocument({ report }: { report: ProjectReportPack }) {
         <div id="report-doc" className="mx-auto max-w-4xl space-y-6 py-2">
           {/* Header block */}
           <div className="report-section space-y-1 border-b-4 border-double border-foreground pb-4 text-center">
-            <Image
-              src="/images/logo.png" alt="P.W. Nigeria Ltd." width={160} height={80}
+            {/* plain eager img — next/image's optimized lazy URL is
+                skipped by the print snapshot, so the logo must be raw */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/images/logo.png" alt="P.W. Nigeria Ltd."
               className="mx-auto mb-1 h-14 w-auto"
             />
             <p className="text-lg font-bold tracking-wide">P.W. NIGERIA LTD.</p>
