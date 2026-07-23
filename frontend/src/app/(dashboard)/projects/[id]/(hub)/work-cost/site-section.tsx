@@ -9,7 +9,7 @@
 import { useMemo } from 'react'
 import { useParams } from 'next/navigation'
 import ECharts from 'echarts-for-react'
-import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Kpi, Legend } from '@/components/projects/hub-ui'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useProjectSite } from '@/hooks/use-projects'
@@ -67,9 +67,8 @@ export default function SitePage() {
           value={`${(labourTotals?.movement ?? 0) >= 0 ? '+' : ''}${num(labourTotals?.movement ?? 0)}`}
           lineage="this week − previous (identity)" />
         <Kpi label="Subcontractors" value={String(subsByName.size)}
-          sub={`${site.subcontractors.length} work items`} lineage="latest report ledger" />
-        <Kpi label="Hired vehicles · stored weeks" value={naira(site.hired_to_date_stored, true)}
-          sub={`${site.hired_vehicles.length} arrangements this week`} lineage="days × rate" />
+          sub={`${site.subcontractors.length} work items`} />
+        <Kpi label="Hired vehicles · stored weeks" value={naira(site.hired_to_date_stored, true)} />
       </div>
 
       <div className="grid gap-3 lg:grid-cols-2">
@@ -116,10 +115,7 @@ export default function SitePage() {
 
       <Card className="relative">
         <Legend>Subcontractors · latest ledger</Legend>
-        <CardHeader className="pb-1 pt-5">
-          <p className="text-xs text-muted-foreground">the latest report carries each ledger&apos;s cumulative truth</p>
-        </CardHeader>
-        <CardContent className="p-0">
+        <CardContent className="p-0 pt-3">
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
@@ -145,12 +141,7 @@ export default function SitePage() {
 
       <Card className="relative">
         <Legend>Materials · latest week</Legend>
-        <CardHeader className="pb-1 pt-5">
-          <p className="text-xs text-muted-foreground">
-            Variance is the sheet&apos;s own loss detector (available − used), shown verbatim
-          </p>
-        </CardHeader>
-        <CardContent className="p-0">
+        <CardContent className="p-0 pt-3">
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
@@ -190,11 +181,6 @@ export default function SitePage() {
               </tbody>
             </table>
           </div>
-          {site.materials.length > 0 && !site.materials[0].stock_maintained && (
-            <p className="border-t px-4 py-2 text-xs text-amber-700">
-              Stock side not maintained by this site (openings/closings empty) — usage recorded, loss detection unavailable.
-            </p>
-          )}
         </CardContent>
       </Card>
 
