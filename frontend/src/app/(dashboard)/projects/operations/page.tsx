@@ -62,9 +62,11 @@ function ProjectCard({ p }: { p: ProjectOperationsRow }) {
     p.works_certified != null && p.current_contract_amount
       ? (p.works_certified / p.current_contract_amount) * 100
       : null
+  // standby counts as available — the machine is fit to work, just not called on
+  const totalHours = p.hours_worked + p.standby_hours + p.breakdown_hours
   const availability =
-    p.hours_worked + p.breakdown_hours > 0
-      ? (p.hours_worked / (p.hours_worked + p.breakdown_hours)) * 100
+    totalHours > 0
+      ? ((p.hours_worked + p.standby_hours) / totalHours) * 100
       : null
 
   return (
@@ -102,7 +104,7 @@ function ProjectCard({ p }: { p: ProjectOperationsRow }) {
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           <Metric icon={Timer} label="Hours worked" value={`${num(p.hours_worked)} hrs`} />
           <Metric
-            icon={Activity} label="Availability"
+            icon={Activity} label="Fleet availability"
             value={availability != null ? `${availability.toFixed(1)}%` : '—'}
           />
           <Metric icon={Droplets} label="Diesel" value={`${num(p.diesel_litres)} L`} />

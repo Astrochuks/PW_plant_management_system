@@ -39,9 +39,16 @@ const SORTS: Array<{ key: SortKey; label: string }> = [
   { key: 'diesel', label: 'Diesel litres' },
 ]
 
+// availability = fit to work (standby counts as available);
+// utilisation = share of all hours actually worked
 const availability = (p: ProjectPlantRollup): number | null => {
-  const denom = p.hours_worked + p.breakdown_hours
-  return denom > 0 ? p.hours_worked / denom : null
+  const total = p.hours_worked + p.standby_hours + p.breakdown_hours
+  return total > 0 ? (p.hours_worked + p.standby_hours) / total : null
+}
+
+const utilisation = (p: ProjectPlantRollup): number | null => {
+  const total = p.hours_worked + p.standby_hours + p.breakdown_hours
+  return total > 0 ? p.hours_worked / total : null
 }
 
 export default function PlantsSection() {
@@ -204,6 +211,7 @@ export default function PlantsSection() {
                   <th className="px-4 py-2 text-right font-medium">Standby</th>
                   <th className="px-4 py-2 text-right font-medium">Breakdown</th>
                   <th className="px-4 py-2 text-right font-medium">Availability</th>
+                  <th className="px-4 py-2 text-right font-medium">Utilisation</th>
                   <th className="px-4 py-2 text-right font-medium">Plant cost</th>
                   <th className="px-4 py-2 text-right font-medium">Diesel L</th>
                 </tr>
@@ -211,6 +219,7 @@ export default function PlantsSection() {
               <tbody>
                 {filtered.map((p) => {
                   const avail = availability(p)
+                  const util = utilisation(p)
                   const isOpen = open === p.fleet_number_raw
                   const history = weeksByPlant.get(p.fleet_number_raw) ?? []
                   return (
@@ -238,12 +247,15 @@ export default function PlantsSection() {
                         <td className="px-4 py-1.5 text-right tabular-nums">
                           {avail == null ? '—' : pctFmt(avail, 0)}
                         </td>
+                        <td className="px-4 py-1.5 text-right tabular-nums">
+                          {util == null ? '—' : pctFmt(util, 0)}
+                        </td>
                         <td className="px-4 py-1.5 text-right tabular-nums">{naira(p.plant_cost_ngn)}</td>
                         <td className="px-4 py-1.5 text-right tabular-nums">{num(p.diesel_litres)}</td>
                       </tr>
                       {isOpen && (
                         <tr className="border-b bg-muted/20">
-                          <td colSpan={10} className="px-6 py-3">
+                          <td colSpan={11} className="px-6 py-3">
                             <PlantHistory history={history} />
                           </td>
                         </tr>
@@ -291,13 +303,14 @@ function PlantHistory({ history }: { history: PlantWeekRow[] }) {
               <th className="px-2 py-1.5 text-right font-medium">Standby</th>
               <th className="px-2 py-1.5 text-right font-medium">Breakdown</th>
               <th className="px-2 py-1.5 text-right font-medium">Availability</th>
+              <th className="px-2 py-1.5 text-right font-medium">Utilisation</th>
               <th className="px-2 py-1.5 text-right font-medium">Cost</th>
               <th className="px-2 py-1.5 text-right font-medium">Diesel L</th>
             </tr>
           </thead>
           <tbody>
             {history.map((h) => {
-              const denom = h.worked + h.breakdown
+              const total = h.worked + h.standby + h.breakdown
               return (
                 <tr key={`${h.year}-${h.week_number}`} className="border-b last:border-0">
                   <td className="px-2 py-1 font-medium tabular-nums">{weekLabel(h.year, h.week_number)}</td>
@@ -307,7 +320,10 @@ function PlantHistory({ history }: { history: PlantWeekRow[] }) {
                     {num(h.breakdown)}
                   </td>
                   <td className="px-2 py-1 text-right tabular-nums">
-                    {denom > 0 ? pctFmt(h.worked / denom, 0) : '—'}
+                    {total > 0 ? pctFmt((h.worked + h.standby) / total, 0) : '—'}
+                  </td>
+                  <td className="px-2 py-1 text-right tabular-nums">
+                    {total > 0 ? pctFmt(h.worked / total, 0) : '—'}
                   </td>
                   <td className="px-2 py-1 text-right tabular-nums">{naira(h.plant_cost)}</td>
                   <td className="px-2 py-1 text-right tabular-nums">{num(h.diesel_litres)}</td>

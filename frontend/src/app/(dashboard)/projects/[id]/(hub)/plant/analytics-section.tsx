@@ -155,8 +155,16 @@ export default function PlantAnalyticsSection({ gran, year }: {
 
   const latest = buckets[buckets.length - 1]
   const prev = buckets.length > 1 ? buckets[buckets.length - 2] : null
-  const avail = (b: HourBucket | null) =>
-    b && b.worked + b.breakdown > 0 ? b.worked / (b.worked + b.breakdown) : null
+  // availability = fit to work (standby counts as available);
+  // utilisation = actually working. The gap between them is idle-but-healthy plant.
+  const avail = (b: HourBucket | null) => {
+    const total = b ? b.worked + b.standby + b.breakdown : 0
+    return b && total > 0 ? (b.worked + b.standby) / total : null
+  }
+  const util = (b: HourBucket | null) => {
+    const total = b ? b.worked + b.standby + b.breakdown : 0
+    return b && total > 0 ? b.worked / total : null
+  }
 
   const labels = buckets.map((b) => b.label)
 
@@ -176,18 +184,32 @@ export default function PlantAnalyticsSection({ gran, year }: {
 
   const availOption = {
     tooltip: { trigger: 'axis', valueFormatter: (v: number) => `${v}%` },
-    grid: { left: 44, right: 16, top: 20, bottom: buckets.length > ZOOM_AFTER ? 56 : 30 },
+    legend: { data: ['Fleet availability', 'Utilisation'], bottom: 0 },
+    grid: { left: 44, right: 16, top: 20, bottom: buckets.length > ZOOM_AFTER ? 78 : 42 },
     xAxis: { type: 'category', data: labels },
     yAxis: { type: 'value', max: 100, axisLabel: { formatter: '{value}%' } },
-    series: [{
-      type: 'line',
-      data: buckets.map((b) => {
-        const a = avail(b)
-        return a == null ? null : Math.round(a * 100)
-      }),
-      itemStyle: { color: COLOR_WORKED },
-      lineStyle: { width: 2.5 },
-    }],
+    series: [
+      {
+        name: 'Fleet availability',
+        type: 'line',
+        data: buckets.map((b) => {
+          const a = avail(b)
+          return a == null ? null : Math.round(a * 100)
+        }),
+        itemStyle: { color: COLOR_WORKED },
+        lineStyle: { width: 2.5 },
+      },
+      {
+        name: 'Utilisation',
+        type: 'line',
+        data: buckets.map((b) => {
+          const u = util(b)
+          return u == null ? null : Math.round(u * 100)
+        }),
+        itemStyle: { color: '#3b82f6' },
+        lineStyle: { width: 2.5 },
+      },
+    ],
     ...zoomProps(buckets.length),
   }
 
@@ -207,7 +229,7 @@ export default function PlantAnalyticsSection({ gran, year }: {
   return (
     <div className="space-y-6">
       {/* Period KPIs, each vs the previous bucket */}
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
         <Kpi label={`Hours worked · ${latest.label}`} value={`${num(Math.round(latest.worked))} h`}
           sub={`${num(Math.round(latest.standby))} h standby`}
           extra={<Delta now={latest.worked} prev={prev?.worked ?? null} prevLabel={prev?.label ?? ''} />} />
@@ -215,6 +237,9 @@ export default function PlantAnalyticsSection({ gran, year }: {
           sub={`${num(Math.round(latest.breakdown))} h breakdown`}
           tone={(avail(latest) ?? 1) < 0.5 ? 'bad' : 'good'}
           extra={<Delta now={avail(latest) ?? 0} prev={avail(prev)} prevLabel={prev?.label ?? ''} pts />} />
+        <Kpi label={`Utilisation · ${latest.label}`} value={pctFmt(util(latest))}
+          sub={`${num(Math.round(latest.worked))} of ${num(Math.round(latest.worked + latest.standby + latest.breakdown))} h`}
+          extra={<Delta now={util(latest) ?? 0} prev={util(prev)} prevLabel={prev?.label ?? ''} pts />} />
         <Kpi label={`Plant cost · ${latest.label}`} value={naira(latest.plantCost, true)}
           sub={naira(latest.plantCost)}
           extra={<Delta now={latest.plantCost} prev={prev?.plantCost ?? null} prevLabel={prev?.label ?? ''} downIsGood />} />
@@ -231,7 +256,7 @@ export default function PlantAnalyticsSection({ gran, year }: {
           </CardContent>
         </Card>
         <Card className="relative">
-          <Legend>Fleet availability trend</Legend>
+          <Legend>Fleet availability &amp; utilisation</Legend>
           <CardContent className="pt-3">
             <ECharts option={availOption} style={{ height: 280 }} notMerge />
           </CardContent>
