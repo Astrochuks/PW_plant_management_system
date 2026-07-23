@@ -11,7 +11,7 @@ import { useParams } from 'next/navigation'
 import ECharts from 'echarts-for-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Kpi, Legend } from '@/components/projects/hub-ui'
+import { Delta, Kpi, Legend } from '@/components/projects/hub-ui'
 import { useProjectFinancials, useProjectPlantData } from '@/hooks/use-projects'
 import { naira, num, pctFmt } from '@/lib/format'
 import type { Granularity } from '../work-cost/analytics-section'
@@ -44,29 +44,20 @@ export default function DieselSection({ year, gran }: {
     [fin, year],
   )
 
-  // charts follow the period lens; KPIs and consumers stay period totals
+  // one period lens drives everything: KPIs read the latest bucket vs the
+  // previous one, the charts plot every bucket
   const buckets = useMemo(() => {
-    const map = new Map<string, { label: string; charged: number; logged: number }>()
+    const map = new Map<string, { label: string; cost: number; charged: number; logged: number }>()
     for (const w of weeks) {
       const key = bucketKey(w.year, w.week_number, w.week_ending_date, gran)
-      const b = map.get(key) ?? { label: key, charged: 0, logged: 0 }
+      const b = map.get(key) ?? { label: key, cost: 0, charged: 0, logged: 0 }
+      b.cost += w.diesel_cost
       b.charged += w.diesel_litres
       b.logged += w.diesel_logged_litres
       map.set(key, b)
     }
     return [...map.values()]
   }, [weeks, gran])
-
-  const totals = useMemo(() => {
-    const cost = weeks.reduce((a, w) => a + w.diesel_cost, 0)
-    const charged = weeks.reduce((a, w) => a + w.diesel_litres, 0)
-    const logged = weeks.reduce((a, w) => a + w.diesel_logged_litres, 0)
-    return {
-      cost, charged, logged,
-      attribution: charged > 0 ? logged / charged : null,
-      rate: charged > 0 ? cost / charged : null,
-    }
-  }, [weeks])
 
   // top consumers over the scoped period, from the per-plant log
   const consumers = useMemo(() => {
@@ -122,6 +113,8 @@ export default function DieselSection({ year, gran }: {
     )
   }
 
+  const latest = buckets[buckets.length - 1]
+  const prevB = buckets.length > 1 ? buckets[buckets.length - 2] : null
   const labels = buckets.map((b) => b.label)
 
   const litresOption = {
@@ -155,11 +148,24 @@ export default function DieselSection({ year, gran }: {
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        <Kpi label="Diesel (AGO)" value={naira(totals.cost, true)} sub={naira(totals.cost)} />
-        <Kpi label="Charged" value={`${num(Math.round(totals.charged))} L`} />
-        <Kpi label="Logged to plants" value={`${num(Math.round(totals.logged))} L`}
-          sub={`${totals.attribution == null ? '—' : pctFmt(totals.attribution, 0)} attributed`} />
-        <Kpi label="Avg rate" value={totals.rate == null ? '—' : `${naira(totals.rate)}/L`} />
+        <Kpi label={`Diesel (AGO) · ${latest.label}`} value={naira(latest.cost, true)}
+          sub={naira(latest.cost)}
+          extra={<Delta now={latest.cost} prev={prevB?.cost ?? null} prevLabel={prevB?.label ?? ''} downIsGood />} />
+        <Kpi label={`Charged · ${latest.label}`} value={`${num(Math.round(latest.charged))} L`}
+          extra={<Delta now={latest.charged} prev={prevB?.charged ?? null} prevLabel={prevB?.label ?? ''} downIsGood />} />
+        <Kpi label={`Attribution · ${latest.label}`}
+          value={latest.charged > 0 ? pctFmt(latest.logged / latest.charged, 0) : '—'}
+          sub={`${num(Math.round(latest.logged))} L of ${num(Math.round(latest.charged))} L logged`}
+          extra={<Delta
+            now={latest.charged > 0 ? latest.logged / latest.charged : 0}
+            prev={prevB && prevB.charged > 0 ? prevB.logged / prevB.charged : null}
+            prevLabel={prevB?.label ?? ''} pts />} />
+        <Kpi label={`Avg rate · ${latest.label}`}
+          value={latest.charged > 0 ? `${naira(latest.cost / latest.charged)}/L` : '—'}
+          extra={<Delta
+            now={latest.charged > 0 ? latest.cost / latest.charged : 0}
+            prev={prevB && prevB.charged > 0 ? prevB.cost / prevB.charged : null}
+            prevLabel={prevB?.label ?? ''} downIsGood />} />
       </div>
 
       <div className="grid gap-3 lg:grid-cols-2">
