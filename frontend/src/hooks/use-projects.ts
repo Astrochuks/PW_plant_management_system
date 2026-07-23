@@ -484,6 +484,16 @@ export const operationsKeys = {
     [...operationsKeys.all, 'series', id, g] as const,
 };
 
+export function useExecutiveSummary() {
+  return useQuery({
+    queryKey: [...operationsKeys.all, 'executive'] as const,
+    queryFn: getExecutiveSummary,
+    staleTime: 2 * 60 * 1000,
+    networkMode: 'always',
+    retry: 2,
+  });
+}
+
 export function useProjectOperations() {
   return useQuery({
     queryKey: operationsKeys.portfolio(),
@@ -519,6 +529,7 @@ export function useProjectOperationsSeries(
 }
 
 import {
+  getExecutiveSummary,
   getProjectFinancials,
   getProjectPlantData,
   type ProjectFinancials,
@@ -530,6 +541,7 @@ import {
 } from '@/lib/api/projects';
 
 export type { ProjectFinancials, FinancialWeek, ProjectPlantRollup, ProjectPlantData, PlantFleetWeek, PlantWeekRow };
+export type { ExecutiveSummary, PortfolioProject, AttentionItem, PortfolioWeek } from '@/lib/api/projects';
 
 export function useProjectFinancials(projectId: string | undefined) {
   return useQuery({

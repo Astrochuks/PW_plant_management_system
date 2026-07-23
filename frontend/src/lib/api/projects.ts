@@ -1195,6 +1195,99 @@ export async function getProjectLedgers(projectId: string): Promise<{
   return response.data.data;
 }
 
+// ── Executive summary (portfolio) ───────────────────────────────────
+
+export interface PortfolioProject {
+  id: string;
+  short_name: string | null;
+  project_name: string;
+  client: string | null;
+  status: string;
+  project_type: string | null;
+  location_name: string | null;
+  contract_sum: number | null;
+  scope: number;
+  scope_incl_vat: number;
+  works: number;
+  works_incl_vat: number;
+  cost: number;
+  net: number;
+  margin: number | null;
+  pct_complete: number | null;
+  certified: number | null;
+  paid_gross: number | null;
+  certified_not_paid: number | null;
+  retention_held: number | null;
+  retention_released: number;
+  payments_count: number;
+  last_payment_date: string | null;
+  days_since_payment: number | null;
+  weeks_received: number;
+  latest_year: number;
+  latest_week: number;
+  latest_week_ending: string | null;
+  days_since_report: number | null;
+  latest_net: number;
+  latest_margin: number | null;
+  prev_margin: number | null;
+  schedule: {
+    status: 'overdue' | 'on_track' | 'completed' | null;
+    months_overdue: number | null;
+    revised_completion_date: string | null;
+    original_completion_date: string | null;
+  };
+}
+
+export interface AttentionItem {
+  project_id: string;
+  project: string;
+  severity: 'high' | 'medium' | 'low';
+  kind: string;
+  headline: string;
+  detail: string;
+  value: number | null;
+}
+
+export interface PortfolioWeek {
+  year: number;
+  week_number: number;
+  week_ending_date: string;
+  works: number;
+  works_incl_vat: number;
+  cost: number;
+  net: number;
+  projects_reporting: number;
+}
+
+export interface ExecutiveSummary {
+  generated_at: string;
+  totals: {
+    projects_reporting: number;
+    projects_total: number;
+    contract_sum: number;
+    scope_incl_vat: number;
+    works_incl_vat: number;
+    cost: number;
+    net: number;
+    margin: number | null;
+    pct_complete: number | null;
+    certified: number;
+    paid_gross: number;
+    certified_not_paid: number;
+    retention_held: number;
+    oldest_unpaid_days: number | null;
+    overdue_projects: number;
+  };
+  attention: AttentionItem[];
+  projects: PortfolioProject[];
+  series: PortfolioWeek[];
+}
+
+export async function getExecutiveSummary(): Promise<ExecutiveSummary> {
+  const response = await apiClient.get('/projects/executive');
+  return response.data.data;
+}
+
 // ── Project report pack ─────────────────────────────────────────────
 
 export type ReportPeriod = 'weekly' | 'monthly' | 'quarterly' | 'yearly' | 'to-date';

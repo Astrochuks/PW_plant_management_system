@@ -704,6 +704,18 @@ async def delete_project_submission(
 # ============================================================================
 
 
+@router.get("/executive")
+async def get_executive_summary(
+    current_user: Annotated[CurrentUser, Depends(require_projects_access)],
+) -> dict[str, Any]:
+    """Executive summary: the portfolio position, cash exposure, the
+    exception list, every reporting project, and the portfolio series —
+    all from the same locked per-project formulas."""
+    from app.services.project_portfolio import build_portfolio
+
+    return {"success": True, "data": await build_portfolio(date.today())}
+
+
 @router.get("/operations")
 async def list_project_operations(
     current_user: Annotated[CurrentUser, Depends(require_projects_access)],

@@ -107,6 +107,11 @@ const plantNavItems = [
 // ── Section: PROJECTS ─────────────────────────────────────────────────────
 const projectNavItems = [
   {
+    title: 'Executive Summary',
+    href: '/projects/executive',
+    icon: LayoutDashboard,
+  },
+  {
     title: 'Project Registry',
     href: '/projects',
     icon: FolderKanban,
@@ -296,12 +301,12 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         {showProjectItems && (
           <NavSection label="PROJECTS" collapsed={collapsed} separator>
             {projectNavItems.map((item) => {
-              // Site Operations owns /projects/operations; Registry owns the rest
-              const isOps = item.href === '/projects/operations';
-              const active = isOps
-                ? pathname.startsWith('/projects/operations')
+              // each sub-page owns its own prefix; Registry owns the rest
+              const owned = ['/projects/executive', '/projects/operations'];
+              const active = owned.includes(item.href)
+                ? pathname.startsWith(item.href)
                 : pathname.startsWith('/projects') &&
-                  !pathname.startsWith('/projects/operations');
+                  !owned.some((o) => pathname.startsWith(o));
               return (
                 <NavItem
                   key={item.href}
