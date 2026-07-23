@@ -43,6 +43,64 @@ export default function ReportPage() {
     onError: (err) => toast.error(getErrorMessage(err)),
   })
 
+  // Print via a throwaway iframe holding ONLY the document. The old
+  // body-visibility trick printed text fine but several print engines
+  // cull <img> layers inside visibility-restored subtrees — the logo
+  // never survived. An iframe is its own page: images print.
+  const handleExportPdf = useCallback(async () => {
+    const doc = document.getElementById('report-doc')
+    if (!doc) return
+    const iframe = document.createElement('iframe')
+    iframe.style.position = 'fixed'
+    iframe.style.right = '100%'
+    iframe.style.width = '0'
+    iframe.style.height = '0'
+    iframe.style.border = '0'
+    document.body.appendChild(iframe)
+    const idoc = iframe.contentDocument
+    if (!idoc) return
+    // carry the app's stylesheets so Tailwind classes keep working;
+    // the iframe root has no dark class, so light tokens apply
+    const styles = [...document.querySelectorAll('style, link[rel="stylesheet"]')]
+      .map((el) => el.outerHTML).join('')
+    idoc.open()
+    idoc.write(`<!doctype html><html><head><meta charset="utf-8">
+      <title>Project Report</title>${styles}
+      <style>
+        @page { size: A4; margin: 14mm; }
+        html, body { background: #fff !important; }
+        body { margin: 0; }
+        #report-doc, #report-doc * {
+          color: #000 !important;
+          border-color: #000 !important;
+          background: transparent !important;
+        }
+        #report-doc .text-muted-foreground,
+        #report-doc .text-muted-foreground * { color: #52525b !important; }
+        #report-doc .text-red-600,
+        #report-doc .text-red-600 * { color: #dc2626 !important; }
+        #report-doc .report-section { break-inside: avoid; }
+      </style></head><body>${doc.outerHTML}</body></html>`)
+    idoc.close()
+    // wait for stylesheets and images before opening the dialog
+    await Promise.all([
+      ...[...idoc.querySelectorAll('link[rel="stylesheet"]')].map((l) =>
+        new Promise((res) => {
+          const el = l as HTMLLinkElement
+          if (el.sheet) res(null)
+          else { el.onload = el.onerror = () => res(null) }
+        })),
+      ...[...idoc.images].map((img) =>
+        img.complete ? Promise.resolve(null) : new Promise((res) => {
+          img.onload = img.onerror = () => res(null)
+        })),
+    ])
+    iframe.contentWindow?.focus()
+    iframe.contentWindow?.print()
+    // the dialog blocks; clean up well after it closes
+    setTimeout(() => iframe.remove(), 60_000)
+  }, [])
+
   const handleExportExcel = useCallback(async () => {
     if (!report) return
     // exceljs (not SheetJS) — the community xlsx library cannot embed
@@ -180,31 +238,7 @@ export default function ReportPage() {
 
   return (
     <div className="space-y-4">
-      {/* print CSS: only the document leaves the printer — and always
-          black-on-white, whatever theme the app is in on screen */}
-      <style>{`
-        @media print {
-          body * { visibility: hidden; }
-          #report-doc, #report-doc * { visibility: visible; }
-          #report-doc {
-            position: absolute; left: 0; top: 0; width: 100%; padding: 0;
-            background: #fff !important; color: #000 !important;
-          }
-          #report-doc * {
-            color: #000 !important;
-            border-color: #000 !important;
-            background: transparent !important;
-          }
-          #report-doc .text-muted-foreground,
-          #report-doc .text-muted-foreground * { color: #52525b !important; }
-          #report-doc .text-red-600,
-          #report-doc .text-red-600 * { color: #dc2626 !important; }
-          #report-doc .report-section { break-inside: avoid; }
-          @page { size: A4; margin: 14mm; }
-        }
-      `}</style>
-
-      <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <Select value={period} onValueChange={(v) => setPeriod(v as ReportPeriod)}>
             <SelectTrigger className="h-9 w-32 font-semibold">
@@ -230,7 +264,7 @@ export default function ReportPage() {
           </Button>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" disabled={!report} onClick={() => window.print()}>
+          <Button variant="outline" size="sm" disabled={!report} onClick={handleExportPdf}>
             <FileText className="mr-2 h-3.5 w-3.5" />
             Export PDF
           </Button>
