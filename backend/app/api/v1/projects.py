@@ -1225,6 +1225,24 @@ async def get_project_financial_ledgers(
     return {"success": True, "data": {"certificates": certs, "payments": payments}}
 
 
+@router.get("/{project_id}/report")
+async def get_project_report(
+    project_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(require_projects_access)],
+    period: str = Query(..., pattern="^(weekly|monthly|quarterly|yearly|to-date)$"),
+    ref_date: date = Query(default_factory=date.today, alias="date"),
+) -> dict[str, Any]:
+    """The report pack: every section computed from the ledgers for the
+    period containing ref_date; to-date figures as of the last stored
+    week on or before the window end."""
+    from app.services.project_report import build_report
+
+    pack = await build_report(str(project_id), period, ref_date)
+    if pack is None:
+        raise NotFoundError("Project not found")
+    return {"success": True, "data": pack}
+
+
 @router.get("/{project_id}/operations/summary")
 async def get_project_operations_summary(
     project_id: UUID,

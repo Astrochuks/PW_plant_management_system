@@ -1195,6 +1195,86 @@ export async function getProjectLedgers(projectId: string): Promise<{
   return response.data.data;
 }
 
+// ── Project report pack ─────────────────────────────────────────────
+
+export type ReportPeriod = 'weekly' | 'monthly' | 'quarterly' | 'yearly' | 'to-date';
+
+export interface ProjectReportPack {
+  meta: {
+    project_name: string;
+    short_name: string | null;
+    client: string | null;
+    project_type: string | null;
+    contract_sum: number | null;
+    period: ReportPeriod;
+    label: string;
+    date_from: string;
+    date_to: string;
+    generated_at: string;
+    weeks_covered: Array<{ year: number; week_number: number; week_ending_date: string }>;
+    as_of: { year: number; week_number: number; week_ending_date: string } | null;
+  };
+  contract_summary: {
+    contract_sum: number | null;
+    beme_total: number;
+    beme_incl_vat: number;
+    works_to_date: number;
+    works_incl_vat: number;
+    pct_complete: number | null;
+    cost_to_date: number;
+    net_to_date: number;
+    margin: number | null;
+    certified: number | null;
+    paid_gross: number | null;
+    certified_not_paid: number | null;
+    retention_held: number | null;
+    retention_released: number;
+  };
+  period_summary: {
+    weeks: Array<{
+      year: number; week_number: number; week_ending_date: string;
+      works: number; earnings: number; cost: number; net: number;
+    }>;
+    totals: { works: number; earnings: number; cost: number; net: number; margin: number | null };
+  };
+  work_done: {
+    bills: Array<{
+      bill_code: string | null; name: string | null;
+      contract_amount: number; period_amount: number;
+      to_date_amount: number; pct_complete: number | null;
+    }>;
+  };
+  costs: {
+    categories: Array<{
+      category: string; period_amount: number;
+      to_date_amount: number; share_to_date: number | null;
+    }>;
+  };
+  plant_diesel: {
+    plants_seen: number; worked: number; standby: number; breakdown: number;
+    availability: number | null; utilisation: number | null; plant_cost: number;
+    diesel_cost: number; diesel_charged: number; diesel_logged: number;
+    attribution: number | null;
+  };
+  financials: {
+    certified: number | null; paid_gross: number | null; payments_count: number;
+    unpaid_certificates: Array<{
+      cert: string; certified_to_date: number; this_certificate: number;
+      paid_against: number; outstanding: number;
+    }>;
+    retention_held: number | null; retention_released: number;
+  };
+}
+
+export async function generateProjectReport(
+  projectId: string, period: ReportPeriod, date: string,
+): Promise<ProjectReportPack> {
+  const response = await apiClient.get(`/projects/${projectId}/report`, {
+    params: { period, date },
+  });
+  return response.data.data;
+}
+
 export async function markFleetNumberExternal(raw: string, label?: string): Promise<void> {
   await apiClient.post('/projects/unmapped-fleet-numbers/mark-external', {
     fleet_number_raw: raw, label,
