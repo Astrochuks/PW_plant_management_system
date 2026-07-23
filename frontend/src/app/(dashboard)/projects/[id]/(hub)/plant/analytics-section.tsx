@@ -285,7 +285,7 @@ export default function PlantAnalyticsSection({ gran, year }: {
       {data && <PlantVsWorkCard data={data} fin={fin} gran={gran} year={year} />}
 
       <Card className="relative">
-        <Legend>Fuel efficiency · litres per hour vs fleet-type average</Legend>
+        <Legend>Fuel efficiency · {year === 'all' ? 'All years' : year} · litres per hour vs fleet-type average</Legend>
         <CardContent className="p-0 pt-2">
           <div className="max-h-[440px] overflow-auto">
             <table className="w-full text-xs">
