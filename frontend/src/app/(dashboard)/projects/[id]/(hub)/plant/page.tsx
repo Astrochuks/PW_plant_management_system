@@ -96,25 +96,23 @@ export default function PlantDieselPage() {
                 ))}
               </SelectContent>
             </Select>
-            {view === 'analytics' && (
-              <Select value={gran} onValueChange={(v) => setGran(v as Granularity)}>
-                <SelectTrigger className="h-9 w-36 font-semibold">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {GRANS.map((g) => (
-                    <SelectItem key={g.key} value={g.key}>{g.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
+            <Select value={gran} onValueChange={(v) => setGran(v as Granularity)}>
+              <SelectTrigger className="h-9 w-36 font-semibold">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {GRANS.map((g) => (
+                  <SelectItem key={g.key} value={g.key}>{g.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         )}
       </div>
 
       {view === 'analytics' && <PlantAnalyticsSection gran={gran} year={scopedYear} />}
       {view === 'plants' && <PlantsSection />}
-      {view === 'diesel' && <DieselSection year={scopedYear} />}
+      {view === 'diesel' && <DieselSection year={scopedYear} gran={gran} />}
     </div>
   )
 }

@@ -40,7 +40,7 @@ interface HourBucket {
   dieselCost: number
 }
 
-function bucketKey(year: number, week: number, endingDate: string, g: Granularity): string {
+export function bucketKey(year: number, week: number, endingDate: string, g: Granularity): string {
   const d = new Date(endingDate + 'T00:00:00')
   if (g === 'week') return weekLabel(year, week)
   if (g === 'month') return d.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })

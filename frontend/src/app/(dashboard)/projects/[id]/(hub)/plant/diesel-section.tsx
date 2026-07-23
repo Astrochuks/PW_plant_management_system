@@ -13,7 +13,9 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Kpi, Legend } from '@/components/projects/hub-ui'
 import { useProjectFinancials, useProjectPlantData } from '@/hooks/use-projects'
-import { naira, num, pctFmt, weekLabel } from '@/lib/format'
+import { naira, num, pctFmt } from '@/lib/format'
+import type { Granularity } from '../work-cost/analytics-section'
+import { bucketKey } from './analytics-section'
 
 const ZOOM_AFTER = 30
 const zoomProps = (count: number) =>
@@ -29,7 +31,10 @@ const zoomProps = (count: number) =>
       }
     : {}
 
-export default function DieselSection({ year }: { year: number | 'all' }) {
+export default function DieselSection({ year, gran }: {
+  year: number | 'all'
+  gran: Granularity
+}) {
   const params = useParams<{ id: string }>()
   const { data, isLoading } = useProjectPlantData(params.id)
   const { data: fin } = useProjectFinancials(params.id)
@@ -38,6 +43,19 @@ export default function DieselSection({ year }: { year: number | 'all' }) {
     () => (fin?.weeks ?? []).filter((w) => year === 'all' || w.year === year),
     [fin, year],
   )
+
+  // charts follow the period lens; KPIs and consumers stay period totals
+  const buckets = useMemo(() => {
+    const map = new Map<string, { label: string; charged: number; logged: number }>()
+    for (const w of weeks) {
+      const key = bucketKey(w.year, w.week_number, w.week_ending_date, gran)
+      const b = map.get(key) ?? { label: key, charged: 0, logged: 0 }
+      b.charged += w.diesel_litres
+      b.logged += w.diesel_logged_litres
+      map.set(key, b)
+    }
+    return [...map.values()]
+  }, [weeks, gran])
 
   const totals = useMemo(() => {
     const cost = weeks.reduce((a, w) => a + w.diesel_cost, 0)
@@ -104,34 +122,34 @@ export default function DieselSection({ year }: { year: number | 'all' }) {
     )
   }
 
-  const labels = weeks.map((w) => weekLabel(w.year, w.week_number))
+  const labels = buckets.map((b) => b.label)
 
   const litresOption = {
     tooltip: { trigger: 'axis' },
     legend: { data: ['Charged (AGO row)', 'Logged (per plant)'], bottom: 0 },
-    grid: { left: 60, right: 20, top: 20, bottom: weeks.length > ZOOM_AFTER ? 64 : 42 },
+    grid: { left: 60, right: 20, top: 20, bottom: buckets.length > ZOOM_AFTER ? 64 : 42 },
     xAxis: { type: 'category', data: labels },
     yAxis: { type: 'value', axisLabel: { formatter: '{value} L' } },
     series: [
-      { name: 'Charged (AGO row)', type: 'line', data: weeks.map((w) => Math.round(w.diesel_litres)), itemStyle: { color: '#f59e0b' }, lineStyle: { width: 2.5 } },
-      { name: 'Logged (per plant)', type: 'line', data: weeks.map((w) => Math.round(w.diesel_logged_litres)), itemStyle: { color: '#6b7280' }, lineStyle: { width: 2, type: 'dashed' } },
+      { name: 'Charged (AGO row)', type: 'line', data: buckets.map((b) => Math.round(b.charged)), itemStyle: { color: '#f59e0b' }, lineStyle: { width: 2.5 } },
+      { name: 'Logged (per plant)', type: 'line', data: buckets.map((b) => Math.round(b.logged)), itemStyle: { color: '#6b7280' }, lineStyle: { width: 2, type: 'dashed' } },
     ],
-    ...zoomProps(weeks.length),
+    ...zoomProps(buckets.length),
   }
 
   const attributionOption = {
     tooltip: { trigger: 'axis', valueFormatter: (v: number) => `${v}%` },
-    grid: { left: 44, right: 16, top: 20, bottom: weeks.length > ZOOM_AFTER ? 56 : 30 },
+    grid: { left: 44, right: 16, top: 20, bottom: buckets.length > ZOOM_AFTER ? 56 : 30 },
     xAxis: { type: 'category', data: labels },
     yAxis: { type: 'value', axisLabel: { formatter: '{value}%' } },
     series: [{
       type: 'line',
-      data: weeks.map((w) =>
-        w.diesel_litres > 0 ? Math.round((w.diesel_logged_litres / w.diesel_litres) * 100) : null),
+      data: buckets.map((b) =>
+        b.charged > 0 ? Math.round((b.logged / b.charged) * 100) : null),
       itemStyle: { color: '#8b5cf6' },
       lineStyle: { width: 2.5 },
     }],
-    ...zoomProps(weeks.length),
+    ...zoomProps(buckets.length),
   }
 
   return (
@@ -146,7 +164,7 @@ export default function DieselSection({ year }: { year: number | 'all' }) {
 
       <div className="grid gap-3 lg:grid-cols-2">
         <Card className="relative">
-          <Legend>Diesel · charged vs logged, per week</Legend>
+          <Legend>Diesel · charged vs logged</Legend>
           <CardContent className="pt-3">
             <ECharts option={litresOption} style={{ height: 280 }} notMerge />
           </CardContent>
