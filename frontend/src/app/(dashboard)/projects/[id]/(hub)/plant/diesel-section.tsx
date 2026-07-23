@@ -59,12 +59,23 @@ export default function DieselSection({ year, gran }: {
     return [...map.values()]
   }, [weeks, gran])
 
-  // top consumers over the scoped period, from the per-plant log
+  // top consumers for the latest bucket of the lens — same period the
+  // KPIs read, so the whole view answers for one stretch of time
+  const latestLabel = useMemo(
+    () => (buckets.length ? buckets[buckets.length - 1].label : null),
+    [buckets],
+  )
   const consumers = useMemo(() => {
-    if (!data) return []
+    if (!data || !latestLabel) return []
+    const dateOf = new Map(
+      (fin?.weeks ?? []).map((w) => [`${w.year}-${w.week_number}`, w.week_ending_date]),
+    )
     const byPlant = new Map<string, { diesel: number; worked: number }>()
     for (const pw of data.plant_weeks) {
       if (year !== 'all' && pw.year !== year) continue
+      const ending = dateOf.get(`${pw.year}-${pw.week_number}`)
+      if (!ending) continue
+      if (bucketKey(pw.year, pw.week_number, ending, gran) !== latestLabel) continue
       if (pw.diesel_litres === 0 && pw.worked === 0) continue
       const t = byPlant.get(pw.fleet_number_raw) ?? { diesel: 0, worked: 0 }
       t.diesel += pw.diesel_litres
@@ -88,7 +99,7 @@ export default function DieselSection({ year, gran }: {
         }
       })
       .sort((a, b) => b.diesel - a.diesel)
-  }, [data, year])
+  }, [data, fin, year, gran, latestLabel])
 
   if (isLoading) {
     return (
@@ -184,7 +195,7 @@ export default function DieselSection({ year, gran }: {
       </div>
 
       <Card className="relative">
-        <Legend>Top consumers</Legend>
+        <Legend>Top consumers{latestLabel ? ` · ${latestLabel}` : ''}</Legend>
         <CardContent className="p-0 pt-2">
           <div className="max-h-[440px] overflow-auto">
             <table className="w-full text-xs">
@@ -213,7 +224,7 @@ export default function DieselSection({ year, gran }: {
             </table>
           </div>
           <p className="border-t px-4 py-2 text-xs text-muted-foreground">
-            {consumers.length} plants drew fuel in this period
+            {consumers.length} plants drew fuel in {latestLabel ?? 'this period'}
           </p>
         </CardContent>
       </Card>
