@@ -211,7 +211,7 @@ export default function PlantAnalyticsSection({ gran, year }: {
         <Kpi label={`Hours worked · ${latest.label}`} value={`${num(Math.round(latest.worked))} h`}
           sub={`${num(Math.round(latest.standby))} h standby`}
           extra={<Delta now={latest.worked} prev={prev?.worked ?? null} prevLabel={prev?.label ?? ''} />} />
-        <Kpi label={`Availability · ${latest.label}`} value={pctFmt(avail(latest))}
+        <Kpi label={`Fleet availability · ${latest.label}`} value={pctFmt(avail(latest))}
           sub={`${num(Math.round(latest.breakdown))} h breakdown`}
           tone={(avail(latest) ?? 1) < 0.5 ? 'bad' : 'good'}
           extra={<Delta now={avail(latest) ?? 0} prev={avail(prev)} prevLabel={prev?.label ?? ''} pts />} />
@@ -231,7 +231,7 @@ export default function PlantAnalyticsSection({ gran, year }: {
           </CardContent>
         </Card>
         <Card className="relative">
-          <Legend>Availability trend</Legend>
+          <Legend>Fleet availability trend</Legend>
           <CardContent className="pt-3">
             <ECharts option={availOption} style={{ height: 280 }} notMerge />
           </CardContent>
