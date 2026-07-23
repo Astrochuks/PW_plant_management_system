@@ -10,6 +10,7 @@
  */
 
 import { useCallback, useState } from 'react'
+import Image from 'next/image'
 import { useParams } from 'next/navigation'
 import { FileBarChart, FileSpreadsheet, FileText, Loader2 } from 'lucide-react'
 import { useMutation } from '@tanstack/react-query'
@@ -53,7 +54,7 @@ export default function ReportPage() {
     const header = (section: string): (string | number)[][] => [
       ['P.W. NIGERIA LTD.'],
       [`${m.short_name || m.project_name} — Project Report · ${m.label}`],
-      [`Period: ${m.date_from} to ${m.date_to}${m.as_of ? `  |  To-date figures as of ${weekLabel(m.as_of.year, m.as_of.week_number)}` : ''}`],
+      [`${m.period === 'to-date' ? `Project start to ${m.date_to}` : `Period: ${m.date_from} to ${m.date_to}`}${m.as_of ? `  |  To-date figures as of ${weekLabel(m.as_of.year, m.as_of.week_number)}` : ''}`],
       [`Generated: ${m.generated_at}`],
       [],
       [section],
@@ -151,12 +152,25 @@ export default function ReportPage() {
 
   return (
     <div className="space-y-4">
-      {/* print CSS: only the document leaves the printer */}
+      {/* print CSS: only the document leaves the printer — and always
+          black-on-white, whatever theme the app is in on screen */}
       <style>{`
         @media print {
           body * { visibility: hidden; }
           #report-doc, #report-doc * { visibility: visible; }
-          #report-doc { position: absolute; left: 0; top: 0; width: 100%; padding: 0; }
+          #report-doc {
+            position: absolute; left: 0; top: 0; width: 100%; padding: 0;
+            background: #fff !important; color: #000 !important;
+          }
+          #report-doc * {
+            color: #000 !important;
+            border-color: #000 !important;
+            background: transparent !important;
+          }
+          #report-doc .text-muted-foreground,
+          #report-doc .text-muted-foreground * { color: #52525b !important; }
+          #report-doc .text-red-600,
+          #report-doc .text-red-600 * { color: #dc2626 !important; }
           #report-doc .report-section { break-inside: avoid; }
           @page { size: A4; margin: 14mm; }
         }
@@ -247,6 +261,10 @@ function ReportDocument({ report }: { report: ProjectReportPack }) {
         <div id="report-doc" className="mx-auto max-w-4xl space-y-6 py-2">
           {/* Header block */}
           <div className="report-section space-y-1 border-b-4 border-double border-foreground pb-4 text-center">
+            <Image
+              src="/images/logo.png" alt="P.W. Nigeria Ltd." width={160} height={80}
+              className="mx-auto mb-1 h-14 w-auto"
+            />
             <p className="text-lg font-bold tracking-wide">P.W. NIGERIA LTD.</p>
             <p className="text-base font-semibold">{m.project_name}</p>
             {m.client && <p className="text-xs text-muted-foreground">{m.client}</p>}
@@ -254,7 +272,9 @@ function ReportDocument({ report }: { report: ProjectReportPack }) {
               Project Report — {m.label}
             </p>
             <p className="text-xs text-muted-foreground">
-              Period {fmtDate(m.date_from)} to {fmtDate(m.date_to)}
+              {m.period === 'to-date'
+                ? `Project start to ${fmtDate(m.date_to)}`
+                : `Period ${fmtDate(m.date_from)} to ${fmtDate(m.date_to)}`}
               {m.weeks_covered.length > 0 && ` · ${m.weeks_covered.length} stored week${m.weeks_covered.length > 1 ? 's' : ''}`}
               {m.as_of && ` · to-date figures as of ${weekLabel(m.as_of.year, m.as_of.week_number)}`}
             </p>
