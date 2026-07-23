@@ -19,12 +19,6 @@ from app.services.project_overview import (
     DAYS_PER_MONTH, VAT, _add_months, _as_date, _f, _fn,
 )
 
-# a project is "quiet" once its latest week is this old
-STALE_REPORT_DAYS = 14
-# certified money sitting uncollected this long is a cash problem
-SLOW_PAYMENT_DAYS = 60
-# margin falling by more than this many points period-on-period
-MARGIN_DROP_PTS = 5.0
 
 _SQL = """
 WITH wk AS (
@@ -51,7 +45,8 @@ ranked AS (
 SELECT p.id, p.short_name, p.project_name, p.client, p.status,
        p.project_type, p.current_contract_sum,
        l.name AS location_name,
-       s.name AS state_name,
+       -- the register's own state wins; the site's state is the fallback
+       COALESCE(s_own.name, s_loc.name) AS state_name,
        -- schedule inputs (date arithmetic happens in Python, once, shared)
        p.commencement_date, p.works_commenced_date,
        p.original_completion_date, p.revised_completion_date,
@@ -98,9 +93,12 @@ SELECT p.id, p.short_name, p.project_name, p.client, p.status,
        cert.retention_released                                   AS retention_released,
        pay.paid_gross, pay.cert_paid, pay.last_payment_date, pay.payments_count
 FROM projects p
+LEFT JOIN states s_own ON s_own.id = p.state_id
 LEFT JOIN locations l ON l.id = p.location_id
-LEFT JOIN states s ON s.id = l.state_id
-JOIN LATERAL (
+LEFT JOIN states s_loc ON s_loc.id = l.state_id
+-- LEFT so a brand-new project appears the moment it is created, before
+-- its first weekly report ever lands
+LEFT JOIN LATERAL (
     SELECT * FROM ranked WHERE ranked.project_id = p.id AND rn = 1
 ) lw ON TRUE
 LEFT JOIN LATERAL (
@@ -120,6 +118,9 @@ LEFT JOIN LATERAL (
            count(*)::int                                         AS payments_count
     FROM v_project_payments_latest WHERE project_id = p.id
 ) pay ON TRUE
+-- the live portfolio: every non-legacy project, plus anything that has
+-- ever reported (a project archived to legacy keeps its history here)
+WHERE COALESCE(p.is_legacy, false) = false OR lw.year IS NOT NULL
 ORDER BY p.short_name NULLS LAST, p.project_name
 """
 
@@ -184,7 +185,6 @@ async def build_portfolio(today: date) -> dict[str, Any]:
     series = await fetch(_SERIES_SQL)
 
     projects: list[dict[str, Any]] = []
-    attention: list[dict[str, Any]] = []
 
     for r in rows:
         works = _f(r["works_stored"]) + _f(r["works_adj"])
@@ -210,7 +210,6 @@ async def build_portfolio(today: date) -> dict[str, Any]:
         prev_net = prev_earn - _f(r["prev_cost"])
         prev_margin = (prev_net / prev_earn) if prev_earn else None
 
-        name = r["short_name"] or r["project_name"]
         pid = str(r["id"])
 
         projects.append({
@@ -250,48 +249,6 @@ async def build_portfolio(today: date) -> dict[str, Any]:
             "schedule": sched,
         })
 
-        # ── attention list: only things that would change a decision ────
-        def flag(severity: str, kind: str, headline: str, detail: str,
-                 value: float | None = None) -> None:
-            attention.append({
-                "project_id": pid, "project": name, "severity": severity,
-                "kind": kind, "headline": headline, "detail": detail,
-                "value": value,
-            })
-
-        if sched["status"] == "overdue" and sched["months_overdue"]:
-            flag("high", "overdue",
-                 f"Overdue by {sched['months_overdue']:.1f} months",
-                 f"Revised completion {sched['revised_completion_date']}",
-                 sched["months_overdue"])
-        if unpaid > 0 and (days_since_payment is None
-                           or days_since_payment > SLOW_PAYMENT_DAYS):
-            flag("high", "cash",
-                 "Certified work uncollected",
-                 (f"Last payment {days_since_payment} days ago"
-                  if days_since_payment is not None else "No payment recorded"),
-                 unpaid)
-        if days_since_report is not None and days_since_report > STALE_REPORT_DAYS:
-            flag("medium", "reporting",
-                 f"No weekly report in {days_since_report} days",
-                 f"Latest is W{r['latest_week']:02d} {r['latest_year']}",
-                 float(days_since_report))
-        if latest_margin is not None and prev_margin is not None:
-            drop = (prev_margin - latest_margin) * 100
-            if drop > MARGIN_DROP_PTS:
-                flag("medium", "margin",
-                     f"Margin fell {drop:.1f} pts",
-                     f"W{r['latest_week']:02d} {latest_margin * 100:.1f}% "
-                     f"vs W{r['prev_week']:02d} {prev_margin * 100:.1f}%",
-                     drop)
-        if latest_net < 0:
-            flag("high", "loss",
-                 f"Lost money in W{r['latest_week']:02d}",
-                 f"Net {latest_net:,.0f} for the week", abs(latest_net))
-
-    order = {"high": 0, "medium": 1, "low": 2}
-    attention.sort(key=lambda a: (order.get(a["severity"], 9), -(a["value"] or 0)))
-
     active = [p for p in projects if p["status"] == "active"]
     base = active or projects
 
@@ -329,7 +286,6 @@ async def build_portfolio(today: date) -> dict[str, Any]:
             "overdue_projects": sum(
                 1 for p in base if p["schedule"]["status"] == "overdue"),
         },
-        "attention": attention,
         "projects": projects,
         "series": [
             {

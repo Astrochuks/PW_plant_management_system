@@ -1224,8 +1224,8 @@ export interface PortfolioProject {
   last_payment_date: string | null;
   days_since_payment: number | null;
   weeks_received: number;
-  latest_year: number;
-  latest_week: number;
+  latest_year: number | null;
+  latest_week: number | null;
   latest_week_ending: string | null;
   days_since_report: number | null;
   latest_net: number;
@@ -1237,16 +1237,6 @@ export interface PortfolioProject {
     revised_completion_date: string | null;
     original_completion_date: string | null;
   };
-}
-
-export interface AttentionItem {
-  project_id: string;
-  project: string;
-  severity: 'high' | 'medium' | 'low';
-  kind: string;
-  headline: string;
-  detail: string;
-  value: number | null;
 }
 
 export interface PortfolioWeek {
@@ -1279,7 +1269,6 @@ export interface ExecutiveSummary {
     oldest_unpaid_days: number | null;
     overdue_projects: number;
   };
-  attention: AttentionItem[];
   projects: PortfolioProject[];
   series: PortfolioWeek[];
 }
