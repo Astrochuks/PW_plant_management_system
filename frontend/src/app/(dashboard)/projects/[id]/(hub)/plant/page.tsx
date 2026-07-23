@@ -110,25 +110,18 @@ export default function PlantDieselPage() {
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <Kpi label="Plants seen" value={String(totals?.count ?? 0)}
-          sub={`${num(totals?.worked ?? 0)} hrs worked`} lineage="Plant Return · stored weeks" />
+          sub={`${num(totals?.worked ?? 0)} hrs worked`} />
         <Kpi label="Availability" value={pctFmt(totals?.availability)}
-          sub={`${num(totals?.breakdown ?? 0)} hrs breakdown`} lineage="worked ÷ (worked + breakdown)" />
+          sub={`${num(totals?.breakdown ?? 0)} hrs breakdown`} />
         <Kpi label="Plant cost" value={naira(totals?.cost ?? 0, true)}
-          sub={naira(totals?.cost ?? 0)} lineage="hours × rate · stored weeks" />
+          sub={naira(totals?.cost ?? 0)} />
         <Kpi label="Diesel (AGO)" value={naira(dieselCost, true)}
-          sub={`${num(charged)} L charged · ${logged > 0 && charged > 0 ? pctFmt(logged / charged, 0) : '—'} attributed`}
-          lineage="Cost Report AGO row = money truth" />
+          sub={`${num(charged)} L charged · ${logged > 0 && charged > 0 ? pctFmt(logged / charged, 0) : '—'} attributed`} />
       </div>
 
       <Card className="relative">
         <Legend>Diesel · charged vs logged, per week</Legend>
-        <CardHeader className="pb-1 pt-5">
-          <p className="text-xs text-muted-foreground">
-            The AGO row is what the site pays for; the log is which plants it went into.
-            The gap is unattributed fuel.
-          </p>
-        </CardHeader>
-        <CardContent>
+        <CardContent className="pt-3">
           <ECharts option={dieselOption} style={{ height: 260 }} notMerge />
         </CardContent>
       </Card>
@@ -244,7 +237,7 @@ export default function PlantDieselPage() {
             </table>
           </div>
           <p className="border-t px-4 py-2 text-xs text-muted-foreground">
-            {filtered.length} of {plants?.length ?? 0} plants · availability = worked ÷ (worked + breakdown)
+            {filtered.length} of {plants?.length ?? 0} plants
           </p>
         </CardContent>
       </Card>
