@@ -1658,13 +1658,16 @@ async def get_project_operations_plants(
     project_id: UUID,
     current_user: Annotated[CurrentUser, Depends(require_projects_access)],
 ) -> dict[str, Any]:
-    """Per-plant totals across every ingested week: hours, breakdowns,
-    plant cost, diesel — joined to the fleet register where resolved."""
+    """Fleet workbench payload in one round trip:
+    plants      — per-plant totals joined to the register (+fleet_type)
+    weekly      — fleet-level hours/cost/diesel per stored week
+    plant_weeks — per-plant per-week history for drill-down and trends
+    """
     pid = str(project_id)
     if not await fetchval("SELECT 1 FROM projects WHERE id = $1::uuid", pid):
         raise NotFoundError("Project not found")
 
-    rows = await fetch(
+    row = await fetchrow(
         """
         WITH util AS (
             SELECT fleet_number_raw,
@@ -1689,31 +1692,85 @@ async def get_project_operations_plants(
             FROM project_diesel_consumption
             WHERE project_id = $1::uuid
             GROUP BY fleet_number_raw
-        )
+        ),
         -- FULL join: some equipment appears only in the diesel sheet
         -- (generators, service vehicles) and must still be listed
-        SELECT COALESCE(u.fleet_number_raw, d.fleet_number_raw) AS fleet_number_raw,
-               COALESCE(u.plant_id, d.plant_id)                 AS plant_id,
-               pm.fleet_number,
-               COALESCE(pm.description, u.description, d.description) AS description,
-               u.plant_category,
-               pm.condition,
-               COALESCE(u.weeks_seen, d.weeks_seen)             AS weeks_seen,
-               COALESCE(u.hours_worked, 0)                      AS hours_worked,
-               COALESCE(u.breakdown_hours, 0)                   AS breakdown_hours,
-               COALESCE(u.standby_hours, 0)                     AS standby_hours,
-               COALESCE(u.plant_cost_ngn, 0)                    AS plant_cost_ngn,
-               COALESCE(d.diesel_litres, 0)                     AS diesel_litres
-        FROM util u
-        FULL OUTER JOIN diesel d ON d.fleet_number_raw = u.fleet_number_raw
-        LEFT JOIN plants_master pm
-               ON pm.id = COALESCE(u.plant_id, d.plant_id)::uuid
-        ORDER BY COALESCE(u.hours_worked, 0) DESC,
-                 COALESCE(d.diesel_litres, 0) DESC
+        plants AS (
+            SELECT COALESCE(u.fleet_number_raw, d.fleet_number_raw) AS fleet_number_raw,
+                   COALESCE(u.plant_id, d.plant_id)                 AS plant_id,
+                   pm.fleet_number,
+                   COALESCE(pm.description, u.description, d.description) AS description,
+                   pm.fleet_type,
+                   pm.condition,
+                   COALESCE(u.weeks_seen, d.weeks_seen)             AS weeks_seen,
+                   COALESCE(u.hours_worked, 0)                      AS hours_worked,
+                   COALESCE(u.breakdown_hours, 0)                   AS breakdown_hours,
+                   COALESCE(u.standby_hours, 0)                     AS standby_hours,
+                   COALESCE(u.plant_cost_ngn, 0)                    AS plant_cost_ngn,
+                   COALESCE(d.diesel_litres, 0)                     AS diesel_litres
+            FROM util u
+            FULL OUTER JOIN diesel d ON d.fleet_number_raw = u.fleet_number_raw
+            LEFT JOIN plants_master pm
+                   ON pm.id = COALESCE(u.plant_id, d.plant_id)::uuid
+            ORDER BY COALESCE(u.hours_worked, 0) DESC,
+                     COALESCE(d.diesel_litres, 0) DESC
+        ),
+        weekly AS (
+            SELECT year, week_number,
+                   min(week_ending_date)             AS week_ending_date,
+                   COALESCE(sum(hours_worked), 0)    AS worked,
+                   COALESCE(sum(standby_hours), 0)   AS standby,
+                   COALESCE(sum(breakdown_hours), 0) AS breakdown,
+                   COALESCE(sum(plant_cost), 0)      AS plant_cost
+            FROM project_plant_utilization
+            WHERE project_id = $1::uuid
+            GROUP BY year, week_number
+            ORDER BY year, week_number
+        ),
+        uw AS (
+            SELECT fleet_number_raw, year, week_number,
+                   COALESCE(sum(hours_worked), 0)    AS worked,
+                   COALESCE(sum(standby_hours), 0)   AS standby,
+                   COALESCE(sum(breakdown_hours), 0) AS breakdown,
+                   COALESCE(sum(plant_cost), 0)      AS plant_cost
+            FROM project_plant_utilization
+            WHERE project_id = $1::uuid
+            GROUP BY fleet_number_raw, year, week_number
+        ),
+        dw AS (
+            SELECT fleet_number_raw, year, week_number,
+                   COALESCE(sum(total_litres), 0) AS diesel_litres
+            FROM project_diesel_consumption
+            WHERE project_id = $1::uuid
+            GROUP BY fleet_number_raw, year, week_number
+        ),
+        plant_weeks AS (
+            SELECT COALESCE(uw.fleet_number_raw, dw.fleet_number_raw) AS fleet_number_raw,
+                   COALESCE(uw.year, dw.year)                         AS year,
+                   COALESCE(uw.week_number, dw.week_number)           AS week_number,
+                   COALESCE(uw.worked, 0)                             AS worked,
+                   COALESCE(uw.standby, 0)                            AS standby,
+                   COALESCE(uw.breakdown, 0)                          AS breakdown,
+                   COALESCE(uw.plant_cost, 0)                         AS plant_cost,
+                   COALESCE(dw.diesel_litres, 0)                      AS diesel_litres
+            FROM uw
+            FULL OUTER JOIN dw ON dw.fleet_number_raw = uw.fleet_number_raw
+                              AND dw.year = uw.year
+                              AND dw.week_number = uw.week_number
+            ORDER BY 1, 2, 3
+        )
+        SELECT
+            (SELECT COALESCE(json_agg(p), '[]'::json) FROM plants p)       AS plants,
+            (SELECT COALESCE(json_agg(w), '[]'::json) FROM weekly w)       AS weekly,
+            (SELECT COALESCE(json_agg(pw), '[]'::json) FROM plant_weeks pw) AS plant_weeks
         """,
         pid,
     )
-    return {"success": True, "data": rows}
+    return {"success": True, "data": {
+        "plants": row["plants"],
+        "weekly": row["weekly"],
+        "plant_weeks": row["plant_weeks"],
+    }}
 
 
 @router.get("/review-queue")

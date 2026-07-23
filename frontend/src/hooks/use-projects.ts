@@ -520,13 +520,16 @@ export function useProjectOperationsSeries(
 
 import {
   getProjectFinancials,
-  getProjectPlantRollups,
+  getProjectPlantData,
   type ProjectFinancials,
   type FinancialWeek,
   type ProjectPlantRollup,
+  type ProjectPlantData,
+  type PlantFleetWeek,
+  type PlantWeekRow,
 } from '@/lib/api/projects';
 
-export type { ProjectFinancials, FinancialWeek, ProjectPlantRollup };
+export type { ProjectFinancials, FinancialWeek, ProjectPlantRollup, ProjectPlantData, PlantFleetWeek, PlantWeekRow };
 
 export function useProjectFinancials(projectId: string | undefined) {
   return useQuery({
@@ -539,10 +542,10 @@ export function useProjectFinancials(projectId: string | undefined) {
   });
 }
 
-export function useProjectPlantRollups(projectId: string | undefined) {
+export function useProjectPlantData(projectId: string | undefined) {
   return useQuery({
     queryKey: [...operationsKeys.all, 'plants', projectId ?? ''] as const,
-    queryFn: () => getProjectPlantRollups(projectId!),
+    queryFn: () => getProjectPlantData(projectId!),
     enabled: !!projectId,
     staleTime: 2 * 60 * 1000,
     networkMode: 'always',
@@ -584,7 +587,7 @@ export function usePrefetchHubData(id: string | null) {
       });
       queryClient.prefetchQuery({
         queryKey: [...operationsKeys.all, 'plants', id] as const,
-        queryFn: () => getProjectPlantRollups(id), staleTime: two,
+        queryFn: () => getProjectPlantData(id), staleTime: two,
       });
       queryClient.prefetchQuery({
         queryKey: submissionKeys.unmapped(),

@@ -775,7 +775,7 @@ export interface ProjectPlantRollup {
   plant_id: string | null;
   fleet_number: string | null;
   description: string | null;
-  plant_category: string | null;
+  fleet_type: string | null;
   condition: string | null;
   weeks_seen: number;
   hours_worked: number;
@@ -785,17 +785,66 @@ export interface ProjectPlantRollup {
   diesel_litres: number;
 }
 
-export async function getProjectPlantRollups(projectId: string): Promise<ProjectPlantRollup[]> {
+export interface PlantFleetWeek {
+  year: number;
+  week_number: number;
+  week_ending_date: string;
+  worked: number;
+  standby: number;
+  breakdown: number;
+  plant_cost: number;
+}
+
+export interface PlantWeekRow {
+  fleet_number_raw: string;
+  year: number;
+  week_number: number;
+  worked: number;
+  standby: number;
+  breakdown: number;
+  plant_cost: number;
+  diesel_litres: number;
+}
+
+export interface ProjectPlantData {
+  plants: ProjectPlantRollup[];
+  weekly: PlantFleetWeek[];
+  plant_weeks: PlantWeekRow[];
+}
+
+export async function getProjectPlantData(projectId: string): Promise<ProjectPlantData> {
   const response = await apiClient.get(`/projects/${projectId}/operations/plants`);
-  return (response.data.data ?? []).map((r: Record<string, unknown>) => ({
-    ...r,
-    weeks_seen: Number(r.weeks_seen ?? 0),
-    hours_worked: Number(r.hours_worked ?? 0),
-    breakdown_hours: Number(r.breakdown_hours ?? 0),
-    standby_hours: Number(r.standby_hours ?? 0),
-    plant_cost_ngn: Number(r.plant_cost_ngn ?? 0),
-    diesel_litres: Number(r.diesel_litres ?? 0),
-  }));
+  const d = response.data.data ?? {};
+  return {
+    plants: (d.plants ?? []).map((r: Record<string, unknown>) => ({
+      ...r,
+      weeks_seen: Number(r.weeks_seen ?? 0),
+      hours_worked: Number(r.hours_worked ?? 0),
+      breakdown_hours: Number(r.breakdown_hours ?? 0),
+      standby_hours: Number(r.standby_hours ?? 0),
+      plant_cost_ngn: Number(r.plant_cost_ngn ?? 0),
+      diesel_litres: Number(r.diesel_litres ?? 0),
+    })),
+    weekly: (d.weekly ?? []).map((w: Record<string, unknown>) => ({
+      ...w,
+      year: Number(w.year),
+      week_number: Number(w.week_number),
+      worked: Number(w.worked ?? 0),
+      standby: Number(w.standby ?? 0),
+      breakdown: Number(w.breakdown ?? 0),
+      plant_cost: Number(w.plant_cost ?? 0),
+    })),
+    plant_weeks: (d.plant_weeks ?? []).map((w: Record<string, unknown>) => ({
+      ...w,
+      year: Number(w.year),
+      week_number: Number(w.week_number),
+      worked: Number(w.worked ?? 0),
+      standby: Number(w.standby ?? 0),
+      breakdown: Number(w.breakdown ?? 0),
+      plant_cost: Number(w.plant_cost ?? 0),
+      diesel_litres: Number(w.diesel_litres ?? 0),
+    })),
+  };
 }
 
 // ── Upload preview (parse in memory, nothing stored) ────────────────────────
