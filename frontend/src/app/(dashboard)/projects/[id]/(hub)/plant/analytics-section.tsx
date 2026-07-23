@@ -95,8 +95,8 @@ export default function PlantAnalyticsSection({ gran, year }: {
   }, [scopedWeekly, fin, gran])
 
   // Fuel efficiency: per plant L/hr vs its fleet-type average, year-scoped
-  const efficiency = useMemo(() => {
-    if (!data) return []
+  const { efficiency, effStats } = useMemo(() => {
+    if (!data) return { efficiency: [], effStats: null }
     const byPlant = new Map<string, { worked: number; diesel: number }>()
     for (const pw of data.plant_weeks) {
       if (year !== 'all' && pw.year !== year) continue
@@ -105,6 +105,10 @@ export default function PlantAnalyticsSection({ gran, year }: {
       t.diesel += pw.diesel_litres
       byPlant.set(pw.fleet_number_raw, t)
     }
+    // why most plants sit this one out — shown to the user in the footer
+    const all = [...byPlant.values()]
+    const noFuel = all.filter((t) => t.diesel <= 0).length
+    const lowHours = all.filter((t) => t.diesel > 0 && t.worked < 8).length
     const meta = new Map(data.plants.map((p) => [p.fleet_number_raw, p]))
     const rows = [...byPlant.entries()]
       .map(([raw, t]) => {
@@ -130,7 +134,7 @@ export default function PlantAnalyticsSection({ gran, year }: {
       t.n += 1
       typeTotals.set(r.type, t)
     }
-    return rows
+    const efficiency = rows
       .map((r) => {
         const t = typeTotals.get(r.type)!
         // type average excludes single-plant types — nothing to compare against
@@ -139,6 +143,7 @@ export default function PlantAnalyticsSection({ gran, year }: {
         return { ...r, typeAvg, vsAvg }
       })
       .sort((a, b) => (b.vsAvg ?? -Infinity) - (a.vsAvg ?? -Infinity))
+    return { efficiency, effStats: { total: byPlant.size, noFuel, lowHours } }
   }, [data, year])
 
   if (isLoading) return <SectionSkeleton />
@@ -313,7 +318,10 @@ export default function PlantAnalyticsSection({ gran, year }: {
             </table>
           </div>
           <p className="border-t px-4 py-2 text-xs text-muted-foreground">
-            {efficiency.length} plants with ≥8 hours and fuel drawn
+            Comparing {efficiency.length} of {effStats?.total ?? efficiency.length} plants — the ones
+            with fuel logged to them and at least a day&apos;s work (8 h).
+            {(effStats?.noFuel ?? 0) > 0 && ` ${effStats!.noFuel} sit out because no fuel was logged to them (towed or hand-fueled kit).`}
+            {(effStats?.lowHours ?? 0) > 0 && ` ${effStats!.lowHours} drew fuel but worked under 8 h.`}
           </p>
         </CardContent>
       </Card>
