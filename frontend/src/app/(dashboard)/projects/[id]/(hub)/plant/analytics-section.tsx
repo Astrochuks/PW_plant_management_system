@@ -8,15 +8,22 @@
  * (litres per hour vs the plant's own fleet-type average).
  */
 
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
 import ECharts from 'echarts-for-react'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Delta, Kpi, Legend } from '@/components/projects/hub-ui'
 import { useProjectFinancials, useProjectPlantData } from '@/hooks/use-projects'
+import type { ProjectFinancials, ProjectPlantData } from '@/hooks/use-projects'
 import { naira, num, pctFmt, weekLabel } from '@/lib/format'
 import type { Granularity } from '../work-cost/analytics-section'
+
+const VAT = 1.075
 
 const COLOR_WORKED = '#10b981'
 const COLOR_STANDBY = '#94a3b8'
@@ -275,6 +282,8 @@ export default function PlantAnalyticsSection({ gran, year }: {
         </CardContent>
       </Card>
 
+      {data && <PlantVsWorkCard data={data} fin={fin} gran={gran} year={year} />}
+
       <Card className="relative">
         <Legend>Fuel efficiency · litres per hour vs fleet-type average</Legend>
         <CardContent className="p-0 pt-2">
@@ -326,6 +335,228 @@ export default function PlantAnalyticsSection({ gran, year }: {
         </CardContent>
       </Card>
     </div>
+  )
+}
+
+/**
+ * Plant vs Work — fleet effort against project output. Headline metric is
+ * work done per machine-hour; the cross-filter reads any bill's work
+ * against any fleet type's hours. Hours are never booked to bills in the
+ * workbooks, so a filtered view is correlation, not allocation.
+ */
+function PlantVsWorkCard({ data, fin, gran, year }: {
+  data: ProjectPlantData
+  fin: ProjectFinancials | undefined
+  gran: Granularity
+  year: number | 'all'
+}) {
+  const [bill, setBill] = useState('all')
+  const [type, setType] = useState('all')
+  const [page, setPage] = useState(0)
+
+  const types = useMemo(
+    () => [...new Set(data.plants.map((p) => p.fleet_type).filter((t): t is string => !!t))].sort(),
+    [data],
+  )
+  const bills = (fin?.bills_meta ?? []).filter((b) => b.bill_code != null)
+
+  const rows = useMemo(() => {
+    if (!fin) return []
+    // hours of the chosen slice of the fleet, per (year, week)
+    const typeOf = new Map(data.plants.map((p) => [p.fleet_number_raw, p.fleet_type]))
+    const hoursByWeek = new Map<string, { worked: number; standby: number; breakdown: number }>()
+    for (const pw of data.plant_weeks) {
+      if (year !== 'all' && pw.year !== year) continue
+      if (type !== 'all' && typeOf.get(pw.fleet_number_raw) !== type) continue
+      const k = `${pw.year}-${pw.week_number}`
+      const t = hoursByWeek.get(k) ?? { worked: 0, standby: 0, breakdown: 0 }
+      t.worked += pw.worked
+      t.standby += pw.standby
+      t.breakdown += pw.breakdown
+      hoursByWeek.set(k, t)
+    }
+    const map = new Map<string, {
+      label: string; work: number; worked: number; standby: number; breakdown: number
+    }>()
+    for (const w of fin.weeks) {
+      if (year !== 'all' && w.year !== year) continue
+      const key = bucketKey(w.year, w.week_number, w.week_ending_date, gran)
+      const b = map.get(key) ?? { label: key, work: 0, worked: 0, standby: 0, breakdown: 0 }
+      b.work += bill === 'all' ? w.earnings : (w.works_by_bill?.[bill] ?? 0) * VAT
+      const h = hoursByWeek.get(`${w.year}-${w.week_number}`)
+      if (h) {
+        b.worked += h.worked
+        b.standby += h.standby
+        b.breakdown += h.breakdown
+      }
+      map.set(key, b)
+    }
+    return [...map.values()].map((b) => ({
+      ...b,
+      perHour: b.worked > 0 ? b.work / b.worked : null,
+      util: b.worked + b.standby + b.breakdown > 0
+        ? b.worked / (b.worked + b.standby + b.breakdown) : null,
+    }))
+  }, [data, fin, gran, year, bill, type])
+
+  if (rows.length === 0) return null
+
+  const latest = rows[rows.length - 1]
+  const prevRow = rows.length > 1 ? rows[rows.length - 2] : null
+
+  const labels = rows.map((r) => r.label)
+  const workName = bill === 'all' ? 'Work done (Incl. VAT)' : `Bill ${bill} work (Incl. VAT)`
+  const hoursName = type === 'all' ? 'Fleet hours worked' : `${type} hours worked`
+  const chartOption = {
+    tooltip: { trigger: 'axis' },
+    axisPointer: { link: [{ xAxisIndex: 'all' }] },
+    legend: { data: [workName, hoursName], bottom: 0 },
+    grid: [
+      { left: 64, right: 16, top: 20, height: 140 },
+      { left: 64, right: 16, top: 200, height: 115 },
+    ],
+    xAxis: [
+      { type: 'category', data: labels, gridIndex: 0, axisLabel: { show: false }, axisTick: { show: false } },
+      { type: 'category', data: labels, gridIndex: 1 },
+    ],
+    yAxis: [
+      { type: 'value', gridIndex: 0, axisLabel: { formatter: compactNaira } },
+      { type: 'value', gridIndex: 1, axisLabel: { formatter: '{value} h' } },
+    ],
+    series: [
+      {
+        name: workName, type: 'bar', xAxisIndex: 0, yAxisIndex: 0,
+        data: rows.map((r) => Math.round(r.work)), itemStyle: { color: COLOR_PLANT_COST },
+      },
+      {
+        name: hoursName, type: 'bar', xAxisIndex: 1, yAxisIndex: 1,
+        data: rows.map((r) => Math.round(r.worked)), itemStyle: { color: COLOR_WORKED },
+      },
+    ],
+    ...(rows.length > ZOOM_AFTER
+      ? {
+          dataZoom: [
+            {
+              type: 'slider', height: 14, bottom: 26, xAxisIndex: [0, 1],
+              start: (1 - ZOOM_AFTER / rows.length) * 100, end: 100,
+            },
+            { type: 'inside', xAxisIndex: [0, 1] },
+          ],
+        }
+      : {}),
+  }
+
+  const pages = Math.max(1, Math.ceil(rows.length / 10))
+  const p = Math.min(page, pages - 1)
+  const pageRows = rows.slice(p * 10, (p + 1) * 10)
+  const pctChange = (now: number | null, prevV: number | null): number | null =>
+    now == null || prevV == null || prevV === 0 ? null : ((now - prevV) / prevV) * 100
+
+  return (
+    <Card className="relative">
+      <Legend>Plant vs Work</Legend>
+      <CardContent className="space-y-4 pt-3">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <span className="text-xs font-medium uppercase text-muted-foreground">
+              Work per machine-hour · {latest.label}
+            </span>
+            <span className="text-xl font-bold tabular-nums">
+              {latest.perHour == null ? '—' : naira(latest.perHour)}
+            </span>
+            <Delta now={latest.perHour ?? 0} prev={prevRow?.perHour ?? null}
+              prevLabel={prevRow?.label ?? ''} />
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Select value={bill} onValueChange={(v) => { setBill(v); setPage(0) }}>
+              <SelectTrigger className="h-8 w-64 text-xs font-semibold">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All work</SelectItem>
+                {bills.map((b) => (
+                  <SelectItem key={b.bill_code!} value={b.bill_code!}>
+                    Bill {b.bill_code} — {b.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={type} onValueChange={(v) => { setType(v); setPage(0) }}>
+              <SelectTrigger className="h-8 w-56 text-xs font-semibold">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Whole fleet</SelectItem>
+                {types.map((t) => (
+                  <SelectItem key={t} value={t}>{t}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <ECharts option={chartOption} style={{ height: 370 }} notMerge />
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b text-left text-muted-foreground">
+                <th className="px-4 py-2 font-medium">Period</th>
+                <th className="px-4 py-2 text-right font-medium">Work done (₦)</th>
+                <th className="px-4 py-2 text-right font-medium">Hours worked</th>
+                <th className="px-4 py-2 text-right font-medium">Work per hour</th>
+                <th className="px-4 py-2 text-right font-medium">Utilisation</th>
+                <th className="px-4 py-2 text-right font-medium">Work/hr vs Previous</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pageRows.map((r, i) => {
+                const globalIdx = p * 10 + i
+                const prevPerHour = globalIdx > 0 ? rows[globalIdx - 1].perHour : null
+                const change = pctChange(r.perHour, prevPerHour)
+                return (
+                  <tr key={r.label} className="border-b last:border-0">
+                    <td className="px-4 py-1.5 font-medium">{r.label}</td>
+                    <td className="px-4 py-1.5 text-right tabular-nums">{naira(r.work)}</td>
+                    <td className="px-4 py-1.5 text-right tabular-nums">{num(Math.round(r.worked))}</td>
+                    <td className="px-4 py-1.5 text-right tabular-nums font-medium">
+                      {r.perHour == null ? '—' : naira(r.perHour)}
+                    </td>
+                    <td className="px-4 py-1.5 text-right tabular-nums">
+                      {r.util == null ? '—' : pctFmt(r.util, 0)}
+                    </td>
+                    <td className="px-4 py-1.5 text-right">
+                      {change == null ? <span className="text-muted-foreground">—</span> : (
+                        <span className={`font-medium tabular-nums ${
+                          change >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-600'
+                        }`}>
+                          {change >= 0 ? '▲' : '▼'} {Math.abs(change).toFixed(1)}%
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+        {pages > 1 && (
+          <div className="flex items-center justify-end gap-2 border-t px-1 pt-2 text-xs">
+            <span className="text-muted-foreground">Page {p + 1} of {pages}</span>
+            <Button variant="outline" size="sm" className="h-6 px-2 text-xs"
+              disabled={p === 0} onClick={() => setPage(p - 1)}>Prev</Button>
+            <Button variant="outline" size="sm" className="h-6 px-2 text-xs"
+              disabled={p >= pages - 1} onClick={() => setPage(p + 1)}>Next</Button>
+          </div>
+        )}
+        {(bill !== 'all' || type !== 'all') && (
+          <p className="text-xs text-muted-foreground">
+            Correlation, not allocation — the workbooks never book hours to a bill,
+            so this reads the two side by side.
+          </p>
+        )}
+      </CardContent>
+    </Card>
   )
 }
 
