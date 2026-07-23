@@ -66,11 +66,6 @@ export default function WorkDonePage() {
             </SelectContent>
           </Select>
         </div>
-        {(totals?.overruns ?? 0) > 0 && (
-          <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-800 dark:text-amber-300">
-            {totals!.overruns} quantity over-run{totals!.overruns > 1 ? 's' : ''} flagged — qty done &gt; contract qty, never capped
-          </span>
-        )}
       </div>
 
       {data.bills.map((bill) => (
