@@ -1007,8 +1007,8 @@ async def get_project_work_done(
                   COALESCE(m.qty, 0) + COALESCE(a.qty, 0)   AS qty_done,
                   COALESCE(m.amt, 0) + COALESCE(a.amt, 0)   AS amount_done,
                   CASE WHEN COALESCE(i.contract_amount, 0) <> 0
-                       THEN round(((COALESCE(m.amt, 0) + COALESCE(a.amt, 0))
-                                   / i.contract_amount) * 100, 2) END AS pct_complete,
+                       THEN round((COALESCE(m.amt, 0) + COALESCE(a.amt, 0))
+                                  / i.contract_amount, 4) END AS pct_complete,
                   (COALESCE(i.contract_qty, 0) <> 0 AND
                    COALESCE(m.qty, 0) + COALESCE(a.qty, 0) > i.contract_qty * 1.001)
                       AS is_overrun,

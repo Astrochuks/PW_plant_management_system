@@ -65,9 +65,6 @@ export default function WorkDonePage() {
               ))}
             </SelectContent>
           </Select>
-          <p className="text-[11px] text-muted-foreground">
-            to-date counts everything up to the chosen week; &quot;this wk&quot; is that week&apos;s own movement
-          </p>
         </div>
         {(totals?.overruns ?? 0) > 0 && (
           <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-800 dark:text-amber-300">
