@@ -199,6 +199,16 @@ export default function ExecutiveSummaryPage() {
     return { work, cost, workCol, costCol }
   }, [data, ids, matGran, singleYear, yearNum])
 
+  // the company's cost taxonomy — a stable axis (all categories that
+  // exist in the data, ordered by overall spend), so every one shows even
+  // when its movement rounds to zero in the chosen window (e.g. Sub
+  // Contractors, whose spend lives mostly in the pre-reporting baseline)
+  const allCats = useMemo(() => {
+    const tot = new Map<string, number>()
+    for (const c of data?.cost_series ?? []) tot.set(c.category, (tot.get(c.category) ?? 0) + c.amount)
+    return [...tot.entries()].sort((a, b) => b[1] - a[1]).map(([c]) => c)
+  }, [data])
+
   // cost-category matrix: rows are categories
   const catMatrix = useMemo(() => {
     const cell = new Map<string, number>()          // `${category}|${bucket}`
@@ -212,8 +222,7 @@ export default function ExecutiveSummaryPage() {
       rowTotal.set(c.category, (rowTotal.get(c.category) ?? 0) + c.amount)
       colTotal.set(k, (colTotal.get(k) ?? 0) + c.amount)
     }
-    const cats = [...rowTotal.entries()].filter(([, v]) => v !== 0).sort((a, b) => b[1] - a[1]).map(([c]) => c)
-    return { cell, rowTotal, colTotal, cats }
+    return { cell, rowTotal, colTotal }
   }, [data, ids, matGran, singleYear, yearNum])
 
   // site × category cost (no time axis — uses the Year, ignores granularity)
@@ -228,9 +237,7 @@ export default function ExecutiveSummaryPage() {
       catTotal.set(c.category, (catTotal.get(c.category) ?? 0) + c.amount)
       projTotal.set(c.project_id, (projTotal.get(c.project_id) ?? 0) + c.amount)
     }
-    const cats = [...catTotal.entries()].filter(([, v]) => v !== 0)
-      .sort((a, b) => b[1] - a[1]).map(([c]) => c)
-    return { cell, catTotal, projTotal, cats }
+    return { cell, catTotal, projTotal }
   }, [data, ids, singleYear, yearNum])
 
   // sites grouped by state (shared by the work + cost matrices)
@@ -471,7 +478,7 @@ export default function ExecutiveSummaryPage() {
 
       {/* site × category cost cross-tab */}
       <SiteMatrix title={`Site cost by category · ${lensLabel}`}
-        groups={groups} periods={siteCat.cats}
+        groups={groups} periods={allCats}
         cell={(id, cat) => siteCat.cell.get(`${id}|${cat}`) ?? 0}
         rowTotalFromSeries={(id) => siteCat.projTotal.get(id) ?? 0}
         colTotal={(cat) => siteCat.catTotal.get(cat) ?? 0}
@@ -482,7 +489,7 @@ export default function ExecutiveSummaryPage() {
       <Card className="relative">
         <Legend>Cost by category · {lensLabel}</Legend>
         <CardContent className="p-0 pt-3">
-          {periods.length === 0 || catMatrix.cats.length === 0 ? (
+          {periods.length === 0 || allCats.length === 0 ? (
             <p className="px-4 py-8 text-center text-sm text-muted-foreground">No cost recorded in this window.</p>
           ) : (
             <div className="max-h-[520px] overflow-auto">
@@ -495,7 +502,7 @@ export default function ExecutiveSummaryPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {catMatrix.cats.map((c) => (
+                  {allCats.map((c) => (
                     <tr key={c} className="border-b last:border-0">
                       <td className="sticky left-0 z-10 bg-background px-4 py-1.5 font-medium">{c}</td>
                       {periods.map((per) => {
