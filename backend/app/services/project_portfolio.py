@@ -124,9 +124,9 @@ WHERE COALESCE(p.is_legacy, false) = false OR lw.year IS NOT NULL
 ORDER BY p.short_name NULLS LAST, p.project_name
 """
 
-# per project per week — the frontend buckets this by the page's period
-# lens to build BOTH the portfolio trend and the site × period output
-# matrix (the shape PW's own "General Summary Per Site Output" uses)
+# per project per week — the frontend buckets this by the chosen period
+# lens to build the site × period output matrix and the cost matrix
+# (the shape PW's own "General Summary Per Site Output" uses)
 _SERIES_SQL = """
 SELECT r.project_id, r.year, r.week_number, r.week_ending_date,
        COALESCE(b.works, 0) AS works,
@@ -141,6 +141,18 @@ LEFT JOIN LATERAL (
     FROM project_cost_report
     WHERE weekly_report_id = r.id AND cost_category IS NOT NULL
 ) c ON TRUE
+ORDER BY r.year, r.week_number
+"""
+
+# per project per week per cost category — drives the cost-category matrix
+_COST_SERIES_SQL = """
+SELECT r.project_id, r.year, r.week_number, r.week_ending_date,
+       c.cost_category                       AS category,
+       COALESCE(sum(c.amount_this_week), 0)  AS amount
+FROM project_weekly_reports r
+JOIN project_cost_report c ON c.weekly_report_id = r.id
+WHERE c.cost_category IS NOT NULL
+GROUP BY r.project_id, r.year, r.week_number, r.week_ending_date, c.cost_category
 ORDER BY r.year, r.week_number
 """
 
@@ -183,6 +195,7 @@ def _schedule(row: dict[str, Any], works: float, scope: float) -> dict[str, Any]
 async def build_portfolio(today: date) -> dict[str, Any]:
     rows = await fetch(_SQL)
     series = await fetch(_SERIES_SQL)
+    cost_series = await fetch(_COST_SERIES_SQL)
 
     projects: list[dict[str, Any]] = []
 
@@ -298,5 +311,15 @@ async def build_portfolio(today: date) -> dict[str, Any]:
                 "net": _f(s["works"]) * VAT - _f(s["cost"]),
             }
             for s in series
+        ],
+        "cost_series": [
+            {
+                "project_id": str(s["project_id"]),
+                "year": s["year"], "week_number": s["week_number"],
+                "week_ending_date": s["week_ending_date"],
+                "category": s["category"],
+                "amount": _f(s["amount"]),
+            }
+            for s in cost_series
         ],
     }

@@ -541,7 +541,7 @@ import {
 } from '@/lib/api/projects';
 
 export type { ProjectFinancials, FinancialWeek, ProjectPlantRollup, ProjectPlantData, PlantFleetWeek, PlantWeekRow };
-export type { ExecutiveSummary, PortfolioProject, PortfolioWeek } from '@/lib/api/projects';
+export type { ExecutiveSummary, PortfolioProject, PortfolioWeek, CostSeriesRow } from '@/lib/api/projects';
 
 export function useProjectFinancials(projectId: string | undefined) {
   return useQuery({

@@ -1,17 +1,17 @@
 'use client'
 
 /**
- * Executive summary — the portfolio landing page, built for one job:
- * comparing projects over a chosen window.
+ * Executive summary — the project comparison page. Tables and cards only.
  *
- * The Period filter is a TIME WINDOW — "To date" (default) or a single
- * year — and it scopes EVERY figure on the page: the KPI strip, the
- * site × period output matrix (PW's own "General Summary Per Site
- * Output" shape), the breakdowns, the trend, and the projects table.
- * "To date" compares by year; drill into a year to compare by month.
+ * State + Project filters scope the whole page. Then:
+ *  · a headline card strip (to date)
+ *  · the Projects table — every metric per project, to-date AND this-year
+ *    side by side, plus certificates, payments and schedule
+ *  · the period matrices — site output (work Incl. VAT), cost, and cost
+ *    by category — each site/category down the side, periods across the
+ *    top, on a shared Year + granularity lens (PW's site-output shape)
  *
- * Every figure is the project-level figure summed up — this page and a
- * project hub can never disagree.
+ * Every figure is the project-level figure summed up.
  */
 
 import { Fragment, useEffect, useMemo, useState } from 'react'
@@ -24,53 +24,66 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
 import { Kpi, Legend, LegendSm } from '@/components/projects/hub-ui'
 import { useExecutiveSummary } from '@/hooks/use-projects'
-import type { PortfolioProject, PortfolioWeek } from '@/hooks/use-projects'
+import type { PortfolioProject } from '@/hooks/use-projects'
 import { naira, num, pctFmt, fmtDate } from '@/lib/format'
 
+type Gran = 'week' | 'month' | 'quarter' | 'year'
+
+const GRANS: Array<{ key: Gran; label: string }> = [
+  { key: 'week', label: 'Weekly' },
+  { key: 'month', label: 'Monthly' },
+  { key: 'quarter', label: 'Quarterly' },
+  { key: 'year', label: 'Yearly' },
+]
+
 const ALL = '__all__'
-const TO_DATE = 'todate'
 const UNSET = '— unassigned —'
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const CURRENT_YEAR = new Date().getFullYear()
 
-// To date → compare by YEAR; a single year → compare by MONTH
-function bucketKey(w: PortfolioWeek, window: string): string {
-  if (window === TO_DATE) return String(w.year)
-  const d = new Date(w.week_ending_date + 'T00:00:00')
-  return MONTHS[d.getMonth()]
-}
+// compact money for dense table cells; full figure lives in the title
+const cN = (v: number | null | undefined) =>
+  v == null ? '—'
+    : v === 0 ? '—'
+      : Math.abs(v) >= 1e9 ? `₦${(v / 1e9).toFixed(2)}B`
+        : Math.abs(v) >= 1e6 ? `₦${(v / 1e6).toFixed(1)}M`
+          : Math.abs(v) >= 1e3 ? `₦${(v / 1e3).toFixed(0)}K` : `₦${Math.round(v)}`
 
-// order of the matrix columns for a window
-function bucketOrder(window: string, present: Set<string>): string[] {
-  if (window === TO_DATE) return [...present].sort()
-  return MONTHS.filter((m) => present.has(m))
-}
-
-// cells stay readable at portfolio scale — full naira lives in the tooltip
-const cellMoney = (v: number) =>
+// bare compact for matrix cells (no ₦ — the column header carries units)
+const cCell = (v: number) =>
   v === 0 ? '—'
-    : Math.abs(v) >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}m`
-      : `${(v / 1_000).toFixed(0)}k`
+    : Math.abs(v) >= 1e6 ? `${(v / 1e6).toFixed(1)}m`
+      : `${(v / 1e3).toFixed(0)}k`
 
-interface Win { work: number; cost: number; net: number }
-type Row = PortfolioProject & { win: Win; winMargin: number | null }
+function bucketOf(year: number, week: number, ending: string, g: Gran, singleYear: boolean): string {
+  const d = new Date(ending + 'T00:00:00')
+  const q = Math.floor(d.getMonth() / 3) + 1
+  if (g === 'week') return singleYear ? `W${String(week).padStart(2, '0')}` : `${year} W${String(week).padStart(2, '0')}`
+  if (g === 'month') return singleYear ? MONTHS[d.getMonth()] : `${MONTHS[d.getMonth()]} ${year}`
+  if (g === 'quarter') return singleYear ? `Q${q}` : `Q${q} ${year}`
+  return String(year)
+}
+
+interface SeriesLike {
+  project_id: string; year: number; week_number: number; week_ending_date: string
+}
 
 export default function ExecutiveSummaryPage() {
   const router = useRouter()
   const { data, isLoading } = useExecutiveSummary()
-  // default to the current year; the guard below falls back if it has no data
-  const [period, setPeriod] = useState<string>(() => String(new Date().getFullYear()))
-  const [sort, setSort] = useState<'net' | 'work' | 'cost' | 'margin' | 'pct' | 'unpaid'>('work')
   const [fState, setFState] = useState(ALL)
   const [fProject, setFProject] = useState(ALL)
+  const [sort, setSort] = useState<'workTd' | 'costTd' | 'netTd' | 'marginTd' | 'pct' | 'unpaid' | 'workYr'>('workTd')
 
-  // the executive summary is the LIVE portfolio — active projects only
+  // shared lens for the three matrices
+  const [matYear, setMatYear] = useState<string>(ALL)
+  const [matGran, setMatGran] = useState<Gran>('month')
+
   const all = useMemo(
     () => (data?.projects ?? []).filter((p) => p.status === 'active'),
     [data],
   )
 
-  // State narrows the pool; the Project drill-down lists only what
-  // survives it, so its options cascade from the State choice.
   const scoped = useMemo(() => all.filter((p) =>
     fState === ALL || (p.state_name || UNSET) === fState
   ), [all, fState])
@@ -81,10 +94,9 @@ export default function ExecutiveSummaryPage() {
   )
 
   const options = useMemo(() => {
-    const uniq = (vals: Array<string | null>) =>
-      [...new Set(vals.map((v) => v || UNSET))].sort()
+    const uniqStates = [...new Set(all.map((p) => p.state_name || UNSET))].sort()
     return {
-      states: uniq(all.map((p) => p.state_name)),
+      states: uniqStates,
       projects: scoped
         .map((p) => ({ id: p.id, name: p.short_name || p.project_name }))
         .sort((a, b) => a.name.localeCompare(b.name)),
@@ -95,127 +107,124 @@ export default function ExecutiveSummaryPage() {
     if (fProject !== ALL && !scoped.some((p) => p.id === fProject)) setFProject(ALL)
   }, [scoped, fProject])
 
-  // if the current-year default (or any year) has no data, fall back to
-  // the latest year that does — never leave the page on an empty window
-  useEffect(() => {
-    if (period !== TO_DATE && years.length > 0 && !years.includes(Number(period))) {
-      setPeriod(String(years[0]))
-    }
-  }, [years, period])
-
   const projects = useMemo(
     () => scoped.filter((p) => fProject === ALL || p.id === fProject),
     [scoped, fProject],
   )
+  const ids = useMemo(() => new Set(projects.map((p) => p.id)), [projects])
 
-  // the window's per-project rows + the shared period columns
-  const { rows, periods, byProject, totalsByPeriod, totals } = useMemo(() => {
-    const ids = new Set(projects.map((p) => p.id))
-    const cumulative = period === TO_DATE
-    const yearNum = cumulative ? null : Number(period)
-
-    const scopedSeries = (data?.series ?? []).filter((w) => ids.has(w.project_id))
-    // the series only holds reported weekly MOVEMENT; a project's true
-    // to-date includes work executed before its first uploaded week
-    const winSeries = scopedSeries.filter((w) => cumulative || w.year === yearNum)
-
-    // per-project reported movement inside the window
-    const move = new Map<string, Win>()
-    for (const w of winSeries) {
-      const m = move.get(w.project_id) ?? { work: 0, cost: 0, net: 0 }
-      m.work += w.works_incl_vat; m.cost += w.cost; m.net += w.net
-      move.set(w.project_id, m)
+  // ── this-year movement per project (from the weekly series) ──────────
+  const thisYear = useMemo(() => {
+    const m = new Map<string, { work: number; cost: number; net: number }>()
+    for (const w of data?.series ?? []) {
+      if (!ids.has(w.project_id) || w.year !== CURRENT_YEAR) continue
+      const t = m.get(w.project_id) ?? { work: 0, cost: 0, net: 0 }
+      t.work += w.works_incl_vat; t.cost += w.cost; t.net += w.net
+      m.set(w.project_id, t)
     }
+    return m
+  }, [data, ids])
 
-    // To date → the project's own cumulative totals (movement + baseline
-    // + gap adjustments, kobo-exact with the hub). A year → its movement.
-    const rows: Row[] = projects.map((p) => {
-      const m = move.get(p.id) ?? { work: 0, cost: 0, net: 0 }
-      const win: Win = cumulative
-        ? { work: p.works_incl_vat, cost: p.cost, net: p.net }
-        : m
-      return { ...p, win, winMargin: win.work ? win.net / win.work : null }
-    })
-
-    // matrix cells + period columns (movement per bucket)
-    const present = new Set<string>()
-    const cell = new Map<string, number>()          // `${projectId}|${bucket}`
-    const byPeriod = new Map<string, number>()
-    for (const w of winSeries) {
-      const key = bucketKey(w, period)
-      present.add(key)
-      const ck = `${w.project_id}|${key}`
-      cell.set(ck, (cell.get(ck) ?? 0) + w.works_incl_vat)
-      byPeriod.set(key, (byPeriod.get(key) ?? 0) + w.works_incl_vat)
-    }
-    let cols = bucketOrder(period, present)
-
-    // To date: a leading "Prior" column carries pre-reporting work, so
-    // each row's Prior + years reconciles to its true cumulative total
-    if (cumulative) {
-      let anyPrior = false
-      for (const p of projects) {
-        const m = move.get(p.id) ?? { work: 0, cost: 0, net: 0 }
-        const prior = p.works_incl_vat - m.work
-        if (Math.abs(prior) > 1) {
-          cell.set(`${p.id}|Prior`, prior)
-          byPeriod.set('Prior', (byPeriod.get('Prior') ?? 0) + prior)
-          anyPrior = true
-        }
-      }
-      if (anyPrior) cols = ['Prior', ...cols]
-    }
-
-    const sum = (f: (r: Row) => number | null | undefined) =>
-      rows.reduce((a, r) => a + (f(r) ?? 0), 0)
-    const work = sum((r) => r.win.work)
-    const cost = sum((r) => r.win.cost)
-    const scope = sum((r) => r.scope)
-    const oldest = rows
-      .filter((r) => r.certified_not_paid && r.days_since_payment != null)
-      .map((r) => r.days_since_payment as number)
-
+  // ── headline totals (to date) ────────────────────────────────────────
+  const t = useMemo(() => {
+    const sum = (f: (p: PortfolioProject) => number | null | undefined) =>
+      projects.reduce((a, p) => a + (f(p) ?? 0), 0)
+    const work = sum((p) => p.works_incl_vat)
+    const cost = sum((p) => p.cost)
+    const scope = sum((p) => p.scope)
+    const oldest = projects
+      .filter((p) => p.certified_not_paid && p.days_since_payment != null)
+      .map((p) => p.days_since_payment as number)
     return {
-      rows,
-      periods: cols,
-      byProject: cell,
-      totalsByPeriod: byPeriod,
-      totals: {
-        count: rows.length,
-        contract: sum((r) => r.contract_sum),
-        work, cost, net: work - cost,
-        margin: work ? (work - cost) / work : null,
-        pct: scope ? sum((r) => r.works) / scope : null,   // % complete stays cumulative
-        certified: sum((r) => r.certified),
-        paid: sum((r) => r.paid_gross),
-        unpaid: sum((r) => r.certified_not_paid),
-        retention: sum((r) => r.retention_held),
-        oldestUnpaid: oldest.length ? Math.max(...oldest) : null,
-        overdue: rows.filter((r) => r.schedule.status === 'overdue').length,
-      },
+      count: projects.length,
+      contract: sum((p) => p.contract_sum),
+      work, cost, net: work - cost,
+      margin: work ? (work - cost) / work : null,
+      pct: scope ? sum((p) => p.works) / scope : null,
+      certified: sum((p) => p.certified),
+      paid: sum((p) => p.paid_gross),
+      unpaid: sum((p) => p.certified_not_paid),
+      retention: sum((p) => p.retention_held),
+      oldestUnpaid: oldest.length ? Math.max(...oldest) : null,
+      overdue: projects.filter((p) => p.schedule.status === 'overdue').length,
     }
-  }, [data, projects, period])
+  }, [projects])
 
-  const sorted = useMemo(() => {
-    const list = [...rows]
-    if (sort === 'work') list.sort((a, b) => b.win.work - a.win.work)
-    if (sort === 'cost') list.sort((a, b) => b.win.cost - a.win.cost)
-    if (sort === 'net') list.sort((a, b) => b.win.net - a.win.net)
-    if (sort === 'margin') list.sort((a, b) => (b.winMargin ?? -Infinity) - (a.winMargin ?? -Infinity))
-    if (sort === 'pct') list.sort((a, b) => (b.pct_complete ?? -1) - (a.pct_complete ?? -1))
-    if (sort === 'unpaid') list.sort((a, b) => (b.certified_not_paid ?? 0) - (a.certified_not_paid ?? 0))
-    return list
-  }, [rows, sort])
+  const rows = useMemo(() => {
+    const list = projects.map((p) => ({ p, yr: thisYear.get(p.id) ?? { work: 0, cost: 0, net: 0 } }))
+    const key = {
+      workTd: (x: typeof list[0]) => x.p.works_incl_vat,
+      costTd: (x: typeof list[0]) => x.p.cost,
+      netTd: (x: typeof list[0]) => x.p.net,
+      marginTd: (x: typeof list[0]) => x.p.margin ?? -Infinity,
+      pct: (x: typeof list[0]) => x.p.pct_complete ?? -1,
+      unpaid: (x: typeof list[0]) => x.p.certified_not_paid ?? 0,
+      workYr: (x: typeof list[0]) => x.yr.work,
+    }[sort]
+    return [...list].sort((a, b) => key(b) - key(a))
+  }, [projects, thisYear, sort])
 
-  // matrix rows grouped by state, like the workbook's LOCATION column
-  const grouped = useMemo(() => {
-    const map = new Map<string, Row[]>()
-    for (const r of sorted) {
-      const k = r.state_name || UNSET
-      map.set(k, [...(map.get(k) ?? []), r])
+  // ── the period matrices (shared lens) ────────────────────────────────
+  const singleYear = matYear !== ALL
+  const yearNum = singleYear ? Number(matYear) : null
+
+  const inLens = <T extends SeriesLike>(w: T) => ids.has(w.project_id) && (!singleYear || w.year === yearNum)
+
+  const periods = useMemo(() => {
+    const order: string[] = []
+    const seen = new Set<string>()
+    for (const w of data?.series ?? []) {
+      if (!inLens(w)) continue
+      const k = bucketOf(w.year, w.week_number, w.week_ending_date, matGran, singleYear)
+      if (!seen.has(k)) { seen.add(k); order.push(k) }
+    }
+    return order
+  }, [data, ids, matGran, singleYear, yearNum])
+
+  // work + cost matrices: value per (project, bucket)
+  const siteMatrix = useMemo(() => {
+    const work = new Map<string, number>()
+    const cost = new Map<string, number>()
+    const workCol = new Map<string, number>()
+    const costCol = new Map<string, number>()
+    for (const w of data?.series ?? []) {
+      if (!inLens(w)) continue
+      const k = bucketOf(w.year, w.week_number, w.week_ending_date, matGran, singleYear)
+      const wk = `${w.project_id}|${k}`
+      work.set(wk, (work.get(wk) ?? 0) + w.works_incl_vat)
+      cost.set(wk, (cost.get(wk) ?? 0) + w.cost)
+      workCol.set(k, (workCol.get(k) ?? 0) + w.works_incl_vat)
+      costCol.set(k, (costCol.get(k) ?? 0) + w.cost)
+    }
+    return { work, cost, workCol, costCol }
+  }, [data, ids, matGran, singleYear, yearNum])
+
+  // cost-category matrix: rows are categories
+  const catMatrix = useMemo(() => {
+    const cell = new Map<string, number>()          // `${category}|${bucket}`
+    const rowTotal = new Map<string, number>()
+    const colTotal = new Map<string, number>()
+    for (const c of data?.cost_series ?? []) {
+      if (!inLens(c)) continue
+      const k = bucketOf(c.year, c.week_number, c.week_ending_date, matGran, singleYear)
+      const ck = `${c.category}|${k}`
+      cell.set(ck, (cell.get(ck) ?? 0) + c.amount)
+      rowTotal.set(c.category, (rowTotal.get(c.category) ?? 0) + c.amount)
+      colTotal.set(k, (colTotal.get(k) ?? 0) + c.amount)
+    }
+    const cats = [...rowTotal.entries()].filter(([, v]) => v !== 0).sort((a, b) => b[1] - a[1]).map(([c]) => c)
+    return { cell, rowTotal, colTotal, cats }
+  }, [data, ids, matGran, singleYear, yearNum])
+
+  // sites grouped by state (shared by the work + cost matrices)
+  const groups = useMemo(() => {
+    const map = new Map<string, PortfolioProject[]>()
+    for (const p of rows.map((r) => r.p)) {
+      const k = p.state_name || UNSET
+      map.set(k, [...(map.get(k) ?? []), p])
     }
     return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]))
-  }, [sorted])
+  }, [rows])
 
   if (isLoading) return <PageSkeleton />
   if (!data || all.length === 0) {
@@ -229,10 +238,7 @@ export default function ExecutiveSummaryPage() {
     )
   }
 
-  const t = totals
-  const winLabel = period === TO_DATE ? 'to date' : period
   const filtered = fState !== ALL || fProject !== ALL
-  // every money card says what it is summed across, honouring the filter
   const scopeName = fProject !== ALL ? 'this project'
     : fState !== ALL ? `${fState}` : 'the portfolio'
   const across = t.count === 1
@@ -240,29 +246,10 @@ export default function ExecutiveSummaryPage() {
     : `across ${t.count} projects`
   const acrossLabel = fProject !== ALL ? 'the drill-down'
     : fState !== ALL ? `in ${fState}` : 'all active'
+  const lensLabel = singleYear ? matYear : 'all years'
 
-  const FilterSelect = ({ label, value, onChange, items, allLabel = 'All' }: {
-    label: string
-    value: string
-    onChange: (v: string) => void
-    items: Array<{ value: string; label: string }>
-    allLabel?: string
-  }) => (
-    <div className="min-w-[9rem] flex-1">
-      <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
-      <Select value={value} onValueChange={onChange}>
-        <SelectTrigger className="h-9 w-full text-xs font-semibold">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value={ALL}>{allLabel}</SelectItem>
-          {items.map((i) => (
-            <SelectItem key={i.value} value={i.value} className="capitalize">{i.label}</SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
-  )
+  const money = (v: number | null | undefined) =>
+    <span title={v != null ? naira(v) : undefined}>{cN(v)}</span>
 
   return (
     <div className="space-y-5">
@@ -271,12 +258,11 @@ export default function ExecutiveSummaryPage() {
         <p className="text-sm text-muted-foreground">
           Comparing {t.count} active {t.count === 1 ? 'project' : 'projects'}
           {filtered ? ` of ${all.length}` : ''}
-          {' · '}{period === TO_DATE ? 'all time to date' : `year ${period}`}
           {' · '}as at {fmtDate(data.generated_at)}
         </p>
       </div>
 
-      {/* filter bar — State · Project · Period(window) drive everything */}
+      {/* filters — State · Project scope the whole page */}
       <Card className="relative">
         <Legend>Filters</Legend>
         <CardContent className="flex flex-wrap items-end gap-3 pt-4">
@@ -285,51 +271,31 @@ export default function ExecutiveSummaryPage() {
           <FilterSelect label="Project" value={fProject} onChange={setFProject}
             allLabel="All projects"
             items={options.projects.map((p) => ({ value: p.id, label: p.name }))} />
-          <div className="min-w-[9rem] flex-1">
-            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Period</p>
-            <Select value={period} onValueChange={setPeriod}>
-              <SelectTrigger className="h-9 w-full text-xs font-semibold">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={TO_DATE}>To date</SelectItem>
-                {years.map((y) => (
-                  <SelectItem key={y} value={String(y)}>{y}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          {(filtered || period !== TO_DATE) && (
-            <Button
-              variant="outline" size="sm" className="h-9 text-xs"
-              onClick={() => { setFState(ALL); setFProject(ALL); setPeriod(TO_DATE) }}
-            >
+          {filtered && (
+            <Button variant="outline" size="sm" className="h-9 text-xs"
+              onClick={() => { setFState(ALL); setFProject(ALL) }}>
               Clear
             </Button>
           )}
         </CardContent>
       </Card>
 
-      {/* where we stand — all metrics scoped to the window, and every
-          money card says what it is summed across */}
+      {/* headline — to date */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <Kpi label="Projects" value={String(t.count)}
           sub={filtered ? `of ${all.length} active` : `active ${all.length === 1 ? 'project' : 'projects'}`}
           lineage={acrossLabel} />
-        <Kpi label="Contract value" value={naira(t.contract, true)} sub={naira(t.contract)}
-          lineage={across} />
-        <Kpi label={`Work done · ${winLabel}`} value={naira(t.work, true)}
-          sub={period === TO_DATE ? `${pctFmt(t.pct)} of BEME scope` : naira(t.work)}
-          lineage={across} />
-        <Kpi label={`Cost · ${winLabel}`} value={naira(t.cost, true)} sub={naira(t.cost)}
-          lineage={across} />
-        <Kpi label={`Net · ${winLabel}`} value={naira(t.net, true)} sub={naira(t.net)}
+        <Kpi label="Contract value" value={naira(t.contract, true)} sub={naira(t.contract)} lineage={across} />
+        <Kpi label="Work done · to date" value={naira(t.work, true)}
+          sub={`${pctFmt(t.pct)} of BEME scope`} lineage={across} />
+        <Kpi label="Cost · to date" value={naira(t.cost, true)} sub={naira(t.cost)} lineage={across} />
+        <Kpi label="Net · to date" value={naira(t.net, true)} sub={naira(t.net)}
           tone={t.net >= 0 ? 'good' : 'bad'} lineage={across} />
-        <Kpi label={`Margin · ${winLabel}`} value={pctFmt(t.margin)}
+        <Kpi label="Margin · to date" value={pctFmt(t.margin)}
           tone={(t.margin ?? 0) < 0 ? 'bad' : 'good'} lineage={across} />
       </div>
 
-      {/* what we're owed — a current snapshot (cumulative ledgers) */}
+      {/* cash — a current snapshot */}
       <Card className="relative">
         <Legend>Cash position · to date</Legend>
         <CardContent className="grid gap-5 pt-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,2fr)]">
@@ -357,77 +323,171 @@ export default function ExecutiveSummaryPage() {
         </CardContent>
       </Card>
 
-      {/* PW's own shape: sites down, periods across, output in the cells */}
+      {/* THE comparison table — every metric per project */}
       <Card className="relative">
-        <Legend>Output by site · {winLabel}</Legend>
+        <Legend>Projects</Legend>
+        <CardContent className="p-0 pt-2">
+          <div className="flex items-center justify-end px-4 pb-2">
+            <Select value={sort} onValueChange={(v) => setSort(v as typeof sort)}>
+              <SelectTrigger className="h-8 w-52 text-xs font-semibold"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="workTd">Work done · to date</SelectItem>
+                <SelectItem value="costTd">Cost · to date</SelectItem>
+                <SelectItem value="netTd">Net · to date</SelectItem>
+                <SelectItem value="marginTd">Margin · to date</SelectItem>
+                <SelectItem value="pct">% complete</SelectItem>
+                <SelectItem value="unpaid">Certified, not paid</SelectItem>
+                <SelectItem value="workYr">{`Work done · ${CURRENT_YEAR}`}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b text-muted-foreground">
+                  <th rowSpan={2} className="sticky left-0 z-10 min-w-[180px] bg-background px-4 py-2 text-left align-bottom font-medium">Project</th>
+                  <th colSpan={5} className="border-l px-3 py-1.5 text-center text-[10px] font-semibold uppercase tracking-wide">To date</th>
+                  <th colSpan={4} className="border-l px-3 py-1.5 text-center text-[10px] font-semibold uppercase tracking-wide">Certificates &amp; payments</th>
+                  <th colSpan={4} className="border-l px-3 py-1.5 text-center text-[10px] font-semibold uppercase tracking-wide">{CURRENT_YEAR}</th>
+                  <th colSpan={2} className="border-l px-3 py-1.5 text-center text-[10px] font-semibold uppercase tracking-wide">Status</th>
+                </tr>
+                <tr className="border-b text-left text-[11px] text-muted-foreground">
+                  <th className="border-l px-3 py-1.5 text-right font-medium">% Compl.</th>
+                  <th className="px-3 py-1.5 text-right font-medium">Work done</th>
+                  <th className="px-3 py-1.5 text-right font-medium">Cost</th>
+                  <th className="px-3 py-1.5 text-right font-medium">Net</th>
+                  <th className="px-3 py-1.5 text-right font-medium">Margin</th>
+                  <th className="border-l px-3 py-1.5 text-right font-medium">Certified</th>
+                  <th className="px-3 py-1.5 text-right font-medium">Not paid</th>
+                  <th className="px-3 py-1.5 text-right font-medium">Paid</th>
+                  <th className="px-3 py-1.5 text-right font-medium">Retention</th>
+                  <th className="border-l px-3 py-1.5 text-right font-medium">Work done</th>
+                  <th className="px-3 py-1.5 text-right font-medium">Cost</th>
+                  <th className="px-3 py-1.5 text-right font-medium">Net</th>
+                  <th className="px-3 py-1.5 text-right font-medium">Margin</th>
+                  <th className="border-l px-3 py-1.5 text-left font-medium">Schedule</th>
+                  <th className="px-3 py-1.5 text-right font-medium">Latest</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(({ p, yr }) => {
+                  const yrMargin = yr.work ? yr.net / yr.work : null
+                  return (
+                    <tr key={p.id}
+                      className="cursor-pointer border-b transition-colors last:border-0 hover:bg-muted/40"
+                      onClick={() => router.push(`/projects/${p.id}`)}>
+                      <td className="sticky left-0 z-10 max-w-[220px] truncate bg-background px-4 py-2 font-medium"
+                        title={p.project_name}>
+                        {p.short_name || p.project_name}
+                        {p.state_name && <span className="ml-1.5 text-[10px] text-muted-foreground">{p.state_name}</span>}
+                      </td>
+                      <td className="border-l px-3 py-2 text-right tabular-nums">{pctFmt(p.pct_complete)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{money(p.works_incl_vat)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{money(p.cost)}</td>
+                      <td className={`px-3 py-2 text-right tabular-nums ${p.net < 0 ? 'text-red-600' : ''}`}>{money(p.net)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{pctFmt(p.margin)}</td>
+                      <td className="border-l px-3 py-2 text-right tabular-nums">{money(p.certified)}</td>
+                      <td className={`px-3 py-2 text-right tabular-nums ${p.certified_not_paid ? 'font-medium text-amber-700 dark:text-amber-400' : ''}`}>{money(p.certified_not_paid)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{money(p.paid_gross)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{money(p.retention_held)}</td>
+                      <td className="border-l px-3 py-2 text-right tabular-nums">{money(yr.work)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{money(yr.cost)}</td>
+                      <td className={`px-3 py-2 text-right tabular-nums ${yr.net < 0 ? 'text-red-600' : ''}`}>{money(yr.net)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{yr.work ? pctFmt(yrMargin) : '—'}</td>
+                      <td className="border-l px-3 py-2"><ScheduleChip status={p.schedule.status} months={p.schedule.months_overdue} /></td>
+                      <td className="px-3 py-2 text-right tabular-nums">
+                        <span className={p.days_since_report != null && p.days_since_report > 14 ? 'font-medium text-amber-700 dark:text-amber-400' : ''}>
+                          {p.latest_week_ending ? fmtDate(p.latest_week_ending) : '—'}
+                        </span>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p className="border-t px-4 py-2 text-[11px] text-muted-foreground">
+            To-date, certificates and payments are cumulative · {CURRENT_YEAR} is this year&apos;s reported movement · hover any figure for the full amount
+          </p>
+        </CardContent>
+      </Card>
+
+      {/* the period matrices — shared Year + granularity lens */}
+      <Card className="relative">
+        <Legend>Output &amp; cost over time</Legend>
+        <CardContent className="flex flex-wrap items-end gap-3 pt-4">
+          <div className="min-w-[9rem]">
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Year</p>
+            <Select value={matYear} onValueChange={setMatYear}>
+              <SelectTrigger className="h-9 w-36 text-xs font-semibold"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>All years</SelectItem>
+                {years.map((y) => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="min-w-[9rem]">
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Granularity</p>
+            <Select value={matGran} onValueChange={(v) => setMatGran(v as Gran)}>
+              <SelectTrigger className="h-9 w-36 text-xs font-semibold"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {GRANS.map((g) => <SelectItem key={g.key} value={g.key}>{g.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        </CardContent>
+      </Card>
+
+      <SiteMatrix title={`Site output · work done (Incl. VAT) · ${lensLabel}`}
+        groups={groups} periods={periods}
+        cell={(id, per) => siteMatrix.work.get(`${id}|${per}`) ?? 0}
+        rowTotal={(p) => p.works_incl_vat}
+        rowTotalFromSeries={(id) => periods.reduce((a, per) => a + (siteMatrix.work.get(`${id}|${per}`) ?? 0), 0)}
+        colTotal={(per) => siteMatrix.workCol.get(per) ?? 0}
+        onRow={(id) => router.push(`/projects/${id}`)} />
+
+      <SiteMatrix title={`Site cost · ${lensLabel}`}
+        groups={groups} periods={periods}
+        cell={(id, per) => siteMatrix.cost.get(`${id}|${per}`) ?? 0}
+        rowTotal={(p) => p.cost}
+        rowTotalFromSeries={(id) => periods.reduce((a, per) => a + (siteMatrix.cost.get(`${id}|${per}`) ?? 0), 0)}
+        colTotal={(per) => siteMatrix.costCol.get(per) ?? 0}
+        onRow={(id) => router.push(`/projects/${id}`)} />
+
+      {/* cost by category */}
+      <Card className="relative">
+        <Legend>Cost by category · {lensLabel}</Legend>
         <CardContent className="p-0 pt-3">
-          {periods.length === 0 ? (
-            <p className="px-4 py-8 text-center text-sm text-muted-foreground">
-              No output recorded in this window.
-            </p>
+          {periods.length === 0 || catMatrix.cats.length === 0 ? (
+            <p className="px-4 py-8 text-center text-sm text-muted-foreground">No cost recorded in this window.</p>
           ) : (
             <div className="max-h-[520px] overflow-auto">
               <table className="w-full text-xs">
                 <thead className="sticky top-0 z-10 bg-background">
                   <tr className="border-b text-muted-foreground">
-                    <th className="sticky left-0 z-20 min-w-[220px] bg-background px-4 py-2 text-left font-medium">
-                      Site
-                    </th>
-                    {periods.map((p) => (
-                      <th key={p} className="whitespace-nowrap px-3 py-2 text-right font-medium">{p}</th>
-                    ))}
+                    <th className="sticky left-0 z-20 min-w-[180px] bg-background px-4 py-2 text-left font-medium">Category</th>
+                    {periods.map((p) => <th key={p} className="whitespace-nowrap px-3 py-2 text-right font-medium">{p}</th>)}
                     <th className="whitespace-nowrap border-l px-4 py-2 text-right font-semibold">Total</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {grouped.map(([state, rs]) => (
-                    <Fragment key={state}>
-                      <tr className="border-b bg-muted/40">
-                        <td className="sticky left-0 z-10 bg-muted/40 px-4 py-1.5 text-[11px] font-bold uppercase tracking-wide">
-                          {state}
-                        </td>
-                        <td colSpan={periods.length + 1} className="bg-muted/40" />
-                      </tr>
-                      {rs.map((p) => (
-                        <tr
-                          key={p.id}
-                          className="cursor-pointer border-b transition-colors last:border-0 hover:bg-muted/30"
-                          onClick={() => router.push(`/projects/${p.id}`)}
-                        >
-                          <td className="sticky left-0 z-10 max-w-[260px] truncate bg-background px-4 py-1.5 font-medium"
-                            title={p.project_name}>
-                            {p.short_name || p.project_name}
-                          </td>
-                          {periods.map((per) => {
-                            const v = byProject.get(`${p.id}|${per}`) ?? 0
-                            return (
-                              <td key={per}
-                                className={`px-3 py-1.5 text-right tabular-nums ${v === 0 ? 'text-muted-foreground/40' : ''}`}
-                                title={v ? naira(v) : undefined}>
-                                {cellMoney(v)}
-                              </td>
-                            )
-                          })}
-                          <td className="border-l px-4 py-1.5 text-right font-semibold tabular-nums"
-                            title={naira(p.win.work)}>
-                            {cellMoney(p.win.work)}
-                          </td>
-                        </tr>
-                      ))}
-                    </Fragment>
+                  {catMatrix.cats.map((c) => (
+                    <tr key={c} className="border-b last:border-0">
+                      <td className="sticky left-0 z-10 bg-background px-4 py-1.5 font-medium">{c}</td>
+                      {periods.map((per) => {
+                        const v = catMatrix.cell.get(`${c}|${per}`) ?? 0
+                        return <td key={per} className={`px-3 py-1.5 text-right tabular-nums ${v === 0 ? 'text-muted-foreground/40' : ''}`} title={v ? naira(v) : undefined}>{cCell(v)}</td>
+                      })}
+                      <td className="border-l px-4 py-1.5 text-right font-semibold tabular-nums" title={naira(catMatrix.rowTotal.get(c) ?? 0)}>{cCell(catMatrix.rowTotal.get(c) ?? 0)}</td>
+                    </tr>
                   ))}
                 </tbody>
                 <tfoot className="sticky bottom-0 bg-background">
                   <tr className="border-t-2 border-foreground font-bold">
                     <td className="sticky left-0 bg-background px-4 py-2">Total</td>
-                    {periods.map((per) => (
-                      <td key={per} className="px-3 py-2 text-right tabular-nums"
-                        title={naira(totalsByPeriod.get(per) ?? 0)}>
-                        {cellMoney(totalsByPeriod.get(per) ?? 0)}
-                      </td>
-                    ))}
-                    <td className="border-l px-4 py-2 text-right tabular-nums" title={naira(t.work)}>
-                      {cellMoney(t.work)}
+                    {periods.map((per) => <td key={per} className="px-3 py-2 text-right tabular-nums" title={naira(catMatrix.colTotal.get(per) ?? 0)}>{cCell(catMatrix.colTotal.get(per) ?? 0)}</td>)}
+                    <td className="border-l px-4 py-2 text-right tabular-nums" title={naira(t.cost)}>
+                      {cCell([...catMatrix.rowTotal.values()].reduce((a, v) => a + v, 0))}
                     </td>
                   </tr>
                 </tfoot>
@@ -435,93 +495,100 @@ export default function ExecutiveSummaryPage() {
             </div>
           )}
           <p className="border-t px-4 py-2 text-[11px] text-muted-foreground">
-            Work done Incl. VAT · hover any cell for the full figure
+            Cost per category per period · hover any cell for the full figure
           </p>
         </CardContent>
       </Card>
+    </div>
+  )
+}
 
-      {/* the projects themselves — every metric per project, for the window */}
-      <Card className="relative">
-        <Legend>Projects · {winLabel}</Legend>
-        <CardContent className="p-0 pt-2">
-          <div className="flex justify-end px-4 pb-2">
-            <Select value={sort} onValueChange={(v) => setSort(v as typeof sort)}>
-              <SelectTrigger className="h-8 w-48 text-xs font-semibold">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="work">Work done</SelectItem>
-                <SelectItem value="cost">Cost</SelectItem>
-                <SelectItem value="net">Net earned</SelectItem>
-                <SelectItem value="margin">Margin</SelectItem>
-                <SelectItem value="pct">% complete</SelectItem>
-                <SelectItem value="unpaid">Certified, not paid</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="overflow-x-auto">
+// ── the site × period matrix (work or cost) ────────────────────────────
+function SiteMatrix({ title, groups, periods, cell, rowTotalFromSeries, colTotal, onRow }: {
+  title: string
+  groups: Array<[string, PortfolioProject[]]>
+  periods: string[]
+  cell: (id: string, per: string) => number
+  rowTotal: (p: PortfolioProject) => number
+  rowTotalFromSeries: (id: string) => number
+  colTotal: (per: string) => number
+  onRow: (id: string) => void
+}) {
+  const grand = periods.reduce((a, per) => a + colTotal(per), 0)
+  return (
+    <Card className="relative">
+      <Legend>{title}</Legend>
+      <CardContent className="p-0 pt-3">
+        {periods.length === 0 ? (
+          <p className="px-4 py-8 text-center text-sm text-muted-foreground">No output recorded in this window.</p>
+        ) : (
+          <div className="max-h-[520px] overflow-auto">
             <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b text-left text-muted-foreground">
-                  <th className="px-4 py-2 font-medium">Project</th>
-                  <th className="px-4 py-2 text-right font-medium">% Complete</th>
-                  <th className="px-4 py-2 text-right font-medium">Work done</th>
-                  <th className="px-4 py-2 text-right font-medium">Cost</th>
-                  <th className="px-4 py-2 text-right font-medium">Net</th>
-                  <th className="px-4 py-2 text-right font-medium">Margin</th>
-                  <th className="px-4 py-2 text-right font-medium">Not yet paid</th>
-                  <th className="px-4 py-2 font-medium">Schedule</th>
-                  <th className="px-4 py-2 text-right font-medium">Latest report</th>
+              <thead className="sticky top-0 z-10 bg-background">
+                <tr className="border-b text-muted-foreground">
+                  <th className="sticky left-0 z-20 min-w-[220px] bg-background px-4 py-2 text-left font-medium">Site</th>
+                  {periods.map((p) => <th key={p} className="whitespace-nowrap px-3 py-2 text-right font-medium">{p}</th>)}
+                  <th className="whitespace-nowrap border-l px-4 py-2 text-right font-semibold">Total</th>
                 </tr>
               </thead>
               <tbody>
-                {sorted.map((p) => (
-                  <tr
-                    key={p.id}
-                    className="cursor-pointer border-b transition-colors last:border-0 hover:bg-muted/40"
-                    onClick={() => router.push(`/projects/${p.id}`)}
-                  >
-                    <td className="px-4 py-2 font-medium">
-                      {p.short_name || p.project_name}
-                      {p.state_name && (
-                        <span className="ml-1.5 text-[10px] text-muted-foreground">{p.state_name}</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-2 text-right tabular-nums">{pctFmt(p.pct_complete)}</td>
-                    <td className="px-4 py-2 text-right tabular-nums">{naira(p.win.work)}</td>
-                    <td className="px-4 py-2 text-right tabular-nums">{naira(p.win.cost)}</td>
-                    <td className={`px-4 py-2 text-right tabular-nums font-medium ${p.win.net < 0 ? 'text-red-600' : ''}`}>
-                      {naira(p.win.net)}
-                    </td>
-                    <td className="px-4 py-2 text-right tabular-nums">{pctFmt(p.winMargin)}</td>
-                    <td className={`px-4 py-2 text-right tabular-nums ${p.certified_not_paid ? 'font-medium text-amber-700 dark:text-amber-400' : ''}`}>
-                      {p.certified_not_paid ? naira(p.certified_not_paid) : '—'}
-                    </td>
-                    <td className="px-4 py-2">
-                      <ScheduleChip status={p.schedule.status} months={p.schedule.months_overdue} />
-                    </td>
-                    <td className="px-4 py-2 text-right tabular-nums">
-                      <span className={p.days_since_report != null && p.days_since_report > 14
-                        ? 'font-medium text-amber-700 dark:text-amber-400' : ''}>
-                        {p.latest_week_ending ? fmtDate(p.latest_week_ending) : '—'}
-                      </span>
-                      {p.days_since_report != null && (
-                        <span className="ml-1 text-[10px] text-muted-foreground">
-                          {num(p.days_since_report)}d
-                        </span>
-                      )}
-                    </td>
-                  </tr>
+                {groups.map(([state, rs]) => (
+                  <Fragment key={state}>
+                    <tr className="border-b bg-muted/40">
+                      <td className="sticky left-0 z-10 bg-muted/40 px-4 py-1.5 text-[11px] font-bold uppercase tracking-wide">{state}</td>
+                      <td colSpan={periods.length + 1} className="bg-muted/40" />
+                    </tr>
+                    {rs.map((p) => (
+                      <tr key={p.id} className="cursor-pointer border-b transition-colors last:border-0 hover:bg-muted/30"
+                        onClick={() => onRow(p.id)}>
+                        <td className="sticky left-0 z-10 max-w-[260px] truncate bg-background px-4 py-1.5 font-medium" title={p.project_name}>
+                          {p.short_name || p.project_name}
+                        </td>
+                        {periods.map((per) => {
+                          const v = cell(p.id, per)
+                          return <td key={per} className={`px-3 py-1.5 text-right tabular-nums ${v === 0 ? 'text-muted-foreground/40' : ''}`} title={v ? naira(v) : undefined}>{cCell(v)}</td>
+                        })}
+                        <td className="border-l px-4 py-1.5 text-right font-semibold tabular-nums" title={naira(rowTotalFromSeries(p.id))}>{cCell(rowTotalFromSeries(p.id))}</td>
+                      </tr>
+                    ))}
+                  </Fragment>
                 ))}
               </tbody>
+              <tfoot className="sticky bottom-0 bg-background">
+                <tr className="border-t-2 border-foreground font-bold">
+                  <td className="sticky left-0 bg-background px-4 py-2">Total</td>
+                  {periods.map((per) => <td key={per} className="px-3 py-2 text-right tabular-nums" title={naira(colTotal(per))}>{cCell(colTotal(per))}</td>)}
+                  <td className="border-l px-4 py-2 text-right tabular-nums" title={naira(grand)}>{cCell(grand)}</td>
+                </tr>
+              </tfoot>
             </table>
           </div>
-          <p className="border-t px-4 py-2 text-[11px] text-muted-foreground">
-            Work, cost, net and margin are for {period === TO_DATE ? 'all time to date' : period}
-            {' · '}% complete and not-yet-paid are cumulative
-          </p>
-        </CardContent>
-      </Card>
+        )}
+        <p className="border-t px-4 py-2 text-[11px] text-muted-foreground">
+          Reported movement per period · hover any cell for the full figure
+        </p>
+      </CardContent>
+    </Card>
+  )
+}
+
+function FilterSelect({ label, value, onChange, items, allLabel = 'All' }: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  items: Array<{ value: string; label: string }>
+  allLabel?: string
+}) {
+  return (
+    <div className="min-w-[9rem] flex-1">
+      <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
+      <Select value={value} onValueChange={onChange}>
+        <SelectTrigger className="h-9 w-full text-xs font-semibold"><SelectValue /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value={ALL}>{allLabel}</SelectItem>
+          {items.map((i) => <SelectItem key={i.value} value={i.value} className="capitalize">{i.label}</SelectItem>)}
+        </SelectContent>
+      </Select>
     </div>
   )
 }
@@ -532,25 +599,23 @@ function ScheduleChip({ status, months }: {
 }) {
   if (status === 'overdue') {
     return (
-      <span className="inline-flex items-center gap-1.5 font-semibold text-red-600">
+      <span className="inline-flex items-center gap-1.5 whitespace-nowrap font-semibold text-red-600">
         <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
-        Overdue{months != null ? ` · ${months.toFixed(1)} mths` : ''}
+        Overdue{months != null ? ` · ${months.toFixed(1)}m` : ''}
       </span>
     )
   }
   if (status === 'completed') {
     return (
       <span className="inline-flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400">
-        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-        Completed
+        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />Completed
       </span>
     )
   }
   if (status === 'on_track') {
     return (
       <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-        On track
+        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />On track
       </span>
     )
   }
@@ -561,13 +626,13 @@ function PageSkeleton() {
   return (
     <div className="space-y-5">
       <Skeleton className="h-10 w-64" />
-      <Skeleton className="h-24" />
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-5">
-        {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-24" />)}
+      <Skeleton className="h-20" />
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-6">
+        {[...Array(6)].map((_, i) => <Skeleton key={i} className="h-24" />)}
       </div>
       <Skeleton className="h-40" />
-      <Skeleton className="h-80" />
-      <Skeleton className="h-64" />
+      <Skeleton className="h-72" />
+      <Skeleton className="h-72" />
     </div>
   )
 }

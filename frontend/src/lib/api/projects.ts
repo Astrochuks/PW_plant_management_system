@@ -1250,6 +1250,15 @@ export interface PortfolioWeek {
   net: number;
 }
 
+export interface CostSeriesRow {
+  project_id: string;
+  year: number;
+  week_number: number;
+  week_ending_date: string;
+  category: string;
+  amount: number;
+}
+
 export interface ExecutiveSummary {
   generated_at: string;
   totals: {
@@ -1271,6 +1280,7 @@ export interface ExecutiveSummary {
   };
   projects: PortfolioProject[];
   series: PortfolioWeek[];
+  cost_series: CostSeriesRow[];
 }
 
 export async function getExecutiveSummary(): Promise<ExecutiveSummary> {
