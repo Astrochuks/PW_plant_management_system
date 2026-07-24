@@ -25,9 +25,10 @@ import { Button } from '@/components/ui/button'
 import { Kpi, Legend, LegendSm } from '@/components/projects/hub-ui'
 import { useExecutiveSummary } from '@/hooks/use-projects'
 import type { PortfolioProject } from '@/hooks/use-projects'
-import { naira, num, pctFmt, fmtDate } from '@/lib/format'
+import { naira, nairaM, num, pctFmt, fmtDate } from '@/lib/format'
 
 type Gran = 'week' | 'month' | 'quarter' | 'year'
+type Unit = 'm' | 'full'
 
 const GRANS: Array<{ key: Gran; label: string }> = [
   { key: 'week', label: 'Weekly' },
@@ -40,20 +41,6 @@ const ALL = '__all__'
 const UNSET = '— unassigned —'
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const CURRENT_YEAR = new Date().getFullYear()
-
-// compact money for dense table cells; full figure lives in the title
-const cN = (v: number | null | undefined) =>
-  v == null ? '—'
-    : v === 0 ? '—'
-      : Math.abs(v) >= 1e9 ? `₦${(v / 1e9).toFixed(2)}B`
-        : Math.abs(v) >= 1e6 ? `₦${(v / 1e6).toFixed(1)}M`
-          : Math.abs(v) >= 1e3 ? `₦${(v / 1e3).toFixed(0)}K` : `₦${Math.round(v)}`
-
-// bare compact for matrix cells (no ₦ — the column header carries units)
-const cCell = (v: number) =>
-  v === 0 ? '—'
-    : Math.abs(v) >= 1e6 ? `${(v / 1e6).toFixed(1)}m`
-      : `${(v / 1e3).toFixed(0)}k`
 
 function bucketOf(year: number, week: number, ending: string, g: Gran, singleYear: boolean): string {
   const d = new Date(ending + 'T00:00:00')
@@ -78,6 +65,19 @@ export default function ExecutiveSummaryPage() {
   // shared lens for the three matrices
   const [matYear, setMatYear] = useState<string>(ALL)
   const [matGran, setMatGran] = useState<Gran>('month')
+
+  // ₦m / Full money toggle — drives every figure in the tables & matrices.
+  // Defaults to Full (show every digit); ₦ millions is the compact option.
+  const [unit, setUnitState] = useState<Unit>('full')
+  useEffect(() => {
+    const v = localStorage.getItem('exec-money-unit')
+    if (v === 'm' || v === 'full') setUnitState(v)
+  }, [])
+  const setUnit = (v: Unit) => { setUnitState(v); localStorage.setItem('exec-money-unit', v) }
+  // dense-cell formatter (plain number; the toggle button carries the unit)
+  const fm = (v: number | null | undefined) =>
+    v == null || v === 0 ? '—'
+      : unit === 'm' ? nairaM(v) : Math.round(v).toLocaleString('en-NG')
 
   const all = useMemo(
     () => (data?.projects ?? []).filter((p) => p.status === 'active'),
@@ -273,17 +273,32 @@ export default function ExecutiveSummaryPage() {
   const lensLabel = singleYear ? matYear : 'all years'
 
   const money = (v: number | null | undefined) =>
-    <span title={v != null ? naira(v) : undefined}>{cN(v)}</span>
+    <span title={v != null ? naira(v) : undefined}>{fm(v)}</span>
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Executive summary</h1>
-        <p className="text-sm text-muted-foreground">
-          Comparing {t.count} active {t.count === 1 ? 'project' : 'projects'}
-          {filtered ? ` of ${all.length}` : ''}
-          {' · '}as at {fmtDate(data.generated_at)}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Executive summary</h1>
+          <p className="text-sm text-muted-foreground">
+            Comparing {t.count} active {t.count === 1 ? 'project' : 'projects'}
+            {filtered ? ` of ${all.length}` : ''}
+            {' · '}as at {fmtDate(data.generated_at)}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Figures</span>
+          <span className="inline-flex overflow-hidden rounded-md border bg-card text-[11px] font-bold shadow-sm">
+            {(['m', 'full'] as const).map((u) => (
+              <button key={u} type="button" onClick={() => setUnit(u)}
+                className={`px-2.5 py-1 transition-colors ${
+                  unit === u ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
+                }`}>
+                {u === 'm' ? '₦ millions' : 'Full ₦'}
+              </button>
+            ))}
+          </span>
+        </div>
       </div>
 
       {/* filters — State · Project scope the whole page */}
@@ -467,14 +482,14 @@ export default function ExecutiveSummaryPage() {
         cell={(id, per) => siteMatrix.work.get(`${id}|${per}`) ?? 0}
         rowTotalFromSeries={(id) => periods.reduce((a, per) => a + (siteMatrix.work.get(`${id}|${per}`) ?? 0), 0)}
         colTotal={(per) => siteMatrix.workCol.get(per) ?? 0}
-        onRow={(id) => router.push(`/projects/${id}`)} />
+        fmt={fm} onRow={(id) => router.push(`/projects/${id}`)} />
 
       <SiteMatrix title={`Site cost · ${lensLabel}`}
         groups={groups} periods={periods}
         cell={(id, per) => siteMatrix.cost.get(`${id}|${per}`) ?? 0}
         rowTotalFromSeries={(id) => periods.reduce((a, per) => a + (siteMatrix.cost.get(`${id}|${per}`) ?? 0), 0)}
         colTotal={(per) => siteMatrix.costCol.get(per) ?? 0}
-        onRow={(id) => router.push(`/projects/${id}`)} />
+        fmt={fm} onRow={(id) => router.push(`/projects/${id}`)} />
 
       {/* site × category cost cross-tab */}
       <SiteMatrix title={`Site cost by category · ${lensLabel}`}
@@ -482,7 +497,7 @@ export default function ExecutiveSummaryPage() {
         cell={(id, cat) => siteCat.cell.get(`${id}|${cat}`) ?? 0}
         rowTotalFromSeries={(id) => siteCat.projTotal.get(id) ?? 0}
         colTotal={(cat) => siteCat.catTotal.get(cat) ?? 0}
-        onRow={(id) => router.push(`/projects/${id}`)}
+        fmt={fm} onRow={(id) => router.push(`/projects/${id}`)}
         note="Total cost per category over the window · hover any cell for the full figure" />
 
       {/* cost by category */}
@@ -507,18 +522,18 @@ export default function ExecutiveSummaryPage() {
                       <td className="sticky left-0 z-10 bg-background px-4 py-1.5 font-medium">{c}</td>
                       {periods.map((per) => {
                         const v = catMatrix.cell.get(`${c}|${per}`) ?? 0
-                        return <td key={per} className={`px-3 py-1.5 text-right tabular-nums ${v === 0 ? 'text-muted-foreground/40' : ''}`} title={v ? naira(v) : undefined}>{cCell(v)}</td>
+                        return <td key={per} className={`px-3 py-1.5 text-right tabular-nums ${v === 0 ? 'text-muted-foreground/40' : ''}`} title={v ? naira(v) : undefined}>{fm(v)}</td>
                       })}
-                      <td className="border-l px-4 py-1.5 text-right font-semibold tabular-nums" title={naira(catMatrix.rowTotal.get(c) ?? 0)}>{cCell(catMatrix.rowTotal.get(c) ?? 0)}</td>
+                      <td className="border-l px-4 py-1.5 text-right font-semibold tabular-nums" title={naira(catMatrix.rowTotal.get(c) ?? 0)}>{fm(catMatrix.rowTotal.get(c) ?? 0)}</td>
                     </tr>
                   ))}
                 </tbody>
                 <tfoot className="sticky bottom-0 bg-background">
                   <tr className="border-t-2 border-foreground font-bold">
                     <td className="sticky left-0 bg-background px-4 py-2">Total</td>
-                    {periods.map((per) => <td key={per} className="px-3 py-2 text-right tabular-nums" title={naira(catMatrix.colTotal.get(per) ?? 0)}>{cCell(catMatrix.colTotal.get(per) ?? 0)}</td>)}
+                    {periods.map((per) => <td key={per} className="px-3 py-2 text-right tabular-nums" title={naira(catMatrix.colTotal.get(per) ?? 0)}>{fm(catMatrix.colTotal.get(per) ?? 0)}</td>)}
                     <td className="border-l px-4 py-2 text-right tabular-nums" title={naira(t.cost)}>
-                      {cCell([...catMatrix.rowTotal.values()].reduce((a, v) => a + v, 0))}
+                      {fm([...catMatrix.rowTotal.values()].reduce((a, v) => a + v, 0))}
                     </td>
                   </tr>
                 </tfoot>
@@ -535,7 +550,7 @@ export default function ExecutiveSummaryPage() {
 }
 
 // ── the site × columns matrix (period or category) ─────────────────────
-function SiteMatrix({ title, groups, periods, cell, rowTotalFromSeries, colTotal, onRow,
+function SiteMatrix({ title, groups, periods, cell, rowTotalFromSeries, colTotal, fmt, onRow,
   note = 'Reported movement per period · hover any cell for the full figure' }: {
   title: string
   groups: Array<[string, PortfolioProject[]]>
@@ -543,6 +558,7 @@ function SiteMatrix({ title, groups, periods, cell, rowTotalFromSeries, colTotal
   cell: (id: string, per: string) => number
   rowTotalFromSeries: (id: string) => number
   colTotal: (per: string) => number
+  fmt: (v: number) => string
   onRow: (id: string) => void
   note?: string
 }) {
@@ -578,9 +594,9 @@ function SiteMatrix({ title, groups, periods, cell, rowTotalFromSeries, colTotal
                         </td>
                         {periods.map((per) => {
                           const v = cell(p.id, per)
-                          return <td key={per} className={`px-3 py-1.5 text-right tabular-nums ${v === 0 ? 'text-muted-foreground/40' : ''}`} title={v ? naira(v) : undefined}>{cCell(v)}</td>
+                          return <td key={per} className={`px-3 py-1.5 text-right tabular-nums ${v === 0 ? 'text-muted-foreground/40' : ''}`} title={v ? naira(v) : undefined}>{fmt(v)}</td>
                         })}
-                        <td className="border-l px-4 py-1.5 text-right font-semibold tabular-nums" title={naira(rowTotalFromSeries(p.id))}>{cCell(rowTotalFromSeries(p.id))}</td>
+                        <td className="border-l px-4 py-1.5 text-right font-semibold tabular-nums" title={naira(rowTotalFromSeries(p.id))}>{fmt(rowTotalFromSeries(p.id))}</td>
                       </tr>
                     ))}
                   </Fragment>
@@ -589,8 +605,8 @@ function SiteMatrix({ title, groups, periods, cell, rowTotalFromSeries, colTotal
               <tfoot className="sticky bottom-0 bg-background">
                 <tr className="border-t-2 border-foreground font-bold">
                   <td className="sticky left-0 bg-background px-4 py-2">Total</td>
-                  {periods.map((per) => <td key={per} className="px-3 py-2 text-right tabular-nums" title={naira(colTotal(per))}>{cCell(colTotal(per))}</td>)}
-                  <td className="border-l px-4 py-2 text-right tabular-nums" title={naira(grand)}>{cCell(grand)}</td>
+                  {periods.map((per) => <td key={per} className="px-3 py-2 text-right tabular-nums" title={naira(colTotal(per))}>{fmt(colTotal(per))}</td>)}
+                  <td className="border-l px-4 py-2 text-right tabular-nums" title={naira(grand)}>{fmt(grand)}</td>
                 </tr>
               </tfoot>
             </table>
