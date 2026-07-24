@@ -277,47 +277,56 @@ export default function ExecutiveSummaryPage() {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Executive summary</h1>
-          <p className="text-sm text-muted-foreground">
-            Comparing {t.count} active {t.count === 1 ? 'project' : 'projects'}
-            {filtered ? ` of ${all.length}` : ''}
-            {' · '}as at {fmtDate(data.generated_at)}
-          </p>
+      {/* sticky header + control bar — State/Project (left), Year/Gran
+          (middle), figures toggle (right); scrolls under the app header */}
+      <div className="sticky top-16 z-20 -mx-6 space-y-3 border-b bg-background/95 px-6 pb-3 pt-1 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="text-[1.7rem] font-bold leading-none tracking-tight">Executive summary</h1>
+          <span className="hidden text-xs text-muted-foreground sm:inline">as at {fmtDate(data.generated_at)}</span>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Figures</span>
-          <span className="inline-flex overflow-hidden rounded-md border bg-card text-[11px] font-bold shadow-sm">
-            {(['m', 'full'] as const).map((u) => (
-              <button key={u} type="button" onClick={() => setUnit(u)}
-                className={`px-2.5 py-1 transition-colors ${
-                  unit === u ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
-                }`}>
-                {u === 'm' ? '₦ millions' : 'Full ₦'}
-              </button>
-            ))}
-          </span>
+
+        <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3 rounded-xl border bg-card px-4 py-3 shadow-sm">
+          <div className="flex flex-wrap items-end gap-3">
+            <FilterSelect label="State" value={fState} onChange={setFState}
+              items={options.states.map((s) => ({ value: s, label: s }))} />
+            <FilterSelect label="Project" value={fProject} onChange={setFProject}
+              allLabel="All projects"
+              items={options.projects.map((p) => ({ value: p.id, label: p.name }))} />
+            {filtered && (
+              <Button variant="ghost" size="sm" className="h-9 text-xs text-muted-foreground"
+                onClick={() => { setFState(ALL); setFProject(ALL) }}>
+                Clear
+              </Button>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-end gap-3">
+            <BarSelect label="Year" value={matYear} onValueChange={setMatYear}>
+              <SelectItem value={ALL}>All years</SelectItem>
+              {years.map((y) => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}
+            </BarSelect>
+            <BarSelect label="Granularity" value={matGran} onValueChange={(v) => setMatGran(v as Gran)}>
+              {GRANS.map((g) => <SelectItem key={g.key} value={g.key}>{g.label}</SelectItem>)}
+            </BarSelect>
+          </div>
+
+          <div>
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Figures</p>
+            <span className="inline-flex h-9 overflow-hidden rounded-md border bg-card text-[11px] font-bold shadow-sm">
+              {(['m', 'full'] as const).map((u) => (
+                <button key={u} type="button" onClick={() => setUnit(u)}
+                  className={`px-3 transition-colors ${
+                    unit === u ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
+                  }`}>
+                  {u === 'm' ? '₦m' : 'Full'}
+                </button>
+              ))}
+            </span>
+          </div>
         </div>
       </div>
 
-      {/* filters — State · Project scope the whole page */}
-      <Card className="relative">
-        <Legend>Filters</Legend>
-        <CardContent className="flex flex-wrap items-end gap-3 pt-4">
-          <FilterSelect label="State" value={fState} onChange={setFState}
-            items={options.states.map((s) => ({ value: s, label: s }))} />
-          <FilterSelect label="Project" value={fProject} onChange={setFProject}
-            allLabel="All projects"
-            items={options.projects.map((p) => ({ value: p.id, label: p.name }))} />
-          {filtered && (
-            <Button variant="outline" size="sm" className="h-9 text-xs"
-              onClick={() => { setFState(ALL); setFProject(ALL) }}>
-              Clear
-            </Button>
-          )}
-        </CardContent>
-      </Card>
+      <SectionHeader aside="to date">Portfolio position</SectionHeader>
 
       {/* headline — to date */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
@@ -451,31 +460,7 @@ export default function ExecutiveSummaryPage() {
         </CardContent>
       </Card>
 
-      {/* the period matrices — shared Year + granularity lens */}
-      <Card className="relative">
-        <Legend>Output &amp; cost over time</Legend>
-        <CardContent className="flex flex-wrap items-end gap-3 pt-4">
-          <div className="min-w-[9rem]">
-            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Year</p>
-            <Select value={matYear} onValueChange={setMatYear}>
-              <SelectTrigger className="h-9 w-36 text-xs font-semibold"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL}>All years</SelectItem>
-                {years.map((y) => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="min-w-[9rem]">
-            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Granularity</p>
-            <Select value={matGran} onValueChange={(v) => setMatGran(v as Gran)}>
-              <SelectTrigger className="h-9 w-36 text-xs font-semibold"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {GRANS.map((g) => <SelectItem key={g.key} value={g.key}>{g.label}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
+      <SectionHeader aside={lensLabel}>Compare over time</SectionHeader>
 
       <SiteMatrix title={`Site output · work done (Incl. VAT) · ${lensLabel}`}
         groups={groups} periods={periods}
@@ -618,6 +603,16 @@ function SiteMatrix({ title, groups, periods, cell, rowTotalFromSeries, colTotal
   )
 }
 
+function SectionHeader({ children, aside }: { children: React.ReactNode; aside?: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-3 pt-1">
+      <h2 className="whitespace-nowrap text-sm font-semibold tracking-tight">{children}</h2>
+      {aside && <span className="whitespace-nowrap text-xs text-muted-foreground">{aside}</span>}
+      <div className="h-px flex-1 bg-border" />
+    </div>
+  )
+}
+
 function FilterSelect({ label, value, onChange, items, allLabel = 'All' }: {
   label: string
   value: string
@@ -626,14 +621,31 @@ function FilterSelect({ label, value, onChange, items, allLabel = 'All' }: {
   allLabel?: string
 }) {
   return (
-    <div className="min-w-[9rem] flex-1">
+    <div>
       <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
       <Select value={value} onValueChange={onChange}>
-        <SelectTrigger className="h-9 w-full text-xs font-semibold"><SelectValue /></SelectTrigger>
+        <SelectTrigger className="h-9 w-40 text-xs font-semibold sm:w-44"><SelectValue /></SelectTrigger>
         <SelectContent>
           <SelectItem value={ALL}>{allLabel}</SelectItem>
           {items.map((i) => <SelectItem key={i.value} value={i.value} className="capitalize">{i.label}</SelectItem>)}
         </SelectContent>
+      </Select>
+    </div>
+  )
+}
+
+function BarSelect({ label, value, onValueChange, children }: {
+  label: string
+  value: string
+  onValueChange: (v: string) => void
+  children: React.ReactNode
+}) {
+  return (
+    <div>
+      <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
+      <Select value={value} onValueChange={onValueChange}>
+        <SelectTrigger className="h-9 w-36 text-xs font-semibold"><SelectValue /></SelectTrigger>
+        <SelectContent>{children}</SelectContent>
       </Select>
     </div>
   )
