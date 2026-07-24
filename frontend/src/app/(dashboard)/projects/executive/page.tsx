@@ -268,14 +268,14 @@ export default function ExecutiveSummaryPage() {
   const money = (v: number | null | undefined) =>
     <span title={v != null ? naira(v) : undefined}>{fm(v)}</span>
 
-  // header cell — clickable to sort when given a sort key, with a chevron
-  // on the active column so the sort is always visibly applied
+  // header cell on the brand-yellow row — clickable to sort when given a
+  // sort key, with a chevron on the active column so it is visibly applied
   const th = (label: string, k?: typeof sort, cls = '') => (
     <th
       onClick={k ? () => setSort(k) : undefined}
-      className={`px-3 py-1.5 text-right font-medium ${cls} ${
-        k ? 'cursor-pointer select-none hover:text-foreground' : ''
-      } ${k && sort === k ? 'text-foreground' : ''}`}
+      className={`px-3 py-1.5 text-right font-bold ${cls} ${
+        k ? 'cursor-pointer select-none hover:opacity-80' : ''
+      }`}
     >
       <span className="inline-flex items-center justify-end gap-0.5">
         {label}{k && sort === k && <ChevronDown className="h-3 w-3" />}
@@ -402,15 +402,15 @@ export default function ExecutiveSummaryPage() {
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b text-muted-foreground">
-                  <th rowSpan={2} className="sticky left-0 z-10 min-w-[180px] bg-background px-4 py-2 text-left align-bottom font-medium">Project</th>
-                  <th colSpan={5} className="border-l px-3 py-1.5 text-center text-[10px] font-semibold uppercase tracking-wide">To date</th>
-                  <th colSpan={4} className="border-l px-3 py-1.5 text-center text-[10px] font-semibold uppercase tracking-wide">Certificates &amp; payments</th>
-                  <th colSpan={4} className="border-l px-3 py-1.5 text-center text-[10px] font-semibold uppercase tracking-wide">{CURRENT_YEAR}</th>
-                  <th colSpan={2} className="border-l px-3 py-1.5 text-center text-[10px] font-semibold uppercase tracking-wide">Status</th>
+                  <th rowSpan={2} className="sticky left-0 z-10 min-w-[180px] bg-primary px-4 py-2 text-left align-middle font-bold text-primary-foreground">Project</th>
+                  <th colSpan={5} className="border-l px-3 py-1.5 text-center text-[10px] font-bold uppercase tracking-wide">To date</th>
+                  <th colSpan={4} className="border-l px-3 py-1.5 text-center text-[10px] font-bold uppercase tracking-wide">Certificates &amp; payments</th>
+                  <th colSpan={4} className="border-l px-3 py-1.5 text-center text-[10px] font-bold uppercase tracking-wide">{CURRENT_YEAR}</th>
+                  <th colSpan={2} className="border-l px-3 py-1.5 text-center text-[10px] font-bold uppercase tracking-wide">Status</th>
                 </tr>
-                <tr className="border-b text-left text-[11px] text-muted-foreground">
+                <tr className="border-b bg-primary text-left text-[11px] text-primary-foreground">
                   {th('% Compl.', 'pct', 'border-l')}
-                  {th('Work done', 'workTd')}
+                  {th('Work done (Incl. VAT)', 'workTd')}
                   {th('Cost', 'costTd')}
                   {th('Net', 'netTd')}
                   {th('Margin', 'marginTd')}
@@ -418,12 +418,12 @@ export default function ExecutiveSummaryPage() {
                   {th('Not paid', 'unpaid')}
                   {th('Paid')}
                   {th('Retention')}
-                  {th('Work done', 'workYr', 'border-l')}
+                  {th('Work done (Incl. VAT)', 'workYr', 'border-l')}
                   {th('Cost')}
                   {th('Net')}
                   {th('Margin')}
-                  <th className="border-l px-3 py-1.5 text-left font-medium">Schedule</th>
-                  <th className="px-3 py-1.5 text-right font-medium">Latest</th>
+                  <th className="border-l px-3 py-1.5 text-left font-bold">Schedule</th>
+                  <th className="px-3 py-1.5 text-right font-bold">Latest</th>
                 </tr>
               </thead>
               <tbody>
@@ -433,10 +433,10 @@ export default function ExecutiveSummaryPage() {
                     <tr key={p.id}
                       className="cursor-pointer border-b transition-colors last:border-0 hover:bg-muted/40"
                       onClick={() => router.push(`/projects/${p.id}`)}>
-                      <td className="sticky left-0 z-10 max-w-[220px] truncate bg-background px-4 py-2 font-medium"
+                      <td className="sticky left-0 z-10 min-w-[220px] bg-background px-4 py-2 font-bold"
                         title={p.project_name}>
                         {p.short_name || p.project_name}
-                        {p.state_name && <span className="ml-1.5 text-[10px] text-muted-foreground">{p.state_name}</span>}
+                        {p.state_name && <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">{p.state_name}</span>}
                       </td>
                       <td className="border-l px-3 py-2 text-right tabular-nums">{pctFmt(p.pct_complete)}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{money(p.works_incl_vat)}</td>
@@ -503,17 +503,17 @@ export default function ExecutiveSummaryPage() {
           ) : (
             <div className="max-h-[520px] overflow-auto">
               <table className="w-full text-xs">
-                <thead className="sticky top-0 z-10 bg-background">
-                  <tr className="border-b text-muted-foreground">
-                    <th className="sticky left-0 z-20 min-w-[180px] bg-background px-4 py-2 text-left font-medium">Category</th>
-                    {periods.map((p) => <th key={p} className="whitespace-nowrap px-3 py-2 text-right font-medium">{p}</th>)}
-                    <th className="whitespace-nowrap border-l px-4 py-2 text-right font-semibold">Total</th>
+                <thead className="sticky top-0 z-10">
+                  <tr className="border-b bg-primary text-primary-foreground">
+                    <th className="sticky left-0 z-20 min-w-[180px] bg-primary px-4 py-2 text-left font-bold">Category</th>
+                    {periods.map((p) => <th key={p} className="whitespace-nowrap px-3 py-2 text-right font-bold">{p}</th>)}
+                    <th className="whitespace-nowrap border-l px-4 py-2 text-right font-bold">Total</th>
                   </tr>
                 </thead>
                 <tbody>
                   {allCats.map((c) => (
                     <tr key={c} className="border-b last:border-0">
-                      <td className="sticky left-0 z-10 bg-background px-4 py-1.5 font-medium">{c}</td>
+                      <td className="sticky left-0 z-10 bg-background px-4 py-1.5 font-bold">{c}</td>
                       {periods.map((per) => {
                         const v = catMatrix.cell.get(`${c}|${per}`) ?? 0
                         return <td key={per} className={`px-3 py-1.5 text-right tabular-nums ${v === 0 ? 'text-muted-foreground/40' : ''}`} title={v ? naira(v) : undefined}>{fm(v)}</td>
@@ -566,11 +566,11 @@ function SiteMatrix({ title, groups, periods, cell, rowTotalFromSeries, colTotal
         ) : (
           <div className="max-h-[520px] overflow-auto">
             <table className="w-full text-xs">
-              <thead className="sticky top-0 z-10 bg-background">
-                <tr className="border-b text-muted-foreground">
-                  <th className="sticky left-0 z-20 min-w-[220px] bg-background px-4 py-2 text-left font-medium">Site</th>
-                  {periods.map((p) => <th key={p} className="whitespace-nowrap px-3 py-2 text-right font-medium">{p}</th>)}
-                  <th className="whitespace-nowrap border-l px-4 py-2 text-right font-semibold">Total</th>
+              <thead className="sticky top-0 z-10">
+                <tr className="border-b bg-primary text-primary-foreground">
+                  <th className="sticky left-0 z-20 min-w-[220px] bg-primary px-4 py-2 text-left font-bold">Site</th>
+                  {periods.map((p) => <th key={p} className="whitespace-nowrap px-3 py-2 text-right font-bold">{p}</th>)}
+                  <th className="whitespace-nowrap border-l px-4 py-2 text-right font-bold">Total</th>
                 </tr>
               </thead>
               <tbody>
@@ -583,7 +583,7 @@ function SiteMatrix({ title, groups, periods, cell, rowTotalFromSeries, colTotal
                     {rs.map((p) => (
                       <tr key={p.id} className="cursor-pointer border-b transition-colors last:border-0 hover:bg-muted/30"
                         onClick={() => onRow(p.id)}>
-                        <td className="sticky left-0 z-10 max-w-[260px] truncate bg-background px-4 py-1.5 font-medium" title={p.project_name}>
+                        <td className="sticky left-0 z-10 min-w-[240px] bg-background px-4 py-1.5 font-bold" title={p.project_name}>
                           {p.short_name || p.project_name}
                         </td>
                         {periods.map((per) => {
