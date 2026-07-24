@@ -68,7 +68,8 @@ type Row = PortfolioProject & { win: Win; winMargin: number | null }
 export default function ExecutiveSummaryPage() {
   const router = useRouter()
   const { data, isLoading } = useExecutiveSummary()
-  const [period, setPeriod] = useState<string>(TO_DATE)  // TO_DATE | '2026' | …
+  // default to the current year; the guard below falls back if it has no data
+  const [period, setPeriod] = useState<string>(() => String(new Date().getFullYear()))
   const [sort, setSort] = useState<'net' | 'work' | 'cost' | 'margin' | 'pct' | 'unpaid'>('work')
   const [fState, setFState] = useState(ALL)
   const [fProject, setFProject] = useState(ALL)
@@ -104,6 +105,14 @@ export default function ExecutiveSummaryPage() {
   useEffect(() => {
     if (fProject !== ALL && !scoped.some((p) => p.id === fProject)) setFProject(ALL)
   }, [scoped, fProject])
+
+  // if the current-year default (or any year) has no data, fall back to
+  // the latest year that does — never leave the page on an empty window
+  useEffect(() => {
+    if (period !== TO_DATE && years.length > 0 && !years.includes(Number(period))) {
+      setPeriod(String(years[0]))
+    }
+  }, [years, period])
 
   const projects = useMemo(
     () => scoped.filter((p) => fProject === ALL || p.id === fProject),
