@@ -449,13 +449,13 @@ function PhysicalProgressCard({ o, unit, onUnit }: {
         <div className="overflow-x-auto">
           <table className="w-full min-w-[600px] text-sm">
             <thead>
-              <tr className="border-b bg-muted/40 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-                <th className="whitespace-nowrap px-4 py-2 font-medium">Work Section</th>
-                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">BEME ({ul})</th>
-                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">Last Wk ({ul})</th>
-                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">This Wk ({ul})</th>
-                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">To Date ({ul})</th>
-                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">% Complete</th>
+              <tr className="border-b bg-primary text-primary-foreground text-left text-[11px] uppercase tracking-wide">
+                <th className="whitespace-nowrap px-4 py-2 font-bold">Work Section</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-bold">BEME ({ul})</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-bold">Last Wk ({ul})</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-bold">This Wk ({ul})</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-bold">To Date ({ul})</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-bold">% Complete</th>
               </tr>
             </thead>
             <tbody>
@@ -627,12 +627,12 @@ function CostProfitabilityCard({ o, unit, onUnit }: {
         <div className="overflow-x-auto">
           <table className="w-full min-w-[560px] text-sm">
             <thead>
-              <tr className="border-b bg-muted/40 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-                <th className="whitespace-nowrap px-4 py-2 font-medium">Cost Category</th>
-                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">Last Wk ({ul})</th>
-                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">This Wk ({ul})</th>
-                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">To Date ({ul})</th>
-                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">% of Total</th>
+              <tr className="border-b bg-primary text-primary-foreground text-left text-[11px] uppercase tracking-wide">
+                <th className="whitespace-nowrap px-4 py-2 font-bold">Cost Category</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-bold">Last Wk ({ul})</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-bold">This Wk ({ul})</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-bold">To Date ({ul})</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-bold">% of Total</th>
               </tr>
             </thead>
             <tbody>

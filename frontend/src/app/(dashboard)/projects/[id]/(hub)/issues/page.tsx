@@ -264,12 +264,12 @@ function FlagsTable({ flags, isAdmin, busy, action, onAction }: {
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b text-left text-xs text-muted-foreground">
-            <th className="py-1.5 pr-3 font-medium">Week</th>
-            <th className="py-1.5 pr-3 font-medium">Sheet</th>
-            <th className="py-1.5 pr-3 font-medium">Severity</th>
-            <th className="py-1.5 pr-3 font-medium">Message</th>
-            <th className="py-1.5 text-right font-medium" />
+          <tr className="border-b text-left text-xs bg-primary text-primary-foreground">
+            <th className="py-1.5 pr-3 font-bold">Week</th>
+            <th className="py-1.5 pr-3 font-bold">Sheet</th>
+            <th className="py-1.5 pr-3 font-bold">Severity</th>
+            <th className="py-1.5 pr-3 font-bold">Message</th>
+            <th className="py-1.5 text-right font-bold" />
           </tr>
         </thead>
         <tbody>

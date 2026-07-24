@@ -167,12 +167,12 @@ export default function FinancialsPage() {
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
-                  <tr className="border-b text-left text-muted-foreground">
-                    <th className="px-4 py-2 font-medium">Cert</th>
-                    <th className="px-4 py-2 text-right font-medium">Certified to Date</th>
-                    <th className="px-4 py-2 text-right font-medium">This Certificate</th>
-                    <th className="px-4 py-2 text-right font-medium">Paid Against It</th>
-                    <th className="px-4 py-2 text-right font-medium">Outstanding</th>
+                  <tr className="border-b bg-primary text-primary-foreground text-left">
+                    <th className="px-4 py-2 font-bold">Cert</th>
+                    <th className="px-4 py-2 text-right font-bold">Certified to Date</th>
+                    <th className="px-4 py-2 text-right font-bold">This Certificate</th>
+                    <th className="px-4 py-2 text-right font-bold">Paid Against It</th>
+                    <th className="px-4 py-2 text-right font-bold">Outstanding</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -210,18 +210,18 @@ export default function FinancialsPage() {
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
-                  <tr className="border-b bg-muted/40 text-left text-muted-foreground">
-                    <th className="px-3 py-2 font-medium">Cert</th>
-                    <th className="px-3 py-2 font-medium">Date Submitted</th>
-                    <th className="px-3 py-2 text-right font-medium">Gross Value of Works Done</th>
-                    <th className="px-3 py-2 text-right font-medium">Add Materials on Site</th>
-                    <th className="px-3 py-2 text-right font-medium">General Bill 1</th>
-                    <th className="px-3 py-2 text-right font-medium">Total Value of Work Done</th>
-                    <th className="px-3 py-2 text-right font-medium">Total Retention Held</th>
-                    <th className="px-3 py-2 text-right font-medium">Total Net Payment</th>
-                    <th className="px-3 py-2 text-right font-medium">Advance Received</th>
-                    <th className="px-3 py-2 text-right font-medium">Total Works Executed</th>
-                    <th className="px-3 py-2 text-right font-medium">New Total</th>
+                  <tr className="border-b bg-primary text-primary-foreground text-left">
+                    <th className="px-3 py-2 font-bold">Cert</th>
+                    <th className="px-3 py-2 font-bold">Date Submitted</th>
+                    <th className="px-3 py-2 text-right font-bold">Gross Value of Works Done</th>
+                    <th className="px-3 py-2 text-right font-bold">Add Materials on Site</th>
+                    <th className="px-3 py-2 text-right font-bold">General Bill 1</th>
+                    <th className="px-3 py-2 text-right font-bold">Total Value of Work Done</th>
+                    <th className="px-3 py-2 text-right font-bold">Total Retention Held</th>
+                    <th className="px-3 py-2 text-right font-bold">Total Net Payment</th>
+                    <th className="px-3 py-2 text-right font-bold">Advance Received</th>
+                    <th className="px-3 py-2 text-right font-bold">Total Works Executed</th>
+                    <th className="px-3 py-2 text-right font-bold">New Total</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -254,16 +254,16 @@ export default function FinancialsPage() {
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
-                  <tr className="border-b bg-muted/40 text-left text-muted-foreground">
-                    <th className="px-3 py-2 font-medium">Date</th>
-                    <th className="px-3 py-2 font-medium">Voucher Number</th>
-                    <th className="px-3 py-2 font-medium">Payment Type</th>
-                    <th className="px-3 py-2 text-right font-medium">Gross Amount (Incl. VAT)</th>
-                    <th className="px-3 py-2 text-right font-medium">WHT</th>
-                    <th className="px-3 py-2 text-right font-medium">VAT</th>
-                    <th className="px-3 py-2 text-right font-medium">Vetting Fee</th>
-                    <th className="px-3 py-2 text-right font-medium">Stamp Duty</th>
-                    <th className="px-3 py-2 text-right font-medium">Net Amount Payable</th>
+                  <tr className="border-b bg-primary text-primary-foreground text-left">
+                    <th className="px-3 py-2 font-bold">Date</th>
+                    <th className="px-3 py-2 font-bold">Voucher Number</th>
+                    <th className="px-3 py-2 font-bold">Payment Type</th>
+                    <th className="px-3 py-2 text-right font-bold">Gross Amount (Incl. VAT)</th>
+                    <th className="px-3 py-2 text-right font-bold">WHT</th>
+                    <th className="px-3 py-2 text-right font-bold">VAT</th>
+                    <th className="px-3 py-2 text-right font-bold">Vetting Fee</th>
+                    <th className="px-3 py-2 text-right font-bold">Stamp Duty</th>
+                    <th className="px-3 py-2 text-right font-bold">Net Amount Payable</th>
                   </tr>
                 </thead>
                 <tbody>

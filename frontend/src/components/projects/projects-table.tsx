@@ -412,12 +412,12 @@ export function ProjectsTable({
           </div>
           <Table className="border-collapse">
             <TableHeader>
-              <TableRow className="bg-[#ffbf36] hover:bg-[#ffbf36] border-b-2 border-[#e6ac31]">
+              <TableRow className="bg-primary text-primary-foreground hover:bg-primary border-b-2 border-[#e6ac31]">
                 {columns.map((col) => (
                   <TableHead
                     key={col.key}
                     className={`
-                      text-[#101415] font-semibold text-xs uppercase tracking-wider border-x border-[#e6ac31]/50
+                      text-primary-foreground font-bold text-xs uppercase tracking-wider border-x border-[#e6ac31]/50
                       ${col.width || ''}
                       ${col.align === 'right' ? 'text-right' : ''}
                     `}

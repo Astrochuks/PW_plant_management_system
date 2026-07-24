@@ -423,7 +423,7 @@ export default function ExecutiveSummaryPage() {
                   {th('Net')}
                   {th('Margin')}
                   <th className="border-l px-3 py-1.5 text-left font-bold">Schedule</th>
-                  <th className="px-3 py-1.5 text-right font-bold">Latest</th>
+                  <th className="px-3 py-1.5 text-right font-bold">Latest report</th>
                 </tr>
               </thead>
               <tbody>
@@ -453,9 +453,11 @@ export default function ExecutiveSummaryPage() {
                       <td className="px-3 py-2 text-right tabular-nums">{yr.work ? pctFmt(yrMargin) : '—'}</td>
                       <td className="border-l px-3 py-2"><ScheduleChip status={p.schedule.status} months={p.schedule.months_overdue} /></td>
                       <td className="px-3 py-2 text-right tabular-nums">
-                        <span className={p.days_since_report != null && p.days_since_report > 14 ? 'font-medium text-amber-700 dark:text-amber-400' : ''}>
-                          {p.latest_week_ending ? fmtDate(p.latest_week_ending) : '—'}
-                        </span>
+                        {p.latest_week_ending ? (
+                          <span className={p.days_since_report != null && p.days_since_report > 14 ? 'font-medium text-amber-700 dark:text-amber-400' : ''}>
+                            {p.latest_week != null && `W${String(p.latest_week).padStart(2, '0')} · `}{fmtDate(p.latest_week_ending)}
+                          </span>
+                        ) : '—'}
                       </td>
                     </tr>
                   )
@@ -463,9 +465,6 @@ export default function ExecutiveSummaryPage() {
               </tbody>
             </table>
           </div>
-          <p className="border-t px-4 py-2 text-[11px] text-muted-foreground">
-            To-date, certificates and payments are cumulative · {CURRENT_YEAR} is this year&apos;s reported movement · hover any figure for the full amount
-          </p>
         </CardContent>
       </Card>
 
@@ -491,8 +490,7 @@ export default function ExecutiveSummaryPage() {
         cell={(id, cat) => siteCat.cell.get(`${id}|${cat}`) ?? 0}
         rowTotalFromSeries={(id) => siteCat.projTotal.get(id) ?? 0}
         colTotal={(cat) => siteCat.catTotal.get(cat) ?? 0}
-        fmt={fm} onRow={(id) => router.push(`/projects/${id}`)}
-        note="Total cost per category over the window · hover any cell for the full figure" />
+        fmt={fm} onRow={(id) => router.push(`/projects/${id}`)} />
 
       {/* cost by category */}
       <Card className="relative">
@@ -534,9 +532,6 @@ export default function ExecutiveSummaryPage() {
               </table>
             </div>
           )}
-          <p className="border-t px-4 py-2 text-[11px] text-muted-foreground">
-            Cost per category per period · hover any cell for the full figure
-          </p>
         </CardContent>
       </Card>
     </div>
@@ -544,8 +539,7 @@ export default function ExecutiveSummaryPage() {
 }
 
 // ── the site × columns matrix (period or category) ─────────────────────
-function SiteMatrix({ title, groups, periods, cell, rowTotalFromSeries, colTotal, fmt, onRow,
-  note = 'Reported movement per period · hover any cell for the full figure' }: {
+function SiteMatrix({ title, groups, periods, cell, rowTotalFromSeries, colTotal, fmt, onRow }: {
   title: string
   groups: Array<[string, PortfolioProject[]]>
   periods: string[]
@@ -554,7 +548,6 @@ function SiteMatrix({ title, groups, periods, cell, rowTotalFromSeries, colTotal
   colTotal: (per: string) => number
   fmt: (v: number) => string
   onRow: (id: string) => void
-  note?: string
 }) {
   const grand = periods.reduce((a, per) => a + colTotal(per), 0)
   return (
@@ -606,7 +599,6 @@ function SiteMatrix({ title, groups, periods, cell, rowTotalFromSeries, colTotal
             </table>
           </div>
         )}
-        <p className="border-t px-4 py-2 text-[11px] text-muted-foreground">{note}</p>
       </CardContent>
     </Card>
   )
@@ -668,7 +660,7 @@ function ScheduleChip({ status, months }: {
     return (
       <span className="inline-flex items-center gap-1.5 whitespace-nowrap font-semibold text-red-600">
         <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
-        Overdue{months != null ? ` · ${months.toFixed(1)}m` : ''}
+        Overdue{months != null ? ` · ${months.toFixed(1)} months` : ''}
       </span>
     )
   }

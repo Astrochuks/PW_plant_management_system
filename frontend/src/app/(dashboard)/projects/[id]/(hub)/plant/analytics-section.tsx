@@ -290,15 +290,15 @@ export default function PlantAnalyticsSection({ gran, year }: {
           <div className="max-h-[440px] overflow-auto">
             <table className="w-full text-xs">
               <thead className="sticky top-0 bg-background">
-                <tr className="border-b text-left text-muted-foreground">
-                  <th className="px-4 py-2 font-medium">Fleet</th>
-                  <th className="px-4 py-2 font-medium">Description</th>
-                  <th className="px-4 py-2 font-medium">Type</th>
-                  <th className="px-4 py-2 text-right font-medium">Hours worked</th>
-                  <th className="px-4 py-2 text-right font-medium">Diesel L</th>
-                  <th className="px-4 py-2 text-right font-medium">L/hr</th>
-                  <th className="px-4 py-2 text-right font-medium">Type avg</th>
-                  <th className="px-4 py-2 text-right font-medium">vs Type avg</th>
+                <tr className="border-b bg-primary text-left text-primary-foreground">
+                  <th className="px-4 py-2 font-bold">Fleet</th>
+                  <th className="px-4 py-2 font-bold">Description</th>
+                  <th className="px-4 py-2 font-bold">Type</th>
+                  <th className="px-4 py-2 text-right font-bold">Hours worked</th>
+                  <th className="px-4 py-2 text-right font-bold">Diesel L</th>
+                  <th className="px-4 py-2 text-right font-bold">L/hr</th>
+                  <th className="px-4 py-2 text-right font-bold">Type avg</th>
+                  <th className="px-4 py-2 text-right font-bold">vs Type avg</th>
                 </tr>
               </thead>
               <tbody>
@@ -500,13 +500,13 @@ function PlantVsWorkCard({ data, fin, gran, year }: {
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
-              <tr className="border-b text-left text-muted-foreground">
-                <th className="px-4 py-2 font-medium">Period</th>
-                <th className="px-4 py-2 text-right font-medium">Work done (₦)</th>
-                <th className="px-4 py-2 text-right font-medium">Hours worked</th>
-                <th className="px-4 py-2 text-right font-medium">Work per hour</th>
-                <th className="px-4 py-2 text-right font-medium">Utilisation</th>
-                <th className="px-4 py-2 text-right font-medium">Work/hr vs Previous</th>
+              <tr className="border-b bg-primary text-left text-primary-foreground">
+                <th className="px-4 py-2 font-bold">Period</th>
+                <th className="px-4 py-2 text-right font-bold">Work done (₦)</th>
+                <th className="px-4 py-2 text-right font-bold">Hours worked</th>
+                <th className="px-4 py-2 text-right font-bold">Work per hour</th>
+                <th className="px-4 py-2 text-right font-bold">Utilisation</th>
+                <th className="px-4 py-2 text-right font-bold">Work/hr vs Previous</th>
               </tr>
             </thead>
             <tbody>

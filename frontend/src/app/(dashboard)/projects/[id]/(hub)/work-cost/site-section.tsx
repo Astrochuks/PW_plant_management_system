@@ -83,12 +83,12 @@ export default function SitePage() {
           <Legend>Departments · latest week</Legend>
           <CardContent className="max-h-[260px] overflow-y-auto p-0">
             <table className="w-full text-xs">
-              <thead className="sticky top-0 bg-background">
-                <tr className="border-b text-left text-muted-foreground">
-                  <th className="px-4 py-2 font-medium">Department</th>
-                  <th className="px-4 py-2 text-right font-medium">Previous</th>
-                  <th className="px-4 py-2 text-right font-medium">This week</th>
-                  <th className="px-4 py-2 text-right font-medium">Movement</th>
+              <thead className="sticky top-0 bg-primary">
+                <tr className="border-b text-left bg-primary text-primary-foreground">
+                  <th className="px-4 py-2 font-bold">Department</th>
+                  <th className="px-4 py-2 text-right font-bold">Previous</th>
+                  <th className="px-4 py-2 text-right font-bold">This week</th>
+                  <th className="px-4 py-2 text-right font-bold">Movement</th>
                 </tr>
               </thead>
               <tbody>
@@ -119,14 +119,14 @@ export default function SitePage() {
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
-                <tr className="border-b text-left text-muted-foreground">
-                  <th className="px-4 py-2 font-medium min-w-[200px]">Description</th>
-                  <th className="px-4 py-2 font-medium">Unit</th>
-                  <th className="px-4 py-2 text-right font-medium">Agreed rate</th>
-                  <th className="px-4 py-2 text-right font-medium">Qty to date</th>
-                  <th className="px-4 py-2 text-right font-medium">Balance</th>
-                  <th className="px-4 py-2 text-right font-medium">Value this week</th>
-                  <th className="px-4 py-2 text-right font-medium">Value to date</th>
+                <tr className="border-b text-left bg-primary text-primary-foreground">
+                  <th className="px-4 py-2 font-bold min-w-[200px]">Description</th>
+                  <th className="px-4 py-2 font-bold">Unit</th>
+                  <th className="px-4 py-2 text-right font-bold">Agreed rate</th>
+                  <th className="px-4 py-2 text-right font-bold">Qty to date</th>
+                  <th className="px-4 py-2 text-right font-bold">Balance</th>
+                  <th className="px-4 py-2 text-right font-bold">Value this week</th>
+                  <th className="px-4 py-2 text-right font-bold">Value to date</th>
                 </tr>
               </thead>
               <tbody>
@@ -145,15 +145,15 @@ export default function SitePage() {
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
-                <tr className="border-b text-left text-muted-foreground">
-                  <th className="px-4 py-2 font-medium min-w-[180px]">Description</th>
-                  <th className="px-4 py-2 font-medium">Unit</th>
-                  <th className="px-4 py-2 text-right font-medium">Current price</th>
-                  <th className="px-4 py-2 text-right font-medium">Received</th>
-                  <th className="px-4 py-2 text-right font-medium">On site works</th>
-                  <th className="px-4 py-2 text-right font-medium">Total used</th>
-                  <th className="px-4 py-2 text-right font-medium">Variance qty</th>
-                  <th className="px-4 py-2 text-right font-medium">Variance value</th>
+                <tr className="border-b text-left bg-primary text-primary-foreground">
+                  <th className="px-4 py-2 font-bold min-w-[180px]">Description</th>
+                  <th className="px-4 py-2 font-bold">Unit</th>
+                  <th className="px-4 py-2 text-right font-bold">Current price</th>
+                  <th className="px-4 py-2 text-right font-bold">Received</th>
+                  <th className="px-4 py-2 text-right font-bold">On site works</th>
+                  <th className="px-4 py-2 text-right font-bold">Total used</th>
+                  <th className="px-4 py-2 text-right font-bold">Variance qty</th>
+                  <th className="px-4 py-2 text-right font-bold">Variance value</th>
                 </tr>
               </thead>
               <tbody>
@@ -190,12 +190,12 @@ export default function SitePage() {
           <CardContent className="p-0">
             <table className="w-full text-xs">
               <thead>
-                <tr className="border-b text-left text-muted-foreground">
-                  <th className="px-4 py-2 font-medium">Description</th>
-                  <th className="px-4 py-2 font-medium">Owners</th>
-                  <th className="px-4 py-2 text-right font-medium">Days</th>
-                  <th className="px-4 py-2 text-right font-medium">Rate ₦</th>
-                  <th className="px-4 py-2 text-right font-medium">Amount ₦</th>
+                <tr className="border-b text-left bg-primary text-primary-foreground">
+                  <th className="px-4 py-2 font-bold">Description</th>
+                  <th className="px-4 py-2 font-bold">Owners</th>
+                  <th className="px-4 py-2 text-right font-bold">Days</th>
+                  <th className="px-4 py-2 text-right font-bold">Rate ₦</th>
+                  <th className="px-4 py-2 text-right font-bold">Amount ₦</th>
                 </tr>
               </thead>
               <tbody>

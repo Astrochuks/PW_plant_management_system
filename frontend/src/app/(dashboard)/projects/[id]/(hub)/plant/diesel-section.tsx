@@ -200,13 +200,13 @@ export default function DieselSection({ year, gran }: {
           <div className="max-h-[440px] overflow-auto">
             <table className="w-full text-xs">
               <thead className="sticky top-0 bg-background">
-                <tr className="border-b text-left text-muted-foreground">
-                  <th className="px-4 py-2 font-medium">Fleet</th>
-                  <th className="px-4 py-2 font-medium">Description</th>
-                  <th className="px-4 py-2 text-right font-medium">Diesel L</th>
-                  <th className="px-4 py-2 text-right font-medium">Share</th>
-                  <th className="px-4 py-2 text-right font-medium">Hours worked</th>
-                  <th className="px-4 py-2 text-right font-medium">L/hr</th>
+                <tr className="border-b bg-primary text-left text-primary-foreground">
+                  <th className="px-4 py-2 font-bold">Fleet</th>
+                  <th className="px-4 py-2 font-bold">Description</th>
+                  <th className="px-4 py-2 text-right font-bold">Diesel L</th>
+                  <th className="px-4 py-2 text-right font-bold">Share</th>
+                  <th className="px-4 py-2 text-right font-bold">Hours worked</th>
+                  <th className="px-4 py-2 text-right font-bold">L/hr</th>
                 </tr>
               </thead>
               <tbody>

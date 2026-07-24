@@ -278,11 +278,11 @@ function WorkCard({ gran, buckets, series, scopeInclVat, bill, onBill, bills, bi
         <div className="overflow-x-auto rounded-lg border">
           <table className="w-full min-w-[520px] text-sm">
             <thead>
-              <tr className="border-b bg-muted/40 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-                <th className="whitespace-nowrap px-4 py-2 font-medium capitalize">{gran}</th>
-                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">Work + VAT (₦)</th>
-                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">% of Scope</th>
-                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">vs Previous</th>
+              <tr className="border-b bg-primary text-left text-[11px] uppercase tracking-wide text-primary-foreground">
+                <th className="whitespace-nowrap px-4 py-2 font-bold capitalize">{gran}</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-bold">Work + VAT (₦)</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-bold">% of Scope</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-bold">vs Previous</th>
               </tr>
             </thead>
             <tbody>
@@ -365,13 +365,13 @@ function CostCard({ gran, buckets, series, cat, onCat, cats }: {
         <div className="overflow-x-auto rounded-lg border">
           <table className="w-full min-w-[520px] text-sm">
             <thead>
-              <tr className="border-b bg-muted/40 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-                <th className="whitespace-nowrap px-4 py-2 font-medium capitalize">{gran}</th>
-                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">Cost (₦)</th>
+              <tr className="border-b bg-primary text-left text-[11px] uppercase tracking-wide text-primary-foreground">
+                <th className="whitespace-nowrap px-4 py-2 font-bold capitalize">{gran}</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-bold">Cost (₦)</th>
                 {cat !== 'all' && (
-                  <th className="whitespace-nowrap px-4 py-2 text-right font-medium">Share of Period Cost</th>
+                  <th className="whitespace-nowrap px-4 py-2 text-right font-bold">Share of Period Cost</th>
                 )}
-                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">vs Previous</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-bold">vs Previous</th>
               </tr>
             </thead>
             <tbody>
@@ -490,15 +490,15 @@ function VsCard({ gran, buckets, workSeries, costSeries, bill, onBill, bills, bi
         <div className="overflow-x-auto rounded-lg border">
           <table className="w-full min-w-[720px] text-sm">
             <thead>
-              <tr className="border-b bg-muted/40 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-                <th className="whitespace-nowrap px-4 py-2 font-medium capitalize">{gran}</th>
-                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">{workLabel} (₦)</th>
-                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">{costLabel} (₦)</th>
-                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">Net (₦)</th>
-                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">Margin</th>
-                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">Margin Δ</th>
-                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">Work Δ</th>
-                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">Cost Δ</th>
+              <tr className="border-b bg-primary text-left text-[11px] uppercase tracking-wide text-primary-foreground">
+                <th className="whitespace-nowrap px-4 py-2 font-bold capitalize">{gran}</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-bold">{workLabel} (₦)</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-bold">{costLabel} (₦)</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-bold">Net (₦)</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-bold">Margin</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-bold">Margin Δ</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-bold">Work Δ</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-bold">Cost Δ</th>
               </tr>
             </thead>
             <tbody>

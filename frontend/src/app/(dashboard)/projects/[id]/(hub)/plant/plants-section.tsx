@@ -141,12 +141,12 @@ export default function PlantsSection() {
           <CardContent className="p-0">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b text-left text-xs text-muted-foreground">
-                  <th className="px-4 py-2 font-medium">Raw number</th>
-                  <th className="px-4 py-2 font-medium">Seen as</th>
-                  <th className="px-4 py-2 text-right font-medium">Rows</th>
-                  <th className="px-4 py-2 text-right font-medium">Weeks</th>
-                  <th className="px-4 py-2 text-right font-medium">Verdict</th>
+                <tr className="border-b bg-primary text-left text-xs text-primary-foreground">
+                  <th className="px-4 py-2 font-bold">Raw number</th>
+                  <th className="px-4 py-2 font-bold">Seen as</th>
+                  <th className="px-4 py-2 text-right font-bold">Rows</th>
+                  <th className="px-4 py-2 text-right font-bold">Weeks</th>
+                  <th className="px-4 py-2 text-right font-bold">Verdict</th>
                 </tr>
               </thead>
               <tbody>
@@ -202,18 +202,18 @@ export default function PlantsSection() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b text-left text-xs text-muted-foreground">
+                <tr className="border-b bg-primary text-left text-xs text-primary-foreground">
                   <th className="w-8 px-2 py-2" />
-                  <th className="px-2 py-2 font-medium">Fleet</th>
-                  <th className="px-4 py-2 font-medium">Description</th>
-                  <th className="px-4 py-2 text-right font-medium">Weeks</th>
-                  <th className="px-4 py-2 text-right font-medium">Worked</th>
-                  <th className="px-4 py-2 text-right font-medium">Standby</th>
-                  <th className="px-4 py-2 text-right font-medium">Breakdown</th>
-                  <th className="px-4 py-2 text-right font-medium">Availability</th>
-                  <th className="px-4 py-2 text-right font-medium">Utilisation</th>
-                  <th className="px-4 py-2 text-right font-medium">Plant cost</th>
-                  <th className="px-4 py-2 text-right font-medium">Diesel L</th>
+                  <th className="px-2 py-2 font-bold">Fleet</th>
+                  <th className="px-4 py-2 font-bold">Description</th>
+                  <th className="px-4 py-2 text-right font-bold">Weeks</th>
+                  <th className="px-4 py-2 text-right font-bold">Worked</th>
+                  <th className="px-4 py-2 text-right font-bold">Standby</th>
+                  <th className="px-4 py-2 text-right font-bold">Breakdown</th>
+                  <th className="px-4 py-2 text-right font-bold">Availability</th>
+                  <th className="px-4 py-2 text-right font-bold">Utilisation</th>
+                  <th className="px-4 py-2 text-right font-bold">Plant cost</th>
+                  <th className="px-4 py-2 text-right font-bold">Diesel L</th>
                 </tr>
               </thead>
               <tbody>
@@ -297,15 +297,15 @@ function PlantHistory({ history }: { history: PlantWeekRow[] }) {
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
           <thead>
-            <tr className="border-b text-left text-muted-foreground">
-              <th className="px-2 py-1.5 font-medium">Week</th>
-              <th className="px-2 py-1.5 text-right font-medium">Worked</th>
-              <th className="px-2 py-1.5 text-right font-medium">Standby</th>
-              <th className="px-2 py-1.5 text-right font-medium">Breakdown</th>
-              <th className="px-2 py-1.5 text-right font-medium">Availability</th>
-              <th className="px-2 py-1.5 text-right font-medium">Utilisation</th>
-              <th className="px-2 py-1.5 text-right font-medium">Cost</th>
-              <th className="px-2 py-1.5 text-right font-medium">Diesel L</th>
+            <tr className="border-b bg-primary text-left text-primary-foreground">
+              <th className="px-2 py-1.5 font-bold">Week</th>
+              <th className="px-2 py-1.5 text-right font-bold">Worked</th>
+              <th className="px-2 py-1.5 text-right font-bold">Standby</th>
+              <th className="px-2 py-1.5 text-right font-bold">Breakdown</th>
+              <th className="px-2 py-1.5 text-right font-bold">Availability</th>
+              <th className="px-2 py-1.5 text-right font-bold">Utilisation</th>
+              <th className="px-2 py-1.5 text-right font-bold">Cost</th>
+              <th className="px-2 py-1.5 text-right font-bold">Diesel L</th>
             </tr>
           </thead>
           <tbody>

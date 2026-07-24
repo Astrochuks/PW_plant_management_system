@@ -111,17 +111,17 @@ function BillCard({ bill, open, onToggle }: { bill: WorkDoneBill; open: boolean;
         <div className="overflow-x-auto border-t">
           <table className="w-full text-xs">
             <thead>
-              <tr className="border-b bg-muted/40 text-left text-muted-foreground">
-                <th className="px-3 py-2 font-medium">Item</th>
-                <th className="px-3 py-2 font-medium min-w-[220px]">Description</th>
-                <th className="px-3 py-2 font-medium">Unit</th>
-                <th className="px-3 py-2 text-right font-medium">Contract Qty</th>
-                <th className="px-3 py-2 text-right font-medium">Qty Done</th>
-                <th className="px-3 py-2 text-right font-medium">Rate ₦</th>
-                <th className="px-3 py-2 text-right font-medium">Contract Amount</th>
-                <th className="px-3 py-2 text-right font-medium">Amount Done</th>
-                <th className="px-3 py-2 text-right font-medium">This Week</th>
-                <th className="px-3 py-2 text-right font-medium">% Complete</th>
+              <tr className="border-b bg-primary text-left text-primary-foreground">
+                <th className="px-3 py-2 font-bold">Item</th>
+                <th className="px-3 py-2 font-bold min-w-[220px]">Description</th>
+                <th className="px-3 py-2 font-bold">Unit</th>
+                <th className="px-3 py-2 text-right font-bold">Contract Qty</th>
+                <th className="px-3 py-2 text-right font-bold">Qty Done</th>
+                <th className="px-3 py-2 text-right font-bold">Rate ₦</th>
+                <th className="px-3 py-2 text-right font-bold">Contract Amount</th>
+                <th className="px-3 py-2 text-right font-bold">Amount Done</th>
+                <th className="px-3 py-2 text-right font-bold">This Week</th>
+                <th className="px-3 py-2 text-right font-bold">% Complete</th>
               </tr>
             </thead>
             <tbody>
