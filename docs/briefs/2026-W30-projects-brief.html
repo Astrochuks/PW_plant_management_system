@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>P.W. Nigeria — Projects Brief, Week 30 2026</title>
+<style>
+  @page { size: A4 portrait; margin: 11mm 12mm; }
+
+  :root {
+    --gold:   #ffbf36;
+    --ink:    #101415;
+    --body:   #2b2f31;
+    --muted:  #6b6f70;
+    --hair:   #d9d6cf;   /* warm grey, biased toward the gold */
+    --wash:   #faf7f0;
+    --red:    #a32020;
+  }
+
+  * { box-sizing: border-box; }
+
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  body {
+    margin: 0;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 9.1pt;
+    line-height: 1.42;
+    color: var(--body);
+    background: #fff;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .sheet {
+    width: 186mm;
+    margin: 0 auto;
+    padding: 4mm 0 0;
+  }
+
+  /* ── Masthead ─────────────────────────────────────────────── */
+  .masthead { display: flex; align-items: flex-end; justify-content: space-between; gap: 8mm; }
+  .brand { display: flex; align-items: center; gap: 3mm; }
+  .brand img { width: 13mm; height: 13mm; object-fit: contain; }
+  .brand .name { font-size: 10pt; font-weight: 700; letter-spacing: .02em; color: var(--ink); line-height: 1.15; }
+  .brand .sub  { font-size: 6.6pt; letter-spacing: .13em; text-transform: uppercase; color: var(--muted); }
+
+  .issue { text-align: right; }
+  .issue .kicker { font-size: 6.6pt; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); }
+  .issue .title  { font-family: Georgia, "Times New Roman", serif; font-size: 17pt; font-weight: 700; color: var(--ink); line-height: 1.05; margin-top: .5mm; }
+  .issue .date   { font-size: 7.6pt; color: var(--muted); margin-top: .8mm; }
+
+  .rule { height: 2.2mm; background: var(--gold); margin: 3mm 0 0; }
+  .addressed { font-size: 7.2pt; color: var(--muted); margin: 1.6mm 0 0; }
+
+  /* ── Section furniture ────────────────────────────────────── */
+  section { margin-top: 5mm; }
+  h2 {
+    font-size: 7pt; letter-spacing: .17em; text-transform: uppercase;
+    color: var(--ink); margin: 0 0 2mm; padding-bottom: 1.1mm;
+    border-bottom: .4pt solid var(--hair); font-weight: 700;
+  }
+
+  /* ── A. Cash ──────────────────────────────────────────────── */
+  .cash { display: flex; gap: 4mm; align-items: stretch; }
+
+  .headline {
+    flex: 0 0 62mm; background: var(--wash);
+    border: .4pt solid var(--hair); border-left: 2.2mm solid var(--gold);
+    padding: 3mm 3.5mm;
+  }
+  .headline .label { font-size: 6.6pt; letter-spacing: .13em; text-transform: uppercase; color: var(--muted); }
+  .headline .big {
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 26pt; font-weight: 700; color: var(--ink);
+    line-height: 1; margin: 1.4mm 0 .8mm; letter-spacing: -.01em;
+  }
+  .headline .exact { font-size: 8pt; color: var(--body); }
+  .headline .since {
+    font-size: 8pt; color: var(--red); font-weight: 700; margin-top: 2mm;
+    line-height: 1.3;
+  }
+  .headline .since span { display: block; font-weight: 400; color: var(--muted); }
+
+  .breakdown { flex: 1; }
+  .breakdown table { width: 100%; border-collapse: collapse; }
+  .breakdown td { padding: 1.5mm 0; border-bottom: .4pt solid var(--hair); vertical-align: baseline; }
+  .breakdown tr:last-child td { border-bottom: 0; }
+  .breakdown .what { color: var(--body); }
+  .breakdown .what small { display: block; color: var(--muted); font-size: 7pt; }
+  .breakdown .amt { text-align: right; font-weight: 700; color: var(--ink); white-space: nowrap; font-size: 9pt; }
+
+  .ask {
+    margin-top: 2.5mm; padding: 2mm 2.5mm; background: var(--ink); color: #fff;
+    font-size: 7.6pt;
+  }
+  .ask b { color: var(--gold); letter-spacing: .06em; text-transform: uppercase; font-size: 6.8pt; margin-right: 1.5mm; }
+
+  /* ── B. Projects ──────────────────────────────────────────── */
+  table.projects { width: 100%; border-collapse: collapse; font-size: 8.3pt; table-layout: fixed; }
+  table.projects col.label { width: 42mm; }
+  table.projects col.fig   { width: 48mm; }
+  table.projects th, table.projects td { padding: 1.5mm 2mm; text-align: right; }
+  table.projects thead th { background: var(--gold); color: var(--ink); font-weight: 700; font-size: 7.6pt; vertical-align: bottom; }
+  table.projects thead th:first-child { text-align: left; }
+  table.projects thead th small { display: block; font-weight: 400; font-size: 6.4pt; letter-spacing: .04em; }
+  table.projects tbody th { text-align: left; font-weight: 400; color: var(--body); padding: 1.5mm 2mm; }
+  table.projects tbody tr { border-bottom: .4pt solid var(--hair); }
+  table.projects tbody tr.total { border-top: .9pt solid var(--ink); border-bottom: 0; }
+  table.projects tbody tr.total th, table.projects tbody tr.total td { font-weight: 700; color: var(--ink); padding-top: 2mm; }
+  table.projects td.n { font-variant-numeric: tabular-nums; }
+  table.projects td.dim { color: var(--muted); }
+  .stale { color: var(--red); font-weight: 700; }
+
+  /* ── C. Decisions ─────────────────────────────────────────── */
+  .items { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 3.5mm; }
+  .item { border-top: 1.4mm solid var(--gold); padding-top: 2mm; }
+  .item h3 { margin: 0 0 1.2mm; font-size: 8.6pt; color: var(--ink); line-height: 1.25; }
+  .item .fig {
+    font-family: Georgia, "Times New Roman", serif; font-size: 13pt; font-weight: 700;
+    color: var(--ink); line-height: 1; margin-bottom: 1.4mm;
+  }
+  .item p { margin: 0 0 1.6mm; font-size: 7.5pt; }
+  .item .decide { font-size: 7.4pt; color: var(--ink); border-left: .8mm solid var(--hair); padding-left: 2mm; }
+  .item .decide b { letter-spacing: .06em; text-transform: uppercase; font-size: 6.6pt; color: var(--muted); display: block; }
+
+  /* ── Footer ───────────────────────────────────────────────── */
+  footer { margin-top: 5mm; border-top: .4pt solid var(--hair); padding-top: 2mm; font-size: 6.9pt; color: var(--muted); }
+  footer .caveat { color: var(--body); }
+  footer b { color: var(--ink); }
+</style>
+</head>
+<body>
+<div class="sheet">
+
+  <div class="masthead">
+    <div class="brand">
+      <img src="data:image/png;base64,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" alt="P.W. Nigeria Ltd.">
+      <div>
+        <div class="name">P.W. NIGERIA LTD.</div>
+        <div class="sub">Central Reporting System</div>
+      </div>
+    </div>
+    <div class="issue">
+      <div class="kicker">Projects Brief</div>
+      <div class="title">Week 30 · 2026</div>
+      <div class="date">Friday, 24 July 2026</div>
+    </div>
+  </div>
+  <div class="rule"></div>
+  <p class="addressed">
+    For the Managing Director. Every figure below is recomputed from the site weekly-report
+    workbooks — nothing is re-keyed by hand.
+  </p>
+
+  <!-- ─────────────────────────────────────────────────────── -->
+  <section>
+    <h2>What our clients are holding</h2>
+    <div class="cash">
+      <div class="headline">
+        <div class="label">Earned, not in the bank</div>
+        <div class="big">₦2.43bn</div>
+        <div class="exact">₦2,434,331,608</div>
+        <div class="since">178 days since a payment<span>Last received 27 January 2026</span></div>
+      </div>
+      <div class="breakdown">
+        <table>
+          <tr>
+            <td class="what">Certified, not yet paid
+              <small>Work the client has signed for and not settled · Akwa Ibom Airport Apron</small></td>
+            <td class="amt">₦1,797,243,750</td>
+          </tr>
+          <tr>
+            <td class="what">Retention held
+              <small>5% deducted from certificates, releasable on completion</small></td>
+            <td class="amt">₦637,087,857</td>
+          </tr>
+          <tr>
+            <td class="what">Certified to date
+              <small>Against ₦13,599,853,394 received in payments (gross)</small></td>
+            <td class="amt">₦12,741,757,150</td>
+          </tr>
+        </table>
+        <div class="ask"><b>Decision</b>One certificate chase to the Ministry of Special Duties, Akwa Ibom State. The oldest unpaid certificate has been outstanding 178 days.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────────────────────────────────── -->
+  <section>
+    <h2>Where the two projects stand</h2>
+    <table class="projects">
+      <colgroup>
+        <col class="label"><col class="fig"><col class="fig"><col class="fig">
+      </colgroup>
+      <thead>
+        <tr>
+          <th>&nbsp;</th>
+          <th>Akwa Ibom Airport Apron<small>Government of Akwa Ibom State · Ministry of Special Duties</small></th>
+          <th>6th Bridge over River Kaduna<small>Nurus-Siraj Nigeria Limited</small></th>
+          <th>Both<small>Portfolio</small></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th>Contract value</th>
+          <td class="n">₦10,621,359,979</td>
+          <td class="n">₦4,617,148,926</td>
+          <td class="n">₦15,238,508,905</td>
+        </tr>
+        <tr>
+          <th>BEME scope (Incl. VAT)</th>
+          <td class="n">₦23,283,363,859</td>
+          <td class="n">₦4,275,137,895</td>
+          <td class="n">₦27,558,501,753</td>
+        </tr>
+        <tr>
+          <th>Work done to date (Incl. VAT)</th>
+          <td class="n">₦14,618,964,458</td>
+          <td class="n">₦1,374,389,421</td>
+          <td class="n">₦15,993,353,879</td>
+        </tr>
+        <tr>
+          <th>Cost to date</th>
+          <td class="n">₦7,094,752,961</td>
+          <td class="n">₦1,081,400,128</td>
+          <td class="n">₦8,176,153,089</td>
+        </tr>
+        <tr class="total">
+          <th>Net to date</th>
+          <td class="n">₦7,524,211,497</td>
+          <td class="n">₦292,989,294</td>
+          <td class="n">₦7,817,200,790</td>
+        </tr>
+        <tr>
+          <th>Margin</th>
+          <td class="n">51.5%</td>
+          <td class="n">21.3%</td>
+          <td class="n">48.9%</td>
+        </tr>
+        <tr>
+          <th>Scope complete</th>
+          <td class="n">62.8%</td>
+          <td class="n">32.1%</td>
+          <td class="n">58.0%</td>
+        </tr>
+        <tr>
+          <th>Certificates &amp; payments</th>
+          <td class="n">₦12.74bn certified · ₦13.60bn paid</td>
+          <td class="n dim">No ledger received</td>
+          <td class="n dim">—</td>
+        </tr>
+        <tr>
+          <th>Last report received</th>
+          <td class="n">W10 · 6 Mar 2026 <span class="stale">(140 days)</span></td>
+          <td class="n">W09 · 1 Mar 2025 <span class="stale">(510 days)</span></td>
+          <td class="n dim">9 weeks stored</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ─────────────────────────────────────────────────────── -->
+  <section>
+    <h2>Three things that need your decision</h2>
+    <div class="items">
+
+      <div class="item">
+        <h3>The fuel record is a photocopy</h3>
+        <div class="fig">₦14.1m</div>
+        <p>For seven straight weeks — W3 to W10 — the Akwa per-machine fuel sheet is
+          <b>identical</b>: same 22 machines, same 6,056 litres, week after week. The Cost
+          Report meanwhile shows <b>61,027 litres</b> bought this year against
+          <b>49,123</b> logged. <b>11,904 litres</b> — ₦14.1m at the price we paid — is
+          diesel no machine is recorded as burning.</p>
+        <div class="decide"><b>Decision</b>Fuel logged per machine, every week, entered at
+          site so it cannot be carried forward — or we keep buying fuel we cannot trace.</div>
+      </div>
+
+      <div class="item">
+        <h3>We paid a third more per litre in one week</h3>
+        <div class="fig">₦1,200 → ₦1,600</div>
+        <p>Between W9 and W10 the diesel spend rose <b>44.7%</b> while the litres delivered
+          rose only <b>8.5%</b>. The rest is price: ₦1,200 a litre became ₦1,600 — a 33%
+          jump in a single week, on the largest single line in our cost report
+          (<b>₦72.2m</b> of AGO in 2026).</p>
+        <div class="decide"><b>Decision</b>Who approved the new price, and is it one
+          supplier? A ₦400/litre swing on this volume is ₦24m a year.</div>
+      </div>
+
+      <div class="item">
+        <h3>We are steering on old numbers</h3>
+        <div class="fig">140 &amp; 510 days</div>
+        <p>Akwa's last workbook covers the week ending <b>6 March 2026</b>. Kaduna's covers
+          <b>1 March 2025</b>. Everything on this page is true as at those dates — the
+          system is exactly as current as the last report a site sends in.</p>
+        <div class="decide"><b>Decision</b>Instruct both sites to resume the weekly return,
+          and approve site data entry so a report cannot simply be re-sent unchanged.</div>
+      </div>
+
+    </div>
+  </section>
+
+  <footer>
+    <p class="caveat"><b>One caveat, stated plainly.</b> Both projects carry the same
+      contractual completion date, 18 December 2021 — a workbook template default, not a real
+      date. Overdue months are therefore <b>not</b> quoted on this page; the award letters are
+      needed to correct them. Kaduna has sent no certificate or payment ledger at all, so its
+      certified and retention positions are unknown rather than nil.</p>
+    <p style="margin:1.6mm 0 0">
+      Computed by the P.W. Central Reporting System from 9 stored site weeks · works valued at
+      BEME rates and grossed at 7.5% VAT · costs from the site Cost Report · certificates and
+      payments from the site ledgers · every figure drills down to the week, the bill and the
+      machine behind it.
+    </p>
+  </footer>
+
+</div>
+</body>
+</html>
