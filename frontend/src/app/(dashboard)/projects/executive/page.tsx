@@ -131,13 +131,11 @@ export default function ExecutiveSummaryPage() {
       projects.reduce((a, p) => a + (f(p) ?? 0), 0)
     const work = sum((p) => p.works_incl_vat)
     const cost = sum((p) => p.cost)
-    const scope = sum((p) => p.scope)
     return {
       count: projects.length,
       contract: sum((p) => p.contract_sum),
       work, cost, net: work - cost,
       margin: work ? (work - cost) / work : null,
-      pct: scope ? sum((p) => p.works) / scope : null,
       certified: sum((p) => p.certified),
       paid: sum((p) => p.paid_gross),
       unpaid: sum((p) => p.certified_not_paid),
@@ -331,8 +329,8 @@ export default function ExecutiveSummaryPage() {
                 : `active ${all.length === 1 ? 'project' : 'projects'}`
           } />
         <Kpi label="Contract value" value={naira(t.contract, true)} sub={naira(t.contract)} lineage={across} />
-        <Kpi label="Work done · to date" value={naira(t.work, true)}
-          sub={`${pctFmt(t.pct)} of BEME scope`} lineage={across} />
+        <Kpi label="Work done to date (Incl. VAT)" value={naira(t.work, true)}
+          sub={naira(t.work)} lineage={across} />
         <Kpi label="Cost · to date" value={naira(t.cost, true)} sub={naira(t.cost)} lineage={across} />
         <Kpi label="Net · to date" value={naira(t.net, true)} sub={naira(t.net)}
           tone={t.net >= 0 ? 'good' : 'bad'} lineage={across} />
