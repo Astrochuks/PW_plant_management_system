@@ -25,7 +25,7 @@ import { Button } from '@/components/ui/button'
 import { Kpi, Legend, LegendSm } from '@/components/projects/hub-ui'
 import { useExecutiveSummary } from '@/hooks/use-projects'
 import type { PortfolioProject } from '@/hooks/use-projects'
-import { naira, nairaM, num, pctFmt, fmtDate } from '@/lib/format'
+import { naira, nairaM, pctFmt, fmtDate } from '@/lib/format'
 
 type Gran = 'week' | 'month' | 'quarter' | 'year'
 type Unit = 'm' | 'full'
@@ -132,9 +132,6 @@ export default function ExecutiveSummaryPage() {
     const work = sum((p) => p.works_incl_vat)
     const cost = sum((p) => p.cost)
     const scope = sum((p) => p.scope)
-    const oldest = projects
-      .filter((p) => p.certified_not_paid && p.days_since_payment != null)
-      .map((p) => p.days_since_payment as number)
     return {
       count: projects.length,
       contract: sum((p) => p.contract_sum),
@@ -145,7 +142,6 @@ export default function ExecutiveSummaryPage() {
       paid: sum((p) => p.paid_gross),
       unpaid: sum((p) => p.certified_not_paid),
       retention: sum((p) => p.retention_held),
-      oldestUnpaid: oldest.length ? Math.max(...oldest) : null,
       overdue: projects.filter((p) => p.schedule.status === 'overdue').length,
     }
   }, [projects])
@@ -356,18 +352,14 @@ export default function ExecutiveSummaryPage() {
             <p className="mt-0.5 text-xs tabular-nums text-amber-900/70 dark:text-amber-200/70">
               {naira(t.unpaid)}
             </p>
-            {t.oldestUnpaid != null && (
-              <p className="mt-2 text-xs font-medium text-amber-900 dark:text-amber-200">
-                Longest wait since a payment landed: {num(t.oldestUnpaid)} days
-              </p>
-            )}
+            <p className="mt-1 text-[11px] text-amber-900/70 dark:text-amber-200/70">{across}</p>
           </div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Kpi label="Certified" value={naira(t.certified, true)} />
-            <Kpi label="Paid (gross)" value={naira(t.paid, true)} />
-            <Kpi label="Retention held" value={naira(t.retention, true)} />
+            <Kpi label="Certified" value={naira(t.certified, true)} sub={naira(t.certified)} lineage={across} />
+            <Kpi label="Paid (gross)" value={naira(t.paid, true)} sub={naira(t.paid)} lineage={across} />
+            <Kpi label="Retention held" value={naira(t.retention, true)} sub={naira(t.retention)} lineage={across} />
             <Kpi label="Overdue projects" value={String(t.overdue)}
-              tone={t.overdue > 0 ? 'bad' : 'good'} />
+              tone={t.overdue > 0 ? 'bad' : 'good'} lineage={across} />
           </div>
         </CardContent>
       </Card>
