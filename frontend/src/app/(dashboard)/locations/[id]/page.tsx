@@ -111,8 +111,12 @@ export default function LocationDetailPage() {
   const usageParams = usagePeriod === 'all' ? { period: 'all' as const } : { year: Number(usagePeriod) }
   const { data: usage, isLoading: usageLoading } = useLocationUsage(id, usageParams)
 
-  // Transfers tab state
-  const { data: transfersData, isLoading: transfersLoading } = useLocationTransfers(id, { limit: 100 })
+  // Transfers tab state — only the admin works the queue, so everyone else
+  // sees confirmed moves only (same rule as the Transfers page)
+  const { data: transfersData, isLoading: transfersLoading } = useLocationTransfers(id, {
+    limit: 100,
+    ...(isAdmin ? {} : { status: 'confirmed' }),
+  })
 
   // Costs tab state
   const [costYear, setCostYear] = useState<string>('')

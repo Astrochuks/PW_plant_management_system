@@ -652,8 +652,9 @@ function PlantDetailContent({ plantId }: { plantId: string }) {
             </CardContent>
           </Card>
 
-          {/* Pending Transfer */}
-          {plant.pending_transfer_to_location && (
+          {/* Pending Transfer — admin only: an unconfirmed move is a claim
+              waiting on them, not a fact anyone else should read */}
+          {isAdmin && plant.pending_transfer_to_location && (
             <Card className="border-amber-300 dark:border-amber-700">
               <CardContent className="pt-4">
                 <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400 mb-2">
