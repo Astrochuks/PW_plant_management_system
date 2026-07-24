@@ -268,8 +268,6 @@ export default function ExecutiveSummaryPage() {
   const across = t.count === 1
     ? (fProject !== ALL ? '1 project' : `across ${scopeName}`)
     : `across ${t.count} projects`
-  const acrossLabel = fProject !== ALL ? 'the drill-down'
-    : fState !== ALL ? `in ${fState}` : 'all active'
   const lensLabel = singleYear ? matYear : 'all years'
 
   const money = (v: number | null | undefined) =>
@@ -331,8 +329,11 @@ export default function ExecutiveSummaryPage() {
       {/* headline — to date */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <Kpi label="Projects" value={String(t.count)}
-          sub={filtered ? `of ${all.length} active` : `active ${all.length === 1 ? 'project' : 'projects'}`}
-          lineage={acrossLabel} />
+          sub={
+            fProject !== ALL ? 'selected project'
+              : fState !== ALL ? `active in ${fState}`
+                : `active ${all.length === 1 ? 'project' : 'projects'}`
+          } />
         <Kpi label="Contract value" value={naira(t.contract, true)} sub={naira(t.contract)} lineage={across} />
         <Kpi label="Work done · to date" value={naira(t.work, true)}
           sub={`${pctFmt(t.pct)} of BEME scope`} lineage={across} />
