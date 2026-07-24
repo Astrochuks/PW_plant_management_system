@@ -86,7 +86,7 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
       {/* Three zones: identity · status trio (centered in the leftover space) · actions */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="sm" onClick={() => router.push('/projects')}>
+          <Button variant="ghost" size="sm" onClick={() => router.back()}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div>
