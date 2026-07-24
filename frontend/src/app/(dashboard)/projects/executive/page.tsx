@@ -1,13 +1,14 @@
 'use client'
 
 /**
- * Executive summary — the portfolio landing page.
+ * Executive summary — the portfolio landing page, built for one job:
+ * comparing projects over a chosen window.
  *
- * Shape follows PW's own "General Summary Per Site Output": sites down
- * the side, periods across the top, output in the cells, row totals and
- * a grand total. Around it, the dashboard furniture: a filter bar that
- * drives EVERY figure on the page, the portfolio position, the cash
- * position, and the two breakdowns (by state, by type).
+ * The Period filter is a TIME WINDOW — "To date" (default) or a single
+ * year — and it scopes EVERY figure on the page: the KPI strip, the
+ * site × period output matrix (PW's own "General Summary Per Site
+ * Output" shape), the breakdowns, the trend, and the projects table.
+ * "To date" compares by year; drill into a year to compare by month.
  *
  * Every figure is the project-level figure summed up — this page and a
  * project hub can never disagree.
@@ -25,16 +26,7 @@ import { Button } from '@/components/ui/button'
 import { Kpi, Legend, LegendSm } from '@/components/projects/hub-ui'
 import { useExecutiveSummary } from '@/hooks/use-projects'
 import type { PortfolioProject, PortfolioWeek } from '@/hooks/use-projects'
-import { naira, num, pctFmt, fmtDate, weekLabel } from '@/lib/format'
-
-type Granularity = 'week' | 'month' | 'quarter' | 'year'
-
-const GRANS: Array<{ key: Granularity; label: string }> = [
-  { key: 'week', label: 'Weekly' },
-  { key: 'month', label: 'Monthly' },
-  { key: 'quarter', label: 'Quarterly' },
-  { key: 'year', label: 'Yearly' },
-]
+import { naira, num, pctFmt, fmtDate } from '@/lib/format'
 
 const COLOR_WORK = '#f59e0b'
 const COLOR_COST = '#3b82f6'
@@ -42,14 +34,21 @@ const COLOR_NET = '#10b981'
 const TYPE_COLORS = ['#3b82f6', '#f59e0b', '#10b981', '#8b5cf6', '#f43f5e', '#06b6d4', '#14b8a6', '#94a3b8']
 
 const ALL = '__all__'
+const TO_DATE = 'todate'
 const UNSET = '— unassigned —'
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-function bucketKey(w: PortfolioWeek, g: Granularity): string {
+// To date → compare by YEAR; a single year → compare by MONTH
+function bucketKey(w: PortfolioWeek, window: string): string {
+  if (window === TO_DATE) return String(w.year)
   const d = new Date(w.week_ending_date + 'T00:00:00')
-  if (g === 'week') return weekLabel(w.year, w.week_number)
-  if (g === 'month') return d.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })
-  if (g === 'quarter') return `Q${Math.floor(d.getMonth() / 3) + 1} ${d.getFullYear()}`
-  return String(d.getFullYear())
+  return MONTHS[d.getMonth()]
+}
+
+// order of the matrix columns for a window
+function bucketOrder(window: string, present: Set<string>): string[] {
+  if (window === TO_DATE) return [...present].sort()
+  return MONTHS.filter((m) => present.has(m))
 }
 
 const compactNaira = (v: number) =>
@@ -63,11 +62,14 @@ const cellMoney = (v: number) =>
     : Math.abs(v) >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}m`
       : `${(v / 1_000).toFixed(0)}k`
 
+interface Win { work: number; cost: number; net: number }
+type Row = PortfolioProject & { win: Win; winMargin: number | null }
+
 export default function ExecutiveSummaryPage() {
   const router = useRouter()
   const { data, isLoading } = useExecutiveSummary()
-  const [gran, setGran] = useState<Granularity>('month')
-  const [sort, setSort] = useState<'net' | 'margin' | 'pct' | 'unpaid' | 'stale'>('net')
+  const [period, setPeriod] = useState<string>(TO_DATE)  // TO_DATE | '2026' | …
+  const [sort, setSort] = useState<'net' | 'work' | 'cost' | 'margin' | 'pct' | 'unpaid'>('work')
   const [fState, setFState] = useState(ALL)
   const [fProject, setFProject] = useState(ALL)
 
@@ -77,152 +79,184 @@ export default function ExecutiveSummaryPage() {
     [data],
   )
 
-  // State narrows the pool; the Project drill-down then lists only what
+  // State narrows the pool; the Project drill-down lists only what
   // survives it, so its options cascade from the State choice.
   const scoped = useMemo(() => all.filter((p) =>
     fState === ALL || (p.state_name || UNSET) === fState
   ), [all, fState])
+
+  const years = useMemo(
+    () => [...new Set((data?.series ?? []).map((w) => w.year))].sort((a, b) => b - a),
+    [data],
+  )
 
   const options = useMemo(() => {
     const uniq = (vals: Array<string | null>) =>
       [...new Set(vals.map((v) => v || UNSET))].sort()
     return {
       states: uniq(all.map((p) => p.state_name)),
-      // Project options follow the State choice
       projects: scoped
         .map((p) => ({ id: p.id, name: p.short_name || p.project_name }))
         .sort((a, b) => a.name.localeCompare(b.name)),
     }
   }, [all, scoped])
 
-  // if the State choice drops the chosen project, fall back to All
   useEffect(() => {
-    if (fProject !== ALL && !scoped.some((p) => p.id === fProject)) {
-      setFProject(ALL)
-    }
+    if (fProject !== ALL && !scoped.some((p) => p.id === fProject)) setFProject(ALL)
   }, [scoped, fProject])
 
-  // one filter set drives every figure on the page
   const projects = useMemo(
     () => scoped.filter((p) => fProject === ALL || p.id === fProject),
     [scoped, fProject],
   )
 
-  const ids = useMemo(() => new Set(projects.map((p) => p.id)), [projects])
-  const series = useMemo(
-    () => (data?.series ?? []).filter((w) => ids.has(w.project_id)),
-    [data, ids],
-  )
+  // the window's per-project rows + the shared period columns
+  const { rows, periods, byProject, totalsByPeriod, trend, totals } = useMemo(() => {
+    const ids = new Set(projects.map((p) => p.id))
+    const cumulative = period === TO_DATE
+    const yearNum = cumulative ? null : Number(period)
 
-  const t = useMemo(() => {
-    const sum = (f: (p: PortfolioProject) => number | null | undefined) =>
-      projects.reduce((a, p) => a + (f(p) ?? 0), 0)
-    const works = sum((p) => p.works_incl_vat)
-    const cost = sum((p) => p.cost)
-    const scope = sum((p) => p.scope)
-    const oldest = projects
-      .filter((p) => p.certified_not_paid && p.days_since_payment != null)
-      .map((p) => p.days_since_payment as number)
-    return {
-      count: projects.length,
-      contract: sum((p) => p.contract_sum),
-      works, cost,
-      net: works - cost,
-      margin: works ? (works - cost) / works : null,
-      pct: scope ? sum((p) => p.works) / scope : null,
-      certified: sum((p) => p.certified),
-      paid: sum((p) => p.paid_gross),
-      unpaid: sum((p) => p.certified_not_paid),
-      retention: sum((p) => p.retention_held),
-      oldestUnpaid: oldest.length ? Math.max(...oldest) : null,
-      overdue: projects.filter((p) => p.schedule.status === 'overdue').length,
+    const scopedSeries = (data?.series ?? []).filter((w) => ids.has(w.project_id))
+    // the series only holds reported weekly MOVEMENT; a project's true
+    // to-date includes work executed before its first uploaded week
+    const winSeries = scopedSeries.filter((w) => cumulative || w.year === yearNum)
+
+    // per-project reported movement inside the window
+    const move = new Map<string, Win>()
+    for (const w of winSeries) {
+      const m = move.get(w.project_id) ?? { work: 0, cost: 0, net: 0 }
+      m.work += w.works_incl_vat; m.cost += w.cost; m.net += w.net
+      move.set(w.project_id, m)
     }
-  }, [projects])
 
-  // period columns, shared by the trend chart and the site matrix
-  const { periods, byProject, totalsByPeriod, trend } = useMemo(() => {
-    const order: string[] = []
-    const seen = new Set<string>()
-    const cell = new Map<string, number>()          // `${projectId}|${period}`
-    const totals = new Map<string, number>()
-    const tr = new Map<string, { label: string; work: number; cost: number; net: number }>()
-    for (const w of series) {
-      const key = bucketKey(w, gran)
-      if (!seen.has(key)) { seen.add(key); order.push(key) }
+    // To date → the project's own cumulative totals (movement + baseline
+    // + gap adjustments, kobo-exact with the hub). A year → its movement.
+    const rows: Row[] = projects.map((p) => {
+      const m = move.get(p.id) ?? { work: 0, cost: 0, net: 0 }
+      const win: Win = cumulative
+        ? { work: p.works_incl_vat, cost: p.cost, net: p.net }
+        : m
+      return { ...p, win, winMargin: win.work ? win.net / win.work : null }
+    })
+
+    // matrix cells + period columns (movement per bucket)
+    const present = new Set<string>()
+    const cell = new Map<string, number>()          // `${projectId}|${bucket}`
+    const byPeriod = new Map<string, number>()
+    for (const w of winSeries) {
+      const key = bucketKey(w, period)
+      present.add(key)
       const ck = `${w.project_id}|${key}`
       cell.set(ck, (cell.get(ck) ?? 0) + w.works_incl_vat)
-      totals.set(key, (totals.get(key) ?? 0) + w.works_incl_vat)
+      byPeriod.set(key, (byPeriod.get(key) ?? 0) + w.works_incl_vat)
+    }
+    let cols = bucketOrder(period, present)
+
+    // To date: a leading "Prior" column carries pre-reporting work, so
+    // each row's Prior + years reconciles to its true cumulative total
+    if (cumulative) {
+      let anyPrior = false
+      for (const p of projects) {
+        const m = move.get(p.id) ?? { work: 0, cost: 0, net: 0 }
+        const prior = p.works_incl_vat - m.work
+        if (Math.abs(prior) > 1) {
+          cell.set(`${p.id}|Prior`, prior)
+          byPeriod.set('Prior', (byPeriod.get('Prior') ?? 0) + prior)
+          anyPrior = true
+        }
+      }
+      if (anyPrior) cols = ['Prior', ...cols]
+    }
+
+    // trend: real time buckets only (Prior isn't a period)
+    const tr = new Map<string, { label: string; work: number; cost: number; net: number }>()
+    for (const w of winSeries) {
+      const key = bucketKey(w, period)
       const b = tr.get(key) ?? { label: key, work: 0, cost: 0, net: 0 }
-      b.work += w.works_incl_vat
-      b.cost += w.cost
-      b.net += w.net
+      b.work += w.works_incl_vat; b.cost += w.cost; b.net += w.net
       tr.set(key, b)
     }
+    const trendCols = cols.filter((c) => c !== 'Prior')
+
+    const sum = (f: (r: Row) => number | null | undefined) =>
+      rows.reduce((a, r) => a + (f(r) ?? 0), 0)
+    const work = sum((r) => r.win.work)
+    const cost = sum((r) => r.win.cost)
+    const scope = sum((r) => r.scope)
+    const oldest = rows
+      .filter((r) => r.certified_not_paid && r.days_since_payment != null)
+      .map((r) => r.days_since_payment as number)
+
     return {
-      periods: order,
+      rows,
+      periods: cols,
       byProject: cell,
-      totalsByPeriod: totals,
-      trend: order.map((k) => tr.get(k)!),
+      totalsByPeriod: byPeriod,
+      trend: trendCols.map((k) => tr.get(k) ?? { label: k, work: 0, cost: 0, net: 0 }),
+      totals: {
+        count: rows.length,
+        contract: sum((r) => r.contract_sum),
+        work, cost, net: work - cost,
+        margin: work ? (work - cost) / work : null,
+        pct: scope ? sum((r) => r.works) / scope : null,   // % complete stays cumulative
+        certified: sum((r) => r.certified),
+        paid: sum((r) => r.paid_gross),
+        unpaid: sum((r) => r.certified_not_paid),
+        retention: sum((r) => r.retention_held),
+        oldestUnpaid: oldest.length ? Math.max(...oldest) : null,
+        overdue: rows.filter((r) => r.schedule.status === 'overdue').length,
+      },
     }
-  }, [series, gran])
+  }, [data, projects, period])
 
   const sorted = useMemo(() => {
-    const list = [...projects]
-    if (sort === 'net') list.sort((a, b) => b.net - a.net)
-    if (sort === 'margin') list.sort((a, b) => (b.margin ?? -Infinity) - (a.margin ?? -Infinity))
+    const list = [...rows]
+    if (sort === 'work') list.sort((a, b) => b.win.work - a.win.work)
+    if (sort === 'cost') list.sort((a, b) => b.win.cost - a.win.cost)
+    if (sort === 'net') list.sort((a, b) => b.win.net - a.win.net)
+    if (sort === 'margin') list.sort((a, b) => (b.winMargin ?? -Infinity) - (a.winMargin ?? -Infinity))
     if (sort === 'pct') list.sort((a, b) => (b.pct_complete ?? -1) - (a.pct_complete ?? -1))
     if (sort === 'unpaid') list.sort((a, b) => (b.certified_not_paid ?? 0) - (a.certified_not_paid ?? 0))
-    if (sort === 'stale') list.sort((a, b) => (b.days_since_report ?? -1) - (a.days_since_report ?? -1))
     return list
-  }, [projects, sort])
+  }, [rows, sort])
 
-  // matrix rows grouped by state, exactly like the workbook's LOCATION column
+  // matrix rows grouped by state, like the workbook's LOCATION column
   const grouped = useMemo(() => {
-    const map = new Map<string, PortfolioProject[]>()
-    for (const p of sorted) {
-      const k = p.state_name || UNSET
-      map.set(k, [...(map.get(k) ?? []), p])
+    const map = new Map<string, Row[]>()
+    for (const r of sorted) {
+      const k = r.state_name || UNSET
+      map.set(k, [...(map.get(k) ?? []), r])
     }
     return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]))
   }, [sorted])
 
   const byState = useMemo(() => {
     const m = new Map<string, number>()
-    for (const p of projects) {
-      const k = p.state_name || UNSET
-      m.set(k, (m.get(k) ?? 0) + p.works_incl_vat)
-    }
-    return [...m.entries()].sort((a, b) => a[1] - b[1])
-  }, [projects])
+    for (const r of rows) m.set(r.state_name || UNSET, (m.get(r.state_name || UNSET) ?? 0) + r.win.work)
+    return [...m.entries()].filter(([, v]) => v > 0).sort((a, b) => a[1] - b[1])
+  }, [rows])
 
   const byType = useMemo(() => {
     const m = new Map<string, number>()
-    for (const p of projects) {
-      const k = p.project_type || UNSET
-      m.set(k, (m.get(k) ?? 0) + p.works_incl_vat)
-    }
-    return [...m.entries()].sort((a, b) => b[1] - a[1])
-  }, [projects])
+    for (const r of rows) m.set(r.project_type || UNSET, (m.get(r.project_type || UNSET) ?? 0) + r.win.work)
+    return [...m.entries()].filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1])
+  }, [rows])
 
   if (isLoading) return <PageSkeleton />
   if (!data || all.length === 0) {
     return (
       <div className="rounded-lg border py-16 text-center text-muted-foreground">
-        <p className="text-lg font-medium text-foreground">No reporting projects yet</p>
+        <p className="text-lg font-medium text-foreground">No active projects yet</p>
         <p className="mt-1 text-sm">
-          The portfolio fills itself as sites start sending weekly reports.
+          The portfolio fills itself as projects are created and start reporting.
         </p>
       </div>
     )
   }
 
+  const t = totals
+  const winLabel = period === TO_DATE ? 'to date' : period
   const filtered = fState !== ALL || fProject !== ALL
-
-  // matrix totals are always the sum of the periods on screen, so every
-  // row and the footer reconcile with the cells beside them
-  const rowTotal = (id: string) =>
-    periods.reduce((a, per) => a + (byProject.get(`${id}|${per}`) ?? 0), 0)
-  const grandTotal = [...totalsByPeriod.values()].reduce((a, v) => a + v, 0)
 
   const trendOption = {
     tooltip: { trigger: 'axis', valueFormatter: (v: number) => naira(v) },
@@ -239,7 +273,7 @@ export default function ExecutiveSummaryPage() {
 
   const stateOption = {
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, valueFormatter: (v: number) => naira(v) },
-    grid: { left: 8, right: 56, top: 10, bottom: 10, containLabel: true },
+    grid: { left: 8, right: 64, top: 10, bottom: 10, containLabel: true },
     xAxis: { type: 'value', axisLabel: { formatter: compactNaira } },
     yAxis: { type: 'category', data: byState.map(([k]) => k) },
     series: [{
@@ -277,7 +311,7 @@ export default function ExecutiveSummaryPage() {
     <div className="min-w-[9rem] flex-1">
       <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
       <Select value={value} onValueChange={onChange}>
-        <SelectTrigger className="h-8 w-full text-xs font-semibold">
+        <SelectTrigger className="h-9 w-full text-xs font-semibold">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -295,13 +329,14 @@ export default function ExecutiveSummaryPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Executive summary</h1>
         <p className="text-sm text-muted-foreground">
-          {t.count} active {t.count === 1 ? 'project' : 'projects'}
+          Comparing {t.count} active {t.count === 1 ? 'project' : 'projects'}
           {filtered ? ` of ${all.length}` : ''}
-          {' · '}portfolio position as at {fmtDate(data.generated_at)}
+          {' · '}{period === TO_DATE ? 'all time to date' : `year ${period}`}
+          {' · '}as at {fmtDate(data.generated_at)}
         </p>
       </div>
 
-      {/* filter bar — drives every number, chart and table below */}
+      {/* filter bar — State · Project · Period(window) drive everything */}
       <Card className="relative">
         <Legend>Filters</Legend>
         <CardContent className="flex flex-wrap items-end gap-3 pt-4">
@@ -312,21 +347,22 @@ export default function ExecutiveSummaryPage() {
             items={options.projects.map((p) => ({ value: p.id, label: p.name }))} />
           <div className="min-w-[9rem] flex-1">
             <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Period</p>
-            <Select value={gran} onValueChange={(v) => setGran(v as Granularity)}>
-              <SelectTrigger className="h-8 w-full text-xs font-semibold">
+            <Select value={period} onValueChange={setPeriod}>
+              <SelectTrigger className="h-9 w-full text-xs font-semibold">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {GRANS.map((g) => (
-                  <SelectItem key={g.key} value={g.key}>{g.label}</SelectItem>
+                <SelectItem value={TO_DATE}>To date</SelectItem>
+                {years.map((y) => (
+                  <SelectItem key={y} value={String(y)}>{y}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
-          {filtered && (
+          {(filtered || period !== TO_DATE) && (
             <Button
-              variant="outline" size="sm" className="h-8 text-xs"
-              onClick={() => { setFState(ALL); setFProject(ALL) }}
+              variant="outline" size="sm" className="h-9 text-xs"
+              onClick={() => { setFState(ALL); setFProject(ALL); setPeriod(TO_DATE) }}
             >
               Clear
             </Button>
@@ -334,21 +370,21 @@ export default function ExecutiveSummaryPage() {
         </CardContent>
       </Card>
 
-      {/* where we stand */}
+      {/* where we stand — all metrics scoped to the window */}
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-5">
         <Kpi label="Contract value" value={naira(t.contract, true)} sub={naira(t.contract)} />
-        <Kpi label="Work done · to date" value={naira(t.works, true)}
-          sub={`${pctFmt(t.pct)} of BEME scope`} />
-        <Kpi label="Cost · to date" value={naira(t.cost, true)} sub={naira(t.cost)} />
-        <Kpi label="Net · to date" value={naira(t.net, true)} sub={naira(t.net)}
+        <Kpi label={`Work done · ${winLabel}`} value={naira(t.work, true)}
+          sub={period === TO_DATE ? `${pctFmt(t.pct)} of BEME scope` : naira(t.work)} />
+        <Kpi label={`Cost · ${winLabel}`} value={naira(t.cost, true)} sub={naira(t.cost)} />
+        <Kpi label={`Net · ${winLabel}`} value={naira(t.net, true)} sub={naira(t.net)}
           tone={t.net >= 0 ? 'good' : 'bad'} />
-        <Kpi label="Margin · to date" value={pctFmt(t.margin)}
+        <Kpi label={`Margin · ${winLabel}`} value={pctFmt(t.margin)}
           tone={(t.margin ?? 0) < 0 ? 'bad' : 'good'} />
       </div>
 
-      {/* what we're owed */}
+      {/* what we're owed — a current snapshot (cumulative ledgers) */}
       <Card className="relative">
-        <Legend>Cash position</Legend>
+        <Legend>Cash position · to date</Legend>
         <CardContent className="grid gap-5 pt-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,2fr)]">
           <div className="relative rounded-lg border border-amber-300 bg-amber-50/60 p-4 dark:border-amber-700 dark:bg-amber-950/20">
             <LegendSm>Certified, not yet paid</LegendSm>
@@ -376,78 +412,83 @@ export default function ExecutiveSummaryPage() {
 
       {/* PW's own shape: sites down, periods across, output in the cells */}
       <Card className="relative">
-        <Legend>Output by site</Legend>
+        <Legend>Output by site · {winLabel}</Legend>
         <CardContent className="p-0 pt-3">
-          <div className="max-h-[520px] overflow-auto">
-            <table className="w-full text-xs">
-              <thead className="sticky top-0 z-10 bg-background">
-                <tr className="border-b text-muted-foreground">
-                  <th className="sticky left-0 z-20 min-w-[220px] bg-background px-4 py-2 text-left font-medium">
-                    Site
-                  </th>
-                  {periods.map((p) => (
-                    <th key={p} className="whitespace-nowrap px-3 py-2 text-right font-medium">{p}</th>
-                  ))}
-                  <th className="whitespace-nowrap border-l px-4 py-2 text-right font-semibold">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {grouped.map(([state, rows]) => (
-                  <Fragment key={state}>
-                    <tr className="border-b bg-muted/40">
-                      <td className="sticky left-0 bg-muted/40 px-4 py-1.5 text-[11px] font-bold uppercase tracking-wide"
-                        colSpan={1}>
-                        {state}
-                      </td>
-                      <td colSpan={periods.length + 1} />
-                    </tr>
-                    {rows.map((p) => (
-                      <tr
-                        key={p.id}
-                        className="cursor-pointer border-b transition-colors last:border-0 hover:bg-muted/30"
-                        onClick={() => router.push(`/projects/${p.id}`)}
-                      >
-                        <td className="sticky left-0 z-10 max-w-[260px] truncate bg-background px-4 py-1.5 font-medium"
-                          title={p.project_name}>
-                          {p.short_name || p.project_name}
-                        </td>
-                        {periods.map((per) => {
-                          const v = byProject.get(`${p.id}|${per}`) ?? 0
-                          return (
-                            <td key={per}
-                              className={`px-3 py-1.5 text-right tabular-nums ${v === 0 ? 'text-muted-foreground/50' : ''}`}
-                              title={v ? naira(v) : undefined}>
-                              {cellMoney(v)}
-                            </td>
-                          )
-                        })}
-                        <td className="border-l px-4 py-1.5 text-right font-semibold tabular-nums"
-                          title={naira(rowTotal(p.id))}>
-                          {cellMoney(rowTotal(p.id))}
-                        </td>
-                      </tr>
+          {periods.length === 0 ? (
+            <p className="px-4 py-8 text-center text-sm text-muted-foreground">
+              No output recorded in this window.
+            </p>
+          ) : (
+            <div className="max-h-[520px] overflow-auto">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 z-10 bg-background">
+                  <tr className="border-b text-muted-foreground">
+                    <th className="sticky left-0 z-20 min-w-[220px] bg-background px-4 py-2 text-left font-medium">
+                      Site
+                    </th>
+                    {periods.map((p) => (
+                      <th key={p} className="whitespace-nowrap px-3 py-2 text-right font-medium">{p}</th>
                     ))}
-                  </Fragment>
-                ))}
-              </tbody>
-              <tfoot className="sticky bottom-0 bg-background">
-                <tr className="border-t-2 border-foreground font-bold">
-                  <td className="sticky left-0 bg-background px-4 py-2">Total</td>
-                  {periods.map((per) => (
-                    <td key={per} className="px-3 py-2 text-right tabular-nums"
-                      title={naira(totalsByPeriod.get(per) ?? 0)}>
-                      {cellMoney(totalsByPeriod.get(per) ?? 0)}
-                    </td>
+                    <th className="whitespace-nowrap border-l px-4 py-2 text-right font-semibold">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {grouped.map(([state, rs]) => (
+                    <Fragment key={state}>
+                      <tr className="border-b bg-muted/40">
+                        <td className="sticky left-0 z-10 bg-muted/40 px-4 py-1.5 text-[11px] font-bold uppercase tracking-wide">
+                          {state}
+                        </td>
+                        <td colSpan={periods.length + 1} className="bg-muted/40" />
+                      </tr>
+                      {rs.map((p) => (
+                        <tr
+                          key={p.id}
+                          className="cursor-pointer border-b transition-colors last:border-0 hover:bg-muted/30"
+                          onClick={() => router.push(`/projects/${p.id}`)}
+                        >
+                          <td className="sticky left-0 z-10 max-w-[260px] truncate bg-background px-4 py-1.5 font-medium"
+                            title={p.project_name}>
+                            {p.short_name || p.project_name}
+                          </td>
+                          {periods.map((per) => {
+                            const v = byProject.get(`${p.id}|${per}`) ?? 0
+                            return (
+                              <td key={per}
+                                className={`px-3 py-1.5 text-right tabular-nums ${v === 0 ? 'text-muted-foreground/40' : ''}`}
+                                title={v ? naira(v) : undefined}>
+                                {cellMoney(v)}
+                              </td>
+                            )
+                          })}
+                          <td className="border-l px-4 py-1.5 text-right font-semibold tabular-nums"
+                            title={naira(p.win.work)}>
+                            {cellMoney(p.win.work)}
+                          </td>
+                        </tr>
+                      ))}
+                    </Fragment>
                   ))}
-                  <td className="border-l px-4 py-2 text-right tabular-nums" title={naira(grandTotal)}>
-                    {cellMoney(grandTotal)}
-                  </td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
+                </tbody>
+                <tfoot className="sticky bottom-0 bg-background">
+                  <tr className="border-t-2 border-foreground font-bold">
+                    <td className="sticky left-0 bg-background px-4 py-2">Total</td>
+                    {periods.map((per) => (
+                      <td key={per} className="px-3 py-2 text-right tabular-nums"
+                        title={naira(totalsByPeriod.get(per) ?? 0)}>
+                        {cellMoney(totalsByPeriod.get(per) ?? 0)}
+                      </td>
+                    ))}
+                    <td className="border-l px-4 py-2 text-right tabular-nums" title={naira(t.work)}>
+                      {cellMoney(t.work)}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
           <p className="border-t px-4 py-2 text-[11px] text-muted-foreground">
-            Work done Incl. VAT · totals are the sum of the periods shown · hover any cell for the full figure
+            Work done Incl. VAT · hover any cell for the full figure
           </p>
         </CardContent>
       </Card>
@@ -455,30 +496,36 @@ export default function ExecutiveSummaryPage() {
       {/* the two breakdowns */}
       <div className="grid gap-3 lg:grid-cols-2">
         <Card className="relative">
-          <Legend>Work done by state</Legend>
+          <Legend>Work done by state · {winLabel}</Legend>
           <CardContent className="pt-3">
-            <ECharts option={stateOption} style={{ height: Math.max(200, byState.length * 46 + 40) }} notMerge />
+            {byState.length === 0
+              ? <p className="py-8 text-center text-sm text-muted-foreground">Nothing in this window.</p>
+              : <ECharts option={stateOption} style={{ height: Math.max(180, byState.length * 46 + 30) }} notMerge />}
           </CardContent>
         </Card>
         <Card className="relative">
-          <Legend>Work done by project type</Legend>
+          <Legend>Work done by project type · {winLabel}</Legend>
           <CardContent className="pt-3">
-            <ECharts option={typeOption} style={{ height: Math.max(200, byType.length * 46 + 40) }} notMerge />
+            {byType.length === 0
+              ? <p className="py-8 text-center text-sm text-muted-foreground">Nothing in this window.</p>
+              : <ECharts option={typeOption} style={{ height: Math.max(180, byType.length * 40 + 40) }} notMerge />}
           </CardContent>
         </Card>
       </div>
 
-      {/* the portfolio over time */}
+      {/* the portfolio over the window */}
       <Card className="relative">
-        <Legend>Portfolio · work done vs cost</Legend>
+        <Legend>Work done vs cost · {winLabel}</Legend>
         <CardContent className="pt-3">
-          <ECharts option={trendOption} style={{ height: 300 }} notMerge />
+          {trend.length === 0
+            ? <p className="py-8 text-center text-sm text-muted-foreground">Nothing in this window.</p>
+            : <ECharts option={trendOption} style={{ height: 300 }} notMerge />}
         </CardContent>
       </Card>
 
-      {/* the projects themselves */}
+      {/* the projects themselves — every metric per project, for the window */}
       <Card className="relative">
-        <Legend>Projects</Legend>
+        <Legend>Projects · {winLabel}</Legend>
         <CardContent className="p-0 pt-2">
           <div className="flex justify-end px-4 pb-2">
             <Select value={sort} onValueChange={(v) => setSort(v as typeof sort)}>
@@ -486,11 +533,12 @@ export default function ExecutiveSummaryPage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="work">Work done</SelectItem>
+                <SelectItem value="cost">Cost</SelectItem>
                 <SelectItem value="net">Net earned</SelectItem>
                 <SelectItem value="margin">Margin</SelectItem>
                 <SelectItem value="pct">% complete</SelectItem>
                 <SelectItem value="unpaid">Certified, not paid</SelectItem>
-                <SelectItem value="stale">Longest without a report</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -499,9 +547,9 @@ export default function ExecutiveSummaryPage() {
               <thead>
                 <tr className="border-b text-left text-muted-foreground">
                   <th className="px-4 py-2 font-medium">Project</th>
-                  <th className="px-4 py-2 font-medium">Client</th>
                   <th className="px-4 py-2 text-right font-medium">% Complete</th>
-                  <th className="px-4 py-2 text-right font-medium">Work done (Incl. VAT)</th>
+                  <th className="px-4 py-2 text-right font-medium">Work done</th>
+                  <th className="px-4 py-2 text-right font-medium">Cost</th>
                   <th className="px-4 py-2 text-right font-medium">Net</th>
                   <th className="px-4 py-2 text-right font-medium">Margin</th>
                   <th className="px-4 py-2 text-right font-medium">Not yet paid</th>
@@ -518,17 +566,17 @@ export default function ExecutiveSummaryPage() {
                   >
                     <td className="px-4 py-2 font-medium">
                       {p.short_name || p.project_name}
-                      {p.location_name && (
-                        <span className="ml-1.5 text-[10px] text-muted-foreground">{p.location_name}</span>
+                      {p.state_name && (
+                        <span className="ml-1.5 text-[10px] text-muted-foreground">{p.state_name}</span>
                       )}
                     </td>
-                    <td className="max-w-[200px] truncate px-4 py-2 text-muted-foreground">{p.client ?? '—'}</td>
                     <td className="px-4 py-2 text-right tabular-nums">{pctFmt(p.pct_complete)}</td>
-                    <td className="px-4 py-2 text-right tabular-nums">{naira(p.works_incl_vat)}</td>
-                    <td className={`px-4 py-2 text-right tabular-nums font-medium ${p.net < 0 ? 'text-red-600' : ''}`}>
-                      {naira(p.net)}
+                    <td className="px-4 py-2 text-right tabular-nums">{naira(p.win.work)}</td>
+                    <td className="px-4 py-2 text-right tabular-nums">{naira(p.win.cost)}</td>
+                    <td className={`px-4 py-2 text-right tabular-nums font-medium ${p.win.net < 0 ? 'text-red-600' : ''}`}>
+                      {naira(p.win.net)}
                     </td>
-                    <td className="px-4 py-2 text-right tabular-nums">{pctFmt(p.margin)}</td>
+                    <td className="px-4 py-2 text-right tabular-nums">{pctFmt(p.winMargin)}</td>
                     <td className={`px-4 py-2 text-right tabular-nums ${p.certified_not_paid ? 'font-medium text-amber-700 dark:text-amber-400' : ''}`}>
                       {p.certified_not_paid ? naira(p.certified_not_paid) : '—'}
                     </td>
@@ -551,6 +599,10 @@ export default function ExecutiveSummaryPage() {
               </tbody>
             </table>
           </div>
+          <p className="border-t px-4 py-2 text-[11px] text-muted-foreground">
+            Work, cost, net and margin are for {period === TO_DATE ? 'all time to date' : period}
+            {' · '}% complete and not-yet-paid are cumulative
+          </p>
         </CardContent>
       </Card>
     </div>
