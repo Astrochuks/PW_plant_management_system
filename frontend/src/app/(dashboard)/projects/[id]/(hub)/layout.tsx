@@ -17,7 +17,7 @@ import {
 } from '@/components/ui/dialog'
 import { useAuth } from '@/providers/auth-provider'
 import { useProject, useDeleteProject, usePrefetchHubData, useProjectIssues, useProjectOverview, useProjectSubmissions } from '@/hooks/use-projects'
-import { STATUS_STYLES } from '@/components/projects/projects-table'
+import { STATUS_STYLES, effectiveStatus } from '@/components/projects/projects-table'
 import { InfoChip } from '@/components/projects/hub-ui'
 import { fmtDate, num } from '@/lib/format'
 
@@ -66,7 +66,8 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
 
   const base = `/projects/${projectId}`
   const activeSeg = pathname === base ? '' : pathname.slice(base.length + 1).split('/')[0]
-  const statusStyle = project ? (STATUS_STYLES[project.status] || STATUS_STYLES.active) : null
+  const effStatus = project ? effectiveStatus(project) : null
+  const statusStyle = effStatus ? (STATUS_STYLES[effStatus] || STATUS_STYLES.active) : null
 
   const handleDelete = async () => {
     try {
@@ -100,7 +101,7 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
         <div className="flex flex-1 flex-wrap items-center justify-start gap-x-5 gap-y-1 lg:justify-center">
           {statusStyle && (
             <StatusDot
-              dot={project?.status === 'active' ? 'bg-emerald-500' : 'bg-slate-400'}
+              dot={effStatus === 'active' ? 'bg-emerald-500' : 'bg-slate-400'}
               label={statusStyle.label}
             />
           )}

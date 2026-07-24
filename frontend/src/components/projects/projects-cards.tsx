@@ -5,7 +5,7 @@ import { FolderKanban, MapPin, Building2, CalendarDays } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { STATUS_STYLES } from './projects-table'
+import { STATUS_STYLES, effectiveStatus } from './projects-table'
 import type { Project } from '@/hooks/use-projects'
 
 interface ProjectsCardsProps {
@@ -68,7 +68,7 @@ export function ProjectsCards({ projects, isLoading, onPrefetch }: ProjectsCards
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
       {projects.map((p) => {
-        const status = STATUS_STYLES[p.status] || STATUS_STYLES.active
+        const status = STATUS_STYLES[effectiveStatus(p)] || STATUS_STYLES.active
         return (
           <Card
             key={p.id}

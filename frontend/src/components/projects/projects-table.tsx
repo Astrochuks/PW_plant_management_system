@@ -65,6 +65,11 @@ export const STATUS_STYLES: Record<string, { label: string; variant: 'default' |
   legacy: { label: 'Legacy', variant: 'outline', className: 'bg-blue-50 text-blue-700 border-blue-200' },
 }
 
+// is_legacy is the source of truth for the legacy bucket — a project
+// flagged legacy reads "Legacy" everywhere, whatever its lifecycle status
+export const effectiveStatus = (p: { status: string; is_legacy?: boolean }): string =>
+  p.is_legacy ? 'legacy' : p.status
+
 function formatCurrency(amount: number): string {
   return new Intl.NumberFormat('en-NG', {
     style: 'currency',
@@ -132,7 +137,7 @@ const COLUMN_DEFS: ColumnDef[] = [
     header: 'Status',
     width: 'w-[110px]',
     render: (p) => {
-      const style = STATUS_STYLES[p.status] || STATUS_STYLES.active
+      const style = STATUS_STYLES[effectiveStatus(p)] || STATUS_STYLES.active
       return <Badge variant={style.variant} className={style.className}>{style.label}</Badge>
     },
     skeleton: 'w-16',
