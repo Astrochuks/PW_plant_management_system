@@ -28,12 +28,12 @@ import {
   PanelLeft,
   PieChart,
   FolderKanban,
-  Activity,
   Lightbulb,
   AlertTriangle,
   BookOpen,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { isManagementRole } from '@/lib/roles';
 import { Separator } from '@/components/ui/separator';
 import {
   Tooltip,
@@ -116,11 +116,6 @@ const projectNavItems = [
     href: '/projects',
     icon: FolderKanban,
   },
-  {
-    title: 'Site Operations',
-    href: '/projects/operations',
-    icon: Activity,
-  },
 ];
 
 // ── Section: SHARED ───────────────────────────────────────────────────────
@@ -177,7 +172,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const router = useRouter();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
-  const isManagement = user?.role === 'management';
+  const isManagement = isManagementRole(user?.role);
   const isPlantOfficer = user?.role === 'plant_officer';
   // management-tier (plant module): admin, MD/GPM, plant officer
   const showManagementItems = isAdmin || isManagement || isPlantOfficer;
@@ -302,7 +297,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           <NavSection label="PROJECTS" collapsed={collapsed} separator>
             {projectNavItems.map((item) => {
               // each sub-page owns its own prefix; Registry owns the rest
-              const owned = ['/projects/executive', '/projects/operations'];
+              const owned = ['/projects/executive'];
               const active = owned.includes(item.href)
                 ? pathname.startsWith(item.href)
                 : pathname.startsWith('/projects') &&

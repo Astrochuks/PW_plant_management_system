@@ -4,6 +4,7 @@ import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/providers/auth-provider'
 import { Skeleton } from '@/components/ui/skeleton'
+import { isManagementRole } from '@/lib/roles'
 
 interface ProtectedRouteProps {
   /**
@@ -34,16 +35,18 @@ export function ProtectedRoute({ requiredRole, children }: ProtectedRouteProps) 
       return
     }
 
+    const isManagement = isManagementRole(user.role)
+
     if (
       requiredRole === 'management' &&
-      !['admin', 'management', 'plant_officer'].includes(user.role)
+      !(user.role === 'admin' || isManagement || user.role === 'plant_officer')
     ) {
       // Management-tier route (plant module), user doesn't have permission
       router.push('/access-denied')
       return
     }
 
-    if (requiredRole === 'projects' && !['admin', 'management'].includes(user.role)) {
+    if (requiredRole === 'projects' && !(user.role === 'admin' || isManagement)) {
       // Projects module — the plant officer has no access here
       router.push('/access-denied')
       return

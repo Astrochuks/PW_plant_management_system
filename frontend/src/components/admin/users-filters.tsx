@@ -9,11 +9,12 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { X } from 'lucide-react'
+import { ROLE_LABELS, USER_ROLES, type UserRole } from '@/lib/roles'
 
 interface UsersFiltersProps {
-  role?: 'admin' | 'management' | 'plant_officer' | 'site_engineer'
+  role?: UserRole
   isActive?: boolean
-  onRoleChange: (role: 'admin' | 'management' | 'plant_officer' | 'site_engineer' | undefined) => void
+  onRoleChange: (role: UserRole | undefined) => void
   onStatusChange: (status: boolean | undefined) => void
 }
 
@@ -27,16 +28,20 @@ export function UsersFilters({
 
   return (
     <div className="flex gap-2 flex-wrap items-center">
-      <Select value={role || 'all'} onValueChange={(v) => onRoleChange(v === 'all' ? undefined : (v as 'admin' | 'management' | 'plant_officer' | 'site_engineer'))}>
-        <SelectTrigger className="w-44">
+      <Select
+        value={role || 'all'}
+        onValueChange={(v) =>
+          onRoleChange(v === 'all' ? undefined : (v as UserRole))
+        }
+      >
+        <SelectTrigger className="w-52">
           <SelectValue placeholder="Filter by role" />
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="all">All Roles</SelectItem>
-          <SelectItem value="admin">Admin</SelectItem>
-          <SelectItem value="management">Management (MD / GPM)</SelectItem>
-          <SelectItem value="plant_officer">Plant Officer</SelectItem>
-          <SelectItem value="site_engineer">Site Engineer</SelectItem>
+          {USER_ROLES.map((r) => (
+            <SelectItem key={r} value={r}>{ROLE_LABELS[r]}</SelectItem>
+          ))}
         </SelectContent>
       </Select>
 

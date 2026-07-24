@@ -26,34 +26,20 @@ def as_plant_officer(app, plant_officer_user):
 
 
 def _akwa_project_id(client) -> str:
-    r = client.get("/api/v1/projects/operations")
+    """The Akwa Ibom airport apron project, by name — the registry is the
+    lookup now that the Site Operations portfolio endpoint is retired."""
+    r = client.get("/api/v1/projects", params={"search": "AKWA IBOM"})
     if r.status_code == 503:
         pytest.skip("database unavailable")
     assert r.status_code == 200
     data = r.json()["data"]
-    assert data, "no projects with weekly data"
+    assert data, "Akwa Ibom project not in the registry"
     return data[0]["id"]
 
 
-class TestPortfolio:
-    def test_portfolio_shape_and_consistency(self, client, as_management):
-        r = client.get("/api/v1/projects/operations")
-        if r.status_code == 503:
-            pytest.skip("database unavailable")
-        assert r.status_code == 200
-        rows = r.json()["data"]
-        assert len(rows) >= 1
-        akwa = rows[0]
-        assert akwa["weeks_received"] == 10
-        assert akwa["first_week"] == 43 and akwa["last_week"] == 10  # W43 2025 first
-        # the numbers quoted to the GPM
-        assert 15000 < float(akwa["hours_worked"]) < 17000
-        assert 50000 < float(akwa["diesel_litres"]) < 60000
-        assert float(akwa["plant_cost_ngn"]) > 100_000_000
-        assert akwa["days_since_last_report"] is not None
-
+class TestAccess:
     def test_plant_officer_blocked(self, client, as_plant_officer):
-        assert client.get("/api/v1/projects/operations").status_code == 403
+        assert client.get("/api/v1/projects").status_code == 403
 
 
 class TestSummary:
@@ -155,8 +141,7 @@ class TestFinancials:
         assert len(d["bills"]) >= 5  # BEME bills with % complete
 
     def test_plant_officer_blocked(self, client, as_plant_officer):
-        pid_r = client.get("/api/v1/projects/operations")
-        assert pid_r.status_code == 403
+        assert client.get("/api/v1/projects").status_code == 403
 
 
 class TestPlantsRollup:

@@ -3,13 +3,14 @@
  */
 
 import apiClient, { ApiResponse, getErrorMessage } from './client';
+import type { StoredRole } from '@/lib/roles';
 
 // Types
 export interface User {
   id: string;
   email: string;
   full_name: string | null;
-  role: 'admin' | 'management' | 'plant_officer' | 'site_engineer';
+  role: StoredRole;
   is_active: boolean;
   location_id: string | null;
 }

@@ -26,6 +26,7 @@ import {
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { useAuth } from '@/providers/auth-provider';
 import { cn } from '@/lib/utils';
+import { roleLabel } from '@/lib/roles';
 import Link from 'next/link';
 import { NotificationBell } from '@/components/notifications/notification-bell';
 
@@ -117,8 +118,8 @@ export function Header({ sidebarCollapsed, onMenuClick }: HeaderProps) {
                   <span className="text-sm font-medium">
                     {user?.full_name || user?.email}
                   </span>
-                  <span className="text-xs text-muted-foreground capitalize">
-                    {user?.role?.replace(/_/g, ' ')}
+                  <span className="text-xs text-muted-foreground">
+                    {user?.role ? roleLabel(user.role) : ''}
                   </span>
                 </div>
               </Button>

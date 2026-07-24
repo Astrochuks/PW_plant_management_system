@@ -731,13 +731,26 @@ async def unlock_account(
 # ============================================================================
 
 
+# The roles an admin may assign. 'management' is retired (migration 029 —
+# split into managing_director / general_project_manager); it is still a
+# valid enum value in Postgres and still management-tier for permissions,
+# but it can no longer be written.
+AssignableRole = Literal[
+    "admin",
+    "managing_director",
+    "general_project_manager",
+    "plant_officer",
+    "site_engineer",
+]
+
+
 class CreateUserRequest(BaseModel):
     """Request body for creating a new user."""
 
     email: EmailStr
     password: str = Field(..., min_length=6, description="Temporary password")
     full_name: str = Field(..., min_length=2, max_length=255)
-    role: Literal["admin", "management", "plant_officer", "site_engineer"] = "management"
+    role: AssignableRole = "general_project_manager"
     location_id: UUID | None = None  # Required when role = site_engineer
 
     @field_validator("password")
@@ -750,7 +763,7 @@ class UpdateUserRequest(BaseModel):
     """Request body for updating a user."""
 
     full_name: str | None = None
-    role: Literal["admin", "management", "plant_officer", "site_engineer"] | None = None
+    role: AssignableRole | None = None
     is_active: bool | None = None
     location_id: UUID | None = None  # For assigning/changing site engineer location
     clear_location: bool = False  # Set True to explicitly unlink location
@@ -892,7 +905,11 @@ async def create_user(
 @router.get("/users")
 async def list_users(
     current_user: Annotated[CurrentUser, Depends(require_admin)],
-    role: str | None = Query(None, pattern="^(admin|management|plant_officer|site_engineer)$"),
+    role: str | None = Query(
+        None,
+        pattern="^(admin|managing_director|general_project_manager"
+                "|management|plant_officer|site_engineer)$",
+    ),
     is_active: bool | None = None,
 ) -> dict[str, Any]:
     """List all users (Admin only)."""

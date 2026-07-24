@@ -30,6 +30,13 @@ logger = get_logger(__name__)
 # no more separate "authorization" parameter on each endpoint
 bearer_scheme = HTTPBearer()
 
+# The management tier: the MD and the GPM see the same thing, so every gate
+# treats them alike. 'management' is the pre-029 collapsed value, retired
+# from the UI and the API but still honoured if a row carries it.
+MANAGEMENT_ROLES = frozenset(
+    {"managing_director", "general_project_manager", "management"}
+)
+
 
 # =============================================================================
 # User Cache — eliminates repeated DB lookups for the same user
@@ -219,7 +226,9 @@ class CurrentUser(BaseModel):
 
     id: str
     email: str
-    role: str  # 'admin', 'management' (MD/GPM), 'plant_officer', or 'site_engineer'
+    # 'admin', 'managing_director', 'general_project_manager',
+    # 'plant_officer', 'site_engineer' — plus retired 'management'
+    role: str
     full_name: str | None = None
     is_active: bool = True
     location_id: str | None = None  # Only set for site_engineer role
@@ -231,8 +240,13 @@ class CurrentUser(BaseModel):
 
     @property
     def is_management(self) -> bool:
-        """Check if user has management role (MD / GPM)."""
-        return self.role == "management"
+        """Management tier — the MD and the GPM.
+
+        Migration 029 split them into their own roles; they still see the
+        same thing, so every gate asks this one question. 'management' is
+        the retired pre-029 value, kept so an old row never locks out.
+        """
+        return self.role in MANAGEMENT_ROLES
 
     @property
     def is_plant_officer(self) -> bool:

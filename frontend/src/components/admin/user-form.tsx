@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/select'
 import { toast } from 'sonner'
 import type { User } from '@/lib/api/admin'
+import { ROLE_DESCRIPTIONS, ROLE_LABELS, USER_ROLES } from '@/lib/roles'
 import { useCreateUser, useUpdateUser } from '@/hooks/use-users'
 import { useLocationsWithStats } from '@/hooks/use-locations'
 import { Loader2 } from 'lucide-react'
@@ -39,7 +40,7 @@ const userFormSchema = z.object({
     .optional()
     .or(z.literal('')),
   full_name: z.string().min(2, 'Full name must be at least 2 characters'),
-  role: z.enum(['admin', 'management', 'plant_officer', 'site_engineer']),
+  role: z.enum(USER_ROLES),
   location_id: z.string().optional(),
 }).refine(
   (data) => data.role !== 'site_engineer' || !!data.location_id,
@@ -52,13 +53,6 @@ interface UserFormProps {
   user?: User
   onSuccess?: () => void
   onCancel?: () => void
-}
-
-const ROLE_DESCRIPTIONS: Record<string, string> = {
-  admin: 'Full access to all features and user management',
-  management: 'MD / GPM — read access to plants, projects, reports, and analytics',
-  plant_officer: 'Plant module only — same plant access as management, no projects',
-  site_engineer: 'Can fill and submit weekly reports for their assigned site',
 }
 
 export function UserForm({ user, onSuccess, onCancel }: UserFormProps) {
@@ -76,7 +70,7 @@ export function UserForm({ user, onSuccess, onCancel }: UserFormProps) {
       email: user?.email || '',
       password: '',
       full_name: user?.full_name || '',
-      role: (user?.role as UserFormValues['role']) || 'management',
+      role: (user?.role as UserFormValues['role']) || 'general_project_manager',
       location_id: user?.location_id || '',
     },
   })
@@ -201,10 +195,9 @@ export function UserForm({ user, onSuccess, onCancel }: UserFormProps) {
                   </SelectTrigger>
                 </FormControl>
                 <SelectContent>
-                  <SelectItem value="admin">Admin</SelectItem>
-                  <SelectItem value="management">Management (MD / GPM)</SelectItem>
-                  <SelectItem value="plant_officer">Plant Officer</SelectItem>
-                  <SelectItem value="site_engineer">Site Engineer</SelectItem>
+                  {USER_ROLES.map((r) => (
+                    <SelectItem key={r} value={r}>{ROLE_LABELS[r]}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
               <FormDescription>

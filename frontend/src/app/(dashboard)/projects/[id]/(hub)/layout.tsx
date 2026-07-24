@@ -50,7 +50,7 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
   const isAdmin = user?.role === 'admin'
   const projectId = params.id
 
-  const { data: project } = useProject(projectId)
+  const { data: project, isError: projectMissing } = useProject(projectId)
   const { data: issues } = useProjectIssues(projectId, isAdmin)
   // Watches for workbooks finishing in the background worker: polls only
   // while one is queued/parsing, then invalidates every projects query so
@@ -77,6 +77,22 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
     } catch {
       toast.error('Failed to delete project')
     }
+  }
+
+  // A stale link or a deleted project would otherwise sit on skeletons
+  // forever — say so instead.
+  if (projectMissing) {
+    return (
+      <div className="rounded-lg border border-dashed p-12 text-center">
+        <p className="text-lg font-medium">Project not found</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          It may have been deleted, or the link is out of date.
+        </p>
+        <Button className="mt-4" variant="outline" asChild>
+          <Link href="/projects">Back to Project Registry</Link>
+        </Button>
+      </div>
+    )
   }
 
   return (

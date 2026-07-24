@@ -460,17 +460,14 @@ export function useLinkUnmappedFleetNumber() {
 // ============================================================================
 
 import {
-  getProjectOperations,
   getProjectOperationsSummary,
   getProjectOperationsSeries,
-  type ProjectOperationsRow,
   type ProjectOperationsSummary,
   type ProjectOperationsWeekRow,
   type ProjectOperationsMonthRow,
 } from '@/lib/api/projects';
 
 export type {
-  ProjectOperationsRow,
   ProjectOperationsSummary,
   ProjectOperationsWeekRow,
   ProjectOperationsMonthRow,
@@ -478,7 +475,6 @@ export type {
 
 export const operationsKeys = {
   all: ['projects', 'operations'] as const,
-  portfolio: () => [...operationsKeys.all, 'portfolio'] as const,
   summary: (id: string) => [...operationsKeys.all, 'summary', id] as const,
   series: (id: string, g: 'week' | 'month') =>
     [...operationsKeys.all, 'series', id, g] as const,
@@ -488,16 +484,6 @@ export function useExecutiveSummary() {
   return useQuery({
     queryKey: [...operationsKeys.all, 'executive'] as const,
     queryFn: getExecutiveSummary,
-    staleTime: 2 * 60 * 1000,
-    networkMode: 'always',
-    retry: 2,
-  });
-}
-
-export function useProjectOperations() {
-  return useQuery({
-    queryKey: operationsKeys.portfolio(),
-    queryFn: getProjectOperations,
     staleTime: 2 * 60 * 1000,
     networkMode: 'always',
     retry: 2,

@@ -7,10 +7,11 @@ import { ProtectedRoute } from '@/components/protected-route'
 import { UsersTable } from '@/components/admin/users-table'
 import { UsersFilters } from '@/components/admin/users-filters'
 import { useUsers } from '@/hooks/use-users'
+import type { UserRole } from '@/lib/roles'
 import { Plus } from 'lucide-react'
 
 function UsersPageContent() {
-  const [filters, setFilters] = useState<{ role?: 'admin' | 'management' | 'plant_officer' | 'site_engineer'; is_active?: boolean }>({})
+  const [filters, setFilters] = useState<{ role?: UserRole; is_active?: boolean }>({})
   const { data: users, isLoading } = useUsers(filters)
 
   return (

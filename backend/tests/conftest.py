@@ -108,11 +108,12 @@ def admin_user():
 
 @pytest.fixture
 def management_user():
-    """Mock management user data."""
+    """Mock management-tier user — the MD seat (029 split MD from GPM;
+    both roles pass the same gates)."""
     return {
         "id": "management-user-id",
         "email": "manager@example.com",
-        "role": "management",
+        "role": "managing_director",
         "full_name": "Test Manager",
         "is_active": True,
     }
