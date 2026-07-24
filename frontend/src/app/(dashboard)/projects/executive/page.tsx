@@ -216,6 +216,23 @@ export default function ExecutiveSummaryPage() {
     return { cell, rowTotal, colTotal, cats }
   }, [data, ids, matGran, singleYear, yearNum])
 
+  // site × category cost (no time axis — uses the Year, ignores granularity)
+  const siteCat = useMemo(() => {
+    const cell = new Map<string, number>()          // `${projectId}|${category}`
+    const catTotal = new Map<string, number>()
+    const projTotal = new Map<string, number>()
+    for (const c of data?.cost_series ?? []) {
+      if (!ids.has(c.project_id) || (singleYear && c.year !== yearNum)) continue
+      const ck = `${c.project_id}|${c.category}`
+      cell.set(ck, (cell.get(ck) ?? 0) + c.amount)
+      catTotal.set(c.category, (catTotal.get(c.category) ?? 0) + c.amount)
+      projTotal.set(c.project_id, (projTotal.get(c.project_id) ?? 0) + c.amount)
+    }
+    const cats = [...catTotal.entries()].filter(([, v]) => v !== 0)
+      .sort((a, b) => b[1] - a[1]).map(([c]) => c)
+    return { cell, catTotal, projTotal, cats }
+  }, [data, ids, singleYear, yearNum])
+
   // sites grouped by state (shared by the work + cost matrices)
   const groups = useMemo(() => {
     const map = new Map<string, PortfolioProject[]>()
@@ -441,7 +458,6 @@ export default function ExecutiveSummaryPage() {
       <SiteMatrix title={`Site output · work done (Incl. VAT) · ${lensLabel}`}
         groups={groups} periods={periods}
         cell={(id, per) => siteMatrix.work.get(`${id}|${per}`) ?? 0}
-        rowTotal={(p) => p.works_incl_vat}
         rowTotalFromSeries={(id) => periods.reduce((a, per) => a + (siteMatrix.work.get(`${id}|${per}`) ?? 0), 0)}
         colTotal={(per) => siteMatrix.workCol.get(per) ?? 0}
         onRow={(id) => router.push(`/projects/${id}`)} />
@@ -449,10 +465,18 @@ export default function ExecutiveSummaryPage() {
       <SiteMatrix title={`Site cost · ${lensLabel}`}
         groups={groups} periods={periods}
         cell={(id, per) => siteMatrix.cost.get(`${id}|${per}`) ?? 0}
-        rowTotal={(p) => p.cost}
         rowTotalFromSeries={(id) => periods.reduce((a, per) => a + (siteMatrix.cost.get(`${id}|${per}`) ?? 0), 0)}
         colTotal={(per) => siteMatrix.costCol.get(per) ?? 0}
         onRow={(id) => router.push(`/projects/${id}`)} />
+
+      {/* site × category cost cross-tab */}
+      <SiteMatrix title={`Site cost by category · ${lensLabel}`}
+        groups={groups} periods={siteCat.cats}
+        cell={(id, cat) => siteCat.cell.get(`${id}|${cat}`) ?? 0}
+        rowTotalFromSeries={(id) => siteCat.projTotal.get(id) ?? 0}
+        colTotal={(cat) => siteCat.catTotal.get(cat) ?? 0}
+        onRow={(id) => router.push(`/projects/${id}`)}
+        note="Total cost per category over the window · hover any cell for the full figure" />
 
       {/* cost by category */}
       <Card className="relative">
@@ -503,16 +527,17 @@ export default function ExecutiveSummaryPage() {
   )
 }
 
-// ── the site × period matrix (work or cost) ────────────────────────────
-function SiteMatrix({ title, groups, periods, cell, rowTotalFromSeries, colTotal, onRow }: {
+// ── the site × columns matrix (period or category) ─────────────────────
+function SiteMatrix({ title, groups, periods, cell, rowTotalFromSeries, colTotal, onRow,
+  note = 'Reported movement per period · hover any cell for the full figure' }: {
   title: string
   groups: Array<[string, PortfolioProject[]]>
   periods: string[]
   cell: (id: string, per: string) => number
-  rowTotal: (p: PortfolioProject) => number
   rowTotalFromSeries: (id: string) => number
   colTotal: (per: string) => number
   onRow: (id: string) => void
+  note?: string
 }) {
   const grand = periods.reduce((a, per) => a + colTotal(per), 0)
   return (
@@ -564,9 +589,7 @@ function SiteMatrix({ title, groups, periods, cell, rowTotalFromSeries, colTotal
             </table>
           </div>
         )}
-        <p className="border-t px-4 py-2 text-[11px] text-muted-foreground">
-          Reported movement per period · hover any cell for the full figure
-        </p>
+        <p className="border-t px-4 py-2 text-[11px] text-muted-foreground">{note}</p>
       </CardContent>
     </Card>
   )
