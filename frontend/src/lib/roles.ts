@@ -55,3 +55,14 @@ export const isManagementRole = (role: string | undefined | null): boolean =>
 
 export const roleLabel = (role: string): string =>
   ROLE_LABELS[role as StoredRole] ?? role
+
+/**
+ * Where a role lands after login — and where the logo takes them.
+ * Site engineers have their own UI; management opens on the portfolio,
+ * everyone else on the fleet dashboard.
+ */
+export const homePathForRole = (role: string | undefined | null): string => {
+  if (role === 'site_engineer') return '/site/dashboard'
+  if (isManagementRole(role)) return '/projects/executive'
+  return '/'
+}

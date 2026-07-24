@@ -68,8 +68,15 @@ function TransfersPageContent() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [page, setPage] = useState(0);
 
+  // Management and the plant officer read the movement record, they don't
+  // work the queue — a pending transfer is a claim awaiting the admin's
+  // confirmation, so they only ever see confirmed moves.
+  const confirmedOnly = !isAdmin;
+
   const params = {
-    status: statusFilter !== 'all' ? statusFilter : undefined,
+    status: confirmedOnly
+      ? 'confirmed'
+      : statusFilter !== 'all' ? statusFilter : undefined,
     limit: PAGE_SIZE,
     offset: page * PAGE_SIZE,
   };
@@ -110,9 +117,9 @@ function TransfersPageContent() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className={`grid gap-3 ${confirmedOnly ? 'grid-cols-2' : 'grid-cols-2 md:grid-cols-4'}`}>
         {statsLoading ? (
-          Array.from({ length: 4 }).map((_, i) => (
+          Array.from({ length: confirmedOnly ? 2 : 4 }).map((_, i) => (
             <Card key={i}>
               <CardContent className="p-3">
                 <Skeleton className="h-4 w-20 mb-1" />
@@ -120,6 +127,11 @@ function TransfersPageContent() {
               </CardContent>
             </Card>
           ))
+        ) : confirmedOnly ? (
+          <>
+            <StatCard label="Confirmed" value={stats?.data.confirmed ?? 0} color="emerald" />
+            <StatCard label="Last 7 Days" value={stats?.data.recent_7_days ?? 0} color="blue" />
+          </>
         ) : (
           <>
             <StatCard label="Pending" value={stats?.data.pending ?? 0} color="amber" />
@@ -132,22 +144,24 @@ function TransfersPageContent() {
 
       {/* Filters */}
       <div className="flex items-center gap-3">
-        <Select
-          value={statusFilter}
-          onValueChange={(v) => { setStatusFilter(v); setPage(0); }}
-        >
-          <SelectTrigger className="w-[160px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Status</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
-            <SelectItem value="confirmed">Confirmed</SelectItem>
-            <SelectItem value="cancelled">Cancelled</SelectItem>
-          </SelectContent>
-        </Select>
+        {!confirmedOnly && (
+          <Select
+            value={statusFilter}
+            onValueChange={(v) => { setStatusFilter(v); setPage(0); }}
+          >
+            <SelectTrigger className="w-[160px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Status</SelectItem>
+              <SelectItem value="pending">Pending</SelectItem>
+              <SelectItem value="confirmed">Confirmed</SelectItem>
+              <SelectItem value="cancelled">Cancelled</SelectItem>
+            </SelectContent>
+          </Select>
+        )}
         <span className="text-sm text-muted-foreground">
-          {total} transfer{total !== 1 ? 's' : ''}
+          {total} {confirmedOnly ? 'confirmed ' : ''}transfer{total !== 1 ? 's' : ''}
         </span>
       </div>
 

@@ -25,6 +25,7 @@ import { useAuth } from '@/providers/auth-provider'
 import { useProjectIssues, projectsKeys } from '@/hooks/use-projects'
 import { resolveSheetFlag, unresolveSheetFlag, type SheetFlag } from '@/lib/api/projects'
 import { getErrorMessage } from '@/lib/api/client'
+import { ProtectedRoute } from '@/components/protected-route'
 import { fmtDate, nairaM, weekLabel } from '@/lib/format'
 
 const SEVERITY_BADGE: Record<string, string> = {
@@ -34,6 +35,15 @@ const SEVERITY_BADGE: Record<string, string> = {
 }
 
 export default function ProjectIssuesPage() {
+  // The tab is hidden for everyone but admins; gate the URL too.
+  return (
+    <ProtectedRoute requiredRole="admin">
+      <IssuesContent />
+    </ProtectedRoute>
+  )
+}
+
+function IssuesContent() {
   const params = useParams<{ id: string }>()
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'

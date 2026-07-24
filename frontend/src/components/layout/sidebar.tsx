@@ -33,7 +33,8 @@ import {
   BookOpen,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { isManagementRole } from '@/lib/roles';
+import { homePathForRole, isManagementRole } from '@/lib/roles';
+import { isPlantPath } from './plant-tabs';
 import { Separator } from '@/components/ui/separator';
 import {
   Tooltip,
@@ -118,6 +119,17 @@ const projectNavItems = [
   },
 ];
 
+// ── Section: PLANT (management) ───────────────────────────────────────────
+// Management gets the whole plant module behind one entry; the tabs inside
+// the Plant workbench (PlantTabs) carry the rest.
+const managementPlantNavItems = [
+  {
+    title: 'Plant',
+    href: '/plant',
+    icon: Truck,
+  },
+];
+
 // ── Section: SHARED ───────────────────────────────────────────────────────
 const sharedNavItems = [
   {
@@ -174,8 +186,11 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const isAdmin = user?.role === 'admin';
   const isManagement = isManagementRole(user?.role);
   const isPlantOfficer = user?.role === 'plant_officer';
-  // management-tier (plant module): admin, MD/GPM, plant officer
-  const showManagementItems = isAdmin || isManagement || isPlantOfficer;
+  // Admins and the plant officer drive the plant module from the sidebar.
+  // Management sees one "Plant" entry instead — the module's own tab bar
+  // takes them the rest of the way, so their sidebar stays to the three
+  // things they asked for: executive summary, registry, plant.
+  const showManagementItems = isAdmin || isPlantOfficer;
   // projects module: admin + MD/GPM only — the plant officer has no access
   const showProjectItems = isAdmin || isManagement;
 
@@ -211,14 +226,15 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   // Prefetch all nav routes for instant transitions
   useEffect(() => {
     const allItems = [
-      ...overviewNavItems,
+      ...(isManagement ? [] : overviewNavItems),
       ...(showManagementItems ? plantNavItems : []),
-      ...projectNavItems,
+      ...(isManagement ? managementPlantNavItems : []),
+      ...(showProjectItems ? projectNavItems : []),
       ...(showManagementItems ? sharedNavItems : []),
       ...(isAdmin ? adminNavItems : []),
     ];
     allItems.forEach((item) => router.prefetch(item.href));
-  }, [router, isAdmin, showManagementItems]);
+  }, [router, isAdmin, isManagement, showManagementItems, showProjectItems]);
 
   return (
     <aside
@@ -229,7 +245,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
     >
       {/* Logo Section */}
       <div className="flex h-[72px] items-center justify-between px-3 border-b border-sidebar-border">
-        <Link href="/" className="flex items-center gap-2.5">
+        <Link href={homePathForRole(user?.role)} className="flex items-center gap-2.5">
           <div className="relative w-[46px] h-[46px] flex-shrink-0">
             <Image
               src="/images/logo.png"
@@ -250,19 +266,22 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
       {/* Navigation */}
       <nav className="flex-1 flex flex-col gap-1 p-3 overflow-y-auto">
 
-        {/* OVERVIEW — all authenticated users */}
-        <NavSection label="OVERVIEW" collapsed={collapsed}>
-          {overviewNavItems.map((item) => (
-            <NavItem
-              key={item.href}
-              href={item.href}
-              icon={item.icon}
-              title={item.title}
-              isActive={item.href === '/' ? pathname === '/' : pathname.startsWith(item.href)}
-              collapsed={collapsed}
-            />
-          ))}
-        </NavSection>
+        {/* OVERVIEW — everyone except management, whose home is the
+            executive summary and whose fleet dashboard sits under Plant */}
+        {!isManagement && (
+          <NavSection label="OVERVIEW" collapsed={collapsed}>
+            {overviewNavItems.map((item) => (
+              <NavItem
+                key={item.href}
+                href={item.href}
+                icon={item.icon}
+                title={item.title}
+                isActive={item.href === '/' ? pathname === '/' : pathname.startsWith(item.href)}
+                collapsed={collapsed}
+              />
+            ))}
+          </NavSection>
+        )}
 
         {/* PLANT & EQUIPMENT — management + admin */}
         {showManagementItems && (
@@ -316,7 +335,23 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           </NavSection>
         )}
 
-        {/* SHARED — management + admin */}
+        {/* PLANT — management's single door into the plant module */}
+        {isManagement && (
+          <NavSection label="PLANT" collapsed={collapsed} separator>
+            {managementPlantNavItems.map((item) => (
+              <NavItem
+                key={item.href}
+                href={item.href}
+                icon={item.icon}
+                title={item.title}
+                isActive={isPlantPath(pathname)}
+                collapsed={collapsed}
+              />
+            ))}
+          </NavSection>
+        )}
+
+        {/* SHARED — admin + plant officer */}
         {showManagementItems && (
           <NavSection label="SHARED" collapsed={collapsed} separator>
             {sharedNavItems.map((item) => (

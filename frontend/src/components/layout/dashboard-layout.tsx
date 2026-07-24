@@ -8,6 +8,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Sidebar } from './sidebar';
 import { Header } from './header';
+import { PlantTabs } from './plant-tabs';
 import { useAuth } from '@/providers/auth-provider';
 import { useLocations, useFleetTypes } from '@/hooks/use-plants';
 import { cn } from '@/lib/utils';
@@ -116,7 +117,10 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
           sidebarCollapsed ? 'lg:pl-[70px]' : 'lg:pl-[240px]'
         )}
       >
-        <div className="p-6">{children}</div>
+        <div className="p-6">
+          <PlantTabs />
+          {children}
+        </div>
       </main>
     </div>
   );

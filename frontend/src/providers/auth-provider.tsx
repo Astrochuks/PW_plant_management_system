@@ -20,6 +20,7 @@ import {
   getTokenExpiresAt,
 } from '@/lib/api/auth';
 import { getErrorMessage } from '@/lib/api/client';
+import { homePathForRole } from '@/lib/roles';
 import { silentRefreshToken, markSessionAlive, SESSION_EXPIRED_EVENT } from '@/lib/api/silent-refresh';
 import { useEventStream } from '@/hooks/use-event-stream';
 
@@ -202,12 +203,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       markSessionAlive(); // reset the circuit breaker — fresh token chain
       setUser(response.user);
       scheduleRefresh();
-      // Site engineers get their own dedicated UI
-      if (response.user.role === 'site_engineer') {
-        router.replace('/site/dashboard');
-      } else {
-        router.replace('/');
-      }
+      router.replace(homePathForRole(response.user.role));
     } catch (error) {
       throw new Error(getErrorMessage(error));
     }
