@@ -266,6 +266,14 @@ export default function ExecutiveSummaryPage() {
   const t = totals
   const winLabel = period === TO_DATE ? 'to date' : period
   const filtered = fState !== ALL || fProject !== ALL
+  // every money card says what it is summed across, honouring the filter
+  const scopeName = fProject !== ALL ? 'this project'
+    : fState !== ALL ? `${fState}` : 'the portfolio'
+  const across = t.count === 1
+    ? (fProject !== ALL ? '1 project' : `across ${scopeName}`)
+    : `across ${t.count} projects`
+  const acrossLabel = fProject !== ALL ? 'the drill-down'
+    : fState !== ALL ? `in ${fState}` : 'all active'
 
   const trendOption = {
     tooltip: { trigger: 'axis', valueFormatter: (v: number) => naira(v) },
@@ -379,16 +387,23 @@ export default function ExecutiveSummaryPage() {
         </CardContent>
       </Card>
 
-      {/* where we stand — all metrics scoped to the window */}
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-5">
-        <Kpi label="Contract value" value={naira(t.contract, true)} sub={naira(t.contract)} />
+      {/* where we stand — all metrics scoped to the window, and every
+          money card says what it is summed across */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <Kpi label="Projects" value={String(t.count)}
+          sub={filtered ? `of ${all.length} active` : `active ${all.length === 1 ? 'project' : 'projects'}`}
+          lineage={acrossLabel} />
+        <Kpi label="Contract value" value={naira(t.contract, true)} sub={naira(t.contract)}
+          lineage={across} />
         <Kpi label={`Work done · ${winLabel}`} value={naira(t.work, true)}
-          sub={period === TO_DATE ? `${pctFmt(t.pct)} of BEME scope` : naira(t.work)} />
-        <Kpi label={`Cost · ${winLabel}`} value={naira(t.cost, true)} sub={naira(t.cost)} />
+          sub={period === TO_DATE ? `${pctFmt(t.pct)} of BEME scope` : naira(t.work)}
+          lineage={across} />
+        <Kpi label={`Cost · ${winLabel}`} value={naira(t.cost, true)} sub={naira(t.cost)}
+          lineage={across} />
         <Kpi label={`Net · ${winLabel}`} value={naira(t.net, true)} sub={naira(t.net)}
-          tone={t.net >= 0 ? 'good' : 'bad'} />
+          tone={t.net >= 0 ? 'good' : 'bad'} lineage={across} />
         <Kpi label={`Margin · ${winLabel}`} value={pctFmt(t.margin)}
-          tone={(t.margin ?? 0) < 0 ? 'bad' : 'good'} />
+          tone={(t.margin ?? 0) < 0 ? 'bad' : 'good'} lineage={across} />
       </div>
 
       {/* what we're owed — a current snapshot (cumulative ledgers) */}
