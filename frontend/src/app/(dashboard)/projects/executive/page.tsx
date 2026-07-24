@@ -13,7 +13,7 @@
  * project hub can never disagree.
  */
 
-import { Fragment, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import ECharts from 'echarts-for-react'
 import { Card, CardContent } from '@/components/ui/card'
@@ -69,30 +69,44 @@ export default function ExecutiveSummaryPage() {
   const [gran, setGran] = useState<Granularity>('month')
   const [sort, setSort] = useState<'net' | 'margin' | 'pct' | 'unpaid' | 'stale'>('net')
   const [fState, setFState] = useState(ALL)
-  const [fStatus, setFStatus] = useState(ALL)
-  const [fType, setFType] = useState(ALL)
-  const [fClient, setFClient] = useState(ALL)
+  const [fProject, setFProject] = useState(ALL)
 
-  const all = useMemo(() => data?.projects ?? [], [data])
+  // the executive summary is the LIVE portfolio — active projects only
+  const all = useMemo(
+    () => (data?.projects ?? []).filter((p) => p.status === 'active'),
+    [data],
+  )
+
+  // State narrows the pool; the Project drill-down then lists only what
+  // survives it, so its options cascade from the State choice.
+  const scoped = useMemo(() => all.filter((p) =>
+    fState === ALL || (p.state_name || UNSET) === fState
+  ), [all, fState])
 
   const options = useMemo(() => {
     const uniq = (vals: Array<string | null>) =>
       [...new Set(vals.map((v) => v || UNSET))].sort()
     return {
       states: uniq(all.map((p) => p.state_name)),
-      statuses: uniq(all.map((p) => p.status)),
-      types: uniq(all.map((p) => p.project_type)),
-      clients: uniq(all.map((p) => p.client)),
+      // Project options follow the State choice
+      projects: scoped
+        .map((p) => ({ id: p.id, name: p.short_name || p.project_name }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
     }
-  }, [all])
+  }, [all, scoped])
+
+  // if the State choice drops the chosen project, fall back to All
+  useEffect(() => {
+    if (fProject !== ALL && !scoped.some((p) => p.id === fProject)) {
+      setFProject(ALL)
+    }
+  }, [scoped, fProject])
 
   // one filter set drives every figure on the page
-  const projects = useMemo(() => all.filter((p) =>
-    (fState === ALL || (p.state_name || UNSET) === fState)
-    && (fStatus === ALL || (p.status || UNSET) === fStatus)
-    && (fType === ALL || (p.project_type || UNSET) === fType)
-    && (fClient === ALL || (p.client || UNSET) === fClient)
-  ), [all, fState, fStatus, fType, fClient])
+  const projects = useMemo(
+    () => scoped.filter((p) => fProject === ALL || p.id === fProject),
+    [scoped, fProject],
+  )
 
   const ids = useMemo(() => new Set(projects.map((p) => p.id)), [projects])
   const series = useMemo(
@@ -202,7 +216,7 @@ export default function ExecutiveSummaryPage() {
     )
   }
 
-  const filtered = fState !== ALL || fStatus !== ALL || fType !== ALL || fClient !== ALL
+  const filtered = fState !== ALL || fProject !== ALL
 
   // matrix totals are always the sum of the periods on screen, so every
   // row and the footer reconcile with the cells beside them
@@ -253,8 +267,12 @@ export default function ExecutiveSummaryPage() {
     }],
   }
 
-  const FilterSelect = ({ label, value, onChange, items }: {
-    label: string; value: string; onChange: (v: string) => void; items: string[]
+  const FilterSelect = ({ label, value, onChange, items, allLabel = 'All' }: {
+    label: string
+    value: string
+    onChange: (v: string) => void
+    items: Array<{ value: string; label: string }>
+    allLabel?: string
   }) => (
     <div className="min-w-[9rem] flex-1">
       <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
@@ -263,9 +281,9 @@ export default function ExecutiveSummaryPage() {
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value={ALL}>All</SelectItem>
+          <SelectItem value={ALL}>{allLabel}</SelectItem>
           {items.map((i) => (
-            <SelectItem key={i} value={i} className="capitalize">{i}</SelectItem>
+            <SelectItem key={i.value} value={i.value} className="capitalize">{i.label}</SelectItem>
           ))}
         </SelectContent>
       </Select>
@@ -277,8 +295,8 @@ export default function ExecutiveSummaryPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Executive summary</h1>
         <p className="text-sm text-muted-foreground">
-          {t.count} {t.count === 1 ? 'project' : 'projects'}
-          {filtered ? ` of ${all.length}` : ''} reporting
+          {t.count} active {t.count === 1 ? 'project' : 'projects'}
+          {filtered ? ` of ${all.length}` : ''}
           {' · '}portfolio position as at {fmtDate(data.generated_at)}
         </p>
       </div>
@@ -287,10 +305,11 @@ export default function ExecutiveSummaryPage() {
       <Card className="relative">
         <Legend>Filters</Legend>
         <CardContent className="flex flex-wrap items-end gap-3 pt-4">
-          <FilterSelect label="State" value={fState} onChange={setFState} items={options.states} />
-          <FilterSelect label="Status" value={fStatus} onChange={setFStatus} items={options.statuses} />
-          <FilterSelect label="Project type" value={fType} onChange={setFType} items={options.types} />
-          <FilterSelect label="Client" value={fClient} onChange={setFClient} items={options.clients} />
+          <FilterSelect label="State" value={fState} onChange={setFState}
+            items={options.states.map((s) => ({ value: s, label: s }))} />
+          <FilterSelect label="Project" value={fProject} onChange={setFProject}
+            allLabel="All projects"
+            items={options.projects.map((p) => ({ value: p.id, label: p.name }))} />
           <div className="min-w-[9rem] flex-1">
             <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Period</p>
             <Select value={gran} onValueChange={(v) => setGran(v as Granularity)}>
@@ -307,7 +326,7 @@ export default function ExecutiveSummaryPage() {
           {filtered && (
             <Button
               variant="outline" size="sm" className="h-8 text-xs"
-              onClick={() => { setFState(ALL); setFStatus(ALL); setFType(ALL); setFClient(ALL) }}
+              onClick={() => { setFState(ALL); setFProject(ALL) }}
             >
               Clear
             </Button>
