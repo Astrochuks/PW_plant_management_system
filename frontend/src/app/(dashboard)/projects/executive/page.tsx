@@ -16,7 +16,6 @@
 
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import ECharts from 'echarts-for-react'
 import { Card, CardContent } from '@/components/ui/card'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -27,11 +26,6 @@ import { Kpi, Legend, LegendSm } from '@/components/projects/hub-ui'
 import { useExecutiveSummary } from '@/hooks/use-projects'
 import type { PortfolioProject, PortfolioWeek } from '@/hooks/use-projects'
 import { naira, num, pctFmt, fmtDate } from '@/lib/format'
-
-const COLOR_WORK = '#f59e0b'
-const COLOR_COST = '#3b82f6'
-const COLOR_NET = '#10b981'
-const TYPE_COLORS = ['#3b82f6', '#f59e0b', '#10b981', '#8b5cf6', '#f43f5e', '#06b6d4', '#14b8a6', '#94a3b8']
 
 const ALL = '__all__'
 const TO_DATE = 'todate'
@@ -50,11 +44,6 @@ function bucketOrder(window: string, present: Set<string>): string[] {
   if (window === TO_DATE) return [...present].sort()
   return MONTHS.filter((m) => present.has(m))
 }
-
-const compactNaira = (v: number) =>
-  Math.abs(v) >= 1_000_000_000 ? `₦${(v / 1_000_000_000).toFixed(1)}b`
-    : Math.abs(v) >= 1_000_000 ? `₦${(v / 1_000_000).toFixed(0)}m`
-      : Math.abs(v) >= 1_000 ? `₦${(v / 1_000).toFixed(0)}k` : `₦${v}`
 
 // cells stay readable at portfolio scale — full naira lives in the tooltip
 const cellMoney = (v: number) =>
@@ -120,7 +109,7 @@ export default function ExecutiveSummaryPage() {
   )
 
   // the window's per-project rows + the shared period columns
-  const { rows, periods, byProject, totalsByPeriod, trend, totals } = useMemo(() => {
+  const { rows, periods, byProject, totalsByPeriod, totals } = useMemo(() => {
     const ids = new Set(projects.map((p) => p.id))
     const cumulative = period === TO_DATE
     const yearNum = cumulative ? null : Number(period)
@@ -177,16 +166,6 @@ export default function ExecutiveSummaryPage() {
       if (anyPrior) cols = ['Prior', ...cols]
     }
 
-    // trend: real time buckets only (Prior isn't a period)
-    const tr = new Map<string, { label: string; work: number; cost: number; net: number }>()
-    for (const w of winSeries) {
-      const key = bucketKey(w, period)
-      const b = tr.get(key) ?? { label: key, work: 0, cost: 0, net: 0 }
-      b.work += w.works_incl_vat; b.cost += w.cost; b.net += w.net
-      tr.set(key, b)
-    }
-    const trendCols = cols.filter((c) => c !== 'Prior')
-
     const sum = (f: (r: Row) => number | null | undefined) =>
       rows.reduce((a, r) => a + (f(r) ?? 0), 0)
     const work = sum((r) => r.win.work)
@@ -201,7 +180,6 @@ export default function ExecutiveSummaryPage() {
       periods: cols,
       byProject: cell,
       totalsByPeriod: byPeriod,
-      trend: trendCols.map((k) => tr.get(k) ?? { label: k, work: 0, cost: 0, net: 0 }),
       totals: {
         count: rows.length,
         contract: sum((r) => r.contract_sum),
@@ -239,18 +217,6 @@ export default function ExecutiveSummaryPage() {
     return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]))
   }, [sorted])
 
-  const byState = useMemo(() => {
-    const m = new Map<string, number>()
-    for (const r of rows) m.set(r.state_name || UNSET, (m.get(r.state_name || UNSET) ?? 0) + r.win.work)
-    return [...m.entries()].filter(([, v]) => v > 0).sort((a, b) => a[1] - b[1])
-  }, [rows])
-
-  const byType = useMemo(() => {
-    const m = new Map<string, number>()
-    for (const r of rows) m.set(r.project_type || UNSET, (m.get(r.project_type || UNSET) ?? 0) + r.win.work)
-    return [...m.entries()].filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1])
-  }, [rows])
-
   if (isLoading) return <PageSkeleton />
   if (!data || all.length === 0) {
     return (
@@ -274,49 +240,6 @@ export default function ExecutiveSummaryPage() {
     : `across ${t.count} projects`
   const acrossLabel = fProject !== ALL ? 'the drill-down'
     : fState !== ALL ? `in ${fState}` : 'all active'
-
-  const trendOption = {
-    tooltip: { trigger: 'axis', valueFormatter: (v: number) => naira(v) },
-    legend: { data: ['Work done (Incl. VAT)', 'Cost', 'Net'], bottom: 0 },
-    grid: { left: 64, right: 16, top: 20, bottom: 42 },
-    xAxis: { type: 'category', data: trend.map((b) => b.label) },
-    yAxis: { type: 'value', axisLabel: { formatter: compactNaira } },
-    series: [
-      { name: 'Work done (Incl. VAT)', type: 'bar', data: trend.map((b) => Math.round(b.work)), itemStyle: { color: COLOR_WORK } },
-      { name: 'Cost', type: 'bar', data: trend.map((b) => Math.round(b.cost)), itemStyle: { color: COLOR_COST } },
-      { name: 'Net', type: 'line', data: trend.map((b) => Math.round(b.net)), itemStyle: { color: COLOR_NET }, lineStyle: { width: 2.5 } },
-    ],
-  }
-
-  const stateOption = {
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, valueFormatter: (v: number) => naira(v) },
-    grid: { left: 8, right: 64, top: 10, bottom: 10, containLabel: true },
-    xAxis: { type: 'value', axisLabel: { formatter: compactNaira } },
-    yAxis: { type: 'category', data: byState.map(([k]) => k) },
-    series: [{
-      type: 'bar',
-      data: byState.map(([, v]) => Math.round(v)),
-      itemStyle: { color: COLOR_WORK, borderRadius: [0, 4, 4, 0] },
-      label: { show: true, position: 'right', formatter: (p: { value: number }) => compactNaira(p.value) },
-    }],
-  }
-
-  const typeOption = {
-    tooltip: { trigger: 'item', valueFormatter: (v: number) => naira(v) },
-    legend: { orient: 'vertical', right: 0, top: 'center', itemWidth: 10, itemHeight: 10 },
-    series: [{
-      type: 'pie',
-      radius: ['45%', '72%'],
-      center: ['38%', '50%'],
-      avoidLabelOverlap: true,
-      itemStyle: { borderColor: '#fff', borderWidth: 2 },
-      label: { formatter: '{d}%', fontSize: 11 },
-      data: byType.map(([k, v], i) => ({
-        name: k, value: Math.round(v),
-        itemStyle: { color: TYPE_COLORS[i % TYPE_COLORS.length] },
-      })),
-    }],
-  }
 
   const FilterSelect = ({ label, value, onChange, items, allLabel = 'All' }: {
     label: string
@@ -514,36 +437,6 @@ export default function ExecutiveSummaryPage() {
           <p className="border-t px-4 py-2 text-[11px] text-muted-foreground">
             Work done Incl. VAT · hover any cell for the full figure
           </p>
-        </CardContent>
-      </Card>
-
-      {/* the two breakdowns */}
-      <div className="grid gap-3 lg:grid-cols-2">
-        <Card className="relative">
-          <Legend>Work done by state · {winLabel}</Legend>
-          <CardContent className="pt-3">
-            {byState.length === 0
-              ? <p className="py-8 text-center text-sm text-muted-foreground">Nothing in this window.</p>
-              : <ECharts option={stateOption} style={{ height: Math.max(180, byState.length * 46 + 30) }} notMerge />}
-          </CardContent>
-        </Card>
-        <Card className="relative">
-          <Legend>Work done by project type · {winLabel}</Legend>
-          <CardContent className="pt-3">
-            {byType.length === 0
-              ? <p className="py-8 text-center text-sm text-muted-foreground">Nothing in this window.</p>
-              : <ECharts option={typeOption} style={{ height: Math.max(180, byType.length * 40 + 40) }} notMerge />}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* the portfolio over the window */}
-      <Card className="relative">
-        <Legend>Work done vs cost · {winLabel}</Legend>
-        <CardContent className="pt-3">
-          {trend.length === 0
-            ? <p className="py-8 text-center text-sm text-muted-foreground">Nothing in this window.</p>
-            : <ECharts option={trendOption} style={{ height: 300 }} notMerge />}
         </CardContent>
       </Card>
 
