@@ -42,7 +42,18 @@ export default function ProjectOverviewPage() {
   }
 
   if (isLoading || !o) return <OverviewSkeleton />
-  if (!o.latest_week) return <NoReportsYet />
+
+  // A brand-new project has its contract details & schedule (entered at
+  // creation) but no weekly reports yet — show the contract card, then a
+  // note in place of the data sections that need uploaded weeks.
+  if (!o.latest_week) {
+    return (
+      <div className="space-y-6">
+        <ContractCard o={o} />
+        <NoReportsYet />
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">

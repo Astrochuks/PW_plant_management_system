@@ -403,12 +403,15 @@ export default function ExecutiveSummaryPage() {
               <thead>
                 <tr className="border-b text-muted-foreground">
                   <th rowSpan={2} className="sticky left-0 z-10 min-w-[180px] bg-primary px-4 py-2 text-left align-middle font-bold text-primary-foreground">Project</th>
+                  <th colSpan={2} className="border-l px-3 py-1.5 text-center text-[10px] font-bold uppercase tracking-wide">Contract</th>
                   <th colSpan={5} className="border-l px-3 py-1.5 text-center text-[10px] font-bold uppercase tracking-wide">To date</th>
                   <th colSpan={4} className="border-l px-3 py-1.5 text-center text-[10px] font-bold uppercase tracking-wide">Certificates &amp; payments</th>
                   <th colSpan={4} className="border-l px-3 py-1.5 text-center text-[10px] font-bold uppercase tracking-wide">{CURRENT_YEAR}</th>
                   <th colSpan={2} className="border-l px-3 py-1.5 text-center text-[10px] font-bold uppercase tracking-wide">Status</th>
                 </tr>
                 <tr className="border-b bg-primary text-left text-[11px] text-primary-foreground">
+                  {th('Contract value', undefined, 'border-l')}
+                  {th('BEME (Incl. VAT)')}
                   {th('% Compl.', 'pct', 'border-l')}
                   {th('Work done (Incl. VAT)', 'workTd')}
                   {th('Cost', 'costTd')}
@@ -438,6 +441,8 @@ export default function ExecutiveSummaryPage() {
                         {p.short_name || p.project_name}
                         {p.state_name && <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">{p.state_name}</span>}
                       </td>
+                      <td className="border-l px-3 py-2 text-right tabular-nums">{money(p.contract_sum)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{money(p.scope_incl_vat)}</td>
                       <td className="border-l px-3 py-2 text-right tabular-nums">{pctFmt(p.pct_complete)}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{money(p.works_incl_vat)}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{money(p.cost)}</td>
