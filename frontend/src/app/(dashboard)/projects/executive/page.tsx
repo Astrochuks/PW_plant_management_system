@@ -16,6 +16,7 @@
 
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { ArrowDownWideNarrow, ChevronDown } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -267,6 +268,21 @@ export default function ExecutiveSummaryPage() {
   const money = (v: number | null | undefined) =>
     <span title={v != null ? naira(v) : undefined}>{fm(v)}</span>
 
+  // header cell — clickable to sort when given a sort key, with a chevron
+  // on the active column so the sort is always visibly applied
+  const th = (label: string, k?: typeof sort, cls = '') => (
+    <th
+      onClick={k ? () => setSort(k) : undefined}
+      className={`px-3 py-1.5 text-right font-medium ${cls} ${
+        k ? 'cursor-pointer select-none hover:text-foreground' : ''
+      } ${k && sort === k ? 'text-foreground' : ''}`}
+    >
+      <span className="inline-flex items-center justify-end gap-0.5">
+        {label}{k && sort === k && <ChevronDown className="h-3 w-3" />}
+      </span>
+    </th>
+  )
+
   return (
     <div className="space-y-5">
       {/* sticky header + control bar — State/Project (left), Year/Gran
@@ -366,9 +382,11 @@ export default function ExecutiveSummaryPage() {
       <Card className="relative">
         <Legend>Projects</Legend>
         <CardContent className="p-0 pt-2">
-          <div className="flex items-center justify-end px-4 pb-2">
+          <div className="flex items-center justify-end gap-2 px-4 pb-2">
+            <ArrowDownWideNarrow className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="text-xs text-muted-foreground">Sort by</span>
             <Select value={sort} onValueChange={(v) => setSort(v as typeof sort)}>
-              <SelectTrigger className="h-8 w-52 text-xs font-semibold"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-8 w-48 text-xs font-semibold"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="workTd">Work done · to date</SelectItem>
                 <SelectItem value="costTd">Cost · to date</SelectItem>
@@ -391,19 +409,19 @@ export default function ExecutiveSummaryPage() {
                   <th colSpan={2} className="border-l px-3 py-1.5 text-center text-[10px] font-semibold uppercase tracking-wide">Status</th>
                 </tr>
                 <tr className="border-b text-left text-[11px] text-muted-foreground">
-                  <th className="border-l px-3 py-1.5 text-right font-medium">% Compl.</th>
-                  <th className="px-3 py-1.5 text-right font-medium">Work done</th>
-                  <th className="px-3 py-1.5 text-right font-medium">Cost</th>
-                  <th className="px-3 py-1.5 text-right font-medium">Net</th>
-                  <th className="px-3 py-1.5 text-right font-medium">Margin</th>
-                  <th className="border-l px-3 py-1.5 text-right font-medium">Certified</th>
-                  <th className="px-3 py-1.5 text-right font-medium">Not paid</th>
-                  <th className="px-3 py-1.5 text-right font-medium">Paid</th>
-                  <th className="px-3 py-1.5 text-right font-medium">Retention</th>
-                  <th className="border-l px-3 py-1.5 text-right font-medium">Work done</th>
-                  <th className="px-3 py-1.5 text-right font-medium">Cost</th>
-                  <th className="px-3 py-1.5 text-right font-medium">Net</th>
-                  <th className="px-3 py-1.5 text-right font-medium">Margin</th>
+                  {th('% Compl.', 'pct', 'border-l')}
+                  {th('Work done', 'workTd')}
+                  {th('Cost', 'costTd')}
+                  {th('Net', 'netTd')}
+                  {th('Margin', 'marginTd')}
+                  {th('Certified', undefined, 'border-l')}
+                  {th('Not paid', 'unpaid')}
+                  {th('Paid')}
+                  {th('Retention')}
+                  {th('Work done', 'workYr', 'border-l')}
+                  {th('Cost')}
+                  {th('Net')}
+                  {th('Margin')}
                   <th className="border-l px-3 py-1.5 text-left font-medium">Schedule</th>
                   <th className="px-3 py-1.5 text-right font-medium">Latest</th>
                 </tr>
