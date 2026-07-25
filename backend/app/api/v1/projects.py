@@ -716,6 +716,30 @@ async def get_executive_summary(
     return {"success": True, "data": await build_portfolio(date.today())}
 
 
+@router.get("/executive/brief")
+async def get_executive_brief(
+    current_user: Annotated[CurrentUser, Depends(require_projects_access)],
+) -> dict[str, Any]:
+    """The exceptions behind the executive summary — what the MD should
+    act on, ranked by the naira each finding is worth.
+
+    On-demand (the brief button), not part of the summary payload: it
+    reads the fuel ledgers week by week, which the page itself never
+    needs. Money is deliberately not returned — the caller already has
+    it, and computing it twice is a chance to disagree with itself.
+    """
+    from app.services.project_brief import build_findings
+    from app.services.project_portfolio import build_portfolio
+
+    today = date.today()
+    portfolio = await build_portfolio(today)
+    findings = await build_findings(today, portfolio["projects"])
+    return {
+        "success": True,
+        "data": {"generated_at": today.isoformat(), "findings": findings},
+    }
+
+
 @router.get("/{project_id}/overview")
 async def get_project_overview(
     project_id: UUID,

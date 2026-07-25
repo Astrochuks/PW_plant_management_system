@@ -16,7 +16,8 @@
 
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { ArrowDownWideNarrow, ChevronDown } from 'lucide-react'
+import { ArrowDownWideNarrow, ChevronDown, FileDown, Loader2 } from 'lucide-react'
+import { toast } from 'sonner'
 import { Card, CardContent } from '@/components/ui/card'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -26,6 +27,8 @@ import { Button } from '@/components/ui/button'
 import { Kpi, Legend, LegendSm } from '@/components/projects/hub-ui'
 import { useExecutiveSummary } from '@/hooks/use-projects'
 import type { PortfolioProject } from '@/hooks/use-projects'
+import { downloadExecutiveBrief } from '@/lib/executive-brief-pdf'
+import { getErrorMessage } from '@/lib/api/client'
 import { naira, nairaM, pctFmt, fmtDate } from '@/lib/format'
 
 type Gran = 'week' | 'month' | 'quarter' | 'year'
@@ -66,6 +69,10 @@ export default function ExecutiveSummaryPage() {
   // shared lens for the three matrices
   const [matYear, setMatYear] = useState<string>(ALL)
   const [matGran, setMatGran] = useState<Gran>('month')
+
+  // the brief is built on click — it reads the fuel ledgers week by week,
+  // which this page never needs
+  const [briefing, setBriefing] = useState(false)
 
   // ₦m / Full money toggle — drives every figure in the tables & matrices.
   // Defaults to Full (show every digit); ₦ millions is the compact option.
@@ -268,6 +275,25 @@ export default function ExecutiveSummaryPage() {
   const money = (v: number | null | undefined) =>
     <span title={v != null ? naira(v) : undefined}>{fm(v)}</span>
 
+  // The brief is the same page, addressed to someone who will not open it:
+  // it carries whatever the filters are showing right now.
+  const handleBrief = async () => {
+    setBriefing(true)
+    try {
+      await downloadExecutiveBrief({
+        projects,
+        totals: t,
+        scopeLabel: fProject !== ALL
+          ? (options.projects.find((p) => p.id === fProject)?.name ?? 'One project')
+          : fState !== ALL ? fState : 'All projects',
+      })
+    } catch (err) {
+      toast.error(getErrorMessage(err))
+    } finally {
+      setBriefing(false)
+    }
+  }
+
   // header cell on the brand-yellow row — clickable to sort when given a
   // sort key, with a chevron on the active column so it is visibly applied
   const th = (label: string, k?: typeof sort, cls = '') => (
@@ -290,7 +316,15 @@ export default function ExecutiveSummaryPage() {
       <div className="sticky top-16 z-20 -mx-6 space-y-3 border-b bg-background/95 px-6 pb-3 pt-1 backdrop-blur supports-[backdrop-filter]:bg-background/80">
         <div className="flex items-center justify-between gap-3">
           <h1 className="text-[1.7rem] font-bold leading-none tracking-tight">Executive summary</h1>
-          <span className="hidden text-xs text-muted-foreground sm:inline">as at {fmtDate(data.generated_at)}</span>
+          <div className="flex items-center gap-3">
+            <span className="hidden text-xs text-muted-foreground sm:inline">as at {fmtDate(data.generated_at)}</span>
+            <Button size="sm" onClick={handleBrief} disabled={briefing || t.count === 0}>
+              {briefing
+                ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                : <FileDown className="mr-2 h-4 w-4" />}
+              Executive brief
+            </Button>
+          </div>
         </div>
 
         <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3 rounded-xl border bg-card px-4 py-3 shadow-sm">

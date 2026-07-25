@@ -1240,6 +1240,57 @@ export async function getExecutiveSummary(): Promise<ExecutiveSummary> {
   return response.data.data;
 }
 
+// ── Executive brief — the exceptions behind the summary ──────────────
+
+export type FindingKind =
+  | 'fuel_unattributed'
+  | 'fuel_repeated_log'
+  | 'diesel_price'
+  | 'stale_reporting'
+  | 'never_reported';
+
+/** A run of stored weeks whose per-plant fuel sheet never changed. */
+export interface RepeatRun {
+  weeks: number;
+  from_year: number; from_week: number;
+  to_year: number; to_week: number;
+  plants: number;
+  litres: number;
+}
+
+export interface BriefFinding {
+  project_id: string;
+  project: string;
+  kind: FindingKind;
+  severity: 'high' | 'medium';
+  /** What the finding is worth, for ranking. Null when it has no price. */
+  impact_naira: number | null;
+  facts: {
+    // fuel_unattributed
+    charged_litres?: number; logged_litres?: number; gap_litres?: number;
+    gap_share?: number; avg_rate?: number; ago_spend?: number;
+    weeks?: number; repeat?: RepeatRun | null;
+    // diesel_price
+    from_year?: number; from_week?: number; to_year?: number; to_week?: number;
+    from_rate?: number; to_rate?: number;
+    rate_pct?: number | null; litres_pct?: number | null; spend_pct?: number | null;
+    extra_naira?: number;
+    // stale_reporting
+    days?: number; year?: number | null; week?: number | null;
+    week_ending?: string | null; weeks_received?: number;
+  };
+}
+
+export interface ExecutiveBrief {
+  generated_at: string;
+  findings: BriefFinding[];
+}
+
+export async function getExecutiveBrief(): Promise<ExecutiveBrief> {
+  const response = await apiClient.get('/projects/executive/brief');
+  return response.data.data;
+}
+
 // ── Project report pack ─────────────────────────────────────────────
 
 export type ReportPeriod = 'weekly' | 'monthly' | 'quarterly' | 'yearly' | 'to-date';
