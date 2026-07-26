@@ -1967,10 +1967,17 @@ async def get_costs_by_period(
     plant_id: UUID | None = None,
     location_id: UUID | None = None,
 ) -> dict[str, Any]:
-    """Get costs grouped by period (week, month, quarter, year)."""
+    """Get costs grouped by period (week, month, quarter, year).
+
+    Weeks are ISO weeks, so a week is scoped by its ISO year — the week
+    that straddles New Year belongs to the year holding its Thursday, not
+    to whichever calendar year each day of it falls in. Month, quarter and
+    year stay on the calendar year, which is what they mean.
+    """
     period_column = {"week": "week_number", "month": "month", "quarter": "quarter", "year": "year"}[period]
 
-    conds = ["year = $1"]
+    year_column = "EXTRACT(ISOYEAR FROM replaced_date)::int" if period == "week" else "year"
+    conds = [f"{year_column} = $1"]
     params: list[Any] = [year]
     if plant_id:
         params.append(str(plant_id))

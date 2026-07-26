@@ -461,9 +461,12 @@ async def submit_draft(
     if not row_count:
         raise ValidationError("Draft has no plant rows to submit")
 
-    # Compute ISO week
+    # (ISO year, ISO week) — the pair every other ingest path stores
+    # (uploads.py, plants.py). Using the calendar year here would file the
+    # week straddling New Year under the wrong year: a report ending
+    # 03 Jan 2027 is ISO 2026-W53, not 2027-W53.
     iso = week_ending_date.isocalendar()
-    year = week_ending_date.year
+    year = iso[0]
     week_number = iso[1]
 
     # Check for duplicate submission
