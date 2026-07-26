@@ -367,7 +367,8 @@ async def get_top_sites(
                 l.name AS location_name,
                 COALESCE(SUM(sp.total_cost_ngn), 0)::float AS total_spend,
                 COUNT(*)::int AS items_count,
-                COUNT(DISTINCT sp.purchase_order_number)::int AS po_count,
+                -- a PO is its number AND its date (migration 031)
+                COUNT(DISTINCT (sp.purchase_order_number, sp.po_date))::int AS po_count,
                 COUNT(DISTINCT sp.plant_id)::int AS plants_count
             FROM spare_parts sp
             JOIN locations l ON l.id = sp.location_id
@@ -1936,7 +1937,7 @@ async def get_overall_summary(
                 COALESCE(SUM(CASE WHEN is_workshop THEN total_cost_ngn ELSE 0 END), 0)::float AS workshop_cost,
                 COALESCE(SUM(CASE WHEN COALESCE(is_category, false) THEN total_cost_ngn ELSE 0 END), 0)::float AS category_cost,
                 count(*)::int AS items_count,
-                count(DISTINCT purchase_order_number)::int AS po_count,
+                count(DISTINCT (purchase_order_number, po_date))::int AS po_count,
                 count(DISTINCT plant_id)::int AS plants_count,
                 count(DISTINCT location_id)::int AS locations_count
             FROM spare_parts WHERE {where}""",
@@ -1997,7 +1998,7 @@ async def get_costs_by_period(
         f"""SELECT {period_column} AS period_val,
                    COALESCE(SUM(total_cost_ngn), 0)::float AS total_cost,
                    count(*)::int AS items_count,
-                   count(DISTINCT purchase_order_number)::int AS po_count
+                   count(DISTINCT (purchase_order_number, po_date))::int AS po_count
             FROM spare_parts
             WHERE {where} AND {period_column} IS NOT NULL
             GROUP BY {period_column}
@@ -2170,7 +2171,7 @@ async def get_repeat_purchases(
                 pm.description AS plant_description,
                 l.name AS location_name,
                 UPPER(TRIM(sp.part_description)) AS part_name,
-                count(DISTINCT sp.purchase_order_number) AS po_count,
+                count(DISTINCT (sp.purchase_order_number, sp.po_date)) AS po_count,
                 count(*) AS purchase_count,
                 sum(sp.quantity) AS total_quantity,
                 sum(sp.total_cost_ngn)::float AS total_spent,

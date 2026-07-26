@@ -40,6 +40,7 @@ import { Pagination } from '@/components/plants/pagination';
 import { usePurchaseOrders } from '@/hooks/use-spare-parts';
 import { useDebounce } from '@/hooks/use-debounce';
 import { useAuth } from '@/providers/auth-provider';
+import { naira } from '@/lib/format';
 import { useUrlFilters } from '@/hooks/use-url-filters';
 import type { POSummary } from '@/lib/api/spare-parts';
 
@@ -149,6 +150,9 @@ function PurchaseOrdersPageInner() {
                     </p>
                     <p className="text-2xl font-bold mt-1">
                       {formatCurrency(Number(data.meta.total_amount) || 0)}
+                    </p>
+                    <p className="text-xs tabular-nums text-muted-foreground">
+                      {naira(Number(data.meta.total_amount) || 0)}
                     </p>
                   </div>
                   <div className="p-2.5 rounded-lg bg-emerald-100 dark:bg-emerald-900">

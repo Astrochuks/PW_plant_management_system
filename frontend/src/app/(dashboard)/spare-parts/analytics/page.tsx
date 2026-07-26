@@ -29,6 +29,7 @@ import {
   useHighCostPlants,
 } from '@/hooks/use-spare-parts'
 import { useLocationsWithStats } from '@/hooks/use-locations'
+import { naira } from '@/lib/format'
 
 const currentYear = new Date().getFullYear()
 const YEAR_OPTIONS = Array.from({ length: 5 }, (_, i) => currentYear - i)
@@ -228,6 +229,7 @@ export default function SparePartsAnalyticsPage() {
                 <div>
                   <p className="text-xs text-muted-foreground">Total Cost</p>
                   <p className="text-xl font-bold">{formatCompact(summary.total_cost)}</p>
+                  <p className="text-xs tabular-nums text-muted-foreground">{naira(summary.total_cost)}</p>
                 </div>
               </div>
             </CardContent>
@@ -241,6 +243,7 @@ export default function SparePartsAnalyticsPage() {
                 <div>
                   <p className="text-xs text-muted-foreground">Total Parts</p>
                   <p className="text-xl font-bold">{summary.total_parts.toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground">line items</p>
                 </div>
               </div>
             </CardContent>
@@ -254,6 +257,7 @@ export default function SparePartsAnalyticsPage() {
                 <div>
                   <p className="text-xs text-muted-foreground">Purchase Orders</p>
                   <p className="text-xl font-bold">{summary.total_pos.toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground">by number &amp; date</p>
                 </div>
               </div>
             </CardContent>
@@ -267,6 +271,7 @@ export default function SparePartsAnalyticsPage() {
                 <div>
                   <p className="text-xs text-muted-foreground">Direct Cost</p>
                   <p className="text-xl font-bold">{formatCompact(summary.direct_cost)}</p>
+                  <p className="text-xs tabular-nums text-muted-foreground">{naira(summary.direct_cost)}</p>
                 </div>
               </div>
             </CardContent>

@@ -43,6 +43,7 @@ import { Pagination } from '@/components/plants/pagination';
 import { useDebounce } from '@/hooks/use-debounce';
 import { useLocations } from '@/hooks/use-plants';
 import type { SparePart } from '@/lib/api/spare-parts';
+import { naira } from '@/lib/format';
 
 const DEFAULT_FILTERS: SparePartsFiltersState = {
   search: '',
@@ -204,6 +205,7 @@ export default function SparePartsPage() {
             <StatsCard
               title="Total Spend"
               value={formatCurrency(Number(stats.total_spend) || 0)}
+              subtitle={naira(Number(stats.total_spend) || 0)}
               icon={DollarSign}
               iconBg="bg-emerald-100 dark:bg-emerald-900"
               iconColor="text-emerald-600 dark:text-emerald-300"

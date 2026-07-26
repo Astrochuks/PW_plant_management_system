@@ -169,6 +169,45 @@ class TestReconciliation:
         assert int(view) == int(table)
 
 
+class TestPoCounts:
+    """Every 'Purchase Orders' count in the app counts the same thing.
+
+    Spare Parts Analytics read 301 while the PO list read 311, because
+    count(DISTINCT purchase_order_number) counts NUMBERS, and a number is
+    not a PO.
+    """
+
+    async def test_analytics_po_count_matches_the_po_list(self, db_conn):
+        for year in (2025, 2026):
+            analytics = await db_conn.fetchval(
+                """SELECT count(DISTINCT (purchase_order_number, po_date))::int
+                   FROM spare_parts WHERE year = $1""",
+                year,
+            )
+            po_list = await db_conn.fetchval(
+                """SELECT count(*)::int FROM v_purchase_orders_summary
+                   WHERE EXTRACT(YEAR FROM po_date)::int = $1""",
+                year,
+            )
+            assert analytics == po_list, (
+                f"{year}: analytics counts {analytics} POs, "
+                f"the PO list shows {po_list}"
+            )
+
+    async def test_counting_numbers_alone_undercounts(self, db_conn):
+        """Guards the intent: if these two ever agree, a PO number has
+        silently become unique again and the distinction can be dropped."""
+        by_number = await db_conn.fetchval(
+            """SELECT count(DISTINCT purchase_order_number)::int
+               FROM spare_parts WHERE purchase_order_number IS NOT NULL""")
+        by_number_and_date = await db_conn.fetchval(
+            """SELECT count(*)::int FROM (
+                   SELECT 1 FROM spare_parts
+                   WHERE purchase_order_number IS NOT NULL
+                   GROUP BY purchase_order_number, po_date) x""")
+        assert by_number_and_date >= by_number
+
+
 class TestSupplierPoList:
     """GET /suppliers/{id}/pos carried the same defect: it grouped on the
     number alone, and summed total_cost (raw currency) into a column
