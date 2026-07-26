@@ -13,6 +13,40 @@ which is worse — the page renders a number and the number is wrong.
 
 ## P1 — Wrong numbers, or a page that fails outright
 
+### 1.0 Purchase Orders vs Spare Parts totals — FIXED (migration 031) **[verified]**
+
+The two cards disagreed for 2026: **₦540,639,556.32** vs **₦541,777,556.32**,
+a gap of exactly **₦1,138,000**.
+
+**A purchase order is its NUMBER *and* its DATE.** PO numbers come from
+the plant people; PW does not control how they are written and the same
+number can legitimately recur, including in a different year. The
+authority for when a PO was raised is the date on the purchase order
+document, which is what `po_date` holds.
+
+`v_purchase_orders_summary` grouped by `purchase_order_number` **alone**
+and dated the merged row `min(po_date)`. So POs sharing a number were
+fused into one row carrying the earliest date, and a PO raised in 2026
+that shared its number with a 2025 one disappeared from 2026 entirely.
+
+Live case: `PW-PO201125-08` covers 2025-11-20 (₦100,000), 2026-02-21
+(₦680,000) and 2026-04-08 (₦458,000). All ₦1,238,000 was filed under 2025.
+
+Migration 031 groups by `(purchase_order_number, po_date)` and correlates
+the `plants_count` subquery on the date too. **No data changed** — not one
+date, not one amount. Both cards now read ₦541,777,556.32; every year
+reconciles to ₦0.00 and the view total equals the table total exactly
+(₦675,870,760.06). The 2026 PO count goes 300 → 311, because 14 PO
+numbers cover more than one date and are now correctly counted as
+separate POs. Locked by `backend/tests/test_po_identity.py` (7 tests).
+
+**A caution recorded so it is not repeated:** ~78% of PO numbers encode a
+date (`PW-POddmmyy-nn`), and 71 POs have a `po_date` that disagrees with
+their own number. That looks like a data-quality problem but **is not** —
+the plant people only sometimes derive the number from the date, so the
+number is a convention, never an authority. Do **not** "correct" dates
+against PO numbers.
+
 ### 1.1 Two maintenance-cost functions disagree by ₦12.4m **[verified]**
 
 `get_maintenance_cost_analysis` exists **twice** in the database with
