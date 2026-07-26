@@ -1,0 +1,240 @@
+# Plant module audit — 26 July 2026
+
+Pre-production pass over the plant module: every page, the endpoints behind
+it, tested against live data. Findings are marked **[verified]** where I
+called the endpoint or queried the database, and **[by inspection]** where
+they come from reading the code only.
+
+Health baseline: **77 parameter-free GET endpoints swept, zero 500s.**
+Nothing crashes. Every problem below is a *correctness* or *trust* problem,
+which is worse — the page renders a number and the number is wrong.
+
+---
+
+## P1 — Wrong numbers, or a page that fails outright
+
+### 1.1 Two maintenance-cost functions disagree by ₦12.4m **[verified]**
+
+`get_maintenance_cost_analysis` exists **twice** in the database with
+different logic:
+
+| Overload | Shared-PO handling | 2026 total |
+|---|---|---|
+| `(int, uuid, text, uuid, text)` | divides a shared PO across its plants | **₦529,328,325.07** |
+| `(int, uuid, varchar, uuid, varchar)` | charges the full PO to every plant | **₦541,777,556.32** |
+
+Which one runs is decided by how Postgres resolves the parameter types.
+Today the API sends untyped parameters, so it resolves to `text` — the
+splitting version, which is the sensible one. **Today's figures are correct.**
+
+The danger is that nothing guarantees that. One explicit cast added
+anywhere, one driver change, and the maintenance cost jumps ₦12.4m with no
+error and no deploy note.
+
+**Fix:** drop the `varchar` overload so only one definition can ever run.
+
+### 1.2 "All locations" returns a 422 **[verified]**
+
+Five report pages render `<SelectItem value="all">`, then forward the
+literal string `all` as a filter because `"all"` is truthy:
+
+```
+GET /reports/fleet-summary?location_id=all        -> 422
+GET /reports/maintenance-costs?location_id=all    -> 422
+GET /reports/unverified-plants?location_id=all    -> 422
+```
+
+Affected: `/reports/fleet-summary`, `/reports/maintenance-costs`,
+`/reports/trends`, `/reports/unverified`, `/reports/export`.
+`/reports/generate` got this right — it uses a `_all` sentinel mapped back
+to `''`.
+
+**Fix:** one shared `ALL` sentinel, stripped before the request.
+
+### 1.3 "All fleet types" silently returns nothing **[verified]**
+
+```
+GET /reports/maintenance-costs?year=2026&group_by=month&fleet_type=all  -> 200  []
+```
+
+Worse than the 422: no error, just an empty chart. The user reads it as
+"no maintenance cost this year."
+
+### 1.4 Export Data is broken on every status filter **[verified]**
+
+```
+GET /reports/export/plants?status=working    -> 500
+GET /reports/export/plants?status=breakdown  -> 500
+GET /reports/export/plants?status=all        -> 500
+```
+
+Root cause: `reports.py:478` filters `WHERE status = $1` against
+`v_plants_summary`, and that view has **no `status` column** — it has
+`condition` (43 columns, confirmed). This is the documented
+`status` vs `condition` trap; this endpoint is the one place it survived.
+
+Unfiltered export is fine: 1,688 rows, 1.9 MB, ~2s.
+
+**Fix:** filter `condition`, and rename the dropdown to Condition.
+
+---
+
+## P2 — Numbers that mislead
+
+### 2.1 Fleet Summary hides 402 of 1,688 plants **[verified]**
+
+The table shows Total / Working / Standby / Breakdown. The endpoint also
+returns `other`, which the page never renders:
+
+```
+total=1688   working=437   standby=515   breakdown=334   other=402
+shown columns sum to 1286  ->  402 plants unaccounted for
+38 of 75 fleet-type rows visibly do not add up
+```
+
+Management reads a row where the parts don't equal the total. That single
+impression costs more trust than the missing column is worth.
+
+**Fix:** show `other`, or split it into missing / scrap / off-hire /
+unknown.
+
+### 2.2 `under_repair` is a phantom field **[verified]**
+
+`FleetSummaryData.under_repair` is typed and normalized, but the endpoint
+never returns it — confirmed keys are
+`breakdown, fleet_type, other, standby, total, working`. It is always 0.
+
+### 2.3 Plant Movement shows an always-blank column **[verified]**
+
+The page renders `transferred_by`; the endpoint returns
+`event_date, fleet_number, fleet_type, from_location, plant_id, remarks, to_location`.
+No `transferred_by` — the column is permanently empty.
+
+`remarks` and `fleet_type` are returned and thrown away.
+
+### 2.4 Two transfer reports that can disagree **[by inspection]**
+
+`/reports/trends` reads `get_plant_movement_report()`; `/reports/generate`
+queries `plant_transfers WHERE status='confirmed'` directly. Two sources,
+one subject.
+
+### 2.5 Table columns misaligned in Report Generator **[by inspection]**
+
+`generate/page.tsx:436` — the States Summary table has 8 `<TableHead>` and
+7 `<TableCell>` per row, so every column right of B/Down is shifted one
+left. Same shape at line 485 for Sites Breakdown. Its Excel export pushes
+7 sums onto a 6-column header, producing `NaN` in the totals row.
+
+### 2.6 Cards that ignore their own page filters **[by inspection]**
+
+On `/spare-parts`, Top Suppliers and High-Cost Plants are called with
+`limit` only — they show all-time data beside filtered cards. On
+`/spare-parts/analytics` the High-Cost Plants table cannot take a
+`location_id` at all, so changing the site filter leaves it unchanged.
+
+### 2.7 Exports and search that quietly ignore the filter **[by inspection]**
+
+- Price Catalog export omits `search` — exporting a filtered view dumps
+  the whole catalogue.
+- Repeat Purchases search filters client-side over the current 50-row page
+  only; matches on later pages are invisible.
+
+### 2.8 Dropped fields
+
+`avg_cost` (maintenance-costs) **[verified]** returned and discarded.
+`last_submission_date` (compliance), `verified_count` (weekly-trend),
+`meta.as_of` / `meta.historical` (generate) — the last means a report for a
+past period shows historical data with no indicator on screen.
+
+---
+
+## P3 — Pages and code we do not need
+
+Reachability checked against `sidebar.tsx` and `plant-tabs.tsx`.
+
+**Delete outright**
+
+| What | Why |
+|---|---|
+| `app/(dashboard)/suppliers/create/page.tsx` | Zero inbound links. Duplicates the inline create form already on `/suppliers`; both call the same mutation. |
+| `components/locations/location-card.tsx` | Imported by nobody — `/locations` defines its own local `LocationCard`. |
+| `components/locations/location-detail-modal.tsx` | Superseded by the `/locations/[id]` page. |
+| `components/dashboard/dashboard-filters.tsx`, `dashboard-print.tsx` | Never rendered. Consequence: the zustand filter store has no UI, so the dashboard Cost Trend is permanently pinned to the current year. |
+| `components/charts/fleet-category-chart.tsx`, `locations-chart.tsx` | Exported, never imported. |
+
+**Merge**
+
+`/reports/verification` and `/reports/compliance` are structurally
+identical — same layout, same KPI card, same worst-first sort, same
+progress bar, `rateColor`/`rateBg` copy-pasted byte-for-byte. Only the
+endpoint and two labels differ. One page with a toggle.
+
+**Dead hooks / API functions** (defined, exported, zero call sites)
+
+`useWeeklyBrief`, `useAcknowledgeEvent`, `usePlantEvents` (the
+`use-dashboard.ts` one, which name-collides with the *used* one in
+`use-plants.ts` — easy to import the wrong one), `useCreateSparePart`,
+`useDeleteSparePart`, `useAutocompleteDescriptions`, `getPODocument`,
+`getSupplierAutocomplete`, `usePendingTransfers`.
+
+**Orphaned backend endpoints** (no frontend caller)
+
+Spare parts: `GET /autocomplete/descriptions`, `POST ""`, `POST /entry`,
+`POST /legacy-bulk`, `GET /by-po/{po}/document`, `DELETE /{part_id}`.
+Uploads: `POST /weekly-report`, `POST /purchase-order`,
+`GET /status/{job_id}`, `POST /admin/rebuild-timeline`,
+`POST /admin/purchase-order`, `POST /admin/weekly-report`, and
+`POST /admin/weekly-report/preview` — a near-duplicate of the one the UI
+actually uses (`POST /admin/preview-weekly-report`). Easy to call the wrong one.
+
+**Duplicate wrappers for one endpoint**
+
+`GET /reports/fleet-summary` has two client functions and two hooks both
+named `useFleetSummary`, with different shapes, query keys and staleTimes —
+so it is fetched and cached twice per load. `GET /locations` has three
+entry points and is fetched at least twice on the dashboard.
+
+---
+
+## P4 — Correctness risks worth knowing before production
+
+- **Upload tokens send the wrong shape [by inspection]** —
+  `upload_types` goes as one comma-joined string; the backend declares
+  `list[str]`, so FastAPI parses `"weekly_report,purchase_order"` as a
+  single element containing a comma. The form also advertises
+  `spare_parts`, which is not a backend value.
+- **No role gate on four pages** — `/locations`, `/locations/[id]`,
+  `/suppliers`, `/suppliers/[id]` have no `ProtectedRoute`; the dashboard
+  layout checks authentication only. A site engineer who types the URL
+  renders the page and collects 403s.
+- **Management cannot reach Sites or Suppliers** from any nav — they are
+  in the SHARED sidebar section, which is gated to admin/plant-officer, and
+  they are not in the plant tab bar.
+- **The SSE stream puts the JWT in the query string**
+  (`/events/stream?token=…`) — it will appear in server access logs.
+- **10s global axios timeout** applies to the full-table exports.
+- **`downloadSubmissionFile` bypasses the auth interceptor** (raw `fetch`
+  reading sessionStorage) — a download just after token expiry fails with a
+  bare "Failed to download file" instead of refreshing.
+- **`POST /insights/generate` builds its query string by concatenation**
+  without encoding.
+
+---
+
+## Checked and found correct
+
+Worth recording, so they are not re-investigated:
+
+- `/reports/unverified-plants` — flagged as the highest blank-value risk
+  because its normalizer is identity-only. **Verified correct**: the
+  endpoint returns exactly `plant_id, fleet_number, description,
+  current_location, last_verified_date, weeks_since_verification`
+  (+ `condition`, `fleet_type`). Nothing renders blank.
+- `/reports/verification-status` — normalizer maps `verified_count`
+  correctly.
+- `/reports/submission-compliance` — `total_expected` / `total_submitted`
+  map correctly.
+- Exports run in ~1–2s unfiltered; earlier 503/timeouts were contention
+  from the parallel sweep, not a defect.
+- Route ordering in `plants.py` is correct — the literal routes are all
+  declared before `/{plant_id}`.
