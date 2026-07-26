@@ -299,7 +299,8 @@ export default function SupplierDetailPage() {
                   <TableBody>
                     {posData.data.map((po) => (
                       <TableRow
-                        key={po.po_number}
+                        // number + date: a PO number can recur
+                        key={`${po.po_number}|${po.po_date ?? ''}`}
                         className="cursor-pointer hover:bg-muted/50"
                         onClick={() =>
                           router.push(

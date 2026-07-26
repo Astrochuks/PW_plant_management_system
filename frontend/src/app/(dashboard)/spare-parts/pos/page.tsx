@@ -247,7 +247,9 @@ function PurchaseOrdersPageInner() {
             <TableBody>
               {data.data.map((po) => (
                 <TableRow
-                  key={po.po_number}
+                  // a PO is its number AND its date — the same number can
+                  // recur, so the number alone is not a unique key
+                  key={`${po.po_number}|${po.po_date ?? ''}`}
                   className="cursor-pointer hover:bg-muted/50"
                   onClick={() => handleRowClick(po)}
                 >

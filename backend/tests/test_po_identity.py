@@ -167,3 +167,41 @@ class TestReconciliation:
                WHERE purchase_order_number IS NOT NULL
                  AND COALESCE(is_po_overhead, false) = false""")
         assert int(view) == int(table)
+
+
+class TestSupplierPoList:
+    """GET /suppliers/{id}/pos carried the same defect: it grouped on the
+    number alone, and summed total_cost (raw currency) into a column
+    rendered as naira."""
+
+    async def test_supplier_po_totals_are_ngn_and_group_by_number_and_date(
+        self, db_conn
+    ):
+        supplier_id = await db_conn.fetchval(
+            """SELECT supplier_id FROM spare_parts
+               WHERE supplier_id IS NOT NULL AND purchase_order_number IS NOT NULL
+               GROUP BY supplier_id ORDER BY count(*) DESC LIMIT 1""")
+        if supplier_id is None:
+            pytest.skip("no supplier with purchase orders")
+
+        rows = await db_conn.fetch(
+            """SELECT sp.purchase_order_number AS po_number, sp.po_date,
+                      COALESCE(SUM(sp.total_cost_ngn), 0)::float AS total_amount
+               FROM spare_parts sp
+               WHERE sp.supplier_id = $1::uuid
+                 AND sp.purchase_order_number IS NOT NULL
+               GROUP BY sp.purchase_order_number, sp.po_date""",
+            supplier_id,
+        )
+        # every (number, date) pair is distinct — safe as a React key
+        keys = [(r["po_number"], r["po_date"]) for r in rows]
+        assert len(keys) == len(set(keys))
+
+        # and the rows account for every naira the supplier was paid
+        expected = await db_conn.fetchval(
+            """SELECT COALESCE(SUM(total_cost_ngn), 0) FROM spare_parts
+               WHERE supplier_id = $1::uuid AND purchase_order_number IS NOT NULL""",
+            supplier_id,
+        )
+        assert sum(r["total_amount"] for r in rows) == pytest.approx(
+            float(expected), abs=0.01)

@@ -381,26 +381,33 @@ async def get_supplier_pos(
     if not supplier:
         raise NotFoundError("Supplier", str(supplier_id))
 
-    # Aggregate POs in SQL instead of Python
+    # Aggregate POs in SQL instead of Python.
+    # A PO is its NUMBER **and** its DATE — plant-issued numbers repeat,
+    # including across years, so grouping on the number alone merges
+    # unrelated POs and misstates the supplier's totals (same defect as
+    # v_purchase_orders_summary, migration 031).
     total = await fetchval(
-        """SELECT count(DISTINCT purchase_order_number)
-           FROM spare_parts
-           WHERE supplier_id = $1::uuid AND purchase_order_number IS NOT NULL""",
+        """SELECT count(*) FROM (
+               SELECT 1 FROM spare_parts
+               WHERE supplier_id = $1::uuid AND purchase_order_number IS NOT NULL
+               GROUP BY purchase_order_number, po_date) x""",
         str(supplier_id),
     ) or 0
 
     offset = (page - 1) * limit
     pos = await fetch(
+        # total_cost_ngn, not total_cost: the column is rendered as naira,
+        # and a foreign-currency PO must be converted like everywhere else
         """SELECT sp.purchase_order_number AS po_number,
-                  MAX(sp.po_date) AS po_date,
+                  sp.po_date,
                   MAX(l.name) AS location,
                   count(*)::int AS items_count,
-                  COALESCE(SUM(sp.total_cost), 0)::float AS total_amount
+                  COALESCE(SUM(sp.total_cost_ngn), 0)::float AS total_amount
            FROM spare_parts sp
            LEFT JOIN locations l ON l.id = sp.location_id
            WHERE sp.supplier_id = $1::uuid AND sp.purchase_order_number IS NOT NULL
-           GROUP BY sp.purchase_order_number
-           ORDER BY MAX(sp.po_date) DESC NULLS LAST
+           GROUP BY sp.purchase_order_number, sp.po_date
+           ORDER BY sp.po_date DESC NULLS LAST
            LIMIT $2 OFFSET $3""",
         str(supplier_id),
         limit,
