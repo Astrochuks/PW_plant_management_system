@@ -25,6 +25,7 @@ import {
 import { useAuth } from '@/providers/auth-provider'
 import { useDashboardSummary, useRecentlyPurchased } from '@/hooks/use-dashboard'
 import type { LocationStat, RecentSubmission } from '@/lib/api/dashboard'
+import { isoWeek } from '@/lib/format'
 
 // Dashboard chart components
 import { KpiCards } from '@/components/dashboard/kpi-cards'
@@ -125,7 +126,7 @@ export function FleetDashboard({ title, subtitle }: {
               </CardTitle>
               <Badge variant="outline" className="text-xs font-normal gap-1">
                 <Calendar className="h-3 w-3" />
-                Week {getCurrentWeek()} · {new Date().getFullYear()}
+                Week {isoWeek()} · {new Date().getFullYear()}
               </Badge>
             </div>
           </CardHeader>
@@ -293,7 +294,7 @@ const SUBMISSION_STATUS_COLORS: Record<string, string> = {
 }
 
 function RecentSubmissionsList({ submissions }: { submissions: RecentSubmission[] }) {
-  const currentWeek = getCurrentWeek()
+  const currentWeek = isoWeek()
   const currentYear = new Date().getFullYear()
 
   const thisWeek: RecentSubmission[] = []
@@ -403,13 +404,6 @@ function QuickAction({
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-function getCurrentWeek(): number {
-  const now = new Date()
-  const startOfYear = new Date(now.getFullYear(), 0, 1)
-  const pastDays = (now.getTime() - startOfYear.getTime()) / 86400000
-  return Math.ceil((pastDays + startOfYear.getDay() + 1) / 7)
-}
-
 const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
 function formatPurchaseDate(year: number, month: number | null): string {

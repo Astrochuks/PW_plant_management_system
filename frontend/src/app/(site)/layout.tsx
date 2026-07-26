@@ -6,13 +6,7 @@ import { Loader2, Calendar } from 'lucide-react'
 import Image from 'next/image'
 import { useAuth } from '@/providers/auth-provider'
 import { SiteSidebar } from '@/components/site/site-sidebar'
-
-function getISOWeek(): number {
-  const now = new Date()
-  const startOfYear = new Date(now.getFullYear(), 0, 1)
-  const pastDays = (now.getTime() - startOfYear.getTime()) / 86400000
-  return Math.ceil((pastDays + startOfYear.getDay() + 1) / 7)
-}
+import { isoWeek } from '@/lib/format'
 
 export default function SiteLayout({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading, user } = useAuth()
@@ -66,7 +60,7 @@ export default function SiteLayout({ children }: { children: React.ReactNode }) 
               })}
             </span>
             <span className="text-muted-foreground">·</span>
-            <span className="text-muted-foreground">Week {getISOWeek()}</span>
+            <span className="text-muted-foreground">Week {isoWeek()}</span>
           </div>
         </header>
 

@@ -27,6 +27,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { useAuth } from '@/providers/auth-provider';
 import { cn } from '@/lib/utils';
 import { roleLabel } from '@/lib/roles';
+import { isoWeek } from '@/lib/format';
 import Link from 'next/link';
 import { NotificationBell } from '@/components/notifications/notification-bell';
 
@@ -81,7 +82,7 @@ export function Header({ sidebarCollapsed, onMenuClick }: HeaderProps) {
               {new Date().toLocaleDateString('en-NG', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' })}
             </span>
             <span className="text-muted-foreground">·</span>
-            <span className="text-muted-foreground">Week {getISOWeek()}</span>
+            <span className="text-muted-foreground">Week {isoWeek()}</span>
           </div>
         </div>
 
@@ -152,11 +153,4 @@ export function Header({ sidebarCollapsed, onMenuClick }: HeaderProps) {
       </div>
     </header>
   );
-}
-
-function getISOWeek(): number {
-  const now = new Date();
-  const startOfYear = new Date(now.getFullYear(), 0, 1);
-  const pastDays = (now.getTime() - startOfYear.getTime()) / 86400000;
-  return Math.ceil((pastDays + startOfYear.getDay() + 1) / 7);
 }

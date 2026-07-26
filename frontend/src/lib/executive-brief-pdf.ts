@@ -14,7 +14,7 @@
 import {
   getExecutiveBrief, type BriefFinding, type PortfolioProject, type RepeatRun,
 } from '@/lib/api/projects'
-import { fmtDate, naira, num, pctFmt } from '@/lib/format'
+import { fmtDate, isoWeek, naira, num, pctFmt } from '@/lib/format'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -27,13 +27,6 @@ const WASH = '#faf7f0'
 const RED = '#a32020'
 
 const WIDTH = 523 // A4 portrait less 36pt margins
-
-/** The same week number the app header shows, so the two agree. */
-const weekOfYear = (d: Date): number => {
-  const start = new Date(d.getFullYear(), 0, 1)
-  const pastDays = (d.getTime() - start.getTime()) / 86400000
-  return Math.ceil((pastDays + start.getDay() + 1) / 7)
-}
 
 const wk = (year?: number | null, week?: number | null): string =>
   year && week ? `W${String(week).padStart(2, '0')} ${year}` : '—'
@@ -306,7 +299,7 @@ export function buildBriefDoc(
             alignment: 'right',
             stack: [
               { text: 'PROJECTS BRIEF', fontSize: 6.4, color: MUTED, characterSpacing: 1.4 },
-              { text: `Week ${weekOfYear(now)} · ${now.getFullYear()}`, bold: true, fontSize: 16, color: INK, margin: [0, 1, 0, 0] },
+              { text: `Week ${isoWeek(now)} · ${now.getFullYear()}`, bold: true, fontSize: 16, color: INK, margin: [0, 1, 0, 0] },
               {
                 text: now.toLocaleDateString('en-GB', {
                   weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
@@ -499,7 +492,7 @@ export function buildBriefDoc(
 }
 
 export const briefFileName = (now: Date): string =>
-  `PW_Executive_Brief_W${weekOfYear(now)}_${now.toISOString().slice(0, 10)}.pdf`
+  `PW_Executive_Brief_W${isoWeek(now)}_${now.toISOString().slice(0, 10)}.pdf`
 
 /** Fetch the findings, build the page, hand the reader a file. */
 export async function downloadExecutiveBrief(input: BriefInput): Promise<void> {

@@ -33,3 +33,22 @@ export const fmtDate = (d: string | null | undefined): string =>
 
 export const weekLabel = (year: number, week: number): string =>
   `${year} · W${String(week).padStart(2, '0')}`
+
+/**
+ * ISO-8601 week number — the week every stored `week_number` in this
+ * system already means: Postgres `EXTRACT(WEEK …)` and Python's
+ * `isocalendar()` both return it, and that is what the ingest and the
+ * site-report submission write.
+ *
+ * Derived from the calendar date alone (UTC, midday-safe), so the answer
+ * never shifts with the clock — the old approximation moved the week on
+ * a few minutes after midnight and was a week ahead every Sunday, which
+ * is exactly the day a reporting week ends.
+ */
+export const isoWeek = (d: Date = new Date()): number => {
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))
+  // an ISO week belongs to the year containing its Thursday
+  t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7))
+  const yearStart = new Date(Date.UTC(t.getUTCFullYear(), 0, 1))
+  return Math.ceil(((t.getTime() - yearStart.getTime()) / 86400000 + 1) / 7)
+}
