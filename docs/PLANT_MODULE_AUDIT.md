@@ -47,25 +47,50 @@ the plant people only sometimes derive the number from the date, so the
 number is a convention, never an authority. Do **not** "correct" dates
 against PO numbers.
 
-### 1.1 Two maintenance-cost functions disagree by ₦12.4m **[verified]**
+### 1.1 Maintenance costs destroyed ₦12.4m — FIXED (migration 032) **[verified]**
 
-`get_maintenance_cost_analysis` exists **twice** in the database with
-different logic:
+My first read of this was wrong and is corrected here. The two overloads
+were not "two conventions, one sensible". The `text` overload — the one
+the API actually resolved to — was **losing money**.
 
-| Overload | Shared-PO handling | 2026 total |
-|---|---|---|
-| `(int, uuid, text, uuid, text)` | divides a shared PO across its plants | **₦529,328,325.07** |
-| `(int, uuid, varchar, uuid, varchar)` | charges the full PO to every plant | **₦541,777,556.32** |
+Its aggregate divided a shared PO by its fleet count but never expanded
+the row:
 
-Which one runs is decided by how Postgres resolves the parameter types.
-Today the API sends untyped parameters, so it resolves to `text` — the
-splitting version, which is the sensible one. **Today's figures are correct.**
+```sql
+CASE WHEN sp.shared_fleet_numbers IS NOT NULL
+     THEN sp.total_cost_ngn / array_length(sp.shared_fleet_numbers, 1)
+     ELSE sp.total_cost_ngn END
+```
 
-The danger is that nothing guarantees that. One explicit cast added
-anywhere, one driver change, and the maintenance cost jumps ₦12.4m with no
-error and no deploy note.
+A ₦100,000 PO shared across 5 plants contributed ₦20,000 to the month and
+the other ₦80,000 vanished. Across 2026 that destroyed **₦12,449,231.25**
+of ₦65,548,502.24 of shared spend — proven by differencing the apportioned
+sum against the actual.
 
-**Fix:** drop the `varchar` overload so only one definition can ever run.
+That is why Reports → Maintenance Costs read ₦529,328,325.07 while Spare
+Parts and Purchase Orders both read ₦541,777,556.32. The months summed
+correctly to their own grand total; the grand total itself was short.
+
+Apportioning is only meaningful when the question is *"what did THIS
+plant cost"*. Asked portfolio-wide, the money was spent in full.
+Migration 032 apportions only when `p_plant_id` is supplied, and drops
+the `varchar` overload so one definition can ever run.
+
+**Now:** maintenance costs, spare-parts stats, the PO list and the
+analytics summary all return **₦541,777,556.32** for 2026 — verified
+through the API. Locked by `backend/tests/test_spare_parts_money.py`.
+
+### 1.1b Supplier spend was raw currency shown as naira — FIXED (032) **[verified]**
+
+`v_supplier_stats.total_spend` summed `total_cost`, the **original**
+currency, while both consumers render it as naira — understating by
+**₦9,229,167.32** overall. It now sums `total_cost_ngn`. Its `po_count`
+also counted distinct numbers rather than distinct POs (see 1.0).
+
+**Still open, not fixed:** `get_maintenance_costs_combined` also uses raw
+currency, but it has **zero callers** — safe to drop rather than repair.
+`get_high_cost_plants` apportions shared POs, which is *correct* there:
+it ranks plants by what each plant cost.
 
 ### 1.2 "All locations" returns a 422 **[verified]**
 
