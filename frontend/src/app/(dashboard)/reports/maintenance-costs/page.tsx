@@ -24,6 +24,7 @@ import {
 import { useMaintenanceCosts, type MaintenanceCostGroupBy } from '@/hooks/use-reports'
 import { useLocationsWithStats } from '@/hooks/use-locations'
 import { useFleetTypes } from '@/hooks/use-plants'
+import { ALL, only } from '@/lib/filters'
 
 const GROUP_BY_OPTIONS: { value: MaintenanceCostGroupBy; label: string }[] = [
   { value: 'month', label: 'By Month' },
@@ -184,12 +185,12 @@ export default function MaintenanceCostsPage() {
           </SelectContent>
         </Select>
 
-        <Select value={locationId} onValueChange={setLocationId}>
+        <Select value={locationId || ALL} onValueChange={(v) => setLocationId(v === ALL ? '' : v)}>
           <SelectTrigger className="w-[200px]">
             <SelectValue placeholder="All locations" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All locations</SelectItem>
+            <SelectItem value={ALL}>All locations</SelectItem>
             {locations.map((loc) => (
               <SelectItem key={loc.id} value={loc.id}>
                 {loc.location_name}
@@ -198,12 +199,12 @@ export default function MaintenanceCostsPage() {
           </SelectContent>
         </Select>
 
-        <Select value={fleetType} onValueChange={setFleetType}>
+        <Select value={fleetType || ALL} onValueChange={(v) => setFleetType(v === ALL ? '' : v)}>
           <SelectTrigger className="w-[180px]">
             <SelectValue placeholder="All fleet types" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All fleet types</SelectItem>
+            <SelectItem value={ALL}>All fleet types</SelectItem>
             {fleetTypes.map((ft) => (
               <SelectItem key={ft.id} value={ft.name}>
                 {ft.name}

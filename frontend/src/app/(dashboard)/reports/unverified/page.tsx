@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/select'
 import { useUnverifiedPlants } from '@/hooks/use-reports'
 import { useLocationsWithStats } from '@/hooks/use-locations'
+import { ALL, only } from '@/lib/filters'
 
 const WEEKS_OPTIONS = [2, 3, 4, 6, 8, 12]
 const PAGE_SIZE = 50
@@ -35,7 +36,7 @@ export default function UnverifiedPlantsPage() {
 
   const { data: locations = [] } = useLocationsWithStats()
   const { data: response, isLoading } = useUnverifiedPlants({
-    ...(locationId ? { location_id: locationId } : {}),
+    ...(only(locationId) ? { location_id: locationId } : {}),
     weeks_missing: weeksMissing,
     page,
     limit: PAGE_SIZE,
@@ -46,7 +47,7 @@ export default function UnverifiedPlantsPage() {
 
   // Reset to page 1 when filters change
   const handleLocationChange = (v: string) => {
-    setLocationId(v)
+    setLocationId(v === ALL ? '' : v)
     setPage(1)
   }
   const handleWeeksChange = (v: string) => {
@@ -74,12 +75,12 @@ export default function UnverifiedPlantsPage() {
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3">
-        <Select value={locationId} onValueChange={handleLocationChange}>
+        <Select value={locationId || ALL} onValueChange={handleLocationChange}>
           <SelectTrigger className="w-[200px]">
             <SelectValue placeholder="All locations" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All locations</SelectItem>
+            <SelectItem value={ALL}>All locations</SelectItem>
             {locations.map((loc) => (
               <SelectItem key={loc.id} value={loc.id}>
                 {loc.location_name}

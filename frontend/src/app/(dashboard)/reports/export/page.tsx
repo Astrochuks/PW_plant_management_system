@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/select'
 import { useLocationsWithStats } from '@/hooks/use-locations'
 import { exportPlants, exportMaintenance } from '@/lib/api/reports'
+import { ALL, only } from '@/lib/filters'
 
 const currentYear = new Date().getFullYear()
 const YEAR_OPTIONS = Array.from({ length: 5 }, (_, i) => currentYear - i)
@@ -45,7 +46,7 @@ export default function ExportPage() {
 
   // Plants export state
   const [plantsFormat, setPlantsFormat] = useState<'csv' | 'json'>('csv')
-  const [plantsStatus, setPlantsStatus] = useState<string>('')
+  const [plantsCondition, setPlantsCondition] = useState<string>('')
   const [plantsLocation, setPlantsLocation] = useState<string>('')
   const [plantsLoading, setPlantsLoading] = useState(false)
   const [plantsResult, setPlantsResult] = useState<string | null>(null)
@@ -62,8 +63,8 @@ export default function ExportPage() {
     try {
       const result = await exportPlants({
         format: plantsFormat,
-        ...(plantsStatus ? { status: plantsStatus } : {}),
-        ...(plantsLocation ? { location_id: plantsLocation } : {}),
+        ...(only(plantsCondition) ? { condition: plantsCondition } : {}),
+        ...(only(plantsLocation) ? { location_id: plantsLocation } : {}),
       })
 
       if (plantsFormat === 'csv' && typeof result.data === 'string') {
@@ -159,26 +160,27 @@ export default function ExportPage() {
                 </SelectContent>
               </Select>
 
-              <Select value={plantsStatus} onValueChange={setPlantsStatus}>
+              <Select value={plantsCondition || ALL} onValueChange={(v) => setPlantsCondition(v === ALL ? '' : v)}>
                 <SelectTrigger className="w-[160px]">
-                  <SelectValue placeholder="All statuses" />
+                  <SelectValue placeholder="All conditions" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All statuses</SelectItem>
+                  <SelectItem value={ALL}>All conditions</SelectItem>
                   <SelectItem value="working">Working</SelectItem>
                   <SelectItem value="standby">Standby</SelectItem>
                   <SelectItem value="breakdown">Breakdown</SelectItem>
                   <SelectItem value="missing">Missing</SelectItem>
                   <SelectItem value="scrap">Scrap</SelectItem>
+                  <SelectItem value="off_hire">Off hire</SelectItem>
                 </SelectContent>
               </Select>
 
-              <Select value={plantsLocation} onValueChange={setPlantsLocation}>
+              <Select value={plantsLocation || ALL} onValueChange={(v) => setPlantsLocation(v === ALL ? '' : v)}>
                 <SelectTrigger className="w-[180px]">
                   <SelectValue placeholder="All locations" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All locations</SelectItem>
+                  <SelectItem value={ALL}>All locations</SelectItem>
                   {locations.map((loc) => (
                     <SelectItem key={loc.id} value={loc.id}>
                       {loc.location_name}

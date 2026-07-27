@@ -126,7 +126,7 @@ Reconciled for 1 Jan – 31 Dec 2026, all exact:
 Locked by `backend/tests/test_report_generator_money.py` (6 tests), which
 calls the real endpoint rather than a copy of its SQL.
 
-### 1.2 "All locations" returns a 422 **[verified]**
+### 1.2 "All locations" returns a 422 — FIXED **[verified]**
 
 Five report pages render `<SelectItem value="all">`, then forward the
 literal string `all` as a filter because `"all"` is truthy:
@@ -142,9 +142,15 @@ Affected: `/reports/fleet-summary`, `/reports/maintenance-costs`,
 `/reports/generate` got this right — it uses a `_all` sentinel mapped back
 to `''`.
 
-**Fix:** one shared `ALL` sentinel, stripped before the request.
+**Fixed.** `frontend/src/lib/filters.ts` now exports `ALL` (the Radix
+placeholder token, since `<SelectItem>` cannot take `""`) and `only()`,
+which returns `undefined` for "everything". All five pages bind
+`value={x || ALL}` / `onValueChange={v => setX(v === ALL ? '' : v)}`, so
+component state holds `''` and the parameter is simply omitted. `only()`
+is also applied when building params, and still strips the older literal
+`'all'`, so neither layer alone can send a bad request.
 
-### 1.3 "All fleet types" silently returns nothing **[verified]**
+### 1.3 "All fleet types" silently returns nothing — FIXED **[verified]**
 
 ```
 GET /reports/maintenance-costs?year=2026&group_by=month&fleet_type=all  -> 200  []
@@ -166,9 +172,46 @@ Root cause: `reports.py:478` filters `WHERE status = $1` against
 `condition` (43 columns, confirmed). This is the documented
 `status` vs `condition` trap; this endpoint is the one place it survived.
 
-Unfiltered export is fine: 1,688 rows, 1.9 MB, ~2s.
+~~Unfiltered export is fine: 1,688 rows, 1.9 MB, ~2s.~~ **No longer true
+— see 1.5.**
 
-**Fix:** filter `condition`, and rename the dropdown to Condition.
+**Fixed.** The endpoint now filters `condition`, validated against the
+six-value taxonomy so a bad value is a 422 rather than a 500. `status` is
+kept as a deprecated alias mapping to the same column, so an existing
+bookmark or script keeps working. The dropdown is renamed **Condition**
+and gained the missing `off_hire` option.
+
+Locked by `backend/tests/test_report_filters.py` (20 tests): every
+condition exports, the conditions partition the fleet, the deprecated
+alias returns identical counts, a bad value is a 422, and a literal
+`all` is a clean 422 on both parameters.
+
+### 1.5 `v_plants_summary` costs ~74ms per row — NEW **[verified]**
+
+Found while testing 1.4. The view does correlated per-row work, so cost
+scales with rows returned, measured directly against the database:
+
+| query | rows | time |
+|---|---|---|
+| `count(*)` | 1 | **0.49s** |
+| `LIMIT 50` | 50 | **3.71s** |
+| `WHERE condition='working'` | 437 | **27.83s** |
+| unfiltered, what Export runs | 1,688 | **110.81s** |
+
+The export therefore exceeds the request timeout and returns a 503 — so
+1.4 is fixed but Export Data is still unusable unfiltered, and a filtered
+export makes the user wait ~28s.
+
+Paginated callers are unaffected in practice (the plants list fetches 20
+rows, ~1.5s), which is why this went unnoticed.
+
+Two correlated sub-SELECTs in the column list are the cause. One of them
+is also `count(DISTINCT spare_parts.purchase_order_number) AS
+shared_po_count` — the same PO-identity bug as 1.0, so that column
+undercounts wherever it is shown.
+
+**Not fixed:** rewriting a 43-column view used across the module deserves
+its own pass, not a change tacked onto a filter fix.
 
 ---
 

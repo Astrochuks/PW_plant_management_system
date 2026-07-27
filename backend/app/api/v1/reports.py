@@ -452,19 +452,30 @@ async def get_unverified_plants(
     }
 
 
+_CONDITION_RE = "^(working|standby|breakdown|missing|scrap|off_hire)$"
+
+
 @router.get("/export/plants")
 async def export_plants(
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
     format: str = Query("json", pattern="^(json|csv)$"),
-    status: str | None = None,
+    condition: str | None = Query(None, pattern=_CONDITION_RE),
+    status: str | None = Query(None, pattern=_CONDITION_RE, deprecated=True),
     location_id: UUID | None = None,
 ) -> dict[str, Any]:
     """Export plant data.
 
+    Filters on `condition` — the live column. `v_plants_summary` has no
+    `status` column at all, so the old `status = $1` raised
+    UndefinedColumn and every filtered export 500'd. `status` is kept as a
+    deprecated alias so an existing bookmark or script still works, and
+    both are pattern-validated so a bad value is a 422 rather than a 500.
+
     Args:
         current_user: The authenticated user.
         format: Export format (json or csv).
-        status: Filter by status.
+        condition: Filter by plant condition.
+        status: Deprecated alias for `condition`.
         location_id: Filter by location.
 
     Returns:
@@ -473,9 +484,10 @@ async def export_plants(
     conditions: list[str] = []
     params: list[Any] = []
 
-    if status:
-        params.append(status)
-        conditions.append(f"status = ${len(params)}")
+    plant_condition = condition or status
+    if plant_condition:
+        params.append(plant_condition)
+        conditions.append(f"condition = ${len(params)}")
 
     if location_id:
         params.append(str(location_id))

@@ -23,13 +23,14 @@ import {
 } from '@/components/ui/select'
 import { useFleetSummary } from '@/hooks/use-reports'
 import { useLocationsWithStats } from '@/hooks/use-locations'
+import { ALL, only } from '@/lib/filters'
 
 export default function FleetSummaryPage() {
   const [locationId, setLocationId] = useState<string>('')
   const { data: locations = [] } = useLocationsWithStats()
 
   const params = useMemo(
-    () => (locationId ? { location_id: locationId } : {}),
+    () => (only(locationId) ? { location_id: locationId } : {}),
     [locationId]
   )
   const { data, isLoading } = useFleetSummary(params)
@@ -113,12 +114,12 @@ export default function FleetSummaryPage() {
             </p>
           </div>
         </div>
-        <Select value={locationId} onValueChange={setLocationId}>
+        <Select value={locationId || ALL} onValueChange={(v) => setLocationId(v === ALL ? '' : v)}>
           <SelectTrigger className="w-[220px]">
             <SelectValue placeholder="All locations" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All locations</SelectItem>
+            <SelectItem value={ALL}>All locations</SelectItem>
             {locations.map((loc) => (
               <SelectItem key={loc.id} value={loc.id}>
                 {loc.location_name}

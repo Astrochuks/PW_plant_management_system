@@ -26,6 +26,7 @@ import { Input } from '@/components/ui/input'
 import { useWeeklyTrend, usePlantMovement } from '@/hooks/use-reports'
 import { useLocationsWithStats } from '@/hooks/use-locations'
 import { useFleetTypes } from '@/hooks/use-plants'
+import { ALL, only } from '@/lib/filters'
 
 const currentYear = new Date().getFullYear()
 const YEAR_OPTIONS = Array.from({ length: 5 }, (_, i) => currentYear - i)
@@ -46,7 +47,7 @@ export default function TrendsPage() {
   const trendParams = useMemo(
     () => ({
       year: trendYear,
-      ...(trendLocation ? { location_id: trendLocation } : {}),
+      ...(only(trendLocation) ? { location_id: trendLocation } : {}),
     }),
     [trendYear, trendLocation]
   )
@@ -170,12 +171,12 @@ export default function TrendsPage() {
               </SelectContent>
             </Select>
 
-            <Select value={trendLocation} onValueChange={setTrendLocation}>
+            <Select value={trendLocation || ALL} onValueChange={(v) => setTrendLocation(v === ALL ? '' : v)}>
               <SelectTrigger className="w-[200px]">
                 <SelectValue placeholder="All locations" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All locations</SelectItem>
+                <SelectItem value={ALL}>All locations</SelectItem>
                 {locations.map((loc) => (
                   <SelectItem key={loc.id} value={loc.id}>
                     {loc.location_name}
@@ -233,12 +234,12 @@ export default function TrendsPage() {
                 className="w-[160px]"
               />
             </div>
-            <Select value={moveFleetType} onValueChange={setMoveFleetType}>
+            <Select value={moveFleetType || ALL} onValueChange={(v) => setMoveFleetType(v === ALL ? '' : v)}>
               <SelectTrigger className="w-[180px]">
                 <SelectValue placeholder="All fleet types" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All fleet types</SelectItem>
+                <SelectItem value={ALL}>All fleet types</SelectItem>
                 {fleetTypes.map((ft) => (
                   <SelectItem key={ft.id} value={ft.name}>
                     {ft.name}
