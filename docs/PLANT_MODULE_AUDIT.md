@@ -92,6 +92,34 @@ currency, but it has **zero callers** — safe to drop rather than repair.
 `get_high_cost_plants` apportions shared POs, which is *correct* there:
 it ranks plants by what each plant cost.
 
+### 1.1c Report generator — audited, PO counts fixed **[verified]**
+
+The generator (`GET /reports/generate`) is the document that leaves the
+building, so it was audited line by line against the same sources.
+
+**Already correct, left alone:** it uses `total_cost_ngn` everywhere (with
+a comment explaining why), filters by `replaced_date BETWEEN`, and carries
+explicit *unattributed* (no plant) and *unlocated* (no site) rows so its
+sub-lists tie back to its own headline.
+
+**Fixed:** four `count(DISTINCT sp.purchase_order_number)` sites — the
+summary, top suppliers, sites spend and unlocated spend — now count
+`DISTINCT (number, po_date)` (see 1.0).
+
+Reconciled for 1 Jan – 31 Dec 2026, all exact:
+
+| | |
+|---|---|
+| generator total spend | ₦541,777,556.32 |
+| spare-parts stats | ₦541,777,556.32 |
+| maintenance costs | ₦541,777,556.32 |
+| generator PO count | 311 = PO list |
+| sites ranking + unlocated | ties to headline |
+| plants + unattributed | ties to headline |
+
+Locked by `backend/tests/test_report_generator_money.py` (6 tests), which
+calls the real endpoint rather than a copy of its SQL.
+
 ### 1.2 "All locations" returns a 422 **[verified]**
 
 Five report pages render `<SelectItem value="all">`, then forward the

@@ -933,10 +933,12 @@ async def generate_report(
     # Cross-PO aggregations use total_cost_ngn so foreign-currency POs are
     # converted to NGN before summing. total_cost (original currency) would
     # naively add e.g. £ + ₦ values.
+    # PO counts are DISTINCT (number, po_date): plant-issued numbers repeat,
+    # so a PO is its number AND its date (migration 031).
     async def q_spare_parts_summary():
         return await fetchrow(
             f"""SELECT count(*)::int AS total_items,
-                       count(DISTINCT sp.purchase_order_number)::int AS total_pos,
+                       count(DISTINCT (sp.purchase_order_number, sp.po_date))::int AS total_pos,
                        count(DISTINCT sp.plant_id)::int AS plants_with_parts,
                        COALESCE(sum(sp.total_cost_ngn), 0)::float AS total_spend,
                        COALESCE(avg(sp.total_cost_ngn), 0)::float AS avg_cost_per_item
@@ -951,7 +953,7 @@ async def generate_report(
         return await fetch(
             f"""SELECT COALESCE(s.name, sp.supplier) AS supplier_name,
                        count(*)::int AS items_count,
-                       count(DISTINCT sp.purchase_order_number)::int AS po_count,
+                       count(DISTINCT (sp.purchase_order_number, sp.po_date))::int AS po_count,
                        COALESCE(sum(sp.total_cost_ngn), 0)::float AS total_spend
                 FROM spare_parts sp
                 LEFT JOIN suppliers s ON s.id = sp.supplier_id
@@ -988,7 +990,7 @@ async def generate_report(
             f"""SELECT l.name AS location_name, s.name AS state_name,
                        COALESCE(sum(sp.total_cost_ngn), 0)::float AS total_spend,
                        count(*)::int AS items_count,
-                       count(DISTINCT sp.purchase_order_number)::int AS po_count
+                       count(DISTINCT (sp.purchase_order_number, sp.po_date))::int AS po_count
                 FROM spare_parts sp
                 JOIN locations l ON l.id = sp.location_id
                 LEFT JOIN states s ON s.id = l.state_id
@@ -1023,7 +1025,7 @@ async def generate_report(
             return None
         return await fetchrow(
             f"""SELECT count(*)::int AS items_count,
-                       count(DISTINCT sp.purchase_order_number)::int AS po_count,
+                       count(DISTINCT (sp.purchase_order_number, sp.po_date))::int AS po_count,
                        COALESCE(sum(sp.total_cost_ngn), 0)::float AS total_spend
                 FROM spare_parts sp
                 {sp_join_pm}
