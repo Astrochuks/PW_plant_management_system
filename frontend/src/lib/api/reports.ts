@@ -15,8 +15,11 @@ export interface FleetSummaryData {
   working: number;
   standby: number;
   breakdown: number;
-  under_repair: number;
-  other: number;
+  missing: number;
+  scrap: number;
+  off_hire: number;
+  /** No condition recorded at all — should be 0; a data gap, not a bucket. */
+  unknown: number;
 }
 
 export type MaintenanceCostGroupBy =
@@ -121,8 +124,10 @@ export async function getFleetSummary(params: {
     working: Number(row.working ?? 0),
     standby: Number(row.standby ?? 0),
     breakdown: Number(row.breakdown ?? 0),
-    under_repair: Number(row.under_repair ?? 0),
-    other: Number(row.other ?? 0),
+    missing: Number(row.missing ?? 0),
+    scrap: Number(row.scrap ?? 0),
+    off_hire: Number(row.off_hire ?? 0),
+    unknown: Number(row.unknown ?? 0),
   }));
 }
 

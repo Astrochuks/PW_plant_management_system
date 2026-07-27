@@ -33,7 +33,11 @@ export interface FleetByType {
   working: number;
   standby: number;
   breakdown: number;
-  other: number;
+  missing: number;
+  scrap: number;
+  off_hire: number;
+  /** No condition recorded at all — should be 0; a data gap, not a bucket. */
+  unknown: number;
 }
 
 export interface StateSummaryRow {

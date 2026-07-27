@@ -24,6 +24,7 @@ import {
 import { useFleetSummary } from '@/hooks/use-reports'
 import { useLocationsWithStats } from '@/hooks/use-locations'
 import { ALL, only } from '@/lib/filters'
+import { CONDITIONS } from '@/lib/conditions'
 
 export default function FleetSummaryPage() {
   const [locationId, setLocationId] = useState<string>('')
@@ -165,9 +166,9 @@ export default function FleetSummaryPage() {
                     <TableRow>
                       <TableHead>Fleet Type</TableHead>
                       <TableHead className="text-right">Total</TableHead>
-                      <TableHead className="text-right">Working</TableHead>
-                      <TableHead className="text-right">Standby</TableHead>
-                      <TableHead className="text-right">Breakdown</TableHead>
+                      {CONDITIONS.map((c) => (
+                        <TableHead key={c.value} className="text-right">{c.label}</TableHead>
+                      ))}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -179,21 +180,18 @@ export default function FleetSummaryPage() {
                         <TableCell className="text-right font-mono">
                           {Number(row.total).toLocaleString()}
                         </TableCell>
-                        <TableCell className="text-right font-mono text-emerald-600 dark:text-emerald-400">
-                          {Number(row.working).toLocaleString()}
-                        </TableCell>
-                        <TableCell className="text-right font-mono text-amber-600 dark:text-amber-400">
-                          {Number(row.standby).toLocaleString()}
-                        </TableCell>
-                        <TableCell className="text-right font-mono">
-                          {Number(row.breakdown) > 0 ? (
-                            <span className="text-red-600 dark:text-red-400">
-                              {Number(row.breakdown).toLocaleString()}
-                            </span>
-                          ) : (
-                            <span className="text-muted-foreground">0</span>
-                          )}
-                        </TableCell>
+                        {CONDITIONS.map((c) => {
+                          const n = Number(row[c.value] ?? 0)
+                          return (
+                            <TableCell key={c.value} className="text-right font-mono">
+                              {n > 0 ? (
+                                <span style={{ color: c.color }}>{n.toLocaleString()}</span>
+                              ) : (
+                                <span className="text-muted-foreground">0</span>
+                              )}
+                            </TableCell>
+                          )
+                        })}
                       </TableRow>
                     ))}
                     {/* Totals row */}
@@ -202,15 +200,12 @@ export default function FleetSummaryPage() {
                       <TableCell className="text-right font-mono">
                         {data.reduce((s, d) => s + Number(d.total), 0).toLocaleString()}
                       </TableCell>
-                      <TableCell className="text-right font-mono text-emerald-600 dark:text-emerald-400">
-                        {data.reduce((s, d) => s + Number(d.working), 0).toLocaleString()}
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-amber-600 dark:text-amber-400">
-                        {data.reduce((s, d) => s + Number(d.standby), 0).toLocaleString()}
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-red-600 dark:text-red-400">
-                        {data.reduce((s, d) => s + Number(d.breakdown), 0).toLocaleString()}
-                      </TableCell>
+                      {CONDITIONS.map((c) => (
+                        <TableCell key={c.value} className="text-right font-mono"
+                          style={{ color: c.color }}>
+                          {data.reduce((sum, d) => sum + Number(d[c.value] ?? 0), 0).toLocaleString()}
+                        </TableCell>
+                      ))}
                     </TableRow>
                   </TableBody>
                 </Table>

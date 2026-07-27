@@ -8,6 +8,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { CONDITIONS } from '@/lib/conditions';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -135,8 +136,10 @@ export default function ReportGeneratorPage() {
 
     // ── Sheet 2: Fleet By Type ───────────────────────────────────
     {
-      const headers = ['Fleet Type', 'Total', 'Working', 'Standby', 'Breakdown', 'Other'];
-      const rows = report.fleet_by_type.map(r => [r.fleet_type, r.total, r.working, r.standby, r.breakdown, r.other]);
+      const headers = ['Fleet Type', 'Total', ...CONDITIONS.map(c => c.label)];
+      const rows = report.fleet_by_type.map(r => [
+        r.fleet_type, r.total, ...CONDITIONS.map(c => r[c.value]),
+      ]);
       // Add totals row
       rows.push([
         'TOTAL',
@@ -395,10 +398,9 @@ export default function ReportGeneratorPage() {
                     <TableRow>
                       <TableHead>Fleet Type</TableHead>
                       <TableHead className="text-center">Total</TableHead>
-                      <TableHead className="text-center">Working</TableHead>
-                      <TableHead className="text-center">Standby</TableHead>
-                      <TableHead className="text-center">Breakdown</TableHead>
-                      <TableHead className="text-center">Other</TableHead>
+                      {CONDITIONS.map((c) => (
+                        <TableHead key={c.value} className="text-center">{c.label}</TableHead>
+                      ))}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -406,10 +408,12 @@ export default function ReportGeneratorPage() {
                       <TableRow key={row.fleet_type}>
                         <TableCell className="font-medium">{row.fleet_type}</TableCell>
                         <TableCell className="text-center font-semibold">{row.total}</TableCell>
-                        <TableCell className="text-center text-emerald-600">{row.working || '-'}</TableCell>
-                        <TableCell className="text-center">{row.standby || '-'}</TableCell>
-                        <TableCell className="text-center text-red-600">{row.breakdown || '-'}</TableCell>
-                        <TableCell className="text-center text-muted-foreground">{row.other || '-'}</TableCell>
+                        {CONDITIONS.map((c) => (
+                          <TableCell key={c.value} className="text-center"
+                            style={row[c.value] ? { color: c.color } : undefined}>
+                            {row[c.value] || '-'}
+                          </TableCell>
+                        ))}
                       </TableRow>
                     ))}
                   </TableBody>

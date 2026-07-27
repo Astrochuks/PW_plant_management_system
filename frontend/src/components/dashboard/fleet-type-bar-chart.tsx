@@ -33,13 +33,14 @@ import { useFleetSummary } from '@/hooks/use-dashboard'
 import { exportFleetTypesExcel } from '@/lib/api/plants'
 import { useLocationsWithStats } from '@/hooks/use-locations'
 import type { FleetSummaryItem } from '@/lib/api/dashboard'
+import { CONDITIONS as SHARED_CONDITIONS } from '@/lib/conditions'
 
-const CONDITIONS = [
-  { key: 'working' as const, name: 'Working', color: '#10b981' },
-  { key: 'standby' as const, name: 'Standby', color: '#fbbf24' },
-  { key: 'breakdown' as const, name: 'Breakdown', color: '#dc2626' },
-  { key: 'other' as const, name: 'Other', color: '#9ca3af' },
-]
+// All six by name — no "Other". Lumping missing + scrap + off_hire
+// together hides a plant nobody can find behind one that is merely off
+// hire, and those are very different problems.
+const CONDITIONS = SHARED_CONDITIONS.map((c) => ({
+  key: c.value, name: c.label, color: c.color,
+}))
 
 type ConditionKey = (typeof CONDITIONS)[number]['key']
 
@@ -71,13 +72,16 @@ export function FleetTypeBarChart() {
   const totals = useMemo<Totals>(() => {
     return sorted.reduce<Totals>(
       (acc, row) => ({
+        ...acc,
         total: acc.total + row.total,
-        working: acc.working + row.working,
-        standby: acc.standby + row.standby,
-        breakdown: acc.breakdown + row.breakdown,
-        other: acc.other + row.other,
+        ...Object.fromEntries(
+          CONDITIONS.map((c) => [c.key, acc[c.key] + (row[c.key] ?? 0)]),
+        ),
       }),
-      { total: 0, working: 0, standby: 0, breakdown: 0, other: 0 },
+      {
+        total: 0,
+        ...Object.fromEntries(CONDITIONS.map((c) => [c.key, 0])),
+      } as Totals,
     )
   }, [sorted])
 

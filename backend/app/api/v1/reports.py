@@ -870,14 +870,21 @@ async def generate_report(
         )
 
     async def q_fleet_by_type():
+        # All six conditions by name — never an "other" bucket. Lumping
+        # missing + scrap + off_hire together hides a plant nobody can
+        # find behind one that is merely off hire. `unknown` counts a
+        # plant with no condition at all so `total` still ties out; it
+        # should read zero.
         return await fetch(
             f"""SELECT COALESCE(f.fleet_type, 'Unknown') AS fleet_type,
                        count(*)::int AS total,
-                       count(*) FILTER (WHERE f.condition = 'working')::int AS working,
-                       count(*) FILTER (WHERE f.condition = 'standby')::int AS standby,
+                       count(*) FILTER (WHERE f.condition = 'working')::int   AS working,
+                       count(*) FILTER (WHERE f.condition = 'standby')::int   AS standby,
                        count(*) FILTER (WHERE f.condition = 'breakdown')::int AS breakdown,
-                       count(*) FILTER (WHERE f.condition IS NULL
-                                        OR f.condition NOT IN ('working','standby','breakdown'))::int AS other
+                       count(*) FILTER (WHERE f.condition = 'missing')::int   AS missing,
+                       count(*) FILTER (WHERE f.condition = 'scrap')::int     AS scrap,
+                       count(*) FILTER (WHERE f.condition = 'off_hire')::int  AS off_hire,
+                       count(*) FILTER (WHERE f.condition IS NULL)::int       AS unknown
                 FROM {fleet_src} f
                 LEFT JOIN locations l ON l.id = f.location_id
                 WHERE {pw}

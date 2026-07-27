@@ -217,7 +217,47 @@ its own pass, not a change tacked onto a filter fix.
 
 ## P2 — Numbers that mislead
 
-### 2.1 Fleet Summary hides 402 of 1,688 plants **[verified]**
+### 2.0 One condition taxonomy, no "Other" — FIXED (migration 034) **[verified]**
+
+The six conditions are enforced on the table itself
+(`plants_master_condition_check`): **working, standby, breakdown,
+missing, scrap, off_hire**. Everywhere they are listed, all six now
+appear by name.
+
+`get_fleet_summary_by_type` used to return working/standby/breakdown and
+lump the rest into `other`, which put a plant nobody can find in the same
+grey column as one merely off hire — 401 plants behind one number. The
+report generator carried its own copy of the same query.
+
+Fixed in migration 034 and in `reports.py`, and the frontend now drives
+every list from one constant, `frontend/src/lib/conditions.ts`
+(value + label + colour), so a dashboard, a chart, a table and a report
+cannot drift apart again.
+
+Portfolio, reconciled against direct counts:
+
+| condition | count |
+|---|---|
+| working | 437 |
+| standby | 515 |
+| breakdown | 334 |
+| missing | 301 |
+| scrap | 88 |
+| off_hire | 12 |
+| *unknown* | *1* |
+| **total** | **1,688** |
+
+`unknown` is not a bucket — it exists so `total` ties, and holds exactly
+one plant, **AC127 STATIC COMPRESSOR**, which has no condition recorded.
+Setting it makes the six sum to the fleet exactly. A test names the
+offending plants rather than passing quietly.
+
+Locked by `backend/tests/test_conditions.py` (7 tests), including one
+asserting the CHECK constraint still allows exactly these six — so if the
+taxonomy ever changes, the app is forced to change with it.
+
+
+### 2.1 Fleet Summary hides 402 of 1,688 plants — FIXED (migration 034) **[verified]**
 
 The table shows Total / Working / Standby / Breakdown. The endpoint also
 returns `other`, which the page never renders:
