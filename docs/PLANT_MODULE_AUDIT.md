@@ -87,8 +87,14 @@ currency, while both consumers render it as naira — understating by
 **₦9,229,167.32** overall. It now sums `total_cost_ngn`. Its `po_count`
 also counted distinct numbers rather than distinct POs (see 1.0).
 
-**Still open, not fixed:** `get_maintenance_costs_combined` also uses raw
-currency, but it has **zero callers** — safe to drop rather than repair.
+**`get_maintenance_costs_combined` — DROPPED (migration 033).** It was
+dead *and* broken: no caller anywhere, and it selected from
+`v_purchase_order_costs`, a view deleted long ago, so calling it raised
+`UndefinedTableError` rather than returning a wrong number. It also summed
+raw currency. Migrations 005 and 026 had both noted it as dead and left it
+standing; left there it is a trap, because it looks like a cost source and
+the next person reconciling has to work out it is a ruin before ignoring
+it.
 `get_high_cost_plants` apportions shared POs, which is *correct* there:
 it ranks plants by what each plant cost.
 
