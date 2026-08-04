@@ -19,20 +19,14 @@ import { ALL, only } from '@/lib/filters'
 const currentYear = new Date().getFullYear()
 const YEAR_OPTIONS = Array.from({ length: 5 }, (_, i) => currentYear - i)
 
-function downloadCSV(csvContent: string, filename: string) {
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = filename
-  link.click()
-  URL.revokeObjectURL(url)
-}
-
-function downloadJSON(data: unknown, filename: string) {
-  const blob = new Blob([JSON.stringify(data, null, 2)], {
-    type: 'application/json',
-  })
+/**
+ * Save an already-downloaded file.
+ *
+ * The endpoints now stream the finished CSV/JSON, so there is nothing
+ * left to format here — the previous two helpers existed only to rebuild
+ * a file out of a JSON envelope that had just been parsed.
+ */
+function saveFile(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
@@ -67,12 +61,8 @@ export default function ExportPage() {
         ...(only(plantsLocation) ? { location_id: plantsLocation } : {}),
       })
 
-      if (plantsFormat === 'csv' && typeof result.data === 'string') {
-        downloadCSV(result.data, `plants_export_${new Date().toISOString().slice(0, 10)}.csv`)
-      } else {
-        downloadJSON(result.data, `plants_export_${new Date().toISOString().slice(0, 10)}.json`)
-      }
-      setPlantsResult(`Exported ${result.count} plant records`)
+      saveFile(result.blob, result.filename)
+      setPlantsResult(`Exported ${result.count.toLocaleString()} plant records`)
     } catch {
       setPlantsResult('Export failed. Please try again.')
     } finally {
@@ -89,18 +79,12 @@ export default function ExportPage() {
         year: maintYear,
       })
 
-      if (maintFormat === 'csv' && typeof result.data === 'string') {
-        downloadCSV(
-          result.data,
-          `maintenance_export_${maintYear}_${new Date().toISOString().slice(0, 10)}.csv`
-        )
-      } else {
-        downloadJSON(
-          result.data,
-          `maintenance_export_${maintYear}_${new Date().toISOString().slice(0, 10)}.json`
-        )
-      }
-      setMaintResult(`Exported ${result.count} maintenance records`)
+      // Keep the year in the name — the server does not know it was filtered.
+      saveFile(
+        result.blob,
+        result.filename.replace('maintenance_export_', `maintenance_export_${maintYear}_`)
+      )
+      setMaintResult(`Exported ${result.count.toLocaleString()} maintenance records`)
     } catch {
       setMaintResult('Export failed. Please try again.')
     } finally {

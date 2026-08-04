@@ -172,8 +172,8 @@ Root cause: `reports.py:478` filters `WHERE status = $1` against
 `condition` (43 columns, confirmed). This is the documented
 `status` vs `condition` trap; this endpoint is the one place it survived.
 
-~~Unfiltered export is fine: 1,688 rows, 1.9 MB, ~2s.~~ **No longer true
-— see 1.5.**
+Unfiltered export is fine: 1,688 rows, ~2 MB. (An earlier revision struck
+this out on the strength of a bad measurement — see 1.5.)
 
 **Fixed.** The endpoint now filters `condition`, validated against the
 six-value taxonomy so a bad value is a 422 rather than a 500. `status` is
@@ -186,32 +186,88 @@ condition exports, the conditions partition the fleet, the deprecated
 alias returns identical counts, a bad value is a 422, and a literal
 `all` is a clean 422 on both parameters.
 
-### 1.5 `v_plants_summary` costs ~74ms per row — NEW **[verified]**
+### 1.5 Export tore down the connection pool — FIXED **[verified]**
 
-Found while testing 1.4. The view does correlated per-row work, so cost
-scales with rows returned, measured directly against the database:
+**This entry previously claimed `v_plants_summary` costs ~74ms per row
+and takes 110.81s unfiltered. That was wrong, and so was the cause I
+gave for it.** Both are retracted here; the real defect was elsewhere and
+was worse.
 
-| query | rows | time |
-|---|---|---|
-| `count(*)` | 1 | **0.49s** |
-| `LIMIT 50` | 50 | **3.71s** |
-| `WHERE condition='working'` | 437 | **27.83s** |
-| unfiltered, what Export runs | 1,688 | **110.81s** |
+The view is fast. `EXPLAIN ANALYZE`, three runs:
 
-The export therefore exceeds the request timeout and returns a 503 — so
-1.4 is fixed but Export Data is still unusable unfiltered, and a filtered
-export makes the user wait ~28s.
+| | |
+|---|---|
+| server-side execution | **7.6ms · 8.0ms · 7.7ms** |
+| client-side fetch of the same query | **16.00s · 15.34s · 16.27s** |
 
-Paginated callers are unaffected in practice (the plants list fetches 20
-rows, ~1.5s), which is why this went unnoticed.
+8 milliseconds to execute, 16 seconds to arrive — the gap is transfer,
+not work. The plan is entirely hash joins over 433 buffer hits; the
+"two correlated sub-SELECTs in the column list" I blamed are `LEFT JOIN`
+derived tables that compute once. The original 110.81s was me timing a
+round-trip through the Supabase MCP — which serialises 1,688 × 43 columns
+to JSON and ships them — and attributing it to the view. The
+"Checked and found correct" note at the foot of this document said
+exports ran in 1–2s and that earlier timeouts were sweep contention;
+that note was right and this section contradicted it for a week.
 
-Two correlated sub-SELECTs in the column list are the cause. One of them
-is also `count(DISTINCT spare_parts.purchase_order_number) AS
-shared_po_count` — the same PO-identity bug as 1.0, so that column
-undercounts wherever it is shown.
+**The real defect.** `fetch()` runs a SELECT as ONE command, so
+`command_timeout=15` (`pool.py:72`) covers executing it *and* shipping
+every row. The export needed ~16s, so it missed by a second, was retried
+once (another 15s), and then hit `_try_recover_pool()`:
 
-**Not fixed:** rewriting a 43-column view used across the module deserves
-its own pass, not a change tacked onto a filter fix.
+```
+Query timeout in fetch — retrying once
+Query timeout in fetch (final), triggering pool recovery
+Pool is dead — attempting auto-recovery
+```
+
+**One user pressing Export rebuilt the connection pool for everybody
+else.** The failed download was the least of it.
+
+**Fixed** by streaming instead of buffering:
+
+- `pool.stream_rows()` (new) reads through an asyncpg **cursor**, so each
+  FETCH is its own short command and none approaches the timeout.
+  Memory is flat regardless of row count.
+- Both `/reports/export/plants` and `/reports/export/maintenance` now
+  return a `StreamingResponse` — the file itself, not a JSON envelope
+  wrapping it. The browser only ever unwrapped `data` and rebuilt the
+  file from it, so **the downloaded file is unchanged**: the CSV is
+  byte-identical to the old one (617,467 chars, compared against the old
+  code path directly), and the JSON is the same bare array.
+- Row count moved to `X-Total-Count`, since headers precede the body.
+- Exports get their own 120s axios timeout; the global 10s stays for
+  queries.
+
+Measured after: no 503, no retry, no pool recovery, and time-to-first-byte
+**519ms**, so the browser starts saving immediately. Unfiltered CSV over
+the wire drops **2.02MB → 0.59MB**, because the envelope had been
+repeating all 43 column names on every one of 1,688 rows. JSON goes
+2.02MB → 2.31MB, as the envelope shipped compact JSON that the browser
+then pretty-printed; the *file* was always 2.31MB and CSV is the UI
+default.
+
+Locked by 10 new tests in `backend/tests/test_report_filters.py`
+(30 total), which assert an attachment filename, that the body is not an
+envelope, that CSV rows and JSON array length both equal `X-Total-Count`,
+and that the count header is CORS-exposed.
+
+**Caveat on the numbers:** the 16s transfer was measured from a laptop in
+Nigeria to Supabase in Ireland. In production that hop is Render
+(Frankfurt) → Supabase (Ireland) and will be fast — but the same 2MB
+still has to reach a browser in Nigeria, so the slow hop moves rather
+than disappears. That is what the CSV size reduction and the streaming
+start actually buy.
+
+**Still open:** `shared_po_count` uses
+`count(DISTINCT purchase_order_number)` in both branches of its UNION —
+the PO-identity bug from 1.0. Measured impact today is **zero** (0 of 67
+plants undercounted, 0 POs missed), so it is latent rather than wrong on
+screen; it is fixed separately so it cannot break silently later.
+Separately, the second branch of that UNION is inert: all 56 qualifying
+spare-parts rows have `plant_id IS NULL` (0 orphans), so it can never
+contribute. It is left in place because it would fire correctly if such a
+row ever gained a plant.
 
 ---
 
@@ -388,7 +444,10 @@ entry points and is fetched at least twice on the dashboard.
   they are not in the plant tab bar.
 - **The SSE stream puts the JWT in the query string**
   (`/events/stream?token=…`) — it will appear in server access logs.
-- **10s global axios timeout** applies to the full-table exports.
+- ~~**10s global axios timeout** applies to the full-table exports.~~
+  **Fixed with 1.5** — exports now pass `EXPORT_TIMEOUT_MS` (120s) per
+  call. The global 10s is left alone: raising it would make a genuinely
+  hung request hang for two minutes.
 - **`downloadSubmissionFile` bypasses the auth interceptor** (raw `fetch`
   reading sessionStorage) — a download just after token expiry fails with a
   bare "Failed to download file" instead of refreshing.

@@ -3,7 +3,7 @@
  * Handles all reports and analytics API calls
  */
 
-import apiClient from './client';
+import apiClient, { EXPORT_TIMEOUT_MS } from './client';
 
 // ============================================================================
 // Types
@@ -331,59 +331,94 @@ export async function getUnverifiedPlants(params: {
   };
 }
 
+/** A downloaded export: the file itself, plus what the server called it. */
+export interface ExportFile {
+  blob: Blob;
+  /** Row count, from `X-Total-Count` — the body no longer carries it. */
+  count: number;
+  /** Server-supplied name from `Content-Disposition`, else the fallback. */
+  filename: string;
+}
+
 /**
- * Export plants data
+ * Read `Content-Disposition`, falling back to a dated name.
+ *
+ * The header is only readable cross-origin because the endpoint sends
+ * `Access-Control-Expose-Headers`; if a proxy strips it we still name
+ * the file sensibly rather than saving "download".
+ */
+function exportFilename(headers: unknown, fallback: string): string {
+  const raw = (headers as Record<string, string> | undefined)?.['content-disposition'];
+  return raw?.match(/filename="?([^";]+)"?/)?.[1] ?? fallback;
+}
+
+function toExportFile(
+  response: { data: Blob; headers: unknown },
+  fallback: string
+): ExportFile {
+  const headers = response.headers as Record<string, string> | undefined;
+  return {
+    blob: response.data,
+    count: Number(headers?.['x-total-count'] ?? 0),
+    filename: exportFilename(response.headers, fallback),
+  };
+}
+
+const today = () => new Date().toISOString().slice(0, 10);
+
+/**
+ * Export plants data as a downloadable file.
+ *
+ * The endpoint streams the file directly instead of returning it inside
+ * a JSON envelope, so this takes the bytes as a blob rather than parsing
+ * 2MB of JSON only to re-serialize it into one. Exports get their own
+ * long timeout — the global 10s is for queries, not file transfers.
  */
 export async function exportPlants(params: {
   format?: 'json' | 'csv';
   /** Plant condition — the live column. `status` on plants is stale/legacy. */
   condition?: string;
   location_id?: string;
-} = {}): Promise<{ data: string | unknown[]; format: string; count: number }> {
+} = {}): Promise<ExportFile> {
   const queryParams: Record<string, string> = {};
 
   if (params.format) queryParams.format = params.format;
   if (params.condition) queryParams.condition = params.condition;
   if (params.location_id) queryParams.location_id = params.location_id;
 
-  const response = await apiClient.get<{
-    success: boolean;
-    data: string | unknown[];
-    format: string;
-    count: number;
-  }>('/reports/export/plants', { params: queryParams });
+  const response = await apiClient.get('/reports/export/plants', {
+    params: queryParams,
+    responseType: 'blob',
+    timeout: EXPORT_TIMEOUT_MS,
+  });
 
-  return {
-    data: response.data.data,
-    format: response.data.format,
-    count: response.data.count,
-  };
+  return toExportFile(response, `plants_export_${today()}.${params.format ?? 'json'}`);
 }
 
 /**
- * Export maintenance data
+ * Export maintenance data as a downloadable file.
+ *
+ * Streamed like {@link exportPlants} — see that function.
  */
 export async function exportMaintenance(params: {
   format?: 'json' | 'csv';
   year?: number;
   plant_id?: string;
-} = {}): Promise<{ data: string | unknown[]; format: string; count: number }> {
+} = {}): Promise<ExportFile> {
   const queryParams: Record<string, string> = {};
 
   if (params.format) queryParams.format = params.format;
   if (params.year) queryParams.year = String(params.year);
   if (params.plant_id) queryParams.plant_id = params.plant_id;
 
-  const response = await apiClient.get<{
-    success: boolean;
-    data: string | unknown[];
-    format: string;
-    count: number;
-  }>('/reports/export/maintenance', { params: queryParams });
+  const response = await apiClient.get('/reports/export/maintenance', {
+    params: queryParams,
+    responseType: 'blob',
+    timeout: EXPORT_TIMEOUT_MS,
+  });
 
-  return {
-    data: response.data.data,
-    format: response.data.format,
-    count: response.data.count,
-  };
+  return toExportFile(
+    response,
+    `maintenance_export_${today()}.${params.format ?? 'json'}`
+  );
 }

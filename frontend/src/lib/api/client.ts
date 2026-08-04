@@ -18,6 +18,16 @@ const apiClient: AxiosInstance = axios.create({
   timeout: 10000,
 });
 
+/**
+ * Timeout for full-table exports, which stream a file rather than answer
+ * a query. 10s is right for a normal request and far too short here: the
+ * server starts sending in ~0.5s, but the whole file still has to reach
+ * a browser that may be on a slow Nigerian link. Pass this per-call —
+ * do NOT raise the global timeout, or a genuinely hung request would sit
+ * for two minutes before failing.
+ */
+export const EXPORT_TIMEOUT_MS = 120_000;
+
 // Guard against multiple 401 redirects firing simultaneously
 let isRedirecting = false;
 

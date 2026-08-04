@@ -15,6 +15,7 @@ Usage:
 
 import json
 import ssl
+from collections.abc import AsyncIterator
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
@@ -189,6 +190,57 @@ async def fetch(sql: str, *args: Any) -> list[dict[str, Any]]:
     """
     rows = await _exec_with_recovery("fetch", lambda pool: pool.fetch(sql, *args))
     return [_record_to_dict(r) for r in rows]
+
+
+async def stream_rows(
+    sql: str, *args: Any, prefetch: int = 200
+) -> AsyncIterator[dict[str, Any]]:
+    """Stream a large result set row by row, in batches, as dicts.
+
+    Use this instead of `fetch()` for exports and any other result set
+    that is large enough for its *transfer* to be slow.
+
+    `fetch()` runs the whole SELECT as ONE command, so `command_timeout`
+    (15s) applies to executing it AND shipping every row back. A full
+    plants export executes in ~8ms and then takes ~16s to transfer 2MB,
+    so it timed out by a second, was retried (another 15s), and finally
+    triggered `_try_recover_pool()` — one user pressing Export tore down
+    the connection pool for everyone else. The query was never the
+    problem; holding one command open for the whole transfer was.
+
+    A cursor turns that single long command into many small FETCHes,
+    each its own command, so none of them approaches the timeout and
+    memory stays flat regardless of row count.
+
+    Cursors require a transaction, and Supavisor pins its server-side
+    connection for the length of one — so reach for this for exports,
+    not for ordinary request-path reads.
+
+    Args:
+        sql: Parameterized SELECT (use $1, $2, ... for params).
+        *args: Parameter values.
+        prefetch: Rows per underlying FETCH.
+
+    Yields:
+        One row dict at a time, JSON-safe via `_record_to_dict`.
+
+    Raises:
+        DatabaseUnavailableError: If the pool is not initialized.
+    """
+    import asyncio
+
+    try:
+        pool = get_pool()
+    except RuntimeError:
+        asyncio.create_task(_try_recover_pool())
+        raise DatabaseUnavailableError(
+            "Database temporarily unavailable — reconnecting"
+        ) from None
+
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            async for record in conn.cursor(sql, *args, prefetch=prefetch):
+                yield _record_to_dict(record)
 
 
 async def fetchrow(sql: str, *args: Any) -> dict[str, Any] | None:

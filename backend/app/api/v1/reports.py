@@ -2,13 +2,19 @@
 
 import asyncio
 import calendar
+import csv
+import io
+import json
+import textwrap
+from collections.abc import AsyncIterator
 from datetime import date, timedelta
 from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 
-from app.core.pool import fetch, fetchrow, fetchval, fetch_json_rpc
+from app.core.pool import fetch, fetchrow, fetchval, fetch_json_rpc, stream_rows
 from app.core.security import (
     CurrentUser,
     require_management_or_admin,
@@ -455,6 +461,72 @@ async def get_unverified_plants(
 _CONDITION_RE = "^(working|standby|breakdown|missing|scrap|off_hire)$"
 
 
+async def _csv_chunks(sql: str, params: list[Any]) -> AsyncIterator[str]:
+    """Yield the export as CSV text, flushing about every 64KB.
+
+    Column order comes from the first row, so the file is identical to
+    the one the old `csv.DictWriter(fieldnames=data[0].keys())` wrote.
+    No rows means no bytes, which is also what it did before.
+    """
+    buf = io.StringIO()
+    writer: csv.DictWriter | None = None
+
+    async for row in stream_rows(sql, *params):
+        if writer is None:
+            writer = csv.DictWriter(buf, fieldnames=list(row.keys()))
+            writer.writeheader()
+        writer.writerow(row)
+        if buf.tell() >= 65_536:
+            yield buf.getvalue()
+            buf.seek(0)
+            buf.truncate(0)
+
+    if buf.tell():
+        yield buf.getvalue()
+
+
+async def _json_chunks(sql: str, params: list[Any]) -> AsyncIterator[str]:
+    """Yield the export as a JSON array, one object at a time.
+
+    The browser previously ran `JSON.stringify(result.data, null, 2)` on
+    the array inside the envelope, so a bare indented array is the same
+    file the user was already downloading — the envelope only ever
+    existed to be unwrapped and discarded.
+    """
+    yield "[\n"
+    first = True
+    async for row in stream_rows(sql, *params):
+        chunk = textwrap.indent(json.dumps(row, indent=2, default=str), "  ")
+        yield chunk if first else ",\n" + chunk
+        first = False
+    yield "\n]\n" if not first else "]\n"
+
+
+def _export_response(
+    sql: str, params: list[Any], fmt: str, basename: str, total: int
+) -> StreamingResponse:
+    """Wrap a streamed export in a file-download response.
+
+    `X-Total-Count` carries the row count because headers must be sent
+    before the body, so the count can no longer live in it.
+    """
+    if fmt == "csv":
+        body, media, ext = _csv_chunks(sql, params), "text/csv; charset=utf-8", "csv"
+    else:
+        body, media, ext = _json_chunks(sql, params), "application/json", "json"
+
+    filename = f"{basename}_{date.today().isoformat()}.{ext}"
+    return StreamingResponse(
+        body,
+        media_type=media,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Total-Count": str(total or 0),
+            "Access-Control-Expose-Headers": "X-Total-Count, Content-Disposition",
+        },
+    )
+
+
 @router.get("/export/plants")
 async def export_plants(
     current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
@@ -462,14 +534,28 @@ async def export_plants(
     condition: str | None = Query(None, pattern=_CONDITION_RE),
     status: str | None = Query(None, pattern=_CONDITION_RE, deprecated=True),
     location_id: UUID | None = None,
-) -> dict[str, Any]:
-    """Export plant data.
+) -> StreamingResponse:
+    """Export plant data as a downloadable CSV or JSON file.
 
     Filters on `condition` — the live column. `v_plants_summary` has no
     `status` column at all, so the old `status = $1` raised
     UndefinedColumn and every filtered export 500'd. `status` is kept as a
     deprecated alias so an existing bookmark or script still works, and
     both are pattern-validated so a bad value is a 422 rather than a 500.
+
+    **Streamed, not buffered.** This used to `fetch()` every row, wrap it
+    in a JSON envelope, and return it in one response. The view executes
+    in ~8ms but the 2MB result takes ~16s to transfer, so the single
+    command blew `command_timeout=15`, was retried, and then triggered
+    pool recovery — one export dropped the connection pool for every
+    other user. Streaming through a cursor keeps each FETCH well inside
+    the timeout and memory flat, and sending the file directly (rather
+    than a JSON envelope holding it) drops an unfiltered CSV from 2.02MB
+    to 0.59MB, because the envelope repeated all 43 column names on
+    every one of 1,688 rows.
+
+    The downloaded file is unchanged — same columns, same order, same
+    content.
 
     Args:
         current_user: The authenticated user.
@@ -479,7 +565,8 @@ async def export_plants(
         location_id: Filter by location.
 
     Returns:
-        Exported data or download URL.
+        A streaming CSV or JSON file response. `X-Total-Count` carries
+        the row count, which the response body no longer includes.
     """
     conditions: list[str] = []
     params: list[Any] = []
@@ -494,37 +581,14 @@ async def export_plants(
         conditions.append(f"current_location_id = ${len(params)}::uuid")
 
     where = " AND ".join(conditions) if conditions else "TRUE"
-    data = await fetch(
-        f"SELECT * FROM v_plants_summary WHERE {where} ORDER BY fleet_number",
-        *params,
+    sql = f"SELECT * FROM v_plants_summary WHERE {where} ORDER BY fleet_number"
+
+    # Counted separately because headers must be sent before the body.
+    # Cheap: the view executes in ~8ms and this ships a single row.
+    total = await fetchval(
+        f"SELECT count(*) FROM v_plants_summary WHERE {where}", *params
     )
-
-    if format == "csv":
-        import io
-        import csv
-
-        if not data:
-            return {"success": True, "data": "", "format": "csv"}
-
-        output = io.StringIO()
-        writer = csv.DictWriter(output, fieldnames=data[0].keys())
-        writer.writeheader()
-        writer.writerows(data)
-        csv_data = output.getvalue()
-
-        return {
-            "success": True,
-            "data": csv_data,
-            "format": "csv",
-            "count": len(data),
-        }
-
-    return {
-        "success": True,
-        "data": data,
-        "format": "json",
-        "count": len(data),
-    }
+    return _export_response(sql, params, format, "plants_export", total)
 
 
 @router.get("/export/maintenance")
@@ -533,8 +597,16 @@ async def export_maintenance(
     format: str = Query("json", pattern="^(json|csv)$"),
     year: int | None = None,
     plant_id: UUID | None = None,
-) -> dict[str, Any]:
-    """Export maintenance/spare parts data.
+) -> StreamingResponse:
+    """Export maintenance/spare parts data as a downloadable file.
+
+    Streamed for the same reason as `/export/plants` — see that
+    endpoint's docstring. Buffering the whole result into a JSON
+    envelope held one command open for the entire transfer, so a large
+    export blew `command_timeout` and triggered pool recovery, dropping
+    the connection pool for every other request.
+
+    The downloaded file is unchanged — same columns, same order.
 
     Args:
         current_user: The authenticated user.
@@ -543,7 +615,8 @@ async def export_maintenance(
         plant_id: Filter by plant.
 
     Returns:
-        Exported data or download URL.
+        A streaming CSV or JSON file response, with the row count in
+        `X-Total-Count`.
     """
     conditions: list[str] = []
     params: list[Any] = []
@@ -559,41 +632,19 @@ async def export_maintenance(
         conditions.append(f"sp.plant_id = ${len(params)}::uuid")
 
     where = " AND ".join(conditions) if conditions else "TRUE"
-    data = await fetch(
-        f"""SELECT sp.*, pm.fleet_number
+    sql = f"""SELECT sp.*, pm.fleet_number
             FROM spare_parts sp
             LEFT JOIN plants_master pm ON pm.id = sp.plant_id
             WHERE {where}
-            ORDER BY sp.replaced_date DESC""",
+            ORDER BY sp.replaced_date DESC"""
+
+    total = await fetchval(
+        f"""SELECT count(*) FROM spare_parts sp
+            LEFT JOIN plants_master pm ON pm.id = sp.plant_id
+            WHERE {where}""",
         *params,
     )
-
-    if format == "csv":
-        import io
-        import csv
-
-        if not data:
-            return {"success": True, "data": "", "format": "csv"}
-
-        output = io.StringIO()
-        writer = csv.DictWriter(output, fieldnames=data[0].keys())
-        writer.writeheader()
-        writer.writerows(data)
-        csv_data = output.getvalue()
-
-        return {
-            "success": True,
-            "data": csv_data,
-            "format": "csv",
-            "count": len(data),
-        }
-
-    return {
-        "success": True,
-        "data": data,
-        "format": "json",
-        "count": len(data),
-    }
+    return _export_response(sql, params, format, "maintenance_export", total)
 
 
 @router.get("/states-summary")

@@ -39,12 +39,21 @@ def _skip_if_no_db(r):
         pytest.skip("database unavailable")
 
 
+def _count(r) -> int:
+    """Row count of an export.
+
+    Exports stream a file now, so the count moved out of the body and
+    into `X-Total-Count` — headers must be sent before the first row.
+    """
+    return int(r.headers["X-Total-Count"])
+
+
 class TestExportPlants:
     def test_unfiltered_export_works(self, client, as_management):
         r = client.get("/api/v1/reports/export/plants")
         _skip_if_no_db(r)
         assert r.status_code == 200
-        assert r.json()["count"] > 0
+        assert _count(r) > 0
 
     @pytest.mark.parametrize("cond", CONDITIONS)
     def test_every_condition_exports(self, client, as_management, cond):
@@ -53,7 +62,7 @@ class TestExportPlants:
         r = client.get(f"/api/v1/reports/export/plants?condition={cond}")
         _skip_if_no_db(r)
         assert r.status_code == 200, r.text[:200]
-        assert r.json()["count"] >= 0
+        assert _count(r) >= 0
 
     @pytest.mark.parametrize("cond", ["working", "breakdown"])
     def test_status_still_accepted_as_a_deprecated_alias(
@@ -65,7 +74,7 @@ class TestExportPlants:
         assert r.status_code == 200
         by_condition = client.get(
             f"/api/v1/reports/export/plants?condition={cond}")
-        assert r.json()["count"] == by_condition.json()["count"]
+        assert _count(r) == _count(by_condition)
 
     def test_conditions_partition_the_fleet(self, client, as_management):
         """The filters must add up to the unfiltered export — proof the
@@ -85,10 +94,10 @@ class TestExportPlants:
             r = client.get(f"/api/v1/reports/export/plants?condition={cond}")
             _skip_if_no_db(r)
             assert r.status_code == 200, f"{cond}: {r.text[:200]}"
-            parts += r.json()["count"]
+            parts += _count(r)
 
         # every plant carries a condition except a known handful with NULL
-        assert 0 < parts <= total.json()["count"]
+        assert 0 < parts <= _count(total)
 
     def test_a_bad_condition_is_a_422_not_a_500(self, client, as_management):
         r = client.get("/api/v1/reports/export/plants?condition=nonsense")
@@ -108,7 +117,102 @@ class TestExportPlants:
             "/api/v1/reports/export/plants?format=csv&condition=working")
         _skip_if_no_db(r)
         assert r.status_code == 200
-        assert r.json()["format"] == "csv"
+        assert r.headers["content-type"].startswith("text/csv")
+
+
+class TestExportsAreStreamedFiles:
+    """The export sends the FILE, not a JSON envelope wrapping it.
+
+    Buffering the whole result held ONE command open for the entire
+    transfer. The view executes in ~8ms but shipping 2MB took ~16s, so it
+    blew `command_timeout=15`, was retried, and then tripped
+    `_try_recover_pool()` — one user pressing Export tore down the
+    connection pool for every other request. Streaming through a cursor
+    makes each FETCH its own short command.
+
+    These lock the contract the frontend now depends on: bytes, a
+    filename, and the count in a header.
+    """
+
+    ENDPOINTS = (
+        "/api/v1/reports/export/plants",
+        "/api/v1/reports/export/maintenance?year=2026",
+    )
+
+    @staticmethod
+    def _url(path: str, fmt: str) -> str:
+        return f"{path}{'&' if '?' in path else '?'}format={fmt}"
+
+    @pytest.mark.parametrize("path", ENDPOINTS)
+    def test_it_is_an_attachment_with_a_filename(self, client, as_management, path):
+        r = client.get(self._url(path, "csv"))
+        _skip_if_no_db(r)
+        assert r.status_code == 200
+        disposition = r.headers.get("content-disposition", "")
+        assert "attachment" in disposition
+        assert ".csv" in disposition
+
+    @pytest.mark.parametrize("path", ENDPOINTS)
+    def test_the_body_is_the_file_not_an_envelope(self, client, as_management, path):
+        """The old shape was {success, data, format, count} and the browser
+        unwrapped `data` to rebuild the file. If an envelope ever comes
+        back, the user saves a .csv full of JSON."""
+        r = client.get(self._url(path, "csv"))
+        _skip_if_no_db(r)
+        assert r.status_code == 200
+        assert not r.text.lstrip().startswith('{"success"')
+
+    @pytest.mark.parametrize("path", ENDPOINTS)
+    def test_csv_row_count_matches_the_header(self, client, as_management, path):
+        r = client.get(self._url(path, "csv"))
+        _skip_if_no_db(r)
+        assert r.status_code == 200
+        n = _count(r)
+        if n == 0:
+            assert r.text == ""
+            return
+        # quoted fields may contain newlines, so count parsed rows
+        import csv as _csv
+        import io as _io
+
+        rows = list(_csv.DictReader(_io.StringIO(r.text)))
+        assert len(rows) == n
+
+    @pytest.mark.parametrize("path", ENDPOINTS)
+    def test_json_is_a_bare_array_of_the_same_length(
+        self, client, as_management, path
+    ):
+        """`JSON.stringify(result.data, null, 2)` wrote the bare array, so
+        a bare array is the same file the user already received."""
+        import json as _json
+
+        r = client.get(self._url(path, "json"))
+        _skip_if_no_db(r)
+        assert r.status_code == 200
+        parsed = _json.loads(r.text)
+        assert isinstance(parsed, list)
+        assert len(parsed) == _count(r)
+
+    def test_csv_carries_every_view_column(self, client, as_management):
+        """Column set and order come from the row itself, so this catches a
+        projection quietly narrowing what the user downloads."""
+        r = client.get("/api/v1/reports/export/plants?format=csv")
+        _skip_if_no_db(r)
+        assert r.status_code == 200
+        header = r.text.splitlines()[0].split(",")
+        for col in ("fleet_number", "description", "condition",
+                    "current_location", "total_maintenance_cost",
+                    "shared_po_count"):
+            assert col in header, f"{col} missing from the export"
+
+    def test_the_count_header_is_exposed_to_the_browser(self, client, as_management):
+        """Cross-origin a header is invisible to JS unless exposed, and the
+        page reads the count from it to say "Exported N records"."""
+        r = client.get("/api/v1/reports/export/plants?format=csv")
+        _skip_if_no_db(r)
+        exposed = r.headers.get("access-control-expose-headers", "")
+        assert "X-Total-Count" in exposed
+        assert "Content-Disposition" in exposed
 
 
 class TestAllSentinelNeverReachesTheApi:
