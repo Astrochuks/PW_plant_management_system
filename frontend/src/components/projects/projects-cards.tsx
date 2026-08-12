@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { STATUS_STYLES, effectiveStatus } from './projects-table'
 import type { Project } from '@/hooks/use-projects'
+import { money as formatCurrency } from '@/lib/format';
 
 interface ProjectsCardsProps {
   projects: Project[]
@@ -14,14 +15,6 @@ interface ProjectsCardsProps {
   onPrefetch?: (id: string) => void
 }
 
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-NG', {
-    style: 'currency',
-    currency: 'NGN',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount)
-}
 
 function formatDate(dateStr: string): string {
   return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-GB', {

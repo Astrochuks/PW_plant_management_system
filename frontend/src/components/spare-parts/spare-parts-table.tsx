@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { SparePart } from '@/hooks/use-spare-parts';
+import { money as formatCurrency } from '@/lib/format';
 
 interface SparePartsTableProps {
   parts: SparePart[];
@@ -161,21 +162,4 @@ function formatDate(dateString: string): string {
   });
 }
 
-const _CURRENCY_LOCALES: Record<string, string> = {
-  NGN: 'en-NG', GBP: 'en-GB', USD: 'en-US', EUR: 'de-DE',
-};
 
-function formatCurrency(amount: number, code: string = 'NGN'): string {
-  const upper = (code || 'NGN').toUpperCase();
-  const digits = upper === 'NGN' ? 0 : 2;
-  try {
-    return new Intl.NumberFormat(_CURRENCY_LOCALES[upper] ?? 'en-US', {
-      style: 'currency',
-      currency: upper,
-      minimumFractionDigits: digits,
-      maximumFractionDigits: digits,
-    }).format(amount);
-  } catch {
-    return `${upper} ${new Intl.NumberFormat('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(amount)}`;
-  }
-}

@@ -43,7 +43,7 @@ import { Pagination } from '@/components/plants/pagination';
 import { useDebounce } from '@/hooks/use-debounce';
 import { useLocations } from '@/hooks/use-plants';
 import type { SparePart } from '@/lib/api/spare-parts';
-import { naira } from '@/lib/format';
+import { naira, money as formatCurrency } from '@/lib/format';
 
 const DEFAULT_FILTERS: SparePartsFiltersState = {
   search: '',
@@ -686,20 +686,6 @@ function StatsCard({
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-function formatCurrency(amount: number): string {
-  if (amount >= 1_000_000) {
-    return `₦${(amount / 1_000_000).toFixed(1)}M`;
-  }
-  if (amount >= 1_000) {
-    return `₦${(amount / 1_000).toFixed(0)}K`;
-  }
-  return new Intl.NumberFormat('en-NG', {
-    style: 'currency',
-    currency: 'NGN',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount);
-}
 
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 

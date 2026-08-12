@@ -74,6 +74,7 @@ import type { LocationSubmission } from '@/lib/api/locations'
 import { downloadSubmissionFile, deleteWeeklySubmission } from '@/lib/api/uploads'
 import { useQueryClient } from '@tanstack/react-query'
 import { locationsKeys } from '@/hooks/use-locations'
+import { money as formatCurrency } from '@/lib/format';
 
 const CONDITION_STYLES: Record<string, { label: string; className: string }> = {
   working: { label: 'Working', className: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200' },
@@ -1042,20 +1043,6 @@ function CostBar({ label, amount, total, color }: { label: string; amount: numbe
   )
 }
 
-function formatCurrency(amount: number): string {
-  if (amount >= 1_000_000) {
-    return `\u20A6${(amount / 1_000_000).toFixed(1)}M`
-  }
-  if (amount >= 1_000) {
-    return `\u20A6${(amount / 1_000).toFixed(0)}K`
-  }
-  return new Intl.NumberFormat('en-NG', {
-    style: 'currency',
-    currency: 'NGN',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount)
-}
 
 function formatNumber(num: number): string {
   return new Intl.NumberFormat('en-NG', {

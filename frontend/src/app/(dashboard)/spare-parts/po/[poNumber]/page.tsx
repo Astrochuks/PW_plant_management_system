@@ -69,6 +69,7 @@ import type { UpdatePORequest, POSubmission, SparePart } from '@/lib/api/spare-p
 import { useAuth } from '@/providers/auth-provider';
 import { useLocationsWithStats } from '@/hooks/use-locations';
 import { SparePartDetailModal } from '@/components/spare-parts/spare-part-detail-modal';
+import { money as formatCurrency } from '@/lib/format';
 
 export default function PODetailPage() {
   const params = useParams();
@@ -1078,32 +1079,7 @@ function formatDate(dateString: string): string {
   });
 }
 
-// Locale used per ISO 4217 code so Intl renders the right symbol/grouping.
-const CURRENCY_LOCALES: Record<string, string> = {
-  NGN: 'en-NG',
-  GBP: 'en-GB',
-  USD: 'en-US',
-  EUR: 'de-DE',
-};
 
-function formatCurrency(amount: number, code: string = 'NGN'): string {
-  const upper = (code || 'NGN').toUpperCase();
-  // NGN has no commonly-used sub-unit in our data, so we keep it integer.
-  // Foreign currencies (GBP, USD, EUR) use 2 decimals so values like £0.65
-  // and £1.65 from invoices render exactly, not as £1 / £2.
-  const fractionDigits = upper === 'NGN' ? 0 : 2;
-  try {
-    return new Intl.NumberFormat(CURRENCY_LOCALES[upper] ?? 'en-US', {
-      style: 'currency',
-      currency: upper,
-      minimumFractionDigits: fractionDigits,
-      maximumFractionDigits: fractionDigits,
-    }).format(amount);
-  } catch {
-    // Unknown ISO code — fall back to a plain prefix
-    return `${upper} ${new Intl.NumberFormat('en-US', { maximumFractionDigits: fractionDigits, minimumFractionDigits: fractionDigits }).format(amount)}`;
-  }
-}
 
 function formatNGN(amount: number): string {
   return formatCurrency(amount, 'NGN');

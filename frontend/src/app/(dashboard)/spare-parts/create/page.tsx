@@ -44,6 +44,7 @@ import { useLocationsWithStats } from '@/hooks/use-locations';
 import { useDebounce } from '@/hooks/use-debounce';
 import { ProtectedRoute } from '@/components/protected-route';
 import { SupplierCombobox } from '@/components/spare-parts/supplier-combobox';
+import { money as formatCurrency } from '@/lib/format';
 
 // ============================================================================
 // Types
@@ -182,12 +183,6 @@ function createEmptyItem(): LineItem {
   };
 }
 
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-NG', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(amount);
-}
 
 // ============================================================================
 // Component

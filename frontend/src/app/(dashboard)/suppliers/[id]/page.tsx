@@ -42,6 +42,7 @@ import { Pagination } from '@/components/plants/pagination';
 import { useSupplier, useSupplierPOs, useUpdateSupplier } from '@/hooks/use-suppliers';
 import { useAuth } from '@/providers/auth-provider';
 import type { UpdateSupplierRequest } from '@/lib/api/suppliers';
+import { money as formatCurrency } from '@/lib/format';
 
 export default function SupplierDetailPage() {
   const params = useParams();
@@ -397,17 +398,3 @@ function formatDate(dateString: string): string {
   });
 }
 
-function formatCurrency(amount: number): string {
-  if (amount >= 1_000_000) {
-    return `\u20A6${(amount / 1_000_000).toFixed(1)}M`;
-  }
-  if (amount >= 1_000) {
-    return `\u20A6${(amount / 1_000).toFixed(0)}K`;
-  }
-  return new Intl.NumberFormat('en-NG', {
-    style: 'currency',
-    currency: 'NGN',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount);
-}

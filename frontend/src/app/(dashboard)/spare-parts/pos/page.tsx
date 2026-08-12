@@ -40,7 +40,7 @@ import { Pagination } from '@/components/plants/pagination';
 import { usePurchaseOrders } from '@/hooks/use-spare-parts';
 import { useDebounce } from '@/hooks/use-debounce';
 import { useAuth } from '@/providers/auth-provider';
-import { naira } from '@/lib/format';
+import { naira, money as formatCurrency } from '@/lib/format';
 import { useUrlFilters } from '@/hooks/use-url-filters';
 import type { POSummary } from '@/lib/api/spare-parts';
 
@@ -364,10 +364,6 @@ function formatDate(dateString: string): string {
   });
 }
 
-// Locales / symbols per ISO 4217 code.
-const _CURRENCY_LOCALES: Record<string, string> = {
-  NGN: 'en-NG', GBP: 'en-GB', USD: 'en-US', EUR: 'de-DE',
-};
 const _CURRENCY_SYMBOLS: Record<string, string> = {
   NGN: '\u20A6', GBP: '£', USD: '$', EUR: '€',
 };
@@ -375,31 +371,3 @@ const _CURRENCY_SYMBOLS: Record<string, string> = {
 // NGN uses compact notation since values scale large.
 // Foreign currencies show full amount with 2 decimals so invoice values
 // like £1,015.20 don't collapse into a meaningless '£1K'.
-function formatCurrency(amount: number, code: string = 'NGN'): string {
-  const upper = (code || 'NGN').toUpperCase();
-  if (upper === 'NGN') {
-    if (amount >= 1_000_000) {
-      return `\u20A6${(amount / 1_000_000).toFixed(1)}M`;
-    }
-    if (amount >= 1_000) {
-      return `\u20A6${(amount / 1_000).toFixed(0)}K`;
-    }
-    return new Intl.NumberFormat('en-NG', {
-      style: 'currency',
-      currency: 'NGN',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(amount);
-  }
-  try {
-    return new Intl.NumberFormat(_CURRENCY_LOCALES[upper] ?? 'en-US', {
-      style: 'currency',
-      currency: upper,
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(amount);
-  } catch {
-    const sym = _CURRENCY_SYMBOLS[upper] ?? `${upper} `;
-    return `${sym}${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount)}`;
-  }
-}

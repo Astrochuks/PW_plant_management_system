@@ -34,6 +34,7 @@ import { exportPlantsExcel } from '@/lib/api/plants';
 import type { PlantSummary } from '@/hooks/use-plants';
 import type { PlantCondition } from '@/lib/api/plants';
 import type { PaginationMeta } from '@/lib/api/plants';
+import { money as formatCurrency } from '@/lib/format';
 
 // All possible column keys the table can display
 export type ColumnKey =
@@ -605,12 +606,3 @@ function PlantsTableSkeleton({ columns }: { columns: ColumnDef[] }) {
   );
 }
 
-function formatCurrency(amount: number, currency = 'NGN'): string {
-  const locale = currency === 'NGN' ? 'en-NG' : currency === 'GBP' ? 'en-GB' : currency === 'EUR' ? 'de-DE' : 'en-US';
-  return new Intl.NumberFormat(locale, {
-    style: 'currency',
-    currency,
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount);
-}

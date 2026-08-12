@@ -38,6 +38,7 @@ import { useSuppliers, useCreateSupplier } from '@/hooks/use-suppliers';
 import { useDebounce } from '@/hooks/use-debounce';
 import { useAuth } from '@/providers/auth-provider';
 import type { Supplier, CreateSupplierRequest } from '@/lib/api/suppliers';
+import { money as formatCurrency } from '@/lib/format';
 
 export default function SuppliersPage() {
   const router = useRouter();
@@ -341,17 +342,3 @@ function SuppliersTableSkeleton() {
   );
 }
 
-function formatCurrency(amount: number): string {
-  if (amount >= 1_000_000) {
-    return `\u20A6${(amount / 1_000_000).toFixed(1)}M`;
-  }
-  if (amount >= 1_000) {
-    return `\u20A6${(amount / 1_000).toFixed(0)}K`;
-  }
-  return new Intl.NumberFormat('en-NG', {
-    style: 'currency',
-    currency: 'NGN',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount);
-}

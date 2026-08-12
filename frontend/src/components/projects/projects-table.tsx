@@ -23,6 +23,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import type { Project } from '@/hooks/use-projects'
+import { money as formatCurrency } from '@/lib/format';
 
 // ── Column definitions ────────────────────────────────────────────────────
 
@@ -70,14 +71,6 @@ export const STATUS_STYLES: Record<string, { label: string; variant: 'default' |
 export const effectiveStatus = (p: { status: string; is_legacy?: boolean }): string =>
   p.is_legacy ? 'legacy' : p.status
 
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-NG', {
-    style: 'currency',
-    currency: 'NGN',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount)
-}
 
 function formatDate(dateStr: string): string {
   return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-GB', {

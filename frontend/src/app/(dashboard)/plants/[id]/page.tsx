@@ -58,6 +58,7 @@ import { PlantWeeklyUsageChart } from '@/components/plants/plant-weekly-usage-ch
 import { PlantEventsFeed } from '@/components/plants/plant-events-feed'
 import { SparePartDetailModal } from '@/components/spare-parts/spare-part-detail-modal'
 import type { PlantCondition } from '@/lib/api/plants'
+import { money as formatCurrency } from '@/lib/format';
 
 // ---------------------------------------------------------------------------
 // Condition badge config (same as modal)
@@ -87,15 +88,6 @@ function ConditionBadge({ condition }: { condition: PlantCondition | null }) {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-function formatCurrency(amount: number, currency = 'NGN'): string {
-  const locale = currency === 'NGN' ? 'en-NG' : currency === 'GBP' ? 'en-GB' : currency === 'EUR' ? 'de-DE' : 'en-US';
-  return new Intl.NumberFormat(locale, {
-    style: 'currency',
-    currency,
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount)
-}
 
 function formatDate(dateString: string): string {
   return new Date(dateString).toLocaleDateString('en-NG', {

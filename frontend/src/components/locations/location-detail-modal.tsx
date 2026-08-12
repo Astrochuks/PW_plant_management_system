@@ -35,6 +35,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { useLocationDetail, useLocationPlants } from '@/hooks/use-locations';
 import type { PlantCondition } from '@/lib/api/plants';
+import { money as formatCurrency } from '@/lib/format';
 
 interface LocationDetailModalProps {
   locationId: string | null;
@@ -287,11 +288,3 @@ function PlantTableSkeleton() {
   );
 }
 
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-NG', {
-    style: 'currency',
-    currency: 'NGN',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount);
-}

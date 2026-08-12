@@ -28,6 +28,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useSparePart, useUpdateSparePart } from '@/hooks/use-spare-parts';
 import { useAuth } from '@/providers/auth-provider';
 import type { UpdateSparePartRequest } from '@/lib/api/spare-parts';
+import { money as formatCurrency } from '@/lib/format';
 
 interface SparePartDetailModalProps {
   partId: string | null;
@@ -263,16 +264,42 @@ export function SparePartDetailModal({ partId, onClose }: SparePartDetailModalPr
                     <span className="text-muted-foreground">Quantity</span>
                     <span>x {editing ? (editForm.quantity ?? part.quantity) : part.quantity}</span>
                   </div>
-                  {part.vat_percentage > 0 && (
+
+                  {/* The ex-VAT line total — the same figure the PO table
+                      shows, and what the purchase order document lists.
+                      Without it the reader jumps from a unit price to an
+                      all-in total and the arithmetic looks broken. */}
+                  <Separator />
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Line Total</span>
+                    <span>
+                      {formatCurrency(
+                        (Number(editing ? editForm.unit_cost ?? part.unit_cost : part.unit_cost) || 0)
+                          * ((editing ? editForm.quantity ?? part.quantity : part.quantity) || 1),
+                        part.currency || 'NGN',
+                      )}
+                    </span>
+                  </div>
+
+                  {/* Amounts, not percentages: VAT is charged once on the
+                      purchase order and apportioned to this line, so the
+                      percentage alone never explains the total. */}
+                  {Number(part.vat_amount) > 0 && (
                     <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">VAT</span>
-                      <span>{part.vat_percentage}%</span>
+                      <span className="text-muted-foreground">
+                        VAT{part.vat_percentage > 0 ? ` (${part.vat_percentage}%)` : ''}
+                        <span className="ml-1 text-xs opacity-70">· this line&rsquo;s share</span>
+                      </span>
+                      <span>{formatCurrency(Number(part.vat_amount), part.currency || 'NGN')}</span>
                     </div>
                   )}
-                  {part.discount_percentage > 0 && (
+                  {Number(part.discount_amount) > 0 && (
                     <div className="flex justify-between text-sm text-success">
-                      <span>Discount</span>
-                      <span>-{part.discount_percentage}%</span>
+                      <span>
+                        Discount{part.discount_percentage > 0 ? ` (${part.discount_percentage}%)` : ''}
+                        <span className="ml-1 text-xs opacity-70">· this line&rsquo;s share</span>
+                      </span>
+                      <span>-{formatCurrency(Number(part.discount_amount), part.currency || 'NGN')}</span>
                     </div>
                   )}
                   {part.other_costs > 0 && (
@@ -283,7 +310,7 @@ export function SparePartDetailModal({ partId, onClose }: SparePartDetailModalPr
                   )}
                   <Separator />
                   <div className="flex justify-between font-medium">
-                    <span>Total Cost</span>
+                    <span>Total incl. VAT</span>
                     <span className="text-lg">
                       {part.total_cost != null ? formatCurrency(part.total_cost, part.currency || 'NGN') : '-'}
                     </span>
@@ -467,23 +494,4 @@ function formatDate(dateString: string): string {
   });
 }
 
-// Locale per ISO 4217 code so Intl picks the right symbol/grouping.
-const _CURRENCY_LOCALES: Record<string, string> = {
-  NGN: 'en-NG', GBP: 'en-GB', USD: 'en-US', EUR: 'de-DE',
-};
 
-function formatCurrency(amount: number, code: string = 'NGN'): string {
-  const upper = (code || 'NGN').toUpperCase();
-  // NGN: integer (no kobo). Foreign currencies: 2 decimals (£0.65, $1.65, etc.)
-  const digits = upper === 'NGN' ? 0 : 2;
-  try {
-    return new Intl.NumberFormat(_CURRENCY_LOCALES[upper] ?? 'en-US', {
-      style: 'currency',
-      currency: upper,
-      minimumFractionDigits: digits,
-      maximumFractionDigits: digits,
-    }).format(amount);
-  } catch {
-    return `${upper} ${new Intl.NumberFormat('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(amount)}`;
-  }
-}

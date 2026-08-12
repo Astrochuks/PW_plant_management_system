@@ -23,6 +23,7 @@ import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { usePlant } from '@/hooks/use-plants';
 import type { PlantCondition } from '@/lib/api/plants';
+import { money as formatCurrency } from '@/lib/format';
 
 interface PlantDetailModalProps {
   plantId: string | null;
@@ -280,14 +281,6 @@ function PlantDetailSkeleton({ onClose }: { onClose: () => void }) {
   );
 }
 
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-NG', {
-    style: 'currency',
-    currency: 'NGN',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount);
-}
 
 function formatDate(dateString: string): string {
   return new Date(dateString).toLocaleDateString('en-NG', {
