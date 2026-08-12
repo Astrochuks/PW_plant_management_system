@@ -725,6 +725,29 @@ function CostBreakdownSection({
   );
 }
 
+/**
+ * Ex-VAT total for one line — what the PO document's own "NGN TOTAL"
+ * column shows.
+ *
+ * Deliberately NOT `part.total_cost`. That generated column already
+ * carries this line's share of the PO-level VAT, discount and other
+ * costs, which are entered once for the whole PO and distributed across
+ * items in proportion to value. Rendering it beside an ex-VAT unit price
+ * gave rows that could not be made to multiply out — a unit cost of
+ * 1,073.70 x 10 displayed as 11,542.27 — and made the column sum to the
+ * grand total while "Items Subtotal" on the same page showed the ex-VAT
+ * figure. The two disagreed by exactly the VAT.
+ *
+ * VAT belongs on its own line in Cost Breakdown, which is where the
+ * purchase order itself puts it, and what people reconcile against.
+ *
+ * Display only: `total_cost` remains the aggregation field everywhere
+ * else in the system.
+ */
+function lineTotal(part: SparePart): number {
+  return (Number(part.unit_cost) || 0) * (part.quantity || 1);
+}
+
 function ItemsTable({
   parts,
   onPartClick,
@@ -743,7 +766,7 @@ function ItemsTable({
             <TableHead className="w-[120px]">Part Number</TableHead>
             <TableHead className="w-[60px] text-center">Qty</TableHead>
             <TableHead className="w-[110px] text-right">Unit Cost</TableHead>
-            <TableHead className="w-[120px] text-right">Total Cost</TableHead>
+            <TableHead className="w-[120px] text-right">Line Total</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -775,7 +798,9 @@ function ItemsTable({
                 {part.unit_cost != null ? formatCurrency(part.unit_cost, part.currency || 'NGN') : '-'}
               </TableCell>
               <TableCell className="text-right font-medium">
-                {part.total_cost != null ? formatCurrency(part.total_cost, part.currency || 'NGN') : '-'}
+                {part.unit_cost != null
+                  ? formatCurrency(lineTotal(part), part.currency || 'NGN')
+                  : '-'}
               </TableCell>
             </TableRow>
           ))}
@@ -821,10 +846,9 @@ function ItemsTableGroupedBySupplier({
   return (
     <>
       {supplierGroups.map(([key, group]) => {
-        const groupSubtotal = group.parts.reduce(
-          (s, p) => s + (Number(p.total_cost) || 0),
-          0
-        );
+        // Ex-VAT, so a supplier's subtotal ties to the column above it
+        // and to "Items Subtotal" in Cost Breakdown.
+        const groupSubtotal = group.parts.reduce((s, p) => s + lineTotal(p), 0);
         const groupCurrency = group.parts[0]?.currency || 'NGN';
         return (
           <Card key={key}>

@@ -183,6 +183,83 @@ class TestNoAmbiguousOverload:
         assert n == 1, f"{n} overloads — the figure is ambiguous again"
 
 
+class TestLineTotalsReconcileToThePoTotal:
+    """A purchase order page must reconcile the way the paper PO does.
+
+    The document lists each line EXCLUDING VAT, sums them to a goods
+    value, then adds VAT once to reach the total. The page mirrors that:
+    a "Line Total" per item, an "Items Subtotal" card, then VAT, then
+    the grand total.
+
+    That only holds if, for every PO,
+
+        sum(unit_cost x quantity) + VAT - discount + other == sum(total_cost)
+
+    The page used to render `total_cost` per line. That generated column
+    already carries the line's share of the PO-level VAT, so on
+    PW-PO220726-003 a row read NGN 11,542.27 beside a unit price of
+    1,073.70 x 10 — arithmetic no reader could make work — and the
+    column summed to the grand total while "Items Subtotal" directly
+    below it showed the ex-VAT figure. The two disagreed by exactly the
+    VAT.
+
+    Tolerance is per line: `total_cost` rounds to 2dp per row, so a PO
+    can differ by up to half a kobo per line.
+    """
+
+    async def test_ex_vat_lines_plus_overheads_equal_the_all_in_total(self, db_conn):
+        rows = await db_conn.fetch(
+            """SELECT purchase_order_number AS po, po_date,
+                      count(*)                                  AS lines,
+                      sum(unit_cost * quantity)                 AS goods,
+                      sum(COALESCE(vat_amount, 0))              AS vat,
+                      sum(COALESCE(discount_amount, 0))         AS discount,
+                      sum(COALESCE(other_costs, 0))             AS other,
+                      sum(total_cost)                           AS all_in
+               FROM spare_parts
+               WHERE unit_cost IS NOT NULL AND total_cost IS NOT NULL
+               GROUP BY purchase_order_number, po_date"""
+        )
+        assert rows, "no purchase orders to check"
+
+        broken = []
+        for r in rows:
+            expected = (
+                (r["goods"] or 0) + (r["vat"] or 0)
+                - (r["discount"] or 0) + (r["other"] or 0)
+            )
+            drift = abs(float(expected) - float(r["all_in"] or 0))
+            if drift > 0.01 * r["lines"]:
+                broken.append(
+                    f"{r['po']} ({r['po_date']}): ex-VAT {r['goods']} + VAT "
+                    f"{r['vat']} - disc {r['discount']} + other {r['other']} "
+                    f"= {expected}, but sum(total_cost) = {r['all_in']} "
+                    f"(off by {drift:.2f} over {r['lines']} lines)"
+                )
+
+        assert not broken, (
+            "the ex-VAT column and the all-in total no longer reconcile:\n  "
+            + "\n  ".join(broken[:10])
+        )
+
+    async def test_the_two_figures_really_are_different(self, db_conn):
+        """Guards against the fix being undone by making both columns the
+        same thing. Where a PO carries VAT, its ex-VAT subtotal MUST be
+        smaller than its all-in total — that gap is the whole reason the
+        page needs two separate numbers."""
+        row = await db_conn.fetchrow(
+            """SELECT sum(unit_cost * quantity) AS goods, sum(total_cost) AS all_in
+               FROM spare_parts
+               WHERE COALESCE(vat_amount, 0) > 0
+                 AND unit_cost IS NOT NULL AND total_cost IS NOT NULL"""
+        )
+        if not row or row["goods"] is None:
+            pytest.skip("no VAT-bearing purchase orders")
+        assert float(row["goods"]) < float(row["all_in"]), (
+            "ex-VAT goods should be strictly less than the VAT-inclusive total"
+        )
+
+
 class TestPerPlantStillApportions:
     """Splitting a shared PO IS right for one plant's own cost — it just
     must never be applied to a portfolio total."""
