@@ -40,12 +40,20 @@ export const money = (
     return new Intl.NumberFormat(CURRENCY_LOCALES[code] ?? 'en-US', {
       style: 'currency',
       currency: code,
-      // Money carries 2 decimals even when they are zero — the purchase
-      // order documents write 802,620.00 and 1,073.70, so matching them
-      // is what makes a figure reconcilable at a glance. More than 2 are
-      // shown when they exist; none are ever dropped.
+      // Exactly 2 decimals, always.
+      //
+      // Not a rounding policy — 2dp IS the stored precision. Every money
+      // column in this system is written `round(…, 2)` by Postgres, and
+      // the PO documents themselves write 802,620.00 and 1,073.70. A
+      // third decimal on a money figure is therefore never data.
+      //
+      // It is, however, float noise. `_record_to_dict` converts Decimal
+      // to float, so summing 2dp values yields things like
+      // 3455445033.920001 — six decimals, which a 6dp cap happily prints.
+      // That reached the live executive summary. Sub-kobo precision does
+      // not exist here, so refusing to render it loses nothing.
       minimumFractionDigits: 2,
-      maximumFractionDigits: MAX_DP,
+      maximumFractionDigits: 2,
     }).format(n)
   } catch {
     // unknown ISO code — still show the exact number rather than nothing

@@ -42,16 +42,25 @@ forbids the full figure. Tooltips must show the exact value.
 ### The one technical caveat, stated honestly
 
 Money is `numeric` in Postgres (exact), but `_record_to_dict` converts
-`Decimal` to `float` before it reaches JSON. IEEE-754 floats cannot
-represent most decimal fractions exactly, so `34.211` can arrive as
-`34.210999999999999`. The formatters therefore cap at **6 decimal
-places** — enough for any real money, quantity, rate or FX value in this
-system, and enough to suppress that artifact.
+`Decimal` to `float` before it reaches JSON. IEEE-754 cannot represent
+most decimal fractions, so summing values produces artifacts like
+`3455445033.920001` — which reached the live executive summary.
 
-That cap is *not* a rounding policy; it is a floor under float noise. The
-proper fix is to carry money as a string from Postgres to the browser so
-the exact `numeric` survives end to end. Until that is done, do not
-introduce a value with more than 6 real decimal places.
+So the two formatters cap differently, and for different reasons:
+
+- **`money()` shows exactly 2 decimals.** That is not a rounding policy —
+  **2dp is the stored precision.** Every money column is written
+  `round(…, 2)` by Postgres and the PO documents themselves write
+  `802,620.00`. A third decimal on a money figure is never data, only
+  noise, so refusing to render it loses nothing.
+- **`num()` allows up to 6**, because quantities, rates and FX values
+  genuinely carry more — `34.211` litres is a real figure and must show
+  as `34.211`.
+
+The proper fix is to carry money as a string from Postgres to the browser
+so the exact `numeric` survives end to end. Until then: do not introduce
+a money value with more than 2 real decimals, or a quantity with more
+than 6.
 
 ---
 
