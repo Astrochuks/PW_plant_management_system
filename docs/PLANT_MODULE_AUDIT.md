@@ -366,9 +366,20 @@ six, were never shown.
 each. Found while building the public demo, where the generator is one of
 the four pages on show.
 
-**Still open at line ~485:** Sites Breakdown has the same shape, and the
-Excel export pushes 7 sums onto a 6-column header, producing `NaN` in the
-totals row.
+**Sites Breakdown — also fixed.** Same defect, same "Repair" ghost
+column. Both tables now carry all six.
+
+**The Excel claim was wrong, and is retracted.** This entry said the
+export "pushes 7 sums onto a 6-column header, producing `NaN` in the
+totals row". It does not: headers and rows both carry the same fixed
+columns plus one per fleet type, and the grand-total loop sums from
+column 3 to `headers.length`, so every value is numeric. That was a
+*[by inspection]* note that reading the code disproves.
+
+The sheets did have the six-condition problem, now fixed: **States
+Summary omitted Standby and Off Hire entirely** and **Sites Breakdown
+omitted Off Hire**, so neither sheet's condition columns could be made to
+add up to Total Plants.
 
 ### 2.6 Cards that ignore their own page filters **[by inspection]**
 

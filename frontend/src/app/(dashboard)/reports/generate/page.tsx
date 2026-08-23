@@ -155,9 +155,11 @@ export default function ReportGeneratorPage() {
 
     // ── Sheet 3: States Summary ──────────────────────────────────
     {
-      const headers = ['State', 'Code', 'Region', 'Sites', 'Total Plants', 'Working', 'Breakdown', 'Missing', 'Scrap', 'Unknown'];
-      const rows = report.states_summary.map(r => [r.name, r.code, r.region || '', r.sites_count, r.total_plants, r.working, r.breakdown, r.missing, r.scrap, r.unknown ?? 0]);
-      utils.book_append_sheet(wb, makeSheet('STATES SUMMARY', headers, rows, [18, 8, 14, 8, 12, 10, 12, 12, 10, 10]), 'States');
+      // All six conditions — Standby and Off Hire were missing entirely,
+      // so the exported sheet could not be made to add up to Total Plants.
+      const headers = ['State', 'Code', 'Region', 'Sites', 'Total Plants', 'Working', 'Standby', 'Breakdown', 'Missing', 'Scrap', 'Off Hire', 'Unknown'];
+      const rows = report.states_summary.map(r => [r.name, r.code, r.region || '', r.sites_count, r.total_plants, r.working, r.standby, r.breakdown, r.missing, r.scrap, r.off_hire, r.unknown ?? 0]);
+      utils.book_append_sheet(wb, makeSheet('STATES SUMMARY', headers, rows, [18, 8, 14, 8, 12, 10, 10, 12, 12, 10, 10, 10]), 'States');
     }
 
     // ── Sheet 4: Sites Breakdown with Fleet Distribution ────────
@@ -165,9 +167,11 @@ export default function ReportGeneratorPage() {
       const ftSet = new Set<string>();
       report.sites_breakdown.forEach(r => Object.keys(r.fleet_types).forEach(ft => ftSet.add(ft)));
       const ftNames = Array.from(ftSet).sort();
-      const headers = ['#', 'Site', 'State', 'Total Plants', 'Working', 'Breakdown', 'Standby', 'Missing', 'Scrap', 'Unknown', ...ftNames];
+      // Off Hire was missing, so the condition columns never summed to
+      // Total Plants. Order matches the on-screen table.
+      const headers = ['#', 'Site', 'State', 'Total Plants', 'Working', 'Standby', 'Breakdown', 'Missing', 'Scrap', 'Off Hire', 'Unknown', ...ftNames];
       const dataRows = report.sites_breakdown.map((r, i) => [
-        i + 1, r.location_name, r.state_name, r.total_plants, r.working, r.breakdown, r.standby, r.missing, r.scrap, r.unknown ?? 0,
+        i + 1, r.location_name, r.state_name, r.total_plants, r.working, r.standby, r.breakdown, r.missing, r.scrap, r.off_hire, r.unknown ?? 0,
         ...ftNames.map(ft => r.fleet_types[ft] || 0),
       ]);
       // Grand total row
@@ -176,7 +180,7 @@ export default function ReportGeneratorPage() {
         totalRow.push(dataRows.reduce((s, r) => s + (r[c] as number), 0));
       }
       dataRows.push(totalRow);
-      const colWidths = [5, 28, 16, 12, 10, 12, 12, 10, 10, 10, ...ftNames.map(() => 14)];
+      const colWidths = [5, 28, 16, 12, 10, 10, 12, 12, 10, 10, 10, ...ftNames.map(() => 14)];
       utils.book_append_sheet(wb, makeSheet('SITES BREAKDOWN & FLEET DISTRIBUTION', headers, dataRows, colWidths), 'Sites');
     }
 
@@ -494,12 +498,17 @@ export default function ReportGeneratorPage() {
                           <TableHead>Site</TableHead>
                           <TableHead>State</TableHead>
                           <TableHead className="text-center">Total</TableHead>
+                          {/* Six conditions, same order as everywhere else.
+                              There used to be a "Repair" header with no
+                              cell under it — not a condition at all, just
+                              a leftover — which shifted every column right
+                              of B/Down one to the left. */}
                           <TableHead className="text-center">Working</TableHead>
-                          <TableHead className="text-center">B/Down</TableHead>
-                          <TableHead className="text-center">Repair</TableHead>
                           <TableHead className="text-center">Standby</TableHead>
+                          <TableHead className="text-center">B/Down</TableHead>
                           <TableHead className="text-center">Missing</TableHead>
                           <TableHead className="text-center">Scrap</TableHead>
+                          <TableHead className="text-center">Off Hire</TableHead>
                           {fleetTypeNames.map(ft => (
                             <TableHead key={ft} className="text-center text-xs whitespace-nowrap">{ft}</TableHead>
                           ))}
@@ -513,10 +522,11 @@ export default function ReportGeneratorPage() {
                             <TableCell className="text-xs text-muted-foreground">{row.state_name}</TableCell>
                             <TableCell className="text-center font-semibold">{row.total_plants}</TableCell>
                             <TableCell className="text-center text-emerald-600">{row.working || '-'}</TableCell>
+                            <TableCell className="text-center text-blue-600">{row.standby || '-'}</TableCell>
                             <TableCell className="text-center text-red-600">{row.breakdown || '-'}</TableCell>
-                                <TableCell className="text-center">{row.standby || '-'}</TableCell>
                             <TableCell className="text-center text-orange-500">{row.missing || '-'}</TableCell>
                             <TableCell className="text-center text-muted-foreground">{row.scrap || '-'}</TableCell>
+                            <TableCell className="text-center text-muted-foreground">{row.off_hire || '-'}</TableCell>
                             {fleetTypeNames.map(ft => (
                               <TableCell key={ft} className="text-center text-xs tabular-nums">
                                 {row.fleet_types[ft] || <span className="text-muted-foreground/40">-</span>}
