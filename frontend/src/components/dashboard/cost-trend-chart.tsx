@@ -8,13 +8,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { TrendingUp } from 'lucide-react'
 import { useMaintenanceCosts } from '@/hooks/use-reports'
 import { useDashboardFilters } from '@/hooks/use-dashboard-filters'
+import { money as formatNGN } from '@/lib/format';
 
-function formatNGN(value: number): string {
-  if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(1)}B`
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
-  if (value >= 1_000) return `${(value / 1_000).toFixed(0)}K`
-  return String(value)
-}
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 

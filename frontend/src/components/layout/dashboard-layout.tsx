@@ -14,6 +14,7 @@ import { useLocations, useFleetTypes } from '@/hooks/use-plants';
 import { cn } from '@/lib/utils';
 import { Loader2 } from 'lucide-react';
 import Image from 'next/image';
+import { DemoBanner } from '@/components/demo/demo-banner';
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -117,6 +118,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
           sidebarCollapsed ? 'lg:pl-[70px]' : 'lg:pl-[240px]'
         )}
       >
+        <DemoBanner />
         <div className="p-6">
           <PlantTabs />
           {children}

@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "dev:demo": "NEXT_PUBLIC_DEMO_MODE=true next dev --port 3001",
+    "build:demo": "NEXT_PUBLIC_DEMO_MODE=true next build"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

@@ -16,13 +16,8 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import apiClient from '@/lib/api/client';
+import { money as formatNGN } from '@/lib/format';
 
-function formatNGN(amount: number): string {
-  return new Intl.NumberFormat('en-NG', {
-    style: 'currency', currency: 'NGN',
-    minimumFractionDigits: 0, maximumFractionDigits: 0,
-  }).format(amount);
-}
 
 interface CatalogItem {
   part_name: string;

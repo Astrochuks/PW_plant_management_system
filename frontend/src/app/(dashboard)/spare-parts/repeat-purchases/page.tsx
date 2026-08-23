@@ -26,15 +26,8 @@ import {
 // Tooltip removed — PO badges are now clickable links
 import { useRepeatPurchases, useRepeatPurchaseDetail, type RepeatPurchase } from '@/hooks/use-spare-parts';
 import { ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
+import { money as formatNGN } from '@/lib/format';
 
-function formatNGN(amount: number): string {
-  return new Intl.NumberFormat('en-NG', {
-    style: 'currency',
-    currency: 'NGN',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount);
-}
 
 function SeverityBadge({ severity }: { severity: string }) {
   const config: Record<string, { label: string; className: string; icon: typeof AlertTriangle }> = {

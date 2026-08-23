@@ -29,7 +29,7 @@ import {
   useHighCostPlants,
 } from '@/hooks/use-spare-parts'
 import { useLocationsWithStats } from '@/hooks/use-locations'
-import { naira } from '@/lib/format'
+import { naira, money as formatNGN } from '@/lib/format';
 
 const currentYear = new Date().getFullYear()
 const YEAR_OPTIONS = Array.from({ length: 5 }, (_, i) => currentYear - i)
@@ -39,14 +39,6 @@ const MONTH_LABELS = [
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
 ]
 
-function formatNGN(amount: number): string {
-  return new Intl.NumberFormat('en-NG', {
-    style: 'currency',
-    currency: 'NGN',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount)
-}
 
 function formatCompact(amount: number): string {
   if (amount >= 1_000_000) return `\u20A6${(amount / 1_000_000).toFixed(1)}M`

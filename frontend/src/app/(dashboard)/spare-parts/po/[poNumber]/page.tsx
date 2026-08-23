@@ -69,7 +69,7 @@ import type { UpdatePORequest, POSubmission, SparePart } from '@/lib/api/spare-p
 import { useAuth } from '@/providers/auth-provider';
 import { useLocationsWithStats } from '@/hooks/use-locations';
 import { SparePartDetailModal } from '@/components/spare-parts/spare-part-detail-modal';
-import { money as formatCurrency } from '@/lib/format';
+import { money as formatCurrency, money as formatNGN } from '@/lib/format';
 
 export default function PODetailPage() {
   const params = useParams();
@@ -1081,6 +1081,3 @@ function formatDate(dateString: string): string {
 
 
 
-function formatNGN(amount: number): string {
-  return formatCurrency(amount, 'NGN');
-}

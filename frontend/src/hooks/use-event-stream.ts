@@ -9,6 +9,7 @@
  */
 
 import { useEffect, useRef, useCallback } from 'react';
+import { IS_DEMO } from '@/lib/demo';
 import { useQueryClient } from '@tanstack/react-query';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -82,7 +83,10 @@ export function useEventStream(isAuthenticated: boolean) {
   }, []);
 
   useEffect(() => {
-    if (!isAuthenticated) {
+    // The demo build has no backend, and EventSource bypasses the axios
+    // adapter that answers everything else — so this would be the one
+    // thing still dialling a host that isn't there.
+    if (IS_DEMO || !isAuthenticated) {
       cleanup();
       return;
     }

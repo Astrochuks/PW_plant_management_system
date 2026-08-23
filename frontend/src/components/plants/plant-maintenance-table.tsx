@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from 'react'
 import Link from 'next/link'
+import { money } from '@/lib/format'
 import { Input } from '@/components/ui/input'
 import {
   Table,
@@ -136,14 +137,7 @@ export function PlantMaintenanceTable({ records, isLoading, onRowClick }: PlantM
                     )}
                   </TableCell>
                   <TableCell className="font-medium">
-                    {record.total_cost != null
-                      ? record.total_cost.toLocaleString('en-NG', {
-                          style: 'currency',
-                          currency: 'NGN',
-                          minimumFractionDigits: 0,
-                          maximumFractionDigits: 0,
-                        })
-                      : '-'}
+                    {money(record.total_cost)}
                   </TableCell>
                   <TableCell className="text-sm">
                     {format(new Date(record.replaced_date), 'MMM d, yyyy')}

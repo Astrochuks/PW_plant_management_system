@@ -25,6 +25,7 @@ import { useMaintenanceCosts, type MaintenanceCostGroupBy } from '@/hooks/use-re
 import { useLocationsWithStats } from '@/hooks/use-locations'
 import { useFleetTypes } from '@/hooks/use-plants'
 import { ALL, only } from '@/lib/filters'
+import { money as formatNGN } from '@/lib/format';
 
 const GROUP_BY_OPTIONS: { value: MaintenanceCostGroupBy; label: string }[] = [
   { value: 'month', label: 'By Month' },
@@ -39,14 +40,6 @@ const GROUP_BY_OPTIONS: { value: MaintenanceCostGroupBy; label: string }[] = [
 const currentYear = new Date().getFullYear()
 const YEAR_OPTIONS = Array.from({ length: 5 }, (_, i) => currentYear - i)
 
-function formatNGN(amount: number): string {
-  return new Intl.NumberFormat('en-NG', {
-    style: 'currency',
-    currency: 'NGN',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount)
-}
 
 export default function MaintenanceCostsPage() {
   const [year, setYear] = useState<number>(currentYear)

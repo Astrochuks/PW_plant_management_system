@@ -5,6 +5,7 @@
 
 import axios, { AxiosError, AxiosInstance, AxiosRequestConfig } from 'axios';
 import { refreshTokenGlobal } from './silent-refresh';
+import { installDemoMode } from '@/lib/demo';
 
 // API base URL - defaults to localhost for development
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -27,6 +28,14 @@ const apiClient: AxiosInstance = axios.create({
  * for two minutes before failing.
  */
 export const EXPORT_TIMEOUT_MS = 120_000;
+
+/**
+ * In a demo build, swap axios' adapter for one that answers from
+ * synthetic data. Installed here rather than per-call so it covers
+ * every request in the app, and so a demo build cannot reach a real
+ * backend even by accident. No-op in the production build.
+ */
+installDemoMode(apiClient);
 
 // Guard against multiple 401 redirects firing simultaneously
 let isRedirecting = false;

@@ -4,6 +4,7 @@ import { Activity, Banknote } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { ProjectStats } from '@/hooks/use-projects'
+import { money as fullCurrency } from '@/lib/format';
 
 interface ProjectsStatsCardsProps {
   stats: ProjectStats | undefined
@@ -21,14 +22,6 @@ function compactCurrency(amount: number): string {
   return fullCurrency(amount)
 }
 
-function fullCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-NG', {
-    style: 'currency',
-    currency: 'NGN',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount)
-}
 
 export function ProjectsStatsCards({ stats, isLoading, viewMode = 'all' }: ProjectsStatsCardsProps) {
   if (isLoading) {
