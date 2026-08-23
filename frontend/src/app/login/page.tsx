@@ -7,6 +7,7 @@
  */
 
 import { useState, useEffect } from 'react';
+import { IS_DEMO, DEMO_CREDENTIALS } from '@/lib/demo';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -55,10 +56,11 @@ export default function LoginPage() {
 
   const form = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
-    defaultValues: {
-      email: '',
-      password: '',
-    },
+    // Pre-filled in the demo so signing back in is one click. The demo
+    // accepts anything — there is no auth server behind it.
+    defaultValues: IS_DEMO
+      ? { ...DEMO_CREDENTIALS }
+      : { email: '', password: '' },
   });
 
   async function onSubmit(data: LoginFormValues) {
@@ -174,9 +176,34 @@ export default function LoginPage() {
               Welcome back
             </h2>
             <p className="text-muted-foreground mt-2">
-              Sign in to your account to continue
+              {IS_DEMO
+                ? 'Demo — the credentials below are already filled in'
+                : 'Sign in to your account to continue'}
             </p>
           </div>
+
+          {IS_DEMO && (
+            <div className="mb-6 rounded-lg border border-amber-300/60 bg-amber-50 p-4
+                            text-amber-900 dark:border-amber-500/30
+                            dark:bg-amber-950/60 dark:text-amber-100">
+              <p className="text-sm font-semibold">Demo credentials</p>
+              <dl className="mt-2 space-y-1 text-sm">
+                <div className="flex justify-between gap-4">
+                  <dt className="opacity-80">Email</dt>
+                  <dd className="font-mono">{DEMO_CREDENTIALS.email}</dd>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <dt className="opacity-80">Password</dt>
+                  <dd className="font-mono">{DEMO_CREDENTIALS.password}</dd>
+                </div>
+              </dl>
+              <p className="mt-3 text-xs leading-snug opacity-90">
+                Just press <span className="font-medium">Sign in</span>. Every
+                figure inside is invented — no real P.W. Nigeria data appears
+                anywhere in this build.
+              </p>
+            </div>
+          )}
 
           {/* Login Form */}
           <Form {...form}>

@@ -455,10 +455,29 @@ export const demoAdapter: AxiosAdapter = async (config) => {
     if (v !== undefined && v !== null && v !== '') params.set(k, String(v))
   }
 
-  // Writes are inert — the demo is read-only by construction.
   const method = (config.method || 'get').toLowerCase()
+
   if (method !== 'get') {
     await new Promise((r) => setTimeout(r, LATENCY_MS))
+
+    // Sign-in must actually work. Without this, "Sign out" is a dead
+    // end — the form posts to an auth server that does not exist, and
+    // the visitor is stranded on a login page forever. Any credentials
+    // are accepted; there is nothing to authenticate against.
+    //
+    // Note the shape: `login()` reads `response.data` directly, NOT the
+    // {success, data} envelope everything else uses.
+    if (path === '/auth/login') {
+      return ok(config, {
+        access_token: 'demo-token',
+        refresh_token: 'demo-refresh',
+        token_type: 'bearer',
+        expires_in: 365 * 24 * 3600,
+        user: DEMO_USER,
+      })
+    }
+
+    // Every other write is inert — the demo is read-only by construction.
     return ok(config, { success: true, data: null, message: 'Demo mode — not saved' })
   }
 
