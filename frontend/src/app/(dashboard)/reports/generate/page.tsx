@@ -433,14 +433,21 @@ export default function ReportGeneratorPage() {
                   <Table>
                     <TableHeader>
                       <TableRow>
+                        {/* All six conditions, in the order used everywhere
+                            else. This table had eight headers and seven
+                            cells, so every column right of B/Down was
+                            shifted one left — and "Repair" was not even a
+                            condition, it is a leftover from the old
+                            taxonomy. Standby was simply never shown. */}
                         <TableHead>State</TableHead>
                         <TableHead className="text-center">Sites</TableHead>
                         <TableHead className="text-center">Total</TableHead>
                         <TableHead className="text-center">Working</TableHead>
+                        <TableHead className="text-center">Standby</TableHead>
                         <TableHead className="text-center">B/Down</TableHead>
-                        <TableHead className="text-center">Repair</TableHead>
                         <TableHead className="text-center">Missing</TableHead>
                         <TableHead className="text-center">Scrap</TableHead>
+                        <TableHead className="text-center">Off Hire</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -453,9 +460,11 @@ export default function ReportGeneratorPage() {
                           <TableCell className="text-center">{row.sites_count}</TableCell>
                           <TableCell className="text-center font-semibold">{row.total_plants}</TableCell>
                           <TableCell className="text-center text-emerald-600">{row.working || '-'}</TableCell>
+                          <TableCell className="text-center text-blue-600">{row.standby || '-'}</TableCell>
                           <TableCell className="text-center text-red-600">{row.breakdown || '-'}</TableCell>
-                            <TableCell className="text-center text-orange-500">{row.missing || '-'}</TableCell>
+                          <TableCell className="text-center text-orange-500">{row.missing || '-'}</TableCell>
                           <TableCell className="text-center text-muted-foreground">{row.scrap || '-'}</TableCell>
+                          <TableCell className="text-center text-muted-foreground">{row.off_hire || '-'}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>

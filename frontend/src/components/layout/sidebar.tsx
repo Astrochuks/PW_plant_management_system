@@ -43,11 +43,26 @@ import {
 } from '@/components/ui/tooltip';
 import { useAuth } from '@/providers/auth-provider';
 import { useTransferStats, useAdminSiteTransferRequests } from '@/hooks/use-transfers';
+import { IS_DEMO } from '@/lib/demo';
 
 interface SidebarProps {
   collapsed: boolean;
   onToggle: () => void;
 }
+
+/**
+ * The public demo's entire navigation.
+ *
+ * Four pages, each fully working on synthetic data. The rest of the app
+ * is hidden in demo mode — a visitor clicking into a page that half-works
+ * learns less than one who never sees it.
+ */
+const demoNavItems = [
+  { title: 'Dashboard', href: '/', icon: LayoutDashboard },
+  { title: 'Fleet Register', href: '/plants', icon: Truck },
+  { title: 'Report Generator', href: '/reports/generate', icon: FileText },
+  { title: 'Executive Summary', href: '/projects/executive', icon: PieChart },
+]
 
 // ── Section: OVERVIEW ─────────────────────────────────────────────────────
 const overviewNavItems = [
@@ -225,7 +240,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
   // Prefetch all nav routes for instant transitions
   useEffect(() => {
-    const allItems = [
+    const allItems = IS_DEMO ? demoNavItems : [
       ...(isManagement ? [] : overviewNavItems),
       ...(showManagementItems ? plantNavItems : []),
       ...(isManagement ? managementPlantNavItems : []),
@@ -266,9 +281,27 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
       {/* Navigation */}
       <nav className="flex-1 flex flex-col gap-1 p-3 overflow-y-auto">
 
+        {/* DEMO — a deliberately short tour. The public build ships four
+            pages that fully work on synthetic data; everything else is
+            hidden rather than shown broken. */}
+        {IS_DEMO && (
+          <NavSection label="DEMO" collapsed={collapsed}>
+            {demoNavItems.map((item) => (
+              <NavItem
+                key={item.href}
+                href={item.href}
+                icon={item.icon}
+                title={item.title}
+                isActive={item.href === '/' ? pathname === '/' : pathname.startsWith(item.href)}
+                collapsed={collapsed}
+              />
+            ))}
+          </NavSection>
+        )}
+
         {/* OVERVIEW — everyone except management, whose home is the
             executive summary and whose fleet dashboard sits under Plant */}
-        {!isManagement && (
+        {!IS_DEMO && !isManagement && (
           <NavSection label="OVERVIEW" collapsed={collapsed}>
             {overviewNavItems.map((item) => (
               <NavItem
@@ -284,7 +317,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         )}
 
         {/* PLANT & EQUIPMENT — management + admin */}
-        {showManagementItems && (
+        {!IS_DEMO && showManagementItems && (
           <NavSection label="PLANT & EQUIPMENT" collapsed={collapsed} separator>
             {plantNavItems.map((item) => {
               const badgeKey = 'badgeKey' in item ? item.badgeKey : undefined;
@@ -312,7 +345,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           </NavSection>
         )}
 
-        {showProjectItems && (
+        {!IS_DEMO && showProjectItems && (
           <NavSection label="PROJECTS" collapsed={collapsed} separator>
             {projectNavItems.map((item) => {
               // each sub-page owns its own prefix; Registry owns the rest
@@ -336,7 +369,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         )}
 
         {/* PLANT — management's single door into the plant module */}
-        {isManagement && (
+        {!IS_DEMO && isManagement && (
           <NavSection label="PLANT" collapsed={collapsed} separator>
             {managementPlantNavItems.map((item) => (
               <NavItem
@@ -352,7 +385,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         )}
 
         {/* SHARED — admin + plant officer */}
-        {showManagementItems && (
+        {!IS_DEMO && showManagementItems && (
           <NavSection label="SHARED" collapsed={collapsed} separator>
             {sharedNavItems.map((item) => (
               <NavItem
@@ -368,7 +401,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         )}
 
         {/* ADMINISTRATION — admin only */}
-        {isAdmin && (
+        {!IS_DEMO && isAdmin && (
           <NavSection label="ADMINISTRATION" collapsed={collapsed} separator>
             {adminNavItems.map((item) => (
               <NavItem

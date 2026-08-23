@@ -1,4 +1,5 @@
 import apiClient from '@/lib/api/client';
+import { money } from '@/lib/format';
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -156,11 +157,9 @@ export async function generateReport(params: GenerateReportParams): Promise<Gene
 
 // ── NGN formatter ───────────────────────────────────────────────────
 
-export function formatNGN(amount: number): string {
-  return new Intl.NumberFormat('en-NG', {
-    style: 'currency',
-    currency: 'NGN',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount);
-}
+/**
+ * @deprecated Import `money` from `@/lib/format` instead. Kept as an
+ * alias because the generator page and its Excel export both import this
+ * name. It used to round naira to whole units — see CLAUDE.md rule 1.
+ */
+export const formatNGN = (amount: number): string => money(amount);

@@ -279,7 +279,10 @@ export interface DemoPO {
 export const parts: DemoPart[] = []
 export const purchaseOrders: DemoPO[] = []
 
-const PO_COUNT = 46
+// Enough that most of the register shows a maintenance history rather
+// than a column of zeros — a demo where every row reads ₦0.00 looks
+// broken even when it is behaving correctly.
+const PO_COUNT = 190
 let partSeq = 0
 
 for (let i = 0; i < PO_COUNT; i++) {

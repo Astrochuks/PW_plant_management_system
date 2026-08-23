@@ -350,12 +350,25 @@ No `transferred_by` — the column is permanently empty.
 queries `plant_transfers WHERE status='confirmed'` directly. Two sources,
 one subject.
 
-### 2.5 Table columns misaligned in Report Generator **[by inspection]**
+### 2.5 Table columns misaligned in Report Generator — States Summary FIXED **[verified]**
 
-`generate/page.tsx:436` — the States Summary table has 8 `<TableHead>` and
-7 `<TableCell>` per row, so every column right of B/Down is shifted one
-left. Same shape at line 485 for Sites Breakdown. Its Excel export pushes
-7 sums onto a 6-column header, producing `NaN` in the totals row.
+`generate/page.tsx` — the States Summary table had 8 `<TableHead>` and
+7 `<TableCell>` per row, so every column right of B/Down was shifted one
+left: Missing rendered under *Repair*, Scrap under *Missing*, and the
+last column was empty.
+
+Worse, **`Repair` is not a condition at all** — a leftover from the
+retired taxonomy — while `standby` and `off_hire`, which *are* two of the
+six, were never shown.
+
+**Fixed:** the table now names all six conditions in the canonical order
+(Working · Standby · B/Down · Missing · Scrap · Off Hire), with a cell for
+each. Found while building the public demo, where the generator is one of
+the four pages on show.
+
+**Still open at line ~485:** Sites Breakdown has the same shape, and the
+Excel export pushes 7 sums onto a 6-column header, producing `NaN` in the
+totals row.
 
 ### 2.6 Cards that ignore their own page filters **[by inspection]**
 

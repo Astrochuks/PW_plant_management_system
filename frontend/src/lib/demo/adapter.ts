@@ -346,6 +346,285 @@ function executive() {
   })
 }
 
+// ── the report generator ─────────────────────────────────────────────
+
+const PERIOD_LABEL: Record<string, (d: Date) => [string, Date, Date]> = {
+  weekly: (d) => {
+    const start = new Date(d)
+    start.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7))
+    const end = new Date(start.getTime() + 6 * 86400000)
+    return [`Week ${isoWeekOf(d)}, ${d.getUTCFullYear()}`, start, end]
+  },
+  monthly: (d) => {
+    const start = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1))
+    const end = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0))
+    return [
+      start.toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' }),
+      start, end,
+    ]
+  },
+  quarterly: (d) => {
+    const q = Math.floor(d.getUTCMonth() / 3)
+    const start = new Date(Date.UTC(d.getUTCFullYear(), q * 3, 1))
+    const end = new Date(Date.UTC(d.getUTCFullYear(), q * 3 + 3, 0))
+    return [`Q${q + 1} ${d.getUTCFullYear()}`, start, end]
+  },
+  yearly: (d) => [
+    String(d.getUTCFullYear()),
+    new Date(Date.UTC(d.getUTCFullYear(), 0, 1)),
+    new Date(Date.UTC(d.getUTCFullYear(), 11, 31)),
+  ],
+}
+
+function generateReport(params: URLSearchParams) {
+  const period = params.get('period') || 'monthly'
+  const date = new Date(params.get('date') || DEMO_NOW.toISOString().slice(0, 10))
+  const [label, from, to] = (PERIOD_LABEL[period] ?? PERIOD_LABEL.monthly)(date)
+
+  const locationId = params.get('location_id')
+  const fleetType = params.get('fleet_type')
+  const site = locations.find((l) => l.id === locationId)
+
+  let scope = plants
+  if (locationId) scope = scope.filter((p) => p.current_location_id === locationId)
+  if (fleetType) scope = scope.filter((p) => p.fleet_type === fleetType)
+
+  const c = (rows: typeof plants, k: string) => rows.filter((p) => p.condition === k).length
+  const conditionsOf = (rows: typeof plants) => ({
+    working: c(rows, 'working'), standby: c(rows, 'standby'),
+    breakdown: c(rows, 'breakdown'), missing: c(rows, 'missing'),
+    scrap: c(rows, 'scrap'), off_hire: c(rows, 'off_hire'), unknown: 0,
+  })
+
+  const fromISO = from.toISOString().slice(0, 10)
+  const toISO = to.toISOString().slice(0, 10)
+  const inPeriod = parts.filter(
+    (p) => p.replaced_date >= fromISO && p.replaced_date <= toISO)
+  const scopeFleet = new Set(scope.map((p) => p.fleet_number))
+  const spend = inPeriod.filter(
+    (p) => !locationId || p.location_id === locationId)
+
+  const bySupplier = new Map<string, { items: number; pos: Set<string>; total: number }>()
+  for (const p of spend) {
+    const s = bySupplier.get(p.supplier) ?? { items: 0, pos: new Set<string>(), total: 0 }
+    s.items += 1
+    s.pos.add(`${p.purchase_order_number}|${p.po_date}`)
+    s.total += p.total_cost_ngn
+    bySupplier.set(p.supplier, s)
+  }
+
+  const perPlant = new Map<string, { n: number; total: number }>()
+  for (const p of spend) {
+    if (!p.plant_id) continue
+    const e = perPlant.get(p.plant_id) ?? { n: 0, total: 0 }
+    e.n += 1
+    e.total += p.total_cost_ngn
+    perPlant.set(p.plant_id, e)
+  }
+
+  const bySite = new Map<string, { total: number; items: number; pos: Set<string> }>()
+  for (const p of spend) {
+    const loc = locations.find((l) => l.id === p.location_id)
+    const key = loc?.location_name ?? 'Unlocated'
+    const e = bySite.get(key) ?? { total: 0, items: 0, pos: new Set<string>() }
+    e.total += p.total_cost_ngn
+    e.items += 1
+    e.pos.add(`${p.purchase_order_number}|${p.po_date}`)
+    bySite.set(key, e)
+  }
+
+  const money2 = (n: number) => Math.round(n * 100) / 100
+  const totalSpend = money2(spend.reduce((s, p) => s + p.total_cost_ngn, 0))
+  const types = [...new Set(scope.map((p) => p.fleet_type))]
+
+  return wrap({
+    meta: {
+      period, label,
+      date_from: fromISO, date_to: toISO,
+      generated_at: DEMO_NOW.toISOString(),
+      as_of: toISO,
+      historical: to < DEMO_NOW,
+      filters: {
+        location_name: site?.location_name ?? null,
+        state_name: params.get('state_id')
+          ? states.find((s) => s.id === params.get('state_id'))?.name ?? null
+          : null,
+        fleet_type: fleetType,
+      },
+    },
+    fleet_condition: {
+      total_plants: scope.length,
+      ...conditionsOf(scope),
+      // a whole percentage — the page renders `${utilization_rate}%`
+      utilization_rate: scope.length
+        ? Math.round((c(scope, 'working') / scope.length) * 10000) / 100
+        : 0,
+    },
+    fleet_by_type: types.map((t) => {
+      const rows = scope.filter((p) => p.fleet_type === t)
+      return { fleet_type: t, total: rows.length, ...conditionsOf(rows) }
+    }).sort((a, b) => b.total - a.total),
+    states_summary: states.map((s) => {
+      const sites = locations.filter((l) => l.state_id === s.id)
+      const rows = scope.filter((p) => sites.some((l) => l.id === p.current_location_id))
+      return {
+        name: s.name, code: s.code, region: s.region,
+        sites_count: sites.length, total_plants: rows.length, ...conditionsOf(rows),
+      }
+    }).filter((r) => r.total_plants > 0).sort((a, b) => b.total_plants - a.total_plants),
+    sites_breakdown: locations.map((l) => {
+      const rows = scope.filter((p) => p.current_location_id === l.id)
+      const byType: Record<string, number> = {}
+      rows.forEach((p) => { byType[p.fleet_type] = (byType[p.fleet_type] || 0) + 1 })
+      return {
+        location_name: l.location_name,
+        state_name: states.find((s) => s.id === l.state_id)?.name ?? '',
+        state_code: states.find((s) => s.id === l.state_id)?.code ?? '',
+        total_plants: rows.length, ...conditionsOf(rows), fleet_types: byType,
+      }
+    }).filter((r) => r.total_plants > 0).sort((a, b) => b.total_plants - a.total_plants),
+    spare_parts: {
+      summary: {
+        total_items: spend.length,
+        total_pos: new Set(spend.map((p) => `${p.purchase_order_number}|${p.po_date}`)).size,
+        plants_with_parts: perPlant.size,
+        total_spend: totalSpend,
+        avg_cost_per_item: spend.length ? money2(totalSpend / spend.length) : 0,
+      },
+      top_suppliers: [...bySupplier.entries()]
+        .map(([supplier_name, s]) => ({
+          supplier_name, items_count: s.items, po_count: s.pos.size,
+          total_spend: money2(s.total),
+        }))
+        .sort((a, b) => b.total_spend - a.total_spend).slice(0, 10),
+      high_cost_plants: [...perPlant.entries()]
+        .map(([id, e]) => {
+          const p = plants.find((x) => x.id === id)!
+          return {
+            fleet_number: p.fleet_number, description: p.description,
+            fleet_type: p.fleet_type, condition: p.condition,
+            location_name: p.current_location,
+            parts_count: e.n, total_spend: money2(e.total),
+          }
+        })
+        .sort((a, b) => b.total_spend - a.total_spend).slice(0, 25),
+      sites_ranking: [...bySite.entries()]
+        .map(([location_name, e]) => ({
+          location_name,
+          state_name: locations.find((l) => l.location_name === location_name)
+            ? states.find((s) => s.id === locations.find(
+                (l) => l.location_name === location_name)!.state_id)?.name ?? null
+            : null,
+          total_spend: money2(e.total), items_count: e.items, po_count: e.pos.size,
+        }))
+        .sort((a, b) => b.total_spend - a.total_spend),
+    },
+    transfers: {
+      total: Math.min(12, scope.length),
+      details: scope.slice(0, 12).map((p, i) => ({
+        fleet_number: p.fleet_number,
+        fleet_type: p.fleet_type,
+        description: p.description,
+        from_location: locations[(i + 1) % locations.length].location_name,
+        to_location: p.current_location,
+        transfer_date: new Date(
+          from.getTime() + (i + 1) * 86400000,
+        ).toISOString().slice(0, 10),
+      })),
+    },
+  })
+}
+
+/** Findings for the Executive brief PDF, in the kinds it knows how to render. */
+function executiveBrief() {
+  const [a, b, cc] = executiveProjects
+  return wrap({
+    generated_at: DEMO_NOW.toISOString(),
+    findings: [
+      {
+        project_id: a.id, project: a.short_name,
+        kind: 'fuel_unattributed', severity: 'high',
+        impact_naira: 14_207_400,
+        facts: {
+          charged_litres: 41_820, logged_litres: 30_047, gap_litres: 11_773,
+          gap_share: 0.2815, avg_rate: 1206.8, ago_spend: 50_468_376, weeks: 12,
+          repeat: {
+            weeks: 7, from_year: 2026, from_week: 21,
+            to_year: 2026, to_week: 27, plants: 9, litres: 3_150,
+          },
+        },
+      },
+      {
+        project_id: b.id, project: b.short_name,
+        kind: 'diesel_price', severity: 'high',
+        impact_naira: 8_940_000,
+        facts: {
+          rate_pct: 0.3333, from_rate: 1200, to_rate: 1600,
+          from_year: 2026, from_week: 24, to_year: 2026, to_week: 25,
+          spend_pct: 0.4712, litres_pct: 0.1034,
+          extra_naira: 8_940_000, ago_spend: 63_120_500,
+        },
+      },
+      {
+        project_id: cc.id, project: cc.short_name,
+        kind: 'stale_reporting', severity: 'medium',
+        impact_naira: 0,
+        // field names taken from composeFinding()'s stale branch — it
+        // reads week_ending / year / week / weeks_received, not the
+        // last_year / last_week you might expect from the other kinds
+        facts: {
+          days: 34,
+          week_ending: '2026-07-12',
+          year: 2026,
+          week: 28,
+          weeks_received: 41,
+        },
+      },
+    ],
+  })
+}
+
+/** A genuine .xlsx, built in the browser — the demo has no server to ask. */
+async function plantsExcel(params: URLSearchParams): Promise<Blob> {
+  const ExcelJS = (await import('exceljs')).default
+  const wb = new ExcelJS.Workbook()
+  wb.creator = 'P.W. Nigeria — Plant Management System (demo)'
+  const ws = wb.addWorksheet('Fleet Register')
+
+  ws.columns = [
+    { header: 'Fleet Number', key: 'fleet_number', width: 14 },
+    { header: 'Description', key: 'description', width: 26 },
+    { header: 'Fleet Type', key: 'fleet_type', width: 22 },
+    { header: 'Make', key: 'make', width: 14 },
+    { header: 'Model', key: 'model', width: 14 },
+    { header: 'Condition', key: 'condition', width: 12 },
+    { header: 'Site', key: 'current_location', width: 24 },
+    { header: 'State', key: 'state', width: 14 },
+    { header: 'Verified', key: 'verified', width: 10 },
+    { header: 'Last Verified', key: 'last_verified_date', width: 14 },
+    { header: 'Maintenance Cost (NGN)', key: 'total_maintenance_cost', width: 22 },
+    { header: 'Parts Replaced', key: 'parts_replaced_count', width: 14 },
+  ]
+  ws.getRow(1).font = { bold: true }
+  ws.views = [{ state: 'frozen', ySplit: 1 }]
+
+  const rows = (route('/plants', new URLSearchParams([
+    ...[...params.entries()].filter(([k]) => k !== 'page' && k !== 'limit'),
+    ['limit', '100000'], ['page', '1'],
+  ])) as { data: typeof plants }).data
+
+  rows.forEach((p) => ws.addRow({
+    ...p,
+    verified: p.physical_verification ? 'Yes' : 'No',
+  }))
+  ws.getColumn('total_maintenance_cost').numFmt = '#,##0.00'
+
+  const buf = await wb.xlsx.writeBuffer()
+  return new Blob([buf], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  })
+}
+
 // ── router ───────────────────────────────────────────────────────────
 
 function route(path: string, params: URLSearchParams): unknown {
@@ -381,6 +660,8 @@ function route(path: string, params: URLSearchParams): unknown {
       return wrap([...new Set(plants.map((p) => p.purchase_year).filter(Boolean))]
         .sort((a, b) => (b as number) - (a as number)))
     case '/projects/executive': return executive()
+    case '/projects/executive/brief': return executiveBrief()
+    case '/reports/generate': return generateReport(params)
     case '/spare-parts/pos': return poList(params)
     case '/notifications':
       return wrap([
@@ -482,5 +763,12 @@ export const demoAdapter: AxiosAdapter = async (config) => {
   }
 
   await new Promise((r) => setTimeout(r, LATENCY_MS))
+
+  // Blob endpoints: the caller asked for a file, so hand back real bytes
+  // rather than JSON it would try to save as a spreadsheet.
+  if (path === '/plants/export/excel') {
+    return ok(config, await plantsExcel(params))
+  }
+
   return ok(config, route(path, params))
 }
