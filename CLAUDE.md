@@ -87,8 +87,9 @@ stored data — see rule 4.
 
 > **Migration status:** `spare_parts.vat_amount` / `discount_amount` /
 > `other_costs` are still stored per row, distributed pro-rata at entry.
-> Moving them to PO scope is planned and tracked; until it lands, read
-> the components from the PO aggregate, never from a single line.
+> Moving them to PO scope is specified in **`docs/PO_VAT_RESCOPING.md`**
+> and not yet started. Until it lands, read the components from the PO
+> aggregate, never from a single line.
 
 ---
 
