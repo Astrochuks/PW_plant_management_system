@@ -35,6 +35,39 @@ whole — and because the split is *stored*, the kobo is lost permanently.
 
 ---
 
+## The kobo cannot be recovered — only stopped
+
+**`vat_percentage` is 0 on every row.** The bulk-entry insert
+(`POST /spare-parts/bulk`) writes `vat_amount` but never writes
+`vat_percentage` — it is simply absent from the column list, so it keeps
+its default. **The rate is destroyed at entry; only the rounded,
+distributed amounts survive.**
+
+So the original document VAT is not in the database, and cannot be
+derived from it. I tested the obvious recovery — infer the rate from
+`vat ÷ goods`, snap it to 2dp, recompute on the whole PO:
+
+| | |
+|---|---|
+| POs it would change | **28 of 124** |
+| Net movement | **−₦440.78** (the wrong direction) |
+| Worst single PO | **₦222.33** (PW-PO130126-18) |
+
+That does not recover anything. It *fabricates* figures — the stored
+₦411,127.50 may be exactly what the supplier's document says, and there
+is no evidence ₦410,905.17 is better. **Rejected.**
+
+**Consequence for the migration:** the backfill carries
+`sum(vat_amount)` forward **as-is**. Historic kobo stay lost.
+
+That does not weaken the case — it sharpens it. The migration's value is
+that **no future PO can lose another one**: 85 POs are currently exposed
+to this, covering ₦14.6m of VAT, and the count grows with every
+multi-line VAT entry. It is a tourniquet, not a cure, and the entry form
+fix (step 6) is what stops the bleeding.
+
+---
+
 ## The decision
 
 > **VAT, discount and other costs belong to the purchase order.**
@@ -51,28 +84,86 @@ the implementation plan for it.
 
 ## What the data actually looks like
 
-Measured 6 Oct 2026. This is what makes the problem tractable — the hard
-case is small.
+**Profiled 6 Oct 2026** with `scratchpad/po_research.py`. Figures move as
+POs are entered — re-run it before building, and never trust a number
+frozen into this file.
+
+### Scale
+
+| | |
+|---|---|
+| Line items | 2,161 |
+| Purchase orders `(number, date)` | **511** |
+| Distinct PO numbers | 494 |
+| Total spend, all time | **₦824,968,052.05** |
+| 2025 / 2026 | ₦130,538,203.74 / ₦690,874,848.31 |
+| Date range | 2025-01-10 → 2026-09-14 |
+
+**PO identity is load-bearing:** 494 numbers produce 511 POs. Thirteen
+numbers appear on two dates, two on three. Grouping by number alone loses
+17 purchase orders.
+
+### Shape 1 — who the money can be pinned to
 
 | Case | POs | Lines | Spend | Share |
 |---|---|---|---|---|
-| **A** single plant | 357 | 1,360 | ₦603,243,426.40 | **73.1%** |
+| **A** single plant, fully tagged | 357 | 1,360 | ₦603,243,426.40 | **73.1%** |
 | **B** multi-plant, every line tagged | 57 | 373 | ₦130,475,755.67 | **15.8%** |
-| **C** multi-plant, lines untagged | 29 | 103 | ₦28,292,073.36 | **3.4%** |
-| C⁻ single fleet, line untagged | 50 | 233 | ₦51,734,046.62 | 6.3% |
+| **C** multi-plant, lines **untagged** | 29 | 103 | ₦28,292,073.36 | **3.4%** |
+| C⁻ single fleet, lines untagged | 50 | 233 | ₦51,734,046.62 | 6.3% |
 | D workshop / category (no plant) | 15 | 81 | ₦11,005,750.00 | 1.3% |
-| E mixed / other | 3 | 11 | ₦217,000.00 | 0.0% |
+| E mixed (some tagged, some not) | 1 | 8 | ₦84,000.00 | 0.0% |
+| F untagged, no fleet list at all | 2 | 3 | ₦133,000.00 | 0.0% |
 
-**89% of spend needs no guessing at all.** Case B is already fully
-attributed because the per-line fleet field was used at entry
+**89% of spend needs no guessing.** Case B is already fully attributed
+because the per-line fleet field was used at entry
 (`description|qty|cost|part_no|fleet` — the 5th field in
-`POST /spare-parts/bulk`). C⁻ has one fleet, so 100% goes to it.
+`POST /spare-parts/bulk`). C⁻ has one fleet, so all of it goes there.
 
-**Only 3.4% of spend is genuinely ambiguous.**
+**Only 3.4% is genuinely ambiguous.**
 
-Reproduce the table with `scripts/po_attribution_cases.sql` logic — the
-query groups by `(purchase_order_number, po_date)` and classifies on
-`plant_id`, `shared_fleet_numbers`, `is_workshop`, `is_category`.
+### Shape 2 — what sits on top of goods
+
+| | POs | Goods | VAT | Discount | Other |
+|---|---|---|---|---|---|
+| none (goods only) | **376** | ₦553,043,756.60 | — | — | — |
+| VAT only | 106 | ₦215,983,901.95 | ₦15,821,543.15 | — | — |
+| VAT + discount | 18 | ₦9,936,460.00 | ₦687,930.94 | ₦432,207.91 | — |
+| other costs only | 11 | ₦19,941,074.00 | — | — | ₦275,170.00 |
+
+**Three quarters of POs carry no overhead at all.** Only 124 carry VAT.
+`is_po_overhead` is set on **0 rows** — the flag was built and never used.
+
+### Shape 3 — how far each VAT is split
+
+| VAT divided over | POs | VAT exposed |
+|---|---|---|
+| 1 line (no split, no rounding) | 39 | ₦1,904,763.12 |
+| 2–3 lines | 38 | ₦2,749,809.14 |
+| 4–6 lines | 23 | ₦4,328,205.92 |
+| 7+ lines | 24 | ₦7,526,695.91 |
+
+**85 POs currently split a VAT figure across multiple lines**, covering
+**₦14.6m of VAT**. Every one is a rounding opportunity, and every new
+multi-line VAT PO adds another.
+
+### Shape 4 — currency
+
+508 NGN · 2 GBP (₦9,234,144.16) · 1 USD (₦481,600.00). **No PO mixes
+currencies**, so one currency + one `fx_rate_to_ngn` per PO row is safe.
+
+### The VAT arithmetic is sound — don't "fix" it
+
+Implied rate (`vat ÷ goods`) across the 124 POs carrying VAT:
+
+| Implied | POs | Explanation |
+|---|---|---|
+| 7.500% | 103 | VAT on goods |
+| 7.163% / 7.162% | 17 | **exactly 7.500% of (goods − discount)** — all 17 have a discount |
+| 1.403%, 3.636%, 1.396%, 5.013% | 4 | VAT entered as an amount that matches no clean rate |
+
+The sub-7.5% cohort is **correct accounting** — VAT levied on the
+discounted base. It is not an error and must not be normalised away.
 
 ---
 
@@ -161,11 +252,33 @@ The scaffolding already exists and is unused: `spare_parts.purchase_order_id`
 6. **Entry form** — require a per-line fleet on multi-plant POs, so
    Case C stops growing.
 
+### Things the `purchase_orders` table has to survive
+
+Profiling turned these up. Each needs a decision before the schema is
+written, because each breaks "one PO = one row":
+
+| | Count | Problem |
+|---|---|---|
+| POs with **more than one supplier** | 15 | which supplier goes on the PO row? |
+| POs with **more than one location** | 5 | same question for site |
+| POs with **more than one `cost_type`** | 4 | direct and shared on one PO |
+| POs entered **more than once** (`submission_number > 1`) | 14 | one PO, several entry batches |
+| Rows with **NULL `po_date`** | 3 | no `(number, date)` identity at all |
+| Fleet numbers in `shared_fleet_numbers` **not in `plants_master`** | 38 | Case C cannot allocate to a plant that does not exist |
+
+Otherwise the data is clean: no NULL, zero or negative unit costs; no
+NULL or zero quantities; no `cost_type`/`plant_id` contradictions.
+
 ### Acceptance test
 
-Non-negotiable. The 2026 figure must still be **₦541,777,556.32** across
-all five surfaces — Spare Parts, Purchase Orders, Analytics, Maintenance
-Costs, report generator — **before and after**, and every PO must satisfy:
+Non-negotiable — **measure the before figure on the day, do not use a
+number from this file.** Spend changes as POs are entered; the 2026 total
+was ₦541,777,556.32 when this work was first scoped and is
+₦690,874,848.31 today.
+
+The rule is *before equals after*, across all five surfaces — Spare
+Parts, Purchase Orders, Analytics, Maintenance Costs, report generator —
+and every PO must satisfy:
 
 ```
 sum(unit_cost × quantity) + VAT − discount + other == PO total
