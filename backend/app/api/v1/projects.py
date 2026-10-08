@@ -1054,13 +1054,17 @@ async def get_project_costs_summary(
                SELECT id FROM project_weekly_reports
                WHERE project_id = $1::uuid
                ORDER BY year DESC, week_number DESC LIMIT 1)
-           SELECT cost_category,
+           -- A NULL category is a real cost line the site did not label,
+           -- NOT a sheet total: the parser drops the sheet's own Total row
+           -- before anything is stored. Excluding them silently dropped
+           -- NGN 9,000,000 ("Bridge bearing Pad", Maru-Lugga W38).
+           SELECT COALESCE(cost_category, 'Uncategorised') AS cost_category,
                   coalesce(sum(amount_to_date)  FILTER (WHERE weekly_report_id = (SELECT id FROM latest)), 0) AS to_date,
                   coalesce(sum(amount_this_week) FILTER (WHERE weekly_report_id = (SELECT id FROM latest)), 0) AS this_week,
                   coalesce(sum(amount_this_week), 0) AS stored_weeks
            FROM project_cost_report
-           WHERE project_id = $1::uuid AND cost_category IS NOT NULL
-           GROUP BY cost_category
+           WHERE project_id = $1::uuid
+           GROUP BY 1
            ORDER BY 2 DESC""",
         pid,
     )
@@ -1483,10 +1487,11 @@ async def get_project_operations_financials(
             SELECT sum(cat_total) AS total,
                    jsonb_object_agg(cost_category, cat_total) AS by_category
             FROM (
-                SELECT cost_category, sum(amount_this_week) AS cat_total
+                SELECT COALESCE(cost_category, 'Uncategorised') AS cost_category,
+                       sum(amount_this_week) AS cat_total
                 FROM project_cost_report
-                WHERE weekly_report_id = wr.id AND cost_category IS NOT NULL
-                GROUP BY cost_category
+                WHERE weekly_report_id = wr.id
+                GROUP BY 1
             ) c
         ) cost ON TRUE
         -- diesel money truth: the Cost Report AGO row (litres charged @ rate)

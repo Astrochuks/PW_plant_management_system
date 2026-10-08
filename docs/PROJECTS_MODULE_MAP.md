@@ -45,7 +45,7 @@ derivation, verified cell-by-cell), `docs/PARSE_SPEC.md`,
 
 | Table | Cols | Rows | Holds |
 |---|---|---|---|
-| `project_cost_report` | 16 | 772 | Cost by category. **Rows with NULL `cost_category` are the sheet's own totals — cross-check only** |
+| `project_cost_report` | 16 | 772 | Cost by category. A NULL `cost_category` is a **real cost line the site left unlabelled** — count it as *Uncategorised*, never drop it |
 | `project_diesel_consumption` | 21 | 247 | Diesel events. Money truth is the Cost Report AGO row, not this |
 | `project_materials_stock` | 27 | 309 | Materials on site |
 | `project_labour_strength` | 14 | 231 | Headcount by trade |
@@ -215,8 +215,13 @@ money or a wrong report:
 3. **Payments: always `v_project_payments_latest`** — a bare SUM over
    `project_payments` multiplies by the number of workbooks. The old
    pipeline stored ₦13.6B of grand-total rows as cash.
-4. **Cost Report rows with NULL `cost_category` are the sheet's own
-   totals** — cross-check only, never add them in.
+4. **A NULL `cost_category` is real money, not a total row.** The parser
+   discards the sheet's own `Total` row at parse time, so anything that
+   reaches `project_cost_report` is a genuine cost line — a NULL category
+   just means the site left the column blank. Count it as
+   *Uncategorised*. Filtering `cost_category IS NOT NULL` silently
+   dropped **₦9,000,000** ("Bridge bearing Pad", Maru-Lugga W38) from
+   every cost figure until Oct 2026.
 5. **Net Earnings = Weekly Summary definition, excluding contingency.**
    Contingency/VOP rates are **per project** from the BEME tail — Akwa
    2.5+2.5%, Kaduna 3+5%. Never hardcode.

@@ -12,8 +12,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
-  ArrowLeft, CheckCircle2, CircleAlert, CloudUpload, FileSpreadsheet,
-  Loader2, ShieldCheck, Timer, X,
+  AlertTriangle, ArrowLeft, CheckCircle2, CircleAlert, CloudUpload,
+  FileSpreadsheet, Loader2, ShieldCheck, Timer, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -29,6 +29,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import apiClient from '@/lib/api/client'
+import { naira } from '@/lib/format'
 import { getErrorMessage } from '@/lib/api/client'
 import { useProjects, useUploadWeeklyReport } from '@/hooks/use-projects'
 
@@ -201,6 +202,20 @@ export default function UploadWeeklyReportPage() {
     setFile(f)
     void runPreview(f)
   }, [runPreview])
+
+  /** Every failed arithmetic cross-check, flattened across the sheets. */
+  const failedChecks = useMemo(() => {
+    if (!preview) return []
+    return Object.entries(preview.sheets).flatMap(([sheet, s]) =>
+      (s.cross_checks ?? []).map((c) => ({
+        sheet,
+        check: c.check,
+        ours: c.ours,
+        sheet_total: c.sheet,
+        delta: c.delta,
+      })),
+    ).sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
+  }, [preview])
 
   const warnCount = useMemo(() => {
     if (!preview) return 0
@@ -487,6 +502,47 @@ export default function UploadWeeklyReportPage() {
           </div>
 
           <SheetPanel name={activeSheet} sheet={preview.sheets[activeSheet]} />
+
+          {/*
+            Figures that do not reconcile, lifted out of the per-sheet tabs.
+            They were always computed, but a reader had to open each sheet to
+            find them — so a workbook whose Cost Report was NGN 9,000,000
+            short of its own Total was accepted without anyone seeing it.
+            Shown here, directly above Accept, where the decision is made.
+          */}
+          {failedChecks.length > 0 && (
+            <div className="mb-3 rounded-lg border border-amber-300/60 bg-amber-50 p-4
+                            text-amber-900 dark:border-amber-500/30
+                            dark:bg-amber-950/60 dark:text-amber-100">
+              <p className="flex items-center gap-2 text-sm font-semibold">
+                <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden />
+                {failedChecks.length} figure{failedChecks.length > 1 ? 's do' : ' does'}
+                {' '}not match the workbook&rsquo;s own totals
+              </p>
+              <ul className="mt-2 space-y-1 text-sm">
+                {failedChecks.slice(0, 6).map((c) => (
+                  <li key={`${c.sheet}-${c.check}`} className="flex flex-wrap gap-x-2">
+                    <span className="font-medium">{c.sheet}</span>
+                    <span className="opacity-80">{c.check}</span>
+                    <span className="tabular-nums">
+                      ours {naira(c.ours)} · sheet {naira(c.sheet_total)} ·
+                      {' '}<b>{c.delta > 0 ? '+' : ''}{naira(c.delta)}</b>
+                    </span>
+                  </li>
+                ))}
+                {failedChecks.length > 6 && (
+                  <li className="opacity-80">
+                    …and {failedChecks.length - 6} more — open the sheet tabs above.
+                  </li>
+                )}
+              </ul>
+              <p className="mt-3 text-xs leading-snug opacity-90">
+                This usually means the workbook&rsquo;s own SUM range is broken, or a
+                row was missed. You can still accept — the figures are stored
+                either way and the mismatch is recorded against the week.
+              </p>
+            </div>
+          )}
 
           {/* accept bar */}
           <div className="bg-background/95 sticky bottom-0 -mx-2 flex flex-wrap items-center justify-between gap-3 border-t px-2 py-3 backdrop-blur">

@@ -102,9 +102,10 @@ async def build_report(project_id: str, period: str, ref: date) -> dict[str, Any
                 SELECT sum(cat) AS total,
                        jsonb_object_agg(cost_category, cat) AS by_category
                 FROM (
-                    SELECT cost_category, sum(amount_this_week) AS cat
+                    SELECT COALESCE(cost_category, 'Uncategorised') AS cost_category,
+                           sum(amount_this_week) AS cat
                     FROM project_cost_report
-                    WHERE weekly_report_id = wr.id AND cost_category IS NOT NULL
+                    WHERE weekly_report_id = wr.id
                     GROUP BY 1
                 ) x
             ) c ON TRUE
@@ -166,10 +167,11 @@ async def build_report(project_id: str, period: str, ref: date) -> dict[str, Any
               SELECT COALESCE(s.cat, a.cat) AS category,
                      COALESCE(s.amt, 0) + COALESCE(a.amt, 0) AS to_date_amount
               FROM (
-                  SELECT c.cost_category AS cat, sum(c.amount_this_week) AS amt
+                  SELECT COALESCE(c.cost_category, 'Uncategorised') AS cat,
+                         sum(c.amount_this_week) AS amt
                   FROM project_cost_report c
                   JOIN project_weekly_reports r ON r.id = c.weekly_report_id
-                  WHERE r.project_id = $1::uuid AND c.cost_category IS NOT NULL
+                  WHERE r.project_id = $1::uuid
                     AND (r.year, r.week_number) <= ($4, $5)
                   GROUP BY 1
               ) s

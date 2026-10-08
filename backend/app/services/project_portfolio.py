@@ -31,9 +31,10 @@ WITH wk AS (
         FROM project_beme_progress WHERE weekly_report_id = r.id
     ) b ON TRUE
     LEFT JOIN LATERAL (
+        -- every cost line counts; an unlabelled one is still money spent
         SELECT sum(amount_this_week) AS cost
         FROM project_cost_report
-        WHERE weekly_report_id = r.id AND cost_category IS NOT NULL
+        WHERE weekly_report_id = r.id
     ) c ON TRUE
 ),
 ranked AS (
@@ -83,7 +84,7 @@ SELECT p.id, p.short_name, p.project_name, p.client, p.status,
        (SELECT COALESCE(sum(c.amount_this_week), 0)
           FROM project_cost_report c
           JOIN project_weekly_reports r ON r.id = c.weekly_report_id
-         WHERE r.project_id = p.id AND c.cost_category IS NOT NULL) AS cost_stored,
+         WHERE r.project_id = p.id) AS cost_stored,
        (SELECT COALESCE(sum(a.amount), 0) FROM project_ledger_adjustments a
          WHERE a.project_id = p.id AND a.ledger = 'cost')        AS cost_adj,
 
@@ -139,7 +140,7 @@ LEFT JOIN LATERAL (
 LEFT JOIN LATERAL (
     SELECT sum(amount_this_week) AS cost
     FROM project_cost_report
-    WHERE weekly_report_id = r.id AND cost_category IS NOT NULL
+    WHERE weekly_report_id = r.id
 ) c ON TRUE
 ORDER BY r.year, r.week_number
 """
@@ -147,12 +148,11 @@ ORDER BY r.year, r.week_number
 # per project per week per cost category — drives the cost-category matrix
 _COST_SERIES_SQL = """
 SELECT r.project_id, r.year, r.week_number, r.week_ending_date,
-       c.cost_category                       AS category,
+       COALESCE(c.cost_category, 'Uncategorised')    AS category,
        COALESCE(sum(c.amount_this_week), 0)  AS amount
 FROM project_weekly_reports r
 JOIN project_cost_report c ON c.weekly_report_id = r.id
-WHERE c.cost_category IS NOT NULL
-GROUP BY r.project_id, r.year, r.week_number, r.week_ending_date, c.cost_category
+GROUP BY r.project_id, r.year, r.week_number, r.week_ending_date, 5
 ORDER BY r.year, r.week_number
 """
 

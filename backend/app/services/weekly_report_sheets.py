@@ -504,15 +504,33 @@ def parse_cost_report(ws) -> dict[str, Any]:
                 f"Cost Report {desc[:40]!r}: previous + this-week != up-to-date"
             )
 
-    # total cross-check: categorized rows must sum to the sheet's Total
+    # Total cross-check: EVERY captured row must sum to the sheet's Total.
+    #
+    # This used to sum only rows carrying a category, which made the check
+    # answer the wrong question. The sheet's Total includes unlabelled
+    # lines, so an uncategorised cost made the check fail for ever while
+    # the money itself was quietly dropped downstream — NGN 9,000,000
+    # ("Bridge bearing Pad", Maru-Lugga W38). The sheet's own Total row is
+    # already excluded above, so every row here is real spend.
     if sheet_total and sheet_total.get("this_week") is not None:
-        ours = sum(float(x["amount_this_week"] or 0)
-                   for x in rows if x["cost_category"])
+        ours = sum(float(x["amount_this_week"] or 0) for x in rows)
         if abs(ours - float(sheet_total["this_week"])) > 1.0:
             warnings.append(
-                f"Cost Report: our categorized sum {ours:,.2f} != sheet total "
+                f"Cost Report: our captured sum {ours:,.2f} != sheet total "
                 f"{float(sheet_total['this_week']):,.2f}"
             )
+
+    # Unlabelled lines are counted, but the site should still be told —
+    # they land under "Uncategorised" in every breakdown.
+    uncategorised = [x for x in rows
+                     if not x["cost_category"] and x["amount_this_week"]]
+    if uncategorised:
+        total_u = sum(float(x["amount_this_week"] or 0) for x in uncategorised)
+        names = ", ".join(str(x["description"])[:28] for x in uncategorised[:3])
+        warnings.append(
+            f"Cost Report: {len(uncategorised)} row(s) have no Cost Category "
+            f"({total_u:,.2f}) — counted as 'Uncategorised': {names}"
+        )
     if not rows:
         warnings.append("Cost Report: no rows parsed")
     return {"rows": rows, "sheet_total": sheet_total, "warnings": warnings}
@@ -957,6 +975,49 @@ def parse_beme(ws) -> dict[str, Any]:
         # priced rows we could not classify must never vanish silently
         if contract_amount or this_week_amount:
             unclassified_priced += 1
+
+    # ── trailing-zero recovery ─────────────────────────────────────────
+    # Excel holds item 4.10 as the NUMBER 4.1, so the code reaches us as
+    # "4.1" — which sorts before 4.02 and, because BEME ownership is by
+    # code, can collide with a real 4.1.
+    #
+    # Pad the fractional part back out to the width its siblings use, and
+    # pad on the RIGHT: a decimal drops trailing zeros, never leading
+    # ones (4.10 -> 4.1). Left-padding would turn 4.1 into 4.01, which is
+    # a different, usually existing, item.
+    #
+    # Sibling-driven so it cannot damage codes that are genuinely one
+    # digit — Kaduna's bills 5.1-5.5 have width 1 throughout and are left
+    # alone. Skipped too if the padded code already exists.
+    by_bill: dict[str, list[dict[str, Any]]] = {}
+    for item in rows:
+        by_bill.setdefault(item["bill_code"], []).append(item)
+
+    for _bill_code, siblings in by_bill.items():
+        fracs = [c.rsplit(".", 1)[1] for c in
+                 (i["item_code"] or "" for i in siblings) if "." in c]
+        widths = [len(f) for f in fracs if f.isdigit()]
+        target = max(widths) if widths else 0
+        if target < 2:
+            continue
+        existing = {i["item_code"] for i in siblings}
+        for item in siblings:
+            code = item["item_code"] or ""
+            if "." not in code:
+                continue
+            head, frac = code.rsplit(".", 1)
+            if not frac.isdigit() or len(frac) >= target:
+                continue
+            padded = f"{head}.{frac.ljust(target, '0')}"
+            if padded in existing:
+                warnings.append(
+                    f"BEME item {code}: looks like Excel dropped a trailing "
+                    f"zero, but {padded} already exists — left as {code}"
+                )
+                continue
+            existing.discard(code)
+            existing.add(padded)
+            item["item_code"] = padded
 
     # ── duplicate identities: the site reused 3.07 for two different
     # rows — dup_seq (occurrence index) keeps both as distinct items ────
