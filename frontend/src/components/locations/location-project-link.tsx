@@ -24,12 +24,15 @@ import { useUpdateLocation } from '@/hooks/use-locations'
 import { useLinkableProjects } from '@/hooks/use-projects'
 import type { LocationStats } from '@/lib/api/locations'
 
+// PRD v2 §4 lifecycle (migration 036)
 const STATUS_STYLES: Record<string, string> = {
+  awarded: 'border text-foreground',
+  mobilised: 'bg-sky-100 text-sky-700',
   active: 'bg-emerald-100 text-emerald-700',
-  completed: 'bg-gray-100 text-gray-700',
-  retention_period: 'bg-amber-100 text-amber-700',
-  on_hold: 'border text-foreground',
-  cancelled: 'bg-red-100 text-red-700',
+  suspended: 'bg-amber-100 text-amber-700',
+  substantially_complete: 'bg-teal-100 text-teal-700',
+  finally_complete: 'bg-gray-100 text-gray-700',
+  closed: 'bg-gray-100 text-gray-700',
 }
 
 interface Props {

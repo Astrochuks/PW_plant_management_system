@@ -9,7 +9,16 @@ import apiClient from './client';
 // Types
 // ============================================================================
 
-export type ProjectStatus = 'active' | 'completed' | 'on_hold' | 'cancelled' | 'retention_period' | 'legacy';
+// PRD v2 §4 lifecycle (migration 036). 'legacy' is not a status any more —
+// is_legacy carries that meaning; effectiveStatus() still renders it.
+export type ProjectStatus =
+  | 'awarded'
+  | 'mobilised'
+  | 'active'
+  | 'suspended'
+  | 'substantially_complete'
+  | 'finally_complete'
+  | 'closed';
 
 export interface Project {
   id: string;

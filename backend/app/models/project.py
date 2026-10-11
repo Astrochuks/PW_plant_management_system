@@ -51,9 +51,10 @@ class ProjectCreate(BaseModel):
     cost_to_date: float | None = Field(None, ge=0)
     revenue_to_date: float | None = Field(None, ge=0)
 
+    # PRD v2 §4 vocabulary (migration 036); a new project starts 'awarded'
     status: str = Field(
-        "active",
-        pattern=r"^(active|completed|on_hold|cancelled|retention_period)$",
+        "awarded",
+        pattern=r"^(awarded|mobilised|active|suspended|substantially_complete|finally_complete|closed)$",
     )
     project_type: str | None = Field(
         None,
@@ -116,7 +117,7 @@ class ProjectUpdate(BaseModel):
 
     status: str | None = Field(
         None,
-        pattern=r"^(active|completed|on_hold|cancelled|retention_period)$",
+        pattern=r"^(awarded|mobilised|active|suspended|substantially_complete|finally_complete|closed)$",
     )
     project_type: str | None = Field(
         None,

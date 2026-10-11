@@ -2098,7 +2098,9 @@ async def list_projects(
     client: str | None = Query(None),
     state_id: UUID | None = None,
     status: str | None = Query(
-        None, pattern=r"^(active|completed|on_hold|cancelled|retention_period|legacy)$"
+        None,
+        # PRD v2 §4 vocabulary (migration 036)
+        pattern=r"^(awarded|mobilised|active|suspended|substantially_complete|finally_complete|closed)$",
     ),
     is_legacy: bool | None = Query(None, description="Filter by legacy status"),
     project_type: str | None = Query(

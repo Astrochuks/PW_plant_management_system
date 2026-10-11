@@ -89,9 +89,12 @@ scope_unit, award_date, commencement_date, original_duration_months,
 original_completion_date, revised_completion_date, is_legacy, notes,
 created_by, updated_by`.
 **Cache columns (trigger-maintained, read-only to the API):**
-`current_contract_sum`, `current_status`, `current_status_since`,
-`current_beme_revision_id`. The old free-text `status` column is renamed
-`status_legacy` and frozen.
+`current_contract_sum`, `status` (kept under its existing name — every
+reader filters on it; CHECK now the §4 vocabulary, `legacy` → `closed`),
+`status_since`, and (phase B) `current_beme_revision_id`.
+Shipped in 036 (2026-10-11), with `v_project_contract_sums` (delta +
+is_current), `v_project_history` (merged timeline) and
+`project_status_as_at(project, date)`.
 
 ### 3.2 `project_contract_sums`
 | column | type | notes |
@@ -301,19 +304,26 @@ is 034.)
    MD/GPM accounts → `project_manager` (2 rows); default role
    `site_engineer`; the site-engineer location rule removed from the API;
    `lib/roles.ts` → four roles, parked ones recognised for reading only.
-2. `036_project_history`: create `project_contract_sums`,
-   `project_status_events`; add cache columns + triggers; rename
-   `projects.status` → `status_legacy`.
-3. `037_backfill_history`: for each project insert `original` contract
-   sum from `original_contract_sum` (basis `unknown`, note "backfilled
-   from register 2026-10"), plus `variation` where `current_contract_sum`
-   differs; status events: 3 active → `active` dated from first weekly
-   report; 218 legacy → `closed`.
-4. `038_assignments_audit`: extend `user_project_assignments` (created_by,
-   ended_at); `project_documents.kind/linked_*`; notification types.
-5. (phase B) `039_beme_revisions`: revisions table, `revision_id` on
+2. `036_project_history` — **applied 2026-10-11**: `project_contract_sums`,
+   `project_status_events`, append-only triggers, cache triggers onto
+   `projects.status / status_since / current_contract_sum`, the two views
+   and `project_status_as_at()`. `projects.status` keeps its name.
+3. `037_backfill_project_history` — **applied 2026-10-11**: 186 `original`
+   contract sums (35 legacy rows have no sum on record and get none),
+   0 variations (no project's current differed from original), 221 status
+   events (3 `active` from commencement, 218 `closed` from the best
+   completion date else 2017-12-31, note says which).
+   Acceptance: `backend/scripts/verify_project_history.py` → PASS (9 checks).
+4. `038_project_insert_guard` — **applied 2026-10-11**: AFTER INSERT on
+   `projects` seeds the first status event and the `original` contract
+   sum from the inserted row, so no insert path (including the July create
+   form until A-4) can leave a project without history.
+5. `039_assignments_audit`: `users.project_scope`; extend
+   `user_project_assignments` (created_by, ended_at);
+   `project_documents.kind/linked_*`; notification types.
+6. (phase B) `040_beme_revisions`: revisions table, `revision_id` on
    bills/items, backfill revision 1 per project, parameters table.
-6. (phase C) `040_week_items`.
+7. (phase C) `041_week_items`.
 
 Each migration ships with its `down` and a `tests/test_migration_03x.py`
 that asserts counts before/after (run with the user's go — DB-heavy).

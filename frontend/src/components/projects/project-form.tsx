@@ -28,12 +28,16 @@ interface ProjectFormProps {
   mode: 'create' | 'edit'
 }
 
+// PRD v2 §4 lifecycle (migration 036). This July form is replaced by the
+// register screens in A-4; until then it must at least speak the new words.
 const STATUS_OPTIONS = [
+  { value: 'awarded', label: 'Awarded' },
+  { value: 'mobilised', label: 'Mobilised' },
   { value: 'active', label: 'Active' },
-  { value: 'completed', label: 'Completed' },
-  { value: 'retention_period', label: 'Retention Period' },
-  { value: 'on_hold', label: 'On Hold' },
-  { value: 'cancelled', label: 'Cancelled' },
+  { value: 'suspended', label: 'Suspended' },
+  { value: 'substantially_complete', label: 'Substantially complete' },
+  { value: 'finally_complete', label: 'Finally complete' },
+  { value: 'closed', label: 'Closed' },
 ]
 
 const TYPE_OPTIONS = [
