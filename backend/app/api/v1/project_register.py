@@ -482,7 +482,8 @@ async def ongoing_figures(
         works = float(r["works"] or 0); cost = float(r["cost"] or 0)
         series.append({
             "project_id": str(r["project_id"]), "year": r["year"], "week_number": r["week_number"],
-            "week_ending_date": r["week_ending_date"].isoformat() if r["week_ending_date"] else None,
+            # the pool helper already renders dates as ISO strings (_record_to_dict)
+            "week_ending_date": str(r["week_ending_date"]) if r["week_ending_date"] else None,
             "works": works, "works_incl_vat": works * VAT, "cost": cost, "net": works * VAT - cost,
         })
     return {"success": True, "data": {"series": series, "vat": VAT}}
