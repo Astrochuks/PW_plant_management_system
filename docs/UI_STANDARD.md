@@ -123,3 +123,28 @@ The app is used on laptops, tablets and phones. Non-negotiable:
 the page in the running app on real data (screenshot or DOM text), then
 commit with a manifest of files and what to click. If the page could not
 be viewed, say so.
+
+## 8. The endpoint behind a page (no N+1, ever)
+
+A page's endpoint is judged by `EXPLAIN (ANALYZE, BUFFERS)` before it
+ships, not by how it feels on one laptop.
+
+- **One SQL statement per endpoint** for a list or a summary. Never a
+  query inside a Python loop, never `await` per row. Per-row work belongs
+  to Postgres (`LEFT JOIN LATERAL (SELECT sum(...))`, `GROUP BY`, window
+  functions), where it runs in one pass against indexes.
+- **Every join column is indexed** (`weekly_report_id`, `project_id`,
+  `(project_id, effective_date DESC)`), and the plan must show index
+  scans, not sequential scans over a growing table.
+- **Pagination = `count(*) OVER() AS _total_count`** in the same statement;
+  never a separate count query.
+- **Scope in the WHERE clause** (`p.id = ANY($n::uuid[])` from
+  `scope_condition`), never by filtering rows in Python afterwards.
+- **Budget:** ≤ 50 ms server-side for a list/summary endpoint at ten times
+  today's data. Record the measured figure in the commit message
+  (e.g. "6.4 ms, 94 buffer hits, index-backed").
+- **One page, few requests:** a landing page makes ≤ 3 API calls on load
+  and never calls a heavy portfolio endpoint for a subset of its fields —
+  add a light endpoint instead (the `/projects/ongoing/figures` lesson,
+  2026-10-11: 6.5 s → 6.4 ms).
+- Reference: `project_register.ongoing_figures` and its plan.
