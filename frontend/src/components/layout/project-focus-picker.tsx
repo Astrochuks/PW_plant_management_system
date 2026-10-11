@@ -24,7 +24,7 @@ export function ProjectFocusPicker() {
   const value = inUrl && projects.some((p) => p.id === inUrl) ? inUrl : ALL
 
   return (
-    <Select value={value} onValueChange={(v) => router.push(v === ALL ? '/projects/executive' : `/projects/${v}`)}>
+    <Select value={value} onValueChange={(v) => router.push(v === ALL ? '/projects/ongoing' : `/projects/${v}`)}>
       <SelectTrigger className="h-8 w-[260px] text-sm">
         <FolderKanban className="mr-2 h-4 w-4 text-muted-foreground" />
         <SelectValue />

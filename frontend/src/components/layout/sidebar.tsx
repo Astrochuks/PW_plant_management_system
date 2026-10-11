@@ -121,22 +121,13 @@ const plantNavItems = [
 ];
 
 // ── Section: PROJECTS ─────────────────────────────────────────────────────
+// Four pages (decision 2026-10-11): the dashboard, the ongoing portfolio by
+// state, the archive of finished projects, and the weekly submissions.
 const projectNavItems = [
-  {
-    title: 'Executive Summary',
-    href: '/projects/executive',
-    icon: LayoutDashboard,
-  },
-  {
-    title: 'Project Registry',
-    href: '/projects',
-    icon: FolderKanban,
-  },
-  {
-    title: 'Ongoing Projects',
-    href: '/projects/ongoing',
-    icon: ClipboardList,
-  },
+  { title: 'Dashboard', href: '/projects/executive', icon: LayoutDashboard },
+  { title: 'Ongoing Projects', href: '/projects/ongoing', icon: FolderKanban },
+  { title: 'Archive', href: '/projects/archive', icon: ClipboardList },
+  { title: 'Submissions', href: '/projects/submissions', icon: Upload },
 ];
 
 // ── Section: MY SITE (site engineer) ──────────────────────────────────────
@@ -353,12 +344,12 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         {!IS_DEMO && showProjectItems && (
           <NavSection label="PROJECTS" collapsed={collapsed} separator>
             {projectNavItems.map((item) => {
-              // each sub-page owns its own prefix; Registry owns the rest
-              const owned = ['/projects/executive', '/projects/ongoing'];
-              const active = owned.includes(item.href)
-                ? pathname.startsWith(item.href)
-                : pathname.startsWith('/projects') &&
-                  !owned.some((o) => pathname.startsWith(o));
+              // each page owns its own prefix; a project's own pages light up
+              // "Ongoing Projects", the page they are reached from
+              const onProjectPage = /^\/projects\/[0-9a-f-]{36}/.test(pathname);
+              const active = item.href === '/projects/ongoing'
+                ? pathname.startsWith(item.href) || onProjectPage
+                : pathname.startsWith(item.href);
               return (
                 <NavItem
                   key={item.href}

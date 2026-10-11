@@ -72,11 +72,11 @@ export const roleLabel = (role: string): string =>
 
 /**
  * Where a role lands after login — and where the logo takes them.
- * The project manager opens on the executive summary, the site engineer
+ * The project manager opens on the ongoing-projects page, the site engineer
  * on their own project page, everyone else on the fleet dashboard.
  */
 export const homePathForRole = (role: string | undefined | null): string => {
   if (isSiteEngineerRole(role)) return '/my-site'
-  if (isProjectManagerRole(role)) return '/projects/executive'
+  if (isProjectManagerRole(role)) return '/projects/ongoing'
   return '/'
 }
