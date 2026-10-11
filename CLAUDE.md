@@ -138,11 +138,15 @@ named everywhere; there is no "Other" bucket. Drive every list from
 
 ---
 
-## 7. Weeks are ISO weeks
+## 7. Weeks are ISO weeks; a week belongs to the month of its Thursday
 
-`week_number` is ISO-8601, paired with the ISO year — not day-of-year ÷ 7.
-One helper: `isoWeek()` in `lib/format.ts`. Scope WEEK queries by ISO
-year.
+`week_number` is ISO-8601, paired with the ISO week-year. Project weeks
+run Saturday→Friday and end on the **Friday** (CHECK-enforced); plant
+weeks run Monday→Sunday. **Month, quarter and year of a week are those of
+its Thursday** — `week_anchor()` in SQL, `app/core/calendar.py`,
+`lib/calendar.ts`; never the week-ending date, never a hard-coded table.
+The site's "Date" cell is `prepared_on`, not the week. Full rules and the
+2026 month table: `docs/CALENDAR.md`.
 
 Check `pg_trigger` before trusting a value computed in Python; a BEFORE
 trigger silently overwrote this column once already.

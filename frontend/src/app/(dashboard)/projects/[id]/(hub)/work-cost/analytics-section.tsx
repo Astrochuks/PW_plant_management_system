@@ -12,6 +12,7 @@
  * bill filter is active the comparison is correlation, not attribution.
  */
 
+import { monthLabel, quarterLabel, yearLabel } from '@/lib/calendar'
 import { useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
 import ECharts from 'echarts-for-react'
@@ -42,12 +43,12 @@ interface Bucket {
   costByCat: Record<string, number>
 }
 
+// docs/CALENDAR.md: a week's month/quarter/year follow its Thursday
 function bucketKey(w: FinancialWeek, g: Granularity): string {
-  const d = new Date(w.week_ending_date + 'T00:00:00')
   if (g === 'week') return weekLabel(w.year, w.week_number)
-  if (g === 'month') return d.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })
-  if (g === 'quarter') return `Q${Math.floor(d.getMonth() / 3) + 1} ${d.getFullYear()}`
-  return String(d.getFullYear())
+  if (g === 'month') return monthLabel(w.week_ending_date)
+  if (g === 'quarter') return quarterLabel(w.week_ending_date)
+  return yearLabel(w.week_ending_date)
 }
 
 // Charts stay readable at any history length: past this many buckets a

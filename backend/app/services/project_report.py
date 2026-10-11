@@ -70,7 +70,7 @@ async def build_report(project_id: str, period: str, ref: date) -> dict[str, Any
     asof = await fetchrow(
         """SELECT year, week_number, week_ending_date
            FROM project_weekly_reports
-           WHERE project_id = $1::uuid AND week_ending_date <= $2
+           WHERE project_id = $1::uuid AND week_anchor(week_ending_date) <= $2
            ORDER BY year DESC, week_number DESC LIMIT 1""",
         project_id, d_to,
     )
@@ -83,7 +83,7 @@ async def build_report(project_id: str, period: str, ref: date) -> dict[str, Any
             SELECT id, year, week_number, week_ending_date
             FROM project_weekly_reports
             WHERE project_id = $1::uuid
-              AND week_ending_date BETWEEN $2 AND $3
+              AND week_anchor(week_ending_date) BETWEEN $2 AND $3  -- docs/CALENDAR.md
         ),
         wk AS (
             SELECT wr.year, wr.week_number, wr.week_ending_date,

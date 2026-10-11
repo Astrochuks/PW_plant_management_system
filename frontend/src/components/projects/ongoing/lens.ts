@@ -1,13 +1,16 @@
 /**
  * The period lens for the ongoing-projects page.
  *
- * One rule, decided 2026-10-11: figures are the SUM OF THE WEEKS WE HOLD
- * for the period — never the workbook's own "to date" column, which sites
- * inflate. "All stored weeks" is therefore everything on file, not the
- * project's lifetime.
+ * Two rules, decided 2026-10-11 (docs/CALENDAR.md):
+ *  - figures are the SUM OF THE WEEKS WE HOLD for the period — never the
+ *    workbook's own "to date" column, which sites inflate;
+ *  - a week belongs to the month / quarter / year that contain its
+ *    THURSDAY (the week's anchor) — the rule behind the head-office month
+ *    table — not the month its week-ending date happens to fall in.
  */
 
 import type { PortfolioWeek } from '@/lib/api/projects'
+import { anchorThursday } from '@/lib/calendar'
 
 export type LensKey = 'week' | 'month' | 'quarter' | 'year' | 'stored'
 
@@ -68,7 +71,8 @@ export function figuresFor(series: PortfolioWeek[], projectId: string, lens: Len
   }
   const w = lensWindow(lens, asAt)
   if (!w) return sum(mine)
-  return sum(mine.filter((r) => r.week_ending_date >= w[0] && r.week_ending_date <= w[1]))
+  // membership by the week's Thursday, not its week-ending date
+  return sum(mine.filter((r) => { const a = anchorThursday(r.week_ending_date); return a >= w[0] && a <= w[1] }))
 }
 
 export const addFigures = (a: Figures, b: Figures): Figures => ({

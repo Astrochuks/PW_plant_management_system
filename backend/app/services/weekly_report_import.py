@@ -316,6 +316,23 @@ async def persist_weekly_report(
         from datetime import date, timedelta
         jan1 = date(year, 1, 1)
         week_ending = jan1 + timedelta(days=(week_number * 7) - jan1.weekday() - 3)
+    # docs/CALENDAR.md: a project week ends on FRIDAY. The 2025 Lists sheet
+    # labelled Saturday with the outgoing week, which is how two 2025 reports
+    # once got Saturday dates; normalise, and say so when it happens.
+    from app.core.calendar import check_prepared_on, friday_on_or_before
+    friday = friday_on_or_before(week_ending)
+    if friday != week_ending:
+        warnings.append(f"Lists calendar ends {year}-W{week_number} on {week_ending} "
+                        f"({week_ending.strftime('%A')}); stored as its Friday {friday}")
+        week_ending = friday
+    # the site's "Date" cell = when the report was prepared; a fact, never a key
+    prepared_on = (parsed.get("declared") or {}).get("week_ending_date")  # _extract_declaration: the Date cell
+    if hasattr(prepared_on, "date"):
+        prepared_on = prepared_on.date()
+    late = check_prepared_on(prepared_on, week_ending)
+    if late:
+        flag("Contract Summary", "week_number_check", "warning", late,
+             {"prepared_on": prepared_on.isoformat(), "week_ending": week_ending.isoformat()})
 
     plant_rows = sheet_rows("Plant Return")
     diesel_rows = sheet_rows("Diesel Consumption")
@@ -360,15 +377,16 @@ async def persist_weekly_report(
             """INSERT INTO project_weekly_reports
                (project_id, year, week_number, week_ending_date, status,
                 submitted_by, beme_pct_complete, sheets_processed, sheet_hashes,
-                beme_tail)
+                beme_tail, prepared_on)
                VALUES ($1::uuid, $2, $3, $4, 'completed', $5::uuid, $6,
-                       $7::jsonb, $8::jsonb, $9::jsonb)
+                       $7::jsonb, $8::jsonb, $9::jsonb, $10)
                RETURNING id""",
             project_id, year, week_number, week_ending, user_id,
             _pct_from_summary(parsed),
             {n: s["status"] for n, s in sheets.items()},
             sheet_hashes,
             sheets.get("BEME & Works Completed Fd", {}).get("tail") or None,
+            prepared_on,
         ))
 
         # ── fleet resolution across plant + diesel sheets ────────────────

@@ -1402,7 +1402,7 @@ async def get_project_operations_series(
     else:
         rows = await fetch(
             """
-            SELECT to_char(date_trunc('month', wr.week_ending_date),
+            SELECT to_char(date_trunc('month', week_anchor(wr.week_ending_date)),
                            'YYYY-MM')                          AS month,
                    count(*)::int                               AS weeks_in_month,
                    max(wr.beme_pct_complete)                   AS beme_pct_complete,
@@ -1432,7 +1432,7 @@ async def get_project_operations_series(
             LEFT JOIN project_contract_summary_snapshot snap
                    ON snap.weekly_report_id = wr.id
             WHERE wr.project_id = $1::uuid
-            GROUP BY date_trunc('month', wr.week_ending_date)
+            GROUP BY date_trunc('month', week_anchor(wr.week_ending_date))
             ORDER BY 1
             """,
             pid,

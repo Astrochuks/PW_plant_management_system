@@ -8,6 +8,7 @@
  * (litres per hour vs the plant's own fleet-type average).
  */
 
+import { monthLabel, quarterLabel, yearLabel } from '@/lib/calendar'
 import { useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
 import ECharts from 'echarts-for-react'
@@ -40,12 +41,12 @@ interface HourBucket {
   dieselCost: number
 }
 
+// docs/CALENDAR.md: a week's month/quarter/year follow its Thursday
 export function bucketKey(year: number, week: number, endingDate: string, g: Granularity): string {
-  const d = new Date(endingDate + 'T00:00:00')
   if (g === 'week') return weekLabel(year, week)
-  if (g === 'month') return d.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })
-  if (g === 'quarter') return `Q${Math.floor(d.getMonth() / 3) + 1} ${d.getFullYear()}`
-  return String(d.getFullYear())
+  if (g === 'month') return monthLabel(endingDate)
+  if (g === 'quarter') return quarterLabel(endingDate)
+  return yearLabel(endingDate)
 }
 
 const ZOOM_AFTER = 30
