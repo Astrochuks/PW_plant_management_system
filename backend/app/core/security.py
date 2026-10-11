@@ -30,11 +30,16 @@ logger = get_logger(__name__)
 # no more separate "authorization" parameter on each endpoint
 bearer_scheme = HTTPBearer()
 
-# The management tier: the MD and the GPM see the same thing, so every gate
-# treats them alike. 'management' is the pre-029 collapsed value, retired
-# from the UI and the API but still honoured if a row carries it.
-MANAGEMENT_ROLES = frozenset(
-    {"managing_director", "general_project_manager", "management"}
+# Roles v3 (migration 035, decision 2026-10-11): admin · project_manager ·
+# site_engineer · plant_officer. The project manager owns the projects
+# module — every site, with a picker — and has NO plant-module access.
+#
+# The parked values (managing_director, general_project_manager) and the
+# older retired 'management' are no longer written and no row carries them
+# after 035; they still resolve to the project-manager tier so a cached
+# session or a stray old row never locks anyone out.
+PROJECT_MANAGER_ROLES = frozenset(
+    {"project_manager", "managing_director", "general_project_manager", "management"}
 )
 
 
@@ -226,12 +231,12 @@ class CurrentUser(BaseModel):
 
     id: str
     email: str
-    # 'admin', 'managing_director', 'general_project_manager',
-    # 'plant_officer', 'site_engineer' — plus retired 'management'
+    # 'admin', 'project_manager', 'site_engineer', 'plant_officer' — plus
+    # the parked MD/GPM values and retired 'management' (read-only)
     role: str
     full_name: str | None = None
     is_active: bool = True
-    location_id: str | None = None  # Only set for site_engineer role
+    location_id: str | None = None  # legacy plant-site link; no longer required
 
     @property
     def is_admin(self) -> bool:
@@ -239,14 +244,9 @@ class CurrentUser(BaseModel):
         return self.role == "admin"
 
     @property
-    def is_management(self) -> bool:
-        """Management tier — the MD and the GPM.
-
-        Migration 029 split them into their own roles; they still see the
-        same thing, so every gate asks this one question. 'management' is
-        the retired pre-029 value, kept so an old row never locks out.
-        """
-        return self.role in MANAGEMENT_ROLES
+    def is_project_manager(self) -> bool:
+        """The project-manager seat (and the parked MD/GPM values it absorbed)."""
+        return self.role in PROJECT_MANAGER_ROLES
 
     @property
     def is_plant_officer(self) -> bool:
@@ -332,26 +332,28 @@ def require_admin(
 def require_management_or_admin(
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> CurrentUser:
-    """Require management-tier access (admin, MD/GPM, or plant officer).
+    """Gate for the PLANT module: admin or plant officer.
 
-    Gates the PLANT module. The plant officer is management-tier here;
-    the projects module uses require_projects_access instead.
+    The project manager has no plant access (roles v3, 2026-10-11); the
+    projects module uses require_projects_access instead. The function
+    keeps its historical name because ~10 routers import it.
     """
-    if not (current_user.is_admin or current_user.is_management
-            or current_user.is_plant_officer):
-        raise AuthorizationError("Management or admin access required")
+    if not (current_user.is_admin or current_user.is_plant_officer):
+        raise AuthorizationError("Plant module access requires admin or plant officer role")
     return current_user
 
 
 def require_projects_access(
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> CurrentUser:
-    """Require projects-module access: admin or management (MD/GPM).
+    """Gate for the PROJECTS module: admin or project manager.
 
     The plant officer has no business with projects (decision 2026-07-07).
+    Site engineers get project-scoped read access through their own gate
+    once assignments exist (PRD v2 §8), not through this one.
     """
-    if not (current_user.is_admin or current_user.is_management):
-        raise AuthorizationError("Projects access requires management or admin role")
+    if not (current_user.is_admin or current_user.is_project_manager):
+        raise AuthorizationError("Projects access requires admin or project manager role")
     return current_user
 
 

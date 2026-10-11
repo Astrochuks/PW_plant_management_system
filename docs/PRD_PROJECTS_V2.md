@@ -285,24 +285,26 @@ Every list endpoint for a `site_engineer` is filtered by assignment in SQL
 
 ## 9. Migration plan (one migration per step, each reversible)
 
-1. `031_roles_v3`: add enum value `project_manager`; `UPDATE users SET
-   role='project_manager' WHERE role IN ('managing_director',
-   'general_project_manager')`; drop the site-engineer location
-   constraint/check; `lib/roles.ts` → four roles, parked ones recognised
-   for reading only.
-2. `032_project_history`: create `project_contract_sums`,
+(Numbering follows `backend/migrations/`, whose last file before this work
+is 034.)
+
+1. `035_roles_v3` — **applied 2026-10-11**: enum value `project_manager`;
+   MD/GPM accounts → `project_manager` (2 rows); default role
+   `site_engineer`; the site-engineer location rule removed from the API;
+   `lib/roles.ts` → four roles, parked ones recognised for reading only.
+2. `036_project_history`: create `project_contract_sums`,
    `project_status_events`; add cache columns + triggers; rename
    `projects.status` → `status_legacy`.
-3. `033_backfill_history`: for each project insert `original` contract
-   sum from `original_contract_sum` (basis `unknown`, approved by
-   `system`, note "backfilled from register 2026-10"), plus `variation`
-   where `current_contract_sum` differs; status events: 3 active →
-   `active` dated from first weekly report; 218 legacy → `closed`.
-4. `034_assignments_audit`: extend `user_project_assignments` (created_by,
+3. `037_backfill_history`: for each project insert `original` contract
+   sum from `original_contract_sum` (basis `unknown`, note "backfilled
+   from register 2026-10"), plus `variation` where `current_contract_sum`
+   differs; status events: 3 active → `active` dated from first weekly
+   report; 218 legacy → `closed`.
+4. `038_assignments_audit`: extend `user_project_assignments` (created_by,
    ended_at); `project_documents.kind/linked_*`; notification types.
-5. (phase B) `035_beme_revisions`: revisions table, `revision_id` on
+5. (phase B) `039_beme_revisions`: revisions table, `revision_id` on
    bills/items, backfill revision 1 per project, parameters table.
-6. (phase C) `036_week_items`.
+6. (phase C) `040_week_items`.
 
 Each migration ships with its `down` and a `tests/test_migration_03x.py`
 that asserts counts before/after (run with the user's go — DB-heavy).

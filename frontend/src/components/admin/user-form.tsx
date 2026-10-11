@@ -26,7 +26,6 @@ import { toast } from 'sonner'
 import type { User } from '@/lib/api/admin'
 import { ROLE_DESCRIPTIONS, ROLE_LABELS, USER_ROLES } from '@/lib/roles'
 import { useCreateUser, useUpdateUser } from '@/hooks/use-users'
-import { useLocationsWithStats } from '@/hooks/use-locations'
 import { Loader2 } from 'lucide-react'
 
 const userFormSchema = z.object({
@@ -41,11 +40,7 @@ const userFormSchema = z.object({
     .or(z.literal('')),
   full_name: z.string().min(2, 'Full name must be at least 2 characters'),
   role: z.enum(USER_ROLES),
-  location_id: z.string().optional(),
-}).refine(
-  (data) => data.role !== 'site_engineer' || !!data.location_id,
-  { message: 'Site assignment is required for site engineers', path: ['location_id'] }
-)
+})
 
 type UserFormValues = z.infer<typeof userFormSchema>
 
@@ -61,8 +56,15 @@ export function UserForm({ user, onSuccess, onCancel }: UserFormProps) {
   const updateMutation = useUpdateUser(user?.id || '')
   const isEditing = !!user
 
-  const { data: locationsData } = useLocationsWithStats()
-  const locations = locationsData ?? []
+  // A parked role on an existing row (MD/GPM before migration 035) is shown
+  // as what it now is — project manager — so saving the form writes a
+  // valid value.
+  const initialRole: UserFormValues['role'] =
+    user && (USER_ROLES as readonly string[]).includes(user.role)
+      ? (user.role as UserFormValues['role'])
+      : user
+        ? 'project_manager'
+        : 'site_engineer'
 
   const form = useForm<UserFormValues>({
     resolver: zodResolver(userFormSchema),
@@ -70,29 +72,21 @@ export function UserForm({ user, onSuccess, onCancel }: UserFormProps) {
       email: user?.email || '',
       password: '',
       full_name: user?.full_name || '',
-      role: (user?.role as UserFormValues['role']) || 'general_project_manager',
-      location_id: user?.location_id || '',
+      role: initialRole,
     },
   })
-
-  const watchedRole = form.watch('role')
 
   async function onSubmit(values: UserFormValues) {
     try {
       setIsSubmitting(true)
 
       if (isEditing) {
+        // Roles v3: site engineers are scoped by project assignment, not by
+        // a plant location — a legacy location link is cleared on edit.
         const patch: Parameters<typeof updateMutation.mutateAsync>[0] = {
           full_name: values.full_name,
           role: values.role,
-        }
-        if (values.role === 'site_engineer') {
-          patch.location_id = values.location_id || null
-        } else {
-          // If changing away from site_engineer, clear location
-          if (user?.role === 'site_engineer') {
-            patch.clear_location = true
-          }
+          ...(user?.location_id ? { clear_location: true } : {}),
         }
         await updateMutation.mutateAsync(patch)
         toast.success('User updated successfully')
@@ -107,7 +101,7 @@ export function UserForm({ user, onSuccess, onCancel }: UserFormProps) {
           password: values.password,
           full_name: values.full_name,
           role: values.role,
-          location_id: values.role === 'site_engineer' ? (values.location_id || null) : null,
+          location_id: null,
         })
         toast.success('User created successfully')
       }
@@ -207,37 +201,6 @@ export function UserForm({ user, onSuccess, onCancel }: UserFormProps) {
             </FormItem>
           )}
         />
-
-        {watchedRole === 'site_engineer' && (
-          <FormField
-            control={form.control}
-            name="location_id"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Assigned Site</FormLabel>
-                <Select value={field.value || ''} onValueChange={field.onChange}>
-                  <FormControl>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select a site…" />
-                    </SelectTrigger>
-                  </FormControl>
-                  <SelectContent>
-                    {locations.map((loc) => (
-                      <SelectItem key={loc.id} value={loc.id}>
-                        {loc.location_name}
-                        {loc.state_name ? ` — ${loc.state_name}` : ''}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <FormDescription>
-                  Each site can only have one active site engineer.
-                </FormDescription>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-        )}
 
         <div className="flex gap-3">
           <Button

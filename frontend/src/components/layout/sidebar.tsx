@@ -33,8 +33,7 @@ import {
   BookOpen,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { homePathForRole, isManagementRole } from '@/lib/roles';
-import { isPlantPath } from './plant-tabs';
+import { homePathForRole, isProjectManagerRole, isSiteEngineerRole } from '@/lib/roles';
 import { Separator } from '@/components/ui/separator';
 import {
   Tooltip,
@@ -134,14 +133,14 @@ const projectNavItems = [
   },
 ];
 
-// ── Section: PLANT (management) ───────────────────────────────────────────
-// Management gets the whole plant module behind one entry; the tabs inside
-// the Plant workbench (PlantTabs) carry the rest.
-const managementPlantNavItems = [
+// ── Section: MY SITE (site engineer) ──────────────────────────────────────
+// The site engineer's whole world is their assigned project. One entry
+// today; bills and the weekly form hang off it as the register work lands.
+const siteEngineerNavItems = [
   {
-    title: 'Plant',
-    href: '/plant',
-    icon: Truck,
+    title: 'My Site',
+    href: '/my-site',
+    icon: MapPin,
   },
 ];
 
@@ -199,15 +198,15 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const router = useRouter();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
-  const isManagement = isManagementRole(user?.role);
+  const isProjectManager = isProjectManagerRole(user?.role);
+  const isSiteEngineer = isSiteEngineerRole(user?.role);
   const isPlantOfficer = user?.role === 'plant_officer';
-  // Admins and the plant officer drive the plant module from the sidebar.
-  // Management sees one "Plant" entry instead — the module's own tab bar
-  // takes them the rest of the way, so their sidebar stays to the three
-  // things they asked for: executive summary, registry, plant.
+  // Roles v3: the plant module belongs to admin + plant officer; the
+  // projects module to admin + project manager; the site engineer sees only
+  // their own site. Nobody straddles modules except the admin.
   const showManagementItems = isAdmin || isPlantOfficer;
-  // projects module: admin + MD/GPM only — the plant officer has no access
-  const showProjectItems = isAdmin || isManagement;
+  const showProjectItems = isAdmin || isProjectManager;
+  const showOverview = isAdmin || isPlantOfficer;
 
   // Track last visit to transfers page for badge count
   const TRANSFERS_LAST_SEEN_KEY = 'transfers_last_seen_at';
@@ -241,15 +240,15 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   // Prefetch all nav routes for instant transitions
   useEffect(() => {
     const allItems = IS_DEMO ? demoNavItems : [
-      ...(isManagement ? [] : overviewNavItems),
+      ...(showOverview ? overviewNavItems : []),
       ...(showManagementItems ? plantNavItems : []),
-      ...(isManagement ? managementPlantNavItems : []),
       ...(showProjectItems ? projectNavItems : []),
+      ...(isSiteEngineer ? siteEngineerNavItems : []),
       ...(showManagementItems ? sharedNavItems : []),
       ...(isAdmin ? adminNavItems : []),
     ];
     allItems.forEach((item) => router.prefetch(item.href));
-  }, [router, isAdmin, isManagement, showManagementItems, showProjectItems]);
+  }, [router, isAdmin, isSiteEngineer, showOverview, showManagementItems, showProjectItems]);
 
   return (
     <aside
@@ -299,9 +298,8 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           </NavSection>
         )}
 
-        {/* OVERVIEW — everyone except management, whose home is the
-            executive summary and whose fleet dashboard sits under Plant */}
-        {!IS_DEMO && !isManagement && (
+        {/* OVERVIEW — the plant-module seats (admin, plant officer) */}
+        {!IS_DEMO && showOverview && (
           <NavSection label="OVERVIEW" collapsed={collapsed}>
             {overviewNavItems.map((item) => (
               <NavItem
@@ -368,16 +366,16 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           </NavSection>
         )}
 
-        {/* PLANT — management's single door into the plant module */}
-        {!IS_DEMO && isManagement && (
-          <NavSection label="PLANT" collapsed={collapsed} separator>
-            {managementPlantNavItems.map((item) => (
+        {/* MY SITE — the site engineer's own project */}
+        {!IS_DEMO && isSiteEngineer && (
+          <NavSection label="MY SITE" collapsed={collapsed}>
+            {siteEngineerNavItems.map((item) => (
               <NavItem
                 key={item.href}
                 href={item.href}
                 icon={item.icon}
                 title={item.title}
-                isActive={isPlantPath(pathname)}
+                isActive={pathname.startsWith(item.href)}
                 collapsed={collapsed}
               />
             ))}

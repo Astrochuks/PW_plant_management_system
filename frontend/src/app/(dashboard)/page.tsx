@@ -10,19 +10,22 @@ import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Loader2 } from 'lucide-react'
 import { useAuth } from '@/providers/auth-provider'
-import { isManagementRole } from '@/lib/roles'
+import { homePathForRole } from '@/lib/roles'
 import { FleetDashboard } from '@/components/dashboard/fleet-dashboard'
 
 export default function HomePage() {
   const router = useRouter()
   const { user, isLoading } = useAuth()
-  const toExecutive = !isLoading && isManagementRole(user?.role)
+  // The project manager and the site engineer have their own homes; the
+  // fleet dashboard is for the plant-module seats.
+  const home = isLoading ? '/' : homePathForRole(user?.role)
+  const redirecting = home !== '/'
 
   useEffect(() => {
-    if (toExecutive) router.replace('/projects/executive')
-  }, [toExecutive, router])
+    if (redirecting) router.replace(home)
+  }, [redirecting, home, router])
 
-  if (toExecutive) {
+  if (redirecting) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />

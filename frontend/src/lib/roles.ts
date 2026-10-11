@@ -1,68 +1,82 @@
 /**
  * The role vocabulary — one place, so a role never gets spelled two ways.
  *
- * Migration 029 split the old `management` role into the two seats it
- * always stood for: the Managing Director and the General Project Manager.
- * They see the same thing today, so every gate asks `isManagementRole`
- * rather than naming a role. `management` itself is retired — never
- * offered, never written — but still recognised so an old row or a cached
- * session never loses access.
+ * Roles v3 (migration 035, 2026-10-11): four working seats.
+ *   admin            — everything
+ *   project_manager  — the projects module, every site (picker), approves
+ *                      BEME revisions; no plant-module access
+ *   site_engineer    — their own assigned project only (bills, weekly
+ *                      quantities once the form exists)
+ *   plant_officer    — plant module only
+ *
+ * `managing_director` and `general_project_manager` (029) are PARKED and
+ * `management` (pre-029) is retired: never offered, never written, but
+ * still recognised when read so an old row or a cached session never loses
+ * access — they behave as project_manager.
  */
 
 export const USER_ROLES = [
   'admin',
-  'managing_director',
-  'general_project_manager',
-  'plant_officer',
+  'project_manager',
   'site_engineer',
+  'plant_officer',
 ] as const
 
 export type UserRole = (typeof USER_ROLES)[number]
 
-/** Includes the retired value — for reading rows, not for writing. */
-export type StoredRole = UserRole | 'management'
+/** Includes the parked/retired values — for reading rows, not for writing. */
+export type StoredRole =
+  | UserRole
+  | 'managing_director'
+  | 'general_project_manager'
+  | 'management'
 
 export const ROLE_LABELS: Record<StoredRole, string> = {
   admin: 'Admin',
-  managing_director: 'Managing Director',
-  general_project_manager: 'General Project Manager',
-  plant_officer: 'Plant Officer',
+  project_manager: 'Project Manager',
   site_engineer: 'Site Engineer',
-  management: 'Management',
+  plant_officer: 'Plant Officer',
+  managing_director: 'Project Manager (was MD)',
+  general_project_manager: 'Project Manager (was GPM)',
+  management: 'Project Manager (was Management)',
 }
 
 export const ROLE_DESCRIPTIONS: Record<StoredRole, string> = {
   admin: 'Full access to all features and user management',
-  managing_director:
-    'Read access to plants, projects, reports, and analytics',
-  general_project_manager:
-    'Read access to plants, projects, reports, and analytics',
-  plant_officer:
-    'Plant module only — same plant access as management, no projects',
-  site_engineer: 'Can fill and submit weekly reports for their assigned site',
-  management: 'Retired role — reassign to Managing Director or GPM',
+  project_manager:
+    'All projects — register, bills, weekly reports — and approves bill revisions. No plant module.',
+  site_engineer:
+    'Their own project only: bills and, once the form is live, this week’s quantities',
+  plant_officer: 'Plant module only — no projects',
+  managing_director: 'Parked role — behaves as Project Manager',
+  general_project_manager: 'Parked role — behaves as Project Manager',
+  management: 'Retired role — behaves as Project Manager',
 }
 
-const MANAGEMENT_ROLES = new Set<string>([
+const PROJECT_MANAGER_ROLES = new Set<string>([
+  'project_manager',
   'managing_director',
   'general_project_manager',
   'management',
 ])
 
-/** The MD/GPM tier — what the old `role === 'management'` check meant. */
-export const isManagementRole = (role: string | undefined | null): boolean =>
-  !!role && MANAGEMENT_ROLES.has(role)
+/** The project-manager seat, including the parked values it absorbed. */
+export const isProjectManagerRole = (role: string | undefined | null): boolean =>
+  !!role && PROJECT_MANAGER_ROLES.has(role)
+
+export const isSiteEngineerRole = (role: string | undefined | null): boolean =>
+  role === 'site_engineer'
 
 export const roleLabel = (role: string): string =>
   ROLE_LABELS[role as StoredRole] ?? role
 
 /**
  * Where a role lands after login — and where the logo takes them.
- * Site engineers have their own UI; management opens on the portfolio,
- * everyone else on the fleet dashboard.
+ * The project manager opens on the executive summary, the site engineer
+ * on their own project page, everyone else on the fleet dashboard.
  */
 export const homePathForRole = (role: string | undefined | null): string => {
-  if (role === 'site_engineer') return '/site/dashboard'
-  if (isManagementRole(role)) return '/projects/executive'
+  if (isSiteEngineerRole(role)) return '/my-site'
+  if (isProjectManagerRole(role)) return '/projects/executive'
   return '/'
 }

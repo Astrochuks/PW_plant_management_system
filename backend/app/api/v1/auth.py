@@ -735,10 +735,11 @@ async def unlock_account(
 # split into managing_director / general_project_manager); it is still a
 # valid enum value in Postgres and still management-tier for permissions,
 # but it can no longer be written.
+# Roles v3 (migration 035): the four working seats. The parked MD/GPM
+# values remain valid enum members for reading but cannot be assigned.
 AssignableRole = Literal[
     "admin",
-    "managing_director",
-    "general_project_manager",
+    "project_manager",
     "plant_officer",
     "site_engineer",
 ]
@@ -750,8 +751,8 @@ class CreateUserRequest(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=6, description="Temporary password")
     full_name: str = Field(..., min_length=2, max_length=255)
-    role: AssignableRole = "general_project_manager"
-    location_id: UUID | None = None  # Required when role = site_engineer
+    role: AssignableRole = "site_engineer"
+    location_id: UUID | None = None  # legacy plant-site link; optional, site_engineer only
 
     @field_validator("password")
     @classmethod
@@ -812,28 +813,19 @@ async def create_user(
             details=[{"field": "email", "message": "Already exists", "code": "DUPLICATE"}],
         )
 
-    # Validate location_id requirement for site_engineer role
-    if request_body.role == "site_engineer":
-        if not request_body.location_id:
-            raise ValidationError("location_id is required for site_engineer role")
-        # Check location exists
+    # location_id is a legacy plant-site link. Roles v3: a site engineer is
+    # scoped by project assignment (PRD v2 §3.5), so no location is required
+    # and the one-engineer-per-location rule is gone. Still only meaningful
+    # on a site engineer, and it must exist if given.
+    if request_body.location_id is not None:
+        if request_body.role != "site_engineer":
+            raise ValidationError("location_id can only be set for site_engineer role")
         loc = await fetchrow(
-            "SELECT id, name FROM locations WHERE id = $1::uuid",
+            "SELECT id FROM locations WHERE id = $1::uuid",
             str(request_body.location_id),
         )
         if not loc:
             raise ValidationError("Location not found")
-        # Check no other active site_engineer is already assigned to this location
-        existing_engineer = await fetchrow(
-            "SELECT id, email FROM users WHERE location_id = $1::uuid AND role = 'site_engineer' AND is_active = true",
-            str(request_body.location_id),
-        )
-        if existing_engineer:
-            raise ValidationError(
-                f"Location '{loc['name']}' already has an active site engineer assigned ({existing_engineer['email']})"
-            )
-    elif request_body.location_id is not None:
-        raise ValidationError("location_id can only be set for site_engineer role")
 
     try:
         # Create user in Supabase Auth (stays as SDK)
@@ -907,8 +899,8 @@ async def list_users(
     current_user: Annotated[CurrentUser, Depends(require_admin)],
     role: str | None = Query(
         None,
-        pattern="^(admin|managing_director|general_project_manager"
-                "|management|plant_officer|site_engineer)$",
+        pattern="^(admin|project_manager|plant_officer|site_engineer"
+                "|managing_director|general_project_manager|management)$",
     ),
     is_active: bool | None = None,
 ) -> dict[str, Any]:
@@ -1031,13 +1023,7 @@ async def update_user(
     elif request_body.location_id is not None:
         if new_role != "site_engineer":
             raise ValidationError("location_id can only be set for site_engineer role")
-        # Check no other active site_engineer already has this location
-        conflict = await fetchrow(
-            "SELECT id, email FROM users WHERE location_id = $1::uuid AND role = 'site_engineer' AND is_active = true AND id != $2::uuid",
-            str(request_body.location_id), str(user_id),
-        )
-        if conflict:
-            raise ValidationError(f"Location already assigned to another site engineer ({conflict['email']})")
+        # roles v3: no one-engineer-per-location rule any more
         update_data["location_id"] = str(request_body.location_id)
         changes["location_id"] = {"old": str(existing.get("location_id") or ""), "new": str(request_body.location_id)}
 

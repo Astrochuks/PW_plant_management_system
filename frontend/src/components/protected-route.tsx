@@ -4,15 +4,37 @@ import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/providers/auth-provider'
 import { Skeleton } from '@/components/ui/skeleton'
-import { isManagementRole } from '@/lib/roles'
+import { isProjectManagerRole, isSiteEngineerRole } from '@/lib/roles'
+
+/**
+ * Route tiers (roles v3, 2026-10-11):
+ *   admin      — admins only
+ *   management — the PLANT module: admin or plant officer (name kept — many
+ *                pages pass it; the project manager has no plant access)
+ *   projects   — the PROJECTS module: admin or project manager
+ *   site       — the site engineer's own area
+ *   both       — any signed-in user
+ */
+export type RouteTier = 'admin' | 'management' | 'projects' | 'site' | 'both'
+
+export const roleMayEnter = (role: string | undefined | null, tier: RouteTier): boolean => {
+  if (!role) return false
+  switch (tier) {
+    case 'admin':
+      return role === 'admin'
+    case 'management':
+      return role === 'admin' || role === 'plant_officer'
+    case 'projects':
+      return role === 'admin' || isProjectManagerRole(role)
+    case 'site':
+      return isSiteEngineerRole(role)
+    case 'both':
+      return true
+  }
+}
 
 interface ProtectedRouteProps {
-  /**
-   * admin      — admins only
-   * management — management-tier: admin, MD/GPM, plant officer (plant module)
-   * projects   — projects module: admin or MD/GPM (no plant officer)
-   */
-  requiredRole: 'admin' | 'management' | 'projects' | 'both'
+  requiredRole: RouteTier
   children: React.ReactNode
 }
 
@@ -22,34 +44,12 @@ export function ProtectedRoute({ requiredRole, children }: ProtectedRouteProps) 
 
   useEffect(() => {
     if (isLoading) return
-
     if (!user) {
-      // Not authenticated, redirect to login
       router.push('/login')
       return
     }
-
-    if (requiredRole === 'admin' && user.role !== 'admin') {
-      // Admin-only route, user is not admin
+    if (!roleMayEnter(user.role, requiredRole)) {
       router.push('/access-denied')
-      return
-    }
-
-    const isManagement = isManagementRole(user.role)
-
-    if (
-      requiredRole === 'management' &&
-      !(user.role === 'admin' || isManagement || user.role === 'plant_officer')
-    ) {
-      // Management-tier route (plant module), user doesn't have permission
-      router.push('/access-denied')
-      return
-    }
-
-    if (requiredRole === 'projects' && !(user.role === 'admin' || isManagement)) {
-      // Projects module — the plant officer has no access here
-      router.push('/access-denied')
-      return
     }
   }, [user, isLoading, requiredRole, router])
 
@@ -67,11 +67,10 @@ export function ProtectedRoute({ requiredRole, children }: ProtectedRouteProps) 
     )
   }
 
-  // User is authorized
-  if (user) {
+  if (user && roleMayEnter(user.role, requiredRole)) {
     return <>{children}</>
   }
 
-  // Not authorized, will be redirected
+  // Not authorized — the effect above is redirecting
   return null
 }
