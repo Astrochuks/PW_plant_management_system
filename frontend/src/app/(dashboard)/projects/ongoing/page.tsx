@@ -11,15 +11,15 @@
 import { Suspense, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { CalendarDays, Download, FolderKanban, LayoutGrid, Plus, Table2, UploadCloud } from 'lucide-react'
+import { Banknote, CalendarDays, Download, FolderKanban, LayoutGrid, Map, Plus, Radio, Table2, UploadCloud } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
-import { Card, CardContent } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Skeleton } from '@/components/ui/skeleton'
+import { MiniKpi, MiniKpiGrid, MiniKpiSkeleton } from '@/components/shared/mini-kpi'
 import { ProtectedRoute } from '@/components/protected-route'
 import { useAuth } from '@/providers/auth-provider'
 import { useExecutiveSummary, useOngoingProjects } from '@/hooks/use-projects'
@@ -103,13 +103,6 @@ function OngoingContent() {
     }
   }
 
-  const kpis = [
-    { label: 'Value of work done · incl. VAT', value: money(totals.works_incl_vat), sub: lensLabel(lens, asAt) },
-    { label: 'Cost', value: money(totals.cost), sub: 'Weekly Summary costs' },
-    { label: 'Net earnings', value: money(totals.net), sub: `${reporting} of ${siteCount} sites reporting`, tone: totals.net < 0 ? 'bad' : 'good' },
-    { label: 'Margin', value: marginOf(totals) == null ? '—' : `${((marginOf(totals) as number) * 100).toFixed(1)}%`, sub: 'net ÷ work done' },
-  ] as const
-
   return (
     <div className="space-y-6">
       {/* Header — the plant register's shell */}
@@ -136,18 +129,26 @@ function OngoingContent() {
         )}
       </div>
 
-      {/* KPI cards */}
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {kpis.map((k) => (
-          <Card key={k.label}><CardContent className="p-4">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{k.label}</p>
-            {isLoading ? <Skeleton className="mt-2 h-7 w-40" /> : (
-              <p className={`mt-0.5 text-xl font-bold tabular-nums ${'tone' in k && k.tone === 'bad' ? 'text-red-600' : 'tone' in k && k.tone === 'good' && totals.weeks ? 'text-emerald-700 dark:text-emerald-400' : ''}`}>{k.value}</p>
-            )}
-            <p className="truncate text-xs text-muted-foreground tabular-nums">{k.sub}</p>
-          </CardContent></Card>
-        ))}
-      </div>
+      {/* Register cards — every one follows the state filter, the lens and the as-at date */}
+      <MiniKpiGrid cols={4}>
+        {isLoading ? <MiniKpiSkeleton count={4} /> : (
+          <>
+            <MiniKpi icon={FolderKanban} iconColor="text-blue-600 dark:text-blue-400"
+              label={stateFilter ? `Ongoing projects in ${stateFilter}` : 'Ongoing projects'}
+              value={siteCount.toLocaleString()}
+              sub={stateFilter ? `as at ${fmtDate(asAt)}` : `in ${groups.length} state${groups.length !== 1 ? 's' : ''} · as at ${fmtDate(asAt)}`} />
+            <MiniKpi icon={Map} iconColor="text-violet-600 dark:text-violet-400"
+              label="States" value={groups.length.toLocaleString()}
+              sub={groups.map((g) => g.state).join(', ') || '—'} />
+            <MiniKpi icon={Banknote} iconColor="text-amber-600 dark:text-amber-400"
+              label="Total contract sum" value={money(contractTotal)}
+              sub="as recorded in the register" />
+            <MiniKpi icon={Radio} iconColor={reporting ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'}
+              label="Reporting" value={`${reporting} of ${siteCount}`}
+              sub={`${lensLabel(lens, asAt)} · net ${money(totals.net)}`} tone={totals.weeks && totals.net < 0 ? 'bad' : undefined} />
+          </>
+        )}
+      </MiniKpiGrid>
 
       {/* Period lens + filters */}
       <div className="flex flex-wrap items-center gap-3">

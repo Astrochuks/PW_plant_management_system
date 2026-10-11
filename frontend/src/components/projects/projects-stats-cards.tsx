@@ -3,6 +3,7 @@
 import { Activity, Banknote } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
+import { MiniKpi } from '@/components/shared/mini-kpi'
 import type { ProjectStats } from '@/hooks/use-projects'
 import { money as fullCurrency } from '@/lib/format';
 
@@ -66,31 +67,3 @@ export function ProjectsStatsCards({ stats, isLoading, viewMode = 'all' }: Proje
   )
 }
 
-function MiniKpi({
-  label,
-  value,
-  sub,
-  icon: Icon,
-  iconColor,
-}: {
-  label: string
-  value: string
-  sub?: string
-  icon: React.ElementType
-  iconColor: string
-}) {
-  return (
-    <Card className="py-0">
-      <CardContent className="flex items-center gap-3 py-3 px-4">
-        <Icon className={`h-5 w-5 shrink-0 ${iconColor}`} />
-        <div className="min-w-0">
-          <p className="text-lg font-bold leading-tight tabular-nums">{value}</p>
-          <p className="text-[11px] text-muted-foreground leading-tight truncate">
-            {label}
-            {sub && <> &middot; {sub}</>}
-          </p>
-        </div>
-      </CardContent>
-    </Card>
-  )
-}

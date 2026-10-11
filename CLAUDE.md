@@ -173,6 +173,10 @@ guessing. AI may read data (analysis, chat, summaries); it never writes it.
   it, unless they have said go — and say so when you do, because every
   save restarts their server.** (2026-10-11: a harmless cleanup triggered
   a reload that hung, and login "stopped working".)
+- **Build every page, card and table by `docs/UI_STANDARD.md`** — the
+  Plant Register / Ongoing Projects shape: header, `MiniKpi` cards that
+  follow the filters, URL-state filters, toolbar, table-or-cards. Read it
+  before adding a page.
 - **Start the backend only via `backend/scripts/dev.sh`.** It pins
   `--reload-dir app --timeout-graceful-shutdown 5`; a bare
   `uvicorn --reload` can hang forever on open SSE streams. Production
