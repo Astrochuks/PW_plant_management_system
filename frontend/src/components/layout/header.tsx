@@ -30,8 +30,6 @@ import { roleLabel } from '@/lib/roles';
 import { isoWeek } from '@/lib/format';
 import Link from 'next/link';
 import { NotificationBell } from '@/components/notifications/notification-bell';
-import { ProjectFocusPicker } from './project-focus-picker';
-import { isProjectManagerRole } from '@/lib/roles';
 
 interface HeaderProps {
   sidebarCollapsed: boolean;
@@ -88,10 +86,6 @@ export function Header({ sidebarCollapsed, onMenuClick }: HeaderProps) {
             <span className="text-muted-foreground">·</span>
             <span className="text-muted-foreground">Week {isoWeek()}</span>
           </div>
-          {/* the project manager's picker — all sites, or one */}
-          {mounted && isProjectManagerRole(user?.role) && (
-            <ProjectFocusPicker />
-          )}
         </div>
 
         {/* Right side - Actions */}

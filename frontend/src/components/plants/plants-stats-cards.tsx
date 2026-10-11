@@ -55,6 +55,7 @@ export function PlantsStatsCards({
       {/* Summary Strip: 3 compact KPIs */}
       <div className="grid grid-cols-3 gap-3">
         <MiniKpi
+          variant="compact"
           label="Total Plants"
           value={total.toLocaleString()}
           sub={`across ${Object.keys(stats.by_location).filter(k => k !== 'Unknown').length} sites`}
@@ -62,6 +63,7 @@ export function PlantsStatsCards({
           iconColor="text-blue-600 dark:text-blue-400"
         />
         <MiniKpi
+          variant="compact"
           label="Working"
           value={working.toLocaleString()}
           sub={`${workingPct}% of fleet`}
@@ -69,6 +71,7 @@ export function PlantsStatsCards({
           iconColor="text-emerald-600 dark:text-emerald-400"
         />
         <MiniKpi
+          variant="compact"
           label="Breakdown"
           value={breakdown.toLocaleString()}
           sub={breakdown > 0 ? 'needs attention' : 'all clear'}

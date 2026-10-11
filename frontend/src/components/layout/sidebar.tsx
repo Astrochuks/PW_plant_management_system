@@ -43,6 +43,7 @@ import {
 } from '@/components/ui/tooltip';
 import { useAuth } from '@/providers/auth-provider';
 import { useTransferStats, useAdminSiteTransferRequests } from '@/hooks/use-transfers';
+import { useOngoingProjects } from '@/hooks/use-projects';
 import { IS_DEMO } from '@/lib/demo';
 
 interface SidebarProps {
@@ -125,7 +126,7 @@ const plantNavItems = [
 // state, the archive of finished projects, and the weekly submissions.
 const projectNavItems = [
   { title: 'Dashboard', href: '/projects/executive', icon: LayoutDashboard },
-  { title: 'Ongoing Projects', href: '/projects/ongoing', icon: FolderKanban },
+  { title: 'Ongoing Projects', href: '/projects/ongoing', icon: FolderKanban, badgeKey: 'ongoing' as const },
   { title: 'Archive', href: '/projects/archive', icon: ClipboardList },
   { title: 'Submissions', href: '/projects/submissions', icon: Upload },
 ];
@@ -230,9 +231,12 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const { data: siteRequestsData } = useAdminSiteTransferRequests('pending', isAdmin);
   const pendingSiteRequests = siteRequestsData?.count ?? 0;
 
+  // projects seats: how many projects are ongoing today (the nav shows it)
+  const { data: ongoingData } = useOngoingProjects(undefined, showProjectItems);
   const badgeCounts: Record<string, number> = {
     transfers: newTransfers,
     adminTransfers: pendingSiteRequests,
+    ongoing: ongoingData?.meta.count ?? 0,
   };
 
   // Prefetch all nav routes for instant transitions
@@ -350,6 +354,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
               const active = item.href === '/projects/ongoing'
                 ? pathname.startsWith(item.href) || onProjectPage
                 : pathname.startsWith(item.href);
+              const badgeKey = 'badgeKey' in item ? item.badgeKey : undefined;
               return (
                 <NavItem
                   key={item.href}
@@ -358,6 +363,8 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                   title={item.title}
                   isActive={active}
                   collapsed={collapsed}
+                  badge={badgeKey ? badgeCounts[badgeKey] : 0}
+                  badgeTone="count"
                 />
               );
             })}
@@ -485,9 +492,14 @@ interface NavItemProps {
   isActive: boolean;
   collapsed: boolean;
   badge?: number;
+  /** 'alert' = red (something needs doing); 'count' = neutral (how many there are) */
+  badgeTone?: 'alert' | 'count';
 }
 
-function NavItem({ href, icon: Icon, title, isActive, collapsed, badge }: NavItemProps) {
+function NavItem({ href, icon: Icon, title, isActive, collapsed, badge, badgeTone = 'alert' }: NavItemProps) {
+  const badgeColour = badgeTone === 'count'
+    ? (isActive ? 'bg-black/15 text-sidebar-primary-foreground' : 'bg-sidebar-accent text-sidebar-foreground')
+    : 'bg-red-500 text-white';
   const linkContent = (
     <Link
       href={href}
@@ -508,8 +520,9 @@ function NavItem({ href, icon: Icon, title, isActive, collapsed, badge }: NavIte
           className={cn(
             'inline-flex items-center justify-center rounded-full text-[10px] font-bold leading-none',
             collapsed
-              ? 'absolute -top-1 -right-1 h-4 min-w-[16px] px-0.5 bg-red-500 text-white'
-              : 'h-5 min-w-[20px] px-1.5 bg-red-500 text-white'
+              ? 'absolute -top-1 -right-1 h-4 min-w-[16px] px-0.5'
+              : 'h-5 min-w-[20px] px-1.5',
+            badgeColour
           )}
         >
           {badge > 99 ? '99+' : badge}
@@ -527,7 +540,7 @@ function NavItem({ href, icon: Icon, title, isActive, collapsed, badge }: NavIte
         <TooltipContent side="right">
           {title}
           {badge != null && badge > 0 && (
-            <span className="ml-1 text-red-400">({badge})</span>
+            <span className={badgeTone === 'count' ? 'ml-1 text-muted-foreground' : 'ml-1 text-red-400'}>({badge})</span>
           )}
         </TooltipContent>
       </Tooltip>

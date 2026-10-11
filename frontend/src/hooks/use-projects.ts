@@ -644,12 +644,13 @@ export function useProjectActivity(id: string | null, limit = 100) {
   });
 }
 
-export function useOngoingProjects(asAt?: string) {
+export function useOngoingProjects(asAt?: string, enabled = true) {
   return useQuery({
     queryKey: [...projectsKeys.all, 'ongoing', asAt ?? 'today'],
     queryFn: () => getOngoingProjects(asAt),
     staleTime: 60 * 1000,
     placeholderData: keepPreviousData,
+    enabled,
   });
 }
 

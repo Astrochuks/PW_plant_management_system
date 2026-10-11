@@ -21,13 +21,18 @@ Top to bottom, always in this order:
    action group — a single `rounded-lg border bg-card p-0.5` strip of ghost
    buttons separated by `h-4 w-px bg-border`. Non-admins see nothing on the
    right. No banners, no hero.
-2. **Summary cards** — **exactly three** `MiniKpi` cards in a `MiniKpiGrid`
-   (`components/shared/mini-kpi.tsx`): icon · bold value · label. **No
-   words underneath beyond the label** unless the user asks for a specific
-   sub line (decision 2026-10-11: "don't write any word underneath except
-   what I tell you to"). **Every card follows the page's filters, lens and
-   as-at date.** A card that shows a global figure while the table is
-   filtered is a bug (the user has caught this twice).
+2. **Summary cards** — **exactly three** `MiniKpi` cards in a `MiniKpiRow`
+   (`components/shared/mini-kpi.tsx`), `variant="stat"` (the default since
+   2026-10-12): **the figure centred and large (`text-3xl`), the label in
+   small caps under it, no icon.** No words beyond the label unless the
+   user asks for a specific sub line. The row wraps on narrow screens; a
+   card whose content is wide (a long naira figure) takes
+   `className="flex-none"` so it sizes to its content instead of
+   truncating. **Every card follows the page's filters, lens and as-at
+   date.** A card that shows a global figure while the table is filtered
+   is a bug (the user has caught this twice). The older `compact` variant
+   (icon · value · label in one line) remains on the Plant Register until
+   that page is restyled.
 3. **Filters row** — the period lens as a `bg-muted p-1` pill group, the
    as-at date input, then Selects. All state lives in the URL via
    `useUrlFilters` so a page can be shared and refreshed; search inputs are
@@ -108,6 +113,13 @@ The app is used on laptops, tablets and phones. Non-negotiable:
   own "to date" column (decision 2026-10-11).
 - When rows are excluded, say how many and why. When a filter empties the
   page, say which filter.
+
+## 5b. Navigation counts
+
+A nav entry that stands for a list shows how many items are in it
+(`badgeTone="count"`, neutral); only things that need doing get the red
+alert badge. The count comes from the same endpoint the page uses, so the
+two never disagree.
 
 ## 6. Roles on the page
 

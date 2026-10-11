@@ -11,7 +11,7 @@
 import { Suspense, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Banknote, CalendarDays, Download, FolderKanban, LayoutGrid, Map, Plus, Table2, UploadCloud } from 'lucide-react'
+import { CalendarDays, Download, FolderKanban, LayoutGrid, Plus, Table2, UploadCloud } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -19,7 +19,7 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Skeleton } from '@/components/ui/skeleton'
-import { MiniKpi, MiniKpiGrid, MiniKpiSkeleton } from '@/components/shared/mini-kpi'
+import { MiniKpi, MiniKpiRow, MiniKpiSkeleton } from '@/components/shared/mini-kpi'
 import { ProtectedRoute } from '@/components/protected-route'
 import { useAuth } from '@/providers/auth-provider'
 import { useOngoingFigures, useOngoingProjects } from '@/hooks/use-projects'
@@ -128,16 +128,16 @@ function OngoingContent() {
         )}
       </div>
 
-      {/* Three summary cards — value + label only (UI standard §2) */}
-      <MiniKpiGrid cols={3}>
+      {/* Three summary cards — centred figures, no icons (UI standard §2) */}
+      <MiniKpiRow>
         {isLoading ? <MiniKpiSkeleton count={3} /> : (
           <>
-            <MiniKpi icon={FolderKanban} iconColor="text-blue-600 dark:text-blue-400" label="Ongoing projects" value={siteCount.toLocaleString()} />
-            <MiniKpi icon={Map} iconColor="text-violet-600 dark:text-violet-400" label="States" value={groups.length.toLocaleString()} />
-            <MiniKpi icon={Banknote} iconColor="text-amber-600 dark:text-amber-400" label="Total contract sum" value={money(contractTotal)} />
+            <MiniKpi label="Total projects" value={siteCount.toLocaleString()} />
+            <MiniKpi label="States" value={groups.length.toLocaleString()} />
+            <MiniKpi label="Total contract sum" value={money(contractTotal)} className="flex-none" />
           </>
         )}
-      </MiniKpiGrid>
+      </MiniKpiRow>
 
       {/* Period lens + filters */}
       <div className="flex flex-wrap items-center gap-3">

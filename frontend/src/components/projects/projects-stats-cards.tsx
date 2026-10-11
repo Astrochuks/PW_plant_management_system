@@ -50,6 +50,7 @@ export function ProjectsStatsCards({ stats, isLoading, viewMode = 'all' }: Proje
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
       <MiniKpi
+          variant="compact"
         label={viewMode === 'legacy' ? 'Legacy Projects' : 'Active Projects'}
         value={count.toLocaleString()}
         sub={viewMode === 'legacy' ? 'historical register' : undefined}
@@ -57,6 +58,7 @@ export function ProjectsStatsCards({ stats, isLoading, viewMode = 'all' }: Proje
         iconColor="text-emerald-600 dark:text-emerald-400"
       />
       <MiniKpi
+          variant="compact"
         label="Total Value"
         value={compactCurrency(totalValue)}
         sub={totalValue >= 1_000_000 ? fullCurrency(totalValue) : 'current contract sums'}
