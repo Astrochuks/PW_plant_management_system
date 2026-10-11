@@ -11,7 +11,7 @@
 import { Suspense, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { CalendarDays, Download, FolderKanban, LayoutGrid, Plus, Table2, UploadCloud } from 'lucide-react'
+import { CalendarDays, Download, LayoutGrid, Plus, Table2, UploadCloud } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -104,17 +104,9 @@ function OngoingContent() {
 
   return (
     <div className="space-y-6">
-      {/* Header — the plant register's shell */}
+      {/* Header */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-primary/10"><FolderKanban className="h-6 w-6 text-primary" /></div>
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">Ongoing Projects</h1>
-            <p className="text-sm text-muted-foreground">
-              {isLoading ? 'Loading…' : `${siteCount} ongoing project${siteCount !== 1 ? 's' : ''}`}
-            </p>
-          </div>
-        </div>
+        <h1 className="text-2xl font-bold tracking-tight">Ongoing Projects</h1>
         {isAdmin && (
           <div className="flex items-center rounded-lg border bg-card p-0.5 w-fit">
             <Button asChild size="sm" variant="ghost" className="text-muted-foreground hover:text-foreground">
@@ -134,7 +126,7 @@ function OngoingContent() {
           <>
             <MiniKpi label="Total projects" value={siteCount.toLocaleString()} />
             <MiniKpi label="States" value={groups.length.toLocaleString()} />
-            <MiniKpi label="Total contract sum" value={money(contractTotal)} className="flex-none" />
+            <MiniKpi label="Total contract sum" value={money(contractTotal)} />
           </>
         )}
       </MiniKpiRow>

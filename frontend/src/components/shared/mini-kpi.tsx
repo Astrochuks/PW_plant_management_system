@@ -49,7 +49,7 @@ export function MiniKpi({ label, value, sub, variant = 'stat', icon: Icon, iconC
   return (
     <Card className={cn('py-0', className)}>
       <CardContent className="flex flex-col items-center justify-center gap-1 px-6 py-5 text-center">
-        <p className={cn('text-3xl font-bold leading-none tabular-nums tracking-tight', toneClass)}>{value}</p>
+        <p className={cn('whitespace-nowrap text-2xl font-bold leading-none tabular-nums tracking-tight sm:text-3xl', toneClass)}>{value}</p>
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
         {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
       </CardContent>
@@ -58,12 +58,13 @@ export function MiniKpi({ label, value, sub, variant = 'stat', icon: Icon, iconC
 }
 
 /**
- * The row of summary cards. Wraps on narrow screens; each card takes an
- * equal share unless it carries `className="flex-none"`, in which case it
- * sizes to its own content (a long naira figure, for example).
+ * The row of summary cards. Cards share the width equally but never
+ * shrink below their own content (`min-w-max`), so a long naira figure
+ * widens its card instead of spilling out; when the row cannot fit, cards
+ * wrap to the next line. No card needs a width of its own.
  */
 export function MiniKpiRow({ children }: { children: React.ReactNode }) {
-  return <div className="flex flex-wrap gap-3 [&>*]:min-w-[160px] [&>*]:flex-1">{children}</div>
+  return <div className="flex flex-wrap gap-3 [&>*]:flex-1 [&>*]:min-w-max">{children}</div>
 }
 
 /** A fixed-column grid, for pages that still use the compact strip. */
