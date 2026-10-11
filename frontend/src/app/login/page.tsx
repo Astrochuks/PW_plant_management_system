@@ -6,7 +6,8 @@
  * Right: Login form
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useSyncExternalStore } from 'react';
+import { useTheme } from 'next-themes';
 import { IS_DEMO, DEMO_CREDENTIALS } from '@/lib/demo';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -320,18 +321,20 @@ export default function LoginPage() {
   );
 }
 
-// Simple theme toggle component
+const subscribeNoop = () => () => {};
+
+// Theme toggle — goes through next-themes (the root ThemeProvider wraps this
+// page too). It must NOT touch localStorage / the <html> class directly:
+// doing so desyncs next-themes' state from the DOM, and the dashboard header
+// then toggles the wrong way until a full reload.
 function ThemeToggle() {
-  const [mounted, setMounted] = useState(false);
-  const { theme, setTheme } = useThemeState();
+  const { resolvedTheme: theme, setTheme } = useTheme();
+  // next-themes reads localStorage in its state initialiser, so resolvedTheme
+  // is already set on the first client render while the server rendered
+  // nothing. Render a same-size placeholder until hydration has completed.
+  const mounted = useSyncExternalStore(subscribeNoop, () => true, () => false);
 
-  // Avoid hydration mismatch - only render after client mount
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  // Return placeholder with same dimensions to avoid layout shift
-  if (!mounted) {
+  if (!mounted || !theme) {
     return <span className="text-xs text-muted-foreground opacity-0">Loading...</span>;
   }
 
@@ -343,24 +346,4 @@ function ThemeToggle() {
       {theme === 'dark' ? '☀️ Light mode' : '🌙 Dark mode'}
     </button>
   );
-}
-
-// Hook to use theme without importing next-themes directly
-function useThemeState() {
-  const [theme, setThemeState] = useState<string>('light');
-
-  useEffect(() => {
-    const savedTheme = localStorage.getItem('pw-theme') || 'light';
-    setThemeState(savedTheme);
-    // Also apply the theme class on initial load
-    document.documentElement.classList.toggle('dark', savedTheme === 'dark');
-  }, []);
-
-  const setTheme = (newTheme: string) => {
-    setThemeState(newTheme);
-    localStorage.setItem('pw-theme', newTheme);
-    document.documentElement.classList.toggle('dark', newTheme === 'dark');
-  };
-
-  return { theme, setTheme };
 }

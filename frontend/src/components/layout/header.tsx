@@ -37,7 +37,9 @@ interface HeaderProps {
 }
 
 export function Header({ sidebarCollapsed, onMenuClick }: HeaderProps) {
-  const { theme, setTheme } = useTheme();
+  // resolvedTheme, not theme: a stored "system" value resolves to light/dark,
+  // and the icon must reflect what is actually on screen.
+  const { resolvedTheme: theme, setTheme } = useTheme();
   const { user, logout } = useAuth();
   const [mounted, setMounted] = useState(false);
 
