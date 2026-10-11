@@ -30,6 +30,7 @@ import type { OngoingProject } from '@/lib/api/projects'
 import { STATUS_STYLES } from '@/components/projects/projects-table'
 import { type Figures, marginOf } from '@/components/projects/ongoing/lens'
 import { fmtDate, money } from '@/lib/format'
+import { exportRegisterExcel } from '@/lib/register-export'
 
 export interface OngoingRow {
   project: OngoingProject
@@ -242,45 +243,19 @@ export const DEFAULT_ONGOING_COLUMNS: OngoingColumnKey[] = [
 
 // ── Export ───────────────────────────────────────────────────────────────
 
-/** Writes the filtered rows with the visible columns, in order, to .xlsx */
-export async function exportOngoingRows(
-  rows: OngoingRow[],
-  columns: ColumnDef[],
-  filterLine: string,
-): Promise<void> {
-  const { Workbook } = await import('exceljs')
-  const wb = new Workbook()
-  const ws = wb.addWorksheet('Ongoing projects')
-  ws.addRow(['P.W. NIGERIA LTD. — PROJECT REGISTER']).font = { bold: true, size: 13 }
-  ws.addRow([filterLine])
-  ws.addRow([])
-  const headerRow = ws.addRow(['S/NO', ...columns.map((c) => c.header.toUpperCase())])
-  headerRow.font = { bold: true }
-  rows.forEach((r, i) => ws.addRow([i + 1, ...columns.map((c) => c.cell(r))]))
-  // totals over the money columns actually exported
+/** Writes the filtered rows with the visible columns, in order, in the
+ *  shared register layout (lib/register-export.ts). Title = the banner. */
+export async function exportOngoingRows(rows: OngoingRow[], columns: ColumnDef[], title: string): Promise<string> {
   const totals = columns.map((c) =>
     c.numFmt === '#,##0.00' ? rows.reduce((a, r) => a + Number(c.cell(r) ?? 0), 0) : null)
-  if (totals.some((t) => t != null)) {
-    const totalRow = ws.addRow(['', 'TOTAL', ...totals.slice(1)])
-    totalRow.font = { bold: true }
-  }
-  ws.getColumn(1).width = 6
-  columns.forEach((c, i) => {
-    const col = ws.getColumn(i + 2)
-    col.width = c.exportWidth
-    if (c.numFmt) col.numFmt = c.numFmt
+  return exportRegisterExcel({
+    title,
+    sheetName: 'Ongoing projects',
+    fileStem: 'ongoing_projects',
+    columns: columns.map((c) => ({ header: c.header, width: c.exportWidth, numFmt: c.numFmt })),
+    rows: rows.map((r) => columns.map((c) => c.cell(r))),
+    totals,
   })
-  const buf = await wb.xlsx.writeBuffer()
-  const url = URL.createObjectURL(new Blob([buf], {
-    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  }))
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `ongoing-projects-${new Date().toISOString().slice(0, 10)}.xlsx`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
 }
 
 // ── Component ────────────────────────────────────────────────────────────
@@ -291,8 +266,8 @@ interface OngoingTableProps {
   visibleColumns: OngoingColumnKey[]
   onVisibleColumnsChange: (columns: OngoingColumnKey[]) => void
   resultText?: string
-  /** one line describing the active filters, written into the export */
-  filterLine: string
+  /** what the table holds, e.g. "for all states" / "in Kaduna" — the banner and the export title say it */
+  scope: string
   actions?: React.ReactNode
 }
 
@@ -302,11 +277,12 @@ export function OngoingTable({
   visibleColumns,
   onVisibleColumnsChange,
   resultText,
-  filterLine,
+  scope,
   actions,
 }: OngoingTableProps) {
   const router = useRouter()
   const [exporting, setExporting] = useState(false)
+  const bannerTitle = `P.W. NIGERIA LTD. — Ongoing Projects ${scope}`.trim()
 
   const columns = visibleColumns
     .map((key) => COLUMN_MAP.get(key))
@@ -326,7 +302,7 @@ export function OngoingTable({
   const handleExport = async () => {
     setExporting(true)
     try {
-      await exportOngoingRows(rows, columns, filterLine)
+      await exportOngoingRows(rows, columns, bannerTitle)
       toast.success('Export downloaded')
     } catch (err) {
       console.error('[ongoing-table] export failed', err)
@@ -389,7 +365,7 @@ export function OngoingTable({
 
       {/* Table */}
       {isLoading ? (
-        <OngoingTableSkeleton columns={columns} />
+        <OngoingTableSkeleton columns={columns} title={bannerTitle} />
       ) : rows.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground border rounded-lg">
           <FolderKanban className="h-12 w-12 mx-auto mb-4 opacity-50" />
@@ -398,7 +374,7 @@ export function OngoingTable({
         </div>
       ) : (
         <div className="rounded-lg border-2 border-border overflow-x-auto">
-          <BrandBanner />
+          <BrandBanner title={bannerTitle} />
           <Table className="border-collapse">
             <TableHeader>
               <TableRow className="bg-[#ffbf36] hover:bg-[#ffbf36] border-b-2 border-[#e6ac31]">
@@ -437,21 +413,19 @@ export function OngoingTable({
   )
 }
 
-function BrandBanner() {
+function BrandBanner({ title }: { title: string }) {
   return (
     <div className="flex items-center gap-3 px-4 py-2 bg-background border-b-2 border-border">
-      <Image src="/images/logo.png" alt="P.W. Nigeria Ltd." width={55} height={55} className="rounded" />
-      <span className="text-foreground font-bold text-base tracking-wide">
-        P.W. NIGERIA LTD. — Project Register
-      </span>
+      <Image src="/images/logo.png" alt="P.W. Nigeria Ltd." width={55} height={55} className="rounded shrink-0" />
+      <span className="text-foreground font-bold text-base tracking-wide">{title}</span>
     </div>
   )
 }
 
-function OngoingTableSkeleton({ columns }: { columns: ColumnDef[] }) {
+function OngoingTableSkeleton({ columns, title }: { columns: ColumnDef[]; title: string }) {
   return (
     <div className="rounded-lg border-2 border-border overflow-x-auto">
-      <BrandBanner />
+      <BrandBanner title={title} />
       <Table className="border-collapse">
         <TableHeader>
           <TableRow className="bg-[#ffbf36] hover:bg-[#ffbf36] border-b-2 border-[#e6ac31]">

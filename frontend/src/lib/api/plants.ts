@@ -231,6 +231,8 @@ export interface ExportParams {
   verified_only?: boolean;
   exclude_not_seen?: boolean;
   columns?: string;
+  /** banner title written into row 1 of the file (the page's scope) */
+  title?: string;
 }
 
 export async function exportPlantsExcel(params: ExportParams = {}): Promise<Blob> {
@@ -247,6 +249,7 @@ export async function exportPlantsExcel(params: ExportParams = {}): Promise<Blob
   if (params.verified_only) queryParams.verified_only = 'true';
   if (params.exclude_not_seen !== undefined) queryParams.exclude_not_seen = String(params.exclude_not_seen);
   if (params.columns) queryParams.columns = params.columns;
+  if (params.title) queryParams.title = params.title;
 
   const response = await apiClient.get('/plants/export/excel', {
     params: queryParams,

@@ -16,6 +16,7 @@ import { Pagination } from '@/components/plants/pagination';
 import { useDebounce } from '@/hooks/use-debounce';
 import { useUrlFilters } from '@/hooks/use-url-filters';
 import type { ColumnKey } from '@/components/plants/plants-table';
+import { conditionLabel } from '@/lib/conditions';
 
 const FILTER_DEFAULTS = {
   search: '',
@@ -155,6 +156,21 @@ function PlantsPageInner() {
     [filters.condition, filters.location_id, filters.fleet_type, debouncedSearch, filters.purchase_year, filters.division, filters.exclude_locations, filters.has_maintenance, filters.verified_only]
   );
 
+  // one phrase names what the table holds — banner and export title say it
+  const scope = useMemo(() => {
+    const nameOf = (id: string) => locations.find((l) => l.id === id)?.location_name ?? id;
+    const parts: string[] = [filters.location_id ? `for ${nameOf(filters.location_id)}` : 'for all sites'];
+    if (filters.condition.length) parts.push(filters.condition.map(conditionLabel).join(', '));
+    if (filters.fleet_type.length) parts.push(filters.fleet_type.join(', '));
+    if (filters.purchase_year.length) parts.push(filters.purchase_year.join(', '));
+    if (filters.division) parts.push(filters.division === 'mining' ? 'Mining' : 'Civil');
+    if (filters.exclude_locations.length) parts.push(`excluding ${filters.exclude_locations.map(nameOf).join(', ')}`);
+    if (filters.has_maintenance) parts.push('with maintenance cost');
+    if (filters.verified_only) parts.push('verified only');
+    if (debouncedSearch) parts.push(`search "${debouncedSearch}"`);
+    return parts.join(' · ');
+  }, [filters, locations, debouncedSearch]);
+
   return (
     <div className="space-y-6">
       {/* Page Header */}
@@ -200,6 +216,7 @@ function PlantsPageInner() {
         onVisibleColumnsChange={handleVisibleColumnsChange}
         meta={plantsData?.meta}
         exportParams={exportParams}
+        scope={scope}
       />
 
       {/* Pagination */}

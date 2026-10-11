@@ -96,6 +96,35 @@ The app is used on laptops, tablets and phones. Non-negotiable:
   wide (Plant Register pattern); sort via URL params.
 - Group totals go in the section header, not as a fake row.
 
+### 3b. A register names its scope — on the cards, in the banner, in the file
+
+Decided 2026-10-12 on the Ongoing Projects page; applies to every register.
+
+- **One phrase names the scope**, built from the active filters by one
+  function on the page and reused everywhere. Default is the whole
+  population: `for all states`, `for all sites`. One group selected:
+  `in Kaduna`, `for Abuja`. Further filters append with ` · `:
+  `for Abuja · Working, Standby · search "AC1"`.
+- **The brand banner says it**: `P.W. NIGERIA LTD. — <Register> <scope>`,
+  e.g. `P.W. NIGERIA LTD. — Ongoing Projects in Kaduna`,
+  `P.W. NIGERIA LTD. — Plant Register for all sites`.
+- **The cards adapt to it.** Whole population: three cards — the count,
+  the grouping count, the total "across all states". One group selected:
+  two cards — `Total projects in Kaduna`, `Total contract sum in Kaduna`.
+  The label carries the scope; nothing else is written on a card (§2).
+- **Export = the screen.** The filtered rows, the visible columns in their
+  on-screen order, the banner text as the file title. Filename
+  `<register>_<yyyy-mm-dd>.xlsx`.
+- **One file layout** — the Plant Register's, implemented twice and kept
+  identical: `frontend/src/lib/register-export.ts` (client, exceljs) and
+  `export_plants_excel` in `backend/app/api/v1/plants.py` (server,
+  openpyxl):
+  row 1 height 55, logo in A1, title merged from B1 bold 14 `#101415`;
+  row 2 header fill `#FFBF36`, bold 10, centred, medium `#606060`
+  borders; data cells thin `#808080` borders; freeze panes `A3`; money
+  `#,##0.00`; a bold `TOTAL` row closes money columns. No S/NO column,
+  no filter line — the title already says the scope.
+
 ## 4. Numbers (CLAUDE.md rule 1, restated)
 
 - `money()` = exactly two decimals, every time, no compact form unless an

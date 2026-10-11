@@ -339,6 +339,8 @@ interface PlantsTableProps {
   onVisibleColumnsChange: (columns: ColumnKey[]) => void;
   meta?: PaginationMeta;
   exportParams?: Record<string, string | undefined>;
+  /** what the table holds, e.g. "for all sites" / "for Abuja · Working" — banner and export title say it */
+  scope?: string;
 }
 
 export function PlantsTable({
@@ -350,10 +352,12 @@ export function PlantsTable({
   onVisibleColumnsChange,
   meta,
   exportParams,
+  scope,
 }: PlantsTableProps) {
   const { user } = useAuth();
   const [exporting, setExporting] = useState(false);
   const isAdmin = user?.role === 'admin';
+  const bannerTitle = `P.W. NIGERIA LTD. — Plant Register${scope ? ` ${scope}` : ''}`;
 
   const columns = visibleColumns
     .map((key) => COLUMN_MAP.get(key))
@@ -376,6 +380,7 @@ export function PlantsTable({
       const blob = await exportPlantsExcel({
         ...exportParams,
         columns: visibleColumns.join(','),
+        title: bannerTitle,
       });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -468,7 +473,7 @@ export function PlantsTable({
 
       {/* Table */}
       {loading ? (
-        <PlantsTableSkeleton columns={columns} />
+        <PlantsTableSkeleton columns={columns} title={bannerTitle} />
       ) : plants.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground border rounded-lg">
           <p className="text-lg">No plants found</p>
@@ -485,9 +490,7 @@ export function PlantsTable({
               height={55}
               className="rounded"
             />
-            <span className="text-foreground font-bold text-base tracking-wide">
-              P.W. NIGERIA LTD. — Plant Register
-            </span>
+            <span className="text-foreground font-bold text-base tracking-wide">{bannerTitle}</span>
           </div>
           <Table className="border-collapse">
             <TableHeader>
@@ -555,7 +558,7 @@ function ConditionBadge({ condition }: { condition: PlantCondition | null }) {
   );
 }
 
-function PlantsTableSkeleton({ columns }: { columns: ColumnDef[] }) {
+function PlantsTableSkeleton({ columns, title }: { columns: ColumnDef[]; title: string }) {
   return (
     <div className="rounded-lg border-2 border-border">
       {/* PW Brand Banner */}
@@ -567,9 +570,7 @@ function PlantsTableSkeleton({ columns }: { columns: ColumnDef[] }) {
           height={55}
           className="rounded"
         />
-        <span className="text-foreground font-bold text-base tracking-wide">
-          P.W. NIGERIA LTD. — Plant Register
-        </span>
+        <span className="text-foreground font-bold text-base tracking-wide">{title}</span>
       </div>
       <Table className="border-collapse">
         <TableHeader>

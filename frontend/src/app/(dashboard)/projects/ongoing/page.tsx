@@ -92,12 +92,8 @@ function OngoingContent() {
   const resultText = isLoading
     ? ''
     : `${rows.length} ongoing project${rows.length !== 1 ? 's' : ''}${isFetching ? ' · refreshing…' : ''}`
-  const filterLine = [
-    stateFilter ? `State: ${stateFilter}` : 'All states',
-    filters.q ? `Search: "${filters.q}"` : null,
-    `${rows.length} projects`,
-    `Exported ${today}`,
-  ].filter(Boolean).join(' · ')
+  // one phrase names the scope everywhere: cards, banner, export title
+  const scope = (stateFilter ? `in ${stateFilter}` : 'for all states') + (filters.q ? ` · search "${filters.q}"` : '')
 
   return (
     <div className="space-y-6">
@@ -117,13 +113,19 @@ function OngoingContent() {
         )}
       </div>
 
-      {/* Three summary cards — follow the filters (UI standard §2) */}
+      {/* Summary cards follow the scope (UI standard §3b): three across all
+          states, two inside one state */}
       <MiniKpiRow>
-        {isLoading ? <MiniKpiSkeleton count={3} /> : (
+        {isLoading ? <MiniKpiSkeleton count={stateFilter ? 2 : 3} /> : stateFilter ? (
+          <>
+            <MiniKpi label={`Total projects in ${stateFilter}`} value={rows.length.toLocaleString()} />
+            <MiniKpi label={`Total contract sum in ${stateFilter}`} value={money(contractTotal)} />
+          </>
+        ) : (
           <>
             <MiniKpi label="Total projects" value={rows.length.toLocaleString()} />
             <MiniKpi label="States" value={stateCount.toLocaleString()} />
-            <MiniKpi label="Total contract sum" value={money(contractTotal)} />
+            <MiniKpi label="Total contract sum across all states" value={money(contractTotal)} />
           </>
         )}
       </MiniKpiRow>
@@ -157,14 +159,14 @@ function OngoingContent() {
         )}
       </div>
 
-      {/* Register table — exports exactly the rows and columns on screen */}
+      {/* Register table — banner names the scope; export = the screen */}
       <OngoingTable
         rows={rows}
         isLoading={isLoading}
         visibleColumns={visibleColumns}
         onVisibleColumnsChange={setVisibleColumns}
         resultText={resultText}
-        filterLine={filterLine}
+        scope={scope}
         actions={isAdmin ? (
           <Button size="sm" asChild>
             <Link href="/projects/create"><Plus className="h-3.5 w-3.5 mr-1.5" />Add Project</Link>
