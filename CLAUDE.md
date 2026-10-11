@@ -169,6 +169,16 @@ guessing. AI may read data (analysis, chat, summaries); it never writes it.
 - **`Number()`-normalise in the API layer**, not in components.
 - **Never run DB-heavy pytest while the user is working.**
 - **The user performs uploads personally.** Do not upload workbooks.
+- **No edits under `backend/app/` while the user's dev server is watching
+  it, unless they have said go — and say so when you do, because every
+  save restarts their server.** (2026-10-11: a harmless cleanup triggered
+  a reload that hung, and login "stopped working".)
+- **Start the backend only via `backend/scripts/dev.sh`.** It pins
+  `--reload-dir app --timeout-graceful-shutdown 5`; a bare
+  `uvicorn --reload` can hang forever on open SSE streams. Production
+  (Dockerfile CMD) carries the same shutdown cap, and the app ends its
+  own streams on shutdown (`app.core.events.signal_shutdown`, pinned by
+  `tests/test_sse_shutdown.py`).
 - Commit and push per milestone.
 - Backend tests need the asyncio plugin loaded:
   `pytest -o addopts="" -p pytest_asyncio`.

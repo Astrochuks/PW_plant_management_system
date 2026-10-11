@@ -44,5 +44,10 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=5 \
 
 EXPOSE 8000
 
-# Run with single worker (free tier has limited memory)
-CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --timeout-keep-alive 65
+# Run with single worker (free tier has limited memory).
+# --timeout-graceful-shutdown: on SIGTERM (every deploy) uvicorn waits for
+# in-flight requests; without a cap, open SSE streams would hold the old
+# container until the platform force-kills it. The app also ends its own
+# streams on shutdown (app.core.events.signal_shutdown) — this is the belt
+# to that pair of braces.
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --timeout-keep-alive 65 --timeout-graceful-shutdown 5

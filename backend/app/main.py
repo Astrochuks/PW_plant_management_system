@@ -15,6 +15,11 @@ from fastapi.responses import JSONResponse
 
 
 from app.config import get_settings
+from app.core.events import (
+    hook_shutdown_signals,
+    signal_shutdown,
+    unhook_shutdown_signals,
+)
 from app.core.exceptions import AppException
 from app.core.pool import init_pool, close_pool, DatabaseUnavailableError
 from app.monitoring.logging import setup_logging, get_logger
@@ -67,10 +72,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Start background tasks
     metrics_task = asyncio.create_task(start_metrics_flush_task())
 
+    # End every open SSE stream the instant the server is told to exit.
+    # uvicorn waits for in-flight requests BEFORE it runs this function's
+    # shutdown half, and SSE requests never finish on their own — so the
+    # hook has to sit on the exit signal itself, not down here.
+    previous_handlers = hook_shutdown_signals(asyncio.get_running_loop())
+
     yield
 
     # Shutdown
     logger.info("Application shutting down")
+
+    # Belt for servers that never delivered a signal (ASGI test clients,
+    # lifespan-only hosts): idempotent, so harmless when already set.
+    signal_shutdown()
+    unhook_shutdown_signals(previous_handlers)
 
     # Cancel background tasks
     metrics_task.cancel()
