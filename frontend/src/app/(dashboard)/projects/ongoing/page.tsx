@@ -11,7 +11,7 @@
 import { Suspense, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Banknote, CalendarDays, Download, FolderKanban, LayoutGrid, Map, Plus, Radio, Table2, UploadCloud } from 'lucide-react'
+import { Banknote, CalendarDays, Download, FolderKanban, LayoutGrid, Map, Plus, Table2, UploadCloud } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -22,7 +22,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { MiniKpi, MiniKpiGrid, MiniKpiSkeleton } from '@/components/shared/mini-kpi'
 import { ProtectedRoute } from '@/components/protected-route'
 import { useAuth } from '@/providers/auth-provider'
-import { useExecutiveSummary, useOngoingProjects } from '@/hooks/use-projects'
+import { useOngoingFigures, useOngoingProjects } from '@/hooks/use-projects'
 import { useUrlFilters } from '@/hooks/use-url-filters'
 import { STATUS_STYLES } from '@/components/projects/projects-table'
 import { StateSections, StateStrip, groupByState } from '@/components/projects/ongoing/portfolio-by-state'
@@ -53,20 +53,19 @@ function OngoingContent() {
   const stateFilter = filters.state || ''
 
   const { data: ongoing, isLoading: loadingList, isFetching } = useOngoingProjects(asAt)
-  const { data: exec, isLoading: loadingExec } = useExecutiveSummary()
-  const isLoading = loadingList || loadingExec
+  const { data: figures, isLoading: loadingFigures } = useOngoingFigures()
+  const isLoading = loadingList || loadingFigures
 
   const groups = useMemo(() => {
     if (!ongoing) return []
     const rows = stateFilter ? ongoing.data.filter((p) => (p.state_name || '') === stateFilter) : ongoing.data
-    return groupByState(rows, exec?.projects ?? [], exec?.series ?? [], lens, asAt)
-  }, [ongoing, exec, lens, asAt, stateFilter])
+    return groupByState(rows, figures?.series ?? [], lens, asAt)
+  }, [ongoing, figures, lens, asAt, stateFilter])
 
   const states = useMemo(
     () => [...new Set((ongoing?.data ?? []).map((p) => p.state_name).filter(Boolean) as string[])].sort(),
     [ongoing])
   const totals = groups.reduce((a, g) => addFigures(a, g.totals), EMPTY)
-  const reporting = groups.reduce((a, g) => a + g.reporting, 0)
   const siteCount = groups.reduce((a, g) => a + g.sites.length, 0)
   const contractTotal = groups.reduce((a, g) => a + g.contract, 0)
   const [exporting, setExporting] = useState(false)
@@ -112,7 +111,7 @@ function OngoingContent() {
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Ongoing Projects</h1>
             <p className="text-sm text-muted-foreground">
-              {isLoading ? 'Loading…' : `${siteCount} site${siteCount !== 1 ? 's' : ''} in ${groups.length} state${groups.length !== 1 ? 's' : ''} · contract ${money(contractTotal)}`}
+              {isLoading ? 'Loading…' : `${siteCount} ongoing project${siteCount !== 1 ? 's' : ''}`}
             </p>
           </div>
         </div>
@@ -129,33 +128,23 @@ function OngoingContent() {
         )}
       </div>
 
-      {/* Register cards — every one follows the state filter, the lens and the as-at date */}
-      <MiniKpiGrid cols={4}>
-        {isLoading ? <MiniKpiSkeleton count={4} /> : (
+      {/* Three summary cards — value + label only (UI standard §2) */}
+      <MiniKpiGrid cols={3}>
+        {isLoading ? <MiniKpiSkeleton count={3} /> : (
           <>
-            <MiniKpi icon={FolderKanban} iconColor="text-blue-600 dark:text-blue-400"
-              label={stateFilter ? `Ongoing projects in ${stateFilter}` : 'Ongoing projects'}
-              value={siteCount.toLocaleString()}
-              sub={stateFilter ? `as at ${fmtDate(asAt)}` : `in ${groups.length} state${groups.length !== 1 ? 's' : ''} · as at ${fmtDate(asAt)}`} />
-            <MiniKpi icon={Map} iconColor="text-violet-600 dark:text-violet-400"
-              label="States" value={groups.length.toLocaleString()}
-              sub={groups.map((g) => g.state).join(', ') || '—'} />
-            <MiniKpi icon={Banknote} iconColor="text-amber-600 dark:text-amber-400"
-              label="Total contract sum" value={money(contractTotal)}
-              sub="as recorded in the register" />
-            <MiniKpi icon={Radio} iconColor={reporting ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'}
-              label="Reporting" value={`${reporting} of ${siteCount}`}
-              sub={`${lensLabel(lens, asAt)} · net ${money(totals.net)}`} tone={totals.weeks && totals.net < 0 ? 'bad' : undefined} />
+            <MiniKpi icon={FolderKanban} iconColor="text-blue-600 dark:text-blue-400" label="Ongoing projects" value={siteCount.toLocaleString()} />
+            <MiniKpi icon={Map} iconColor="text-violet-600 dark:text-violet-400" label="States" value={groups.length.toLocaleString()} />
+            <MiniKpi icon={Banknote} iconColor="text-amber-600 dark:text-amber-400" label="Total contract sum" value={money(contractTotal)} />
           </>
         )}
       </MiniKpiGrid>
 
       {/* Period lens + filters */}
       <div className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-1 rounded-lg bg-muted p-1 w-fit">
+        <div className="flex max-w-full items-center gap-1 overflow-x-auto rounded-lg bg-muted p-1 w-fit [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {LENS_OPTIONS.map((o) => (
             <button key={o.key} type="button" onClick={() => setFilters({ lens: o.key })}
-              className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${lens === o.key ? 'bg-primary/20 text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+              className={`shrink-0 whitespace-nowrap px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${lens === o.key ? 'bg-primary/20 text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
               {o.label}
             </button>
           ))}
@@ -174,7 +163,7 @@ function OngoingContent() {
       </div>
 
       {/* State strip */}
-      {!isLoading && groups.length > 0 && <StateStrip groups={groups} totalNet={totals.net} />}
+      {!isLoading && groups.length > 0 && <StateStrip groups={groups} />}
 
       {/* Toolbar: result text · actions · view toggle */}
       <div className="flex flex-wrap items-center justify-between gap-2 py-1">
@@ -201,7 +190,7 @@ function OngoingContent() {
       {display === 'cards' ? (
         <StateSections groups={groups} isLoading={isLoading} />
       ) : (
-        <div className="rounded-lg border">
+        <div className="overflow-x-auto rounded-lg border">
           <Table>
             <TableHeader>
               <TableRow>

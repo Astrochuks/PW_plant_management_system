@@ -38,6 +38,7 @@ import {
   getProjectHistory,
   getProjectActivity,
   getOngoingProjects,
+  getOngoingFigures,
   addContractSum,
   addStatusEvent,
   getProjectDocuments,
@@ -712,5 +713,13 @@ export function useProjectTeam(id: string | null) {
     queryFn: () => getProjectTeam(id!),
     enabled: !!id,
     staleTime: 60 * 1000,
+  });
+}
+
+export function useOngoingFigures() {
+  return useQuery({
+    queryKey: [...projectsKeys.all, 'ongoing-figures'],
+    queryFn: getOngoingFigures,
+    staleTime: 5 * 60 * 1000,
   });
 }

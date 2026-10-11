@@ -1550,3 +1550,11 @@ export async function getProjectTeam(projectId: string): Promise<{ assigned: Tea
   const res = await apiClient.get<{ data: { assigned: TeamMember[]; general_managers: TeamMember[] } }>(`/projects/${projectId}/team`)
   return res.data.data
 }
+
+/** the Ongoing page's per-week facts — one light query (see project_register.ongoing_figures) */
+export async function getOngoingFigures(): Promise<{ series: PortfolioWeek[]; vat: number }> {
+  const res = await apiClient.get<{ data: { series: PortfolioWeek[]; vat: number } }>('/projects/ongoing/figures')
+  const d = res.data.data
+  return { vat: Number(d.vat), series: d.series.map((w) => ({
+    ...w, works: Number(w.works ?? 0), works_incl_vat: Number(w.works_incl_vat ?? 0), cost: Number(w.cost ?? 0), net: Number(w.net ?? 0) })) }
+}

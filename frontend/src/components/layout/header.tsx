@@ -90,9 +90,7 @@ export function Header({ sidebarCollapsed, onMenuClick }: HeaderProps) {
           </div>
           {/* the project manager's picker — all sites, or one */}
           {mounted && isProjectManagerRole(user?.role) && (
-            <div className="hidden md:block">
-              <ProjectFocusPicker />
-            </div>
+            <ProjectFocusPicker />
           )}
         </div>
 

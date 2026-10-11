@@ -12,7 +12,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { STATUS_STYLES } from '@/components/projects/projects-table'
-import type { OngoingProject, PortfolioProject } from '@/lib/api/projects'
+import type { OngoingProject } from '@/lib/api/projects'
 import { fmtDate, money } from '@/lib/format'
 import { type Figures, type LensKey, EMPTY, addFigures, figuresFor, marginOf } from './lens'
 import type { PortfolioWeek } from '@/lib/api/projects'
@@ -35,20 +35,19 @@ export interface StateGroup {
 
 export function groupByState(
   projects: OngoingProject[],
-  portfolio: PortfolioProject[],
   series: PortfolioWeek[],
   lens: LensKey,
   asAt: string,
 ): StateGroup[] {
-  const byId = new Map(portfolio.map((p) => [p.id, p]))
   const rows: SiteRow[] = projects.map((p) => {
-    const pf = byId.get(p.id)
+    const mine = series.filter((w) => w.project_id === p.id)
     return {
       project: p,
       figures: figuresFor(series, p.id, lens, asAt),
-      pct_complete: pf?.pct_complete ?? null,
-      weeks_received: pf?.weeks_received ?? 0,
-      latest_week_ending: pf?.latest_week_ending ?? null,
+      // physical progress (work ÷ bills) returns with phase B/C; until then no bar
+      pct_complete: null,
+      weeks_received: mine.length,
+      latest_week_ending: mine.length ? mine.map((w) => w.week_ending_date).sort().slice(-1)[0] : null,
     }
   })
   const groups = new Map<string, SiteRow[]>()
@@ -70,7 +69,7 @@ export function groupByState(
 
 const pct = (x: number | null) => (x == null ? '—' : `${(x * 100).toFixed(1)}%`)
 
-export function StateStrip({ groups, totalNet }: { groups: StateGroup[]; totalNet: number }) {
+export function StateStrip({ groups }: { groups: StateGroup[] }) {
   return (
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       {groups.map((g) => (
@@ -84,12 +83,7 @@ export function StateStrip({ groups, totalNet }: { groups: StateGroup[]; totalNe
             {g.state} · {g.sites.length} site{g.sites.length !== 1 ? 's' : ''}
           </p>
           <p className={`mt-0.5 text-base font-bold tabular-nums ${g.reporting ? (g.totals.net < 0 ? 'text-red-600' : '') : 'text-muted-foreground'}`}>
-            {g.reporting ? money(g.totals.net) : 'no report yet'}
-          </p>
-          <p className="text-xs text-muted-foreground tabular-nums">
-            {g.reporting
-              ? `${totalNet ? pct(g.totals.net / totalNet) : '—'} of net · ${g.reporting} of ${g.sites.length} reporting`
-              : `${money(g.contract)} of contract`}
+            {g.reporting ? money(g.totals.net) : '—'}
           </p>
         </button>
       ))}
@@ -175,7 +169,7 @@ export function SiteCard({ row }: { row: SiteRow }) {
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <h3 className="font-semibold leading-tight line-clamp-2">{p.short_name || p.project_name}</h3>
-            <p className="mt-0.5 truncate text-xs text-muted-foreground tabular-nums">contract {p.contract_sum != null ? money(p.contract_sum) : 'not recorded'}</p>
+            <p className="mt-0.5 truncate text-xs text-muted-foreground tabular-nums">{p.contract_sum != null ? money(p.contract_sum) : '—'}</p>
           </div>
           <Badge variant={neverReported ? 'outline' : style.variant} className={neverReported ? 'shrink-0 text-muted-foreground' : `shrink-0 ${style.className ?? ''}`}>
             {neverReported ? 'Awaiting first report' : style.label}
@@ -185,7 +179,7 @@ export function SiteCard({ row }: { row: SiteRow }) {
         <div>
           <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Net earnings</p>
           <p className={`text-2xl font-bold tabular-nums leading-tight ${has ? (f.net < 0 ? 'text-red-600' : '') : 'text-base font-medium text-muted-foreground'}`}>
-            {has ? money(f.net) : neverReported ? 'no report yet' : 'no figures in this period'}
+            {has ? money(f.net) : '—'}
           </p>
         </div>
 
@@ -212,9 +206,9 @@ export function SiteCard({ row }: { row: SiteRow }) {
               </span>
             </>
           ) : (
-            <span>{neverReported ? 'bills not loaded' : 'progress not available'}</span>
+            <span>—</span>
           )}
-          <span>{row.latest_week_ending ? `last report ${fmtDate(row.latest_week_ending)}` : 'never reported'}</span>
+          <span>{row.latest_week_ending ? fmtDate(row.latest_week_ending) : '—'}</span>
         </div>
       </CardContent>
     </Card>

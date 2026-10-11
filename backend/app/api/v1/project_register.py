@@ -444,3 +444,45 @@ async def document_download_url(
     if not url:
         raise ValidationError("Could not create a download link")
     return {"success": True, "data": {"url": url, "expires_in": 3600}}
+
+
+# ── the ongoing page's figures: one light query ────────────────────────────
+
+@router.get("/ongoing/figures")
+async def ongoing_figures(
+    current_user: Annotated[CurrentUser, Depends(require_projects_read)],
+) -> dict[str, Any]:
+    """Per project per stored week: work done (and incl. VAT), cost, net —
+    the only facts the Ongoing Projects page sums under its period lens
+    (decision 2026-10-11: sums of stored weeks, never a workbook's to-date).
+    One query, scoped; replaces the 6-second executive portfolio call the
+    page used to make for the same numbers."""
+    from app.services.project_overview import VAT  # 1.075 — the earnings convention
+
+    ids = await visible_project_ids(current_user)
+    params: list[Any] = []
+    scope = scope_condition(ids, "r.project_id", params)
+    rows = await fetch(
+        f"""SELECT r.project_id, r.year, r.week_number, r.week_ending_date,
+                   COALESCE(b.works, 0) AS works,
+                   COALESCE(c.cost, 0)  AS cost
+              FROM project_weekly_reports r
+              LEFT JOIN LATERAL (
+                  SELECT sum(amount_this_week) AS works
+                    FROM project_beme_progress WHERE weekly_report_id = r.id) b ON TRUE
+              LEFT JOIN LATERAL (
+                  SELECT sum(amount_this_week) AS cost
+                    FROM project_cost_report WHERE weekly_report_id = r.id) c ON TRUE
+             WHERE r.status = 'completed' AND {scope}
+             ORDER BY r.project_id, r.year, r.week_number""",
+        *params,
+    )
+    series = []
+    for r in rows:
+        works = float(r["works"] or 0); cost = float(r["cost"] or 0)
+        series.append({
+            "project_id": str(r["project_id"]), "year": r["year"], "week_number": r["week_number"],
+            "week_ending_date": r["week_ending_date"].isoformat() if r["week_ending_date"] else None,
+            "works": works, "works_incl_vat": works * VAT, "cost": cost, "net": works * VAT - cost,
+        })
+    return {"success": True, "data": {"series": series, "vat": VAT}}
