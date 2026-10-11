@@ -54,7 +54,7 @@ This PRD specifies A completely and B–D to the depth the data model needs.
 | Role (enum value) | Sees | Does |
 |---|---|---|
 | `admin` | everything | creates projects; enters contract sums and statuses; proposes bill (BEME) revisions; uploads weeklies; manages users and assignments |
-| `project_manager` (Engr. Buge) | **all projects**, with a project picker ("All sites" default → one site) | **approves or rejects BEME revisions**; reads every report, history and audit view; (phase D) comments on weekly submissions |
+| `project_manager` | **scope chosen per user** (decision 2026-10-11): `all` — the General PM (Engr. Buge), every project, with a picker ("All sites" → one site); or `assigned` — only the projects listed for them | **approves or rejects BEME revisions** (General PM); reads every report, history and audit view within scope; (phase D) comments on weekly submissions |
 | `site_engineer` | **only** projects in `user_project_assignments` | reads their project's bills; (phase C/D) enters/uploads this week's quantities; sees their own activity |
 | `plant_officer` | plant module only | unchanged |
 
@@ -123,10 +123,19 @@ Award letter, variation orders, completion certificates, revised BEMEs.
 Add `kind` and `linked_table/linked_id` so a contract-sum row can point at
 its instrument.
 
-### 3.5 Team: `user_project_assignments` (existing, empty)
-`user_id, project_id, role_on_project (site_engineer · project_manager ·
-observer), created_by, created_at, ended_at`. Site engineers are scoped
-by this table; the PM's "picker" is a UI preference, not a row.
+### 3.5 Scope: `users.project_scope` + `user_project_assignments`
+- `users.project_scope` enum `all · assigned` — meaningful for
+  `project_manager` (the General PM is `all`; a project-scoped PM is
+  `assigned`) and fixed at `assigned` for `site_engineer`. Chosen on the
+  user form, never implied by the absence of rows.
+- `user_project_assignments` (existing, empty): `user_id, project_id,
+  role_on_project (site_engineer · project_manager · observer),
+  created_by, created_at, ended_at`. The user form's project multi-select
+  writes these rows (built in A-3, when the register lists the real
+  projects).
+- Enforcement is in SQL on every projects endpoint: `scope = 'all'` → no
+  filter; otherwise `WHERE p.id = ANY($assigned_ids)`. The header picker
+  only narrows within scope, never widens it.
 
 ### 3.6 Bills (phase B — structure fixed now)
 - `project_beme_revisions`: `id, project_id, revision_no, source (award_beme
