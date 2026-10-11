@@ -15,8 +15,10 @@ dated history of contract sums and statuses; each project carries its own
 web form later — contributes **this week's quantities only**, matched to
 our bills; everything else (to-date, %, VAT, provisions, quarter, year) is
 **computed by the system** from those facts and the project's own
-parameters. Every change to a sum, a status or a bill is proposed by one
-person, approved by another, and kept forever.
+parameters. Contract sums and statuses are entered by the admin and kept
+as dated history; **bills are the one thing that needs approval** — by the
+project manager (Engr. Buge) — because every weekly figure is valued
+against them.
 
 Build order: **A. Register → B. Bills → C. Weekly facts → D. Reports/form.**
 This PRD specifies A completely and B–D to the depth the data model needs.
@@ -32,8 +34,10 @@ This PRD specifies A completely and B–D to the depth the data model needs.
   Q2 report and absent from today's ongoing list.
 - Four roles, with the project manager seeing every site and able to
   focus on one, and the site engineer confined to their own project.
-- Maker–checker approval with in-app notification for every change to a
-  contract sum, a status or (phase B) a bill.
+- Approval (with in-app notification) for **bills only** — a BEME
+  revision is proposed by the admin and approved by the project manager.
+  Contract sums and statuses are entered directly; their history is kept
+  automatically.
 - A complete, queryable "who did what" trail.
 
 **Non-goals (for now)**
@@ -49,14 +53,14 @@ This PRD specifies A completely and B–D to the depth the data model needs.
 
 | Role (enum value) | Sees | Does |
 |---|---|---|
-| `admin` | everything | creates projects; proposes contract-sum / status / bill changes; uploads weeklies; manages users and assignments; approves what another admin or the PM proposed |
-| `project_manager` | **all projects**, with a project picker ("All sites" default → one site) | approves proposals; reads every report, history and audit view; (phase D) comments on weekly submissions |
+| `admin` | everything | creates projects; enters contract sums and statuses; proposes bill (BEME) revisions; uploads weeklies; manages users and assignments |
+| `project_manager` (Engr. Buge) | **all projects**, with a project picker ("All sites" default → one site) | **approves or rejects BEME revisions**; reads every report, history and audit view; (phase D) comments on weekly submissions |
 | `site_engineer` | **only** projects in `user_project_assignments` | reads their project's bills; (phase C/D) enters/uploads this week's quantities; sees their own activity |
 | `plant_officer` | plant module only | unchanged |
 
 Rules
-- Maker ≠ checker on every approval. With one admin and one PM in the
-  company today that works; if the PM proposes, an admin approves.
+- One approval in the whole module: BEME revisions, proposed by `admin`,
+  approved by `project_manager`. Nothing else waits on anyone.
 - `site_engineer` loses its plant duties: the `location_id` requirement
   on user creation, the one-engineer-per-location check, and the
   `(site)` route group are retired for this role (the plant weekly report
@@ -102,18 +106,17 @@ created_by, updated_by`.
 | instrument_ref | text | VO number, letter reference |
 | document_path | text | Storage path, served via API only |
 | note | text | |
-| state | enum `pending · approved · rejected · superseded` | |
-| proposed_by / proposed_at | uuid / timestamptz | |
-| decided_by / decided_at / decision_note | uuid / timestamptz / text | |
-Constraint: at most one `original` per project. "Current" = latest
-approved by `effective_date`, then `decided_at`.
+| created_by / created_at | uuid / timestamptz | who entered it — no approval step |
+Constraint: at most one `original` per project. "Current" = latest row by
+`effective_date`, then `created_at`. A wrong entry is fixed by a new
+`correction` row (note required); rows are never edited or deleted.
 
 ### 3.3 `project_status_events`
-`id, project_id, status (enum), effective_date, note, state, proposed_by,
-proposed_at, decided_by, decided_at, decision_note`.
+`id, project_id, status (enum), effective_date, note, created_by,
+created_at`. Entered directly by the admin, no approval.
 Status enum: `awarded · mobilised · active · suspended ·
 substantially_complete · finally_complete · closed`. Allowed transitions
-in §4. "Status as at D" = latest approved event with `effective_date ≤ D`.
+in §4. "Status as at D" = latest event with `effective_date ≤ D`.
 
 ### 3.4 `project_documents` (existing table, reused)
 Award letter, variation orders, completion certificates, revised BEMEs.
@@ -183,10 +186,14 @@ Reports and lists:
 
 ## 5. Contract sums — rules
 
-1. Entered with the project (`original`), then only by new rows.
+1. Entered with the project (`original`), then only by new rows. **The
+   figure entered as `original` for the twelve ongoing projects is the
+   head-office "revised contract sum" from the PDF** — that is the number
+   the company works to today. Earlier sums (e.g. Akwa's 10,621,359,979.09)
+   may be added later as history if the documents are wanted; nothing
+   depends on it.
 2. Amount is the resulting sum, so the table reads like the PDF; delta is
-   derived. Akwa: `original 10,621,359,979.09` → `variation
-   14,621,359,979.09 (delta 4,000,000,000.00)`.
+   derived for any later `variation` row.
 3. `basis` is mandatory. The register page shows "all-in" and "ex-VAT"
    sums in different columns, never mixed in one total.
 4. The "ongoing projects" page = the PDF, regenerated: name, state,
@@ -198,28 +205,31 @@ Reports and lists:
 
 ---
 
-## 6. Approval workflow
+## 6. Approval — bills only
 
-State machine for every proposable row (contract sum, status event,
-BEME revision, later: opening position):
+The only thing that waits for a signature is a **BEME revision** (phase
+B): the first import of a project's bills, and any later change to rates,
+items or bills.
 
 ```
-pending ──approve──▶ approved (effective)      maker ≠ checker
-   └────reject────▶ rejected (reason required) → maker may propose anew
-approved ──(a later approved row of the same kind)──▶ superseded
+pending ──approve──▶ approved (effective)      admin proposes, PM approves
+   └────reject────▶ rejected (reason required) → admin fixes and re-proposes
+approved ──(a later approved revision)──▶ superseded
 ```
-- On `propose`: notification to role `project_manager` (or to `admin` when
-  the PM is the maker) — title, one-line diff summary, link to the review
-  screen. Reminder every 24 h while pending > 72 h; dashboard card
-  "Awaiting your approval (n)".
-- Review screen: old vs new side by side; attached document; for BEME
-  revisions the item-level diff and the change in works total; for
-  contract sums the resulting delta; **"if approved, these figures
-  change"** preview.
-- On decision: notification to the maker; audit row; caches recomputed by
-  trigger.
-- Pending rows affect nothing: lists, reports and exports read approved
-  rows only.
+- On propose: notification to `project_manager` — project, revision
+  number, one-line summary ("6 bills, 180 items, works 7,134,645,052.32"
+  or "3 rates changed, works total +39,781,800.00"), link to the review
+  screen. Dashboard card "Bills awaiting your approval (n)".
+- Review screen: bills and items with our Σ vs the file's totals; for a
+  later revision, the item-level diff against the previous one; the
+  attached source file.
+- On decision: notification to the admin; audit row;
+  `projects.current_beme_revision_id` moves on approval.
+- A pending revision affects nothing: weekly uploads match against the
+  current approved revision only.
+
+Contract sums and statuses: no workflow. The admin enters them, the
+history table and the audit log record who and when.
 
 ---
 
@@ -238,11 +248,11 @@ approved ──(a later approved row of the same kind)──▶ superseded
    **Overview · Bills (B) · Weeks (C) · Documents · Team · History ·
    Activity**. History = merged timeline of contract sums, statuses,
    revisions (who/when/state). Activity = `audit_logs` filtered.
-4. **Propose change** dialogs — contract sum (kind, amount, basis,
+4. **Add change** dialogs (admin) — contract sum (kind, amount, basis,
    effective date, instrument, document, note); status (status, effective
-   date, note). Submit → pending.
-5. **Approvals** `/projects/approvals` (PM, admin) — pending list,
-   review screen, approve/reject.
+   date, note). Saved immediately; appears in History.
+5. **Bills approvals** `/projects/approvals` (PM) — phase B: pending
+   revisions, review screen, approve/reject.
 6. **Ongoing projects** `/projects/ongoing?asat=YYYY-MM-DD` — the PDF,
    live; export.
 7. **Users & assignments** — existing admin pages: role list reduced to
@@ -258,11 +268,12 @@ POST   /projects                                     admin
 GET    /projects/{id}
 GET    /projects/{id}/history                        merged timeline
 GET    /projects/{id}/activity                       audit rows
-POST   /projects/{id}/contract-sums                  propose
-POST   /projects/{id}/status-events                  propose
-GET    /projects/approvals?state=pending             PM, admin
-POST   /projects/approvals/{kind}/{id}/approve       checker ≠ maker
-POST   /projects/approvals/{kind}/{id}/reject        reason required
+POST   /projects/{id}/contract-sums                  admin — saved, audited
+POST   /projects/{id}/status-events                  admin — saved, audited
+(phase B)
+GET    /projects/approvals?state=pending             PM
+POST   /projects/beme-revisions/{id}/approve         PM
+POST   /projects/beme-revisions/{id}/reject          PM, reason required
 GET    /projects/ongoing?as_at=                      + ?format=xlsx|pdf
 GET    /projects/{id}/documents/{doc_id}             streamed, role-checked
 PUT    /users/{id}/projects                          admin: assignments
@@ -327,29 +338,28 @@ document — not scripted — so each gets its instrument attached.
 ## 11. Acceptance tests (phase A)
 
 Register & history
-- A1 Creating a project writes exactly one `original` contract sum
-  (pending), one `awarded` status (pending), one audit row each.
-- A2 A pending contract sum changes nothing on `/projects` or
-  `/projects/ongoing`; approving it updates `current_contract_sum`
-  within the same transaction (trigger).
+- A1 Creating a project writes exactly one `original` contract sum, one
+  `awarded` (or chosen) status event, and one audit row each.
+- A2 Adding a contract sum updates `current_contract_sum` within the same
+  transaction (trigger); the previous row stays and shows in History.
 - A3 `GET /projects/ongoing?as_at=2026-06-30` lists Kwoi when Kwoi has
   `active` from 2025-xx and `finally_complete` from 2026-08-xx;
   `as_at=2026-10-11` does not.
 - A4 Two contract sums with the same `effective_date`: the later
-  `decided_at` wins; the earlier is `superseded`.
-- A5 `history` returns contract sums, statuses and revisions merged,
-  newest first, each with proposer, decider and state.
-- A6 A `correction` row must carry a note and a decision by someone other
-  than the proposer.
+  `created_at` is current.
+- A5 `history` returns contract sums, statuses and (phase B) revisions
+  merged, newest first, each with who and when.
+- A6 A `correction` row without a note → 422. Rows cannot be edited or
+  deleted through any endpoint.
 
-Approval
-- B1 The proposer cannot approve their own row (403, audited).
+Approval (phase B — written now so the model is right)
+- B1 Only `project_manager` can approve or reject a BEME revision (403
+  otherwise, audited).
 - B2 Reject without a reason → 422.
-- B3 Proposing creates one notification for `project_manager` (or
-  `admin` when the PM proposes) with a working `action_url`; deciding
-  creates one for the proposer.
-- B4 A pending row older than 72 h produces a reminder notification at
-  most once per 24 h.
+- B3 Proposing creates one notification for `project_manager` with a
+  working `action_url`; deciding creates one for the proposer.
+- B4 A pending revision is never the project's
+  `current_beme_revision_id`.
 
 Roles & scope
 - C1 A `site_engineer` with no assignment sees an empty register and 403
@@ -384,7 +394,7 @@ Migration
 |---|---|---|
 | A-1 | Roles v3 (migration 031, `roles.ts`, user form, gates) | E1, C4 pass; existing users log in and land correctly |
 | A-2 | History tables + caches + backfill (032–033) | E2; register page unchanged to the eye |
-| A-3 | Propose/approve API + notifications + audit wrapper | A1–A6, B1–B4, D1 |
+| A-3 | Register API (create, contract sums, status events, history, activity, ongoing-as-at) + audit wrapper | A1–A6, D1 |
 | A-4 | Screens: register, new project, project page (History, Activity, Documents, Team), approvals, ongoing-as-at + export | manual walkthrough with the 3 active projects |
 | A-5 | Enter the 12 ongoing projects (user, by hand, from documents) | `/projects/ongoing` reproduces the PDF to the kobo |
 
@@ -412,9 +422,9 @@ commands, log phrases, tests — per the working protocol.
    quantities and %?
 2. Kaduna contract sum: 3,976,872,460.00 (`ex_vat`?) or
    4,617,148,926.06 (`all_in`)?
-3. Kwoi: completion date and instrument, so its status history is real.
-4. Should an admin be allowed to approve another admin's proposal, or
-   must the PM approve everything in the register? (Default here: either
-   PM or a *different* admin.)
-5. Revised-sum documents for Maru–Lugga (8,574,216,648.75) and Akwa
-   (+₦4,000,000,000.00) — needed to set `basis` and `instrument_ref`.
+3. Kwoi: completion date, so its status history is real.
+4. ~~Who approves register changes~~ — decided 2026-10-11: nothing in the
+   register needs approval; only BEME revisions do, and Engr. Buge
+   (`project_manager`) approves them.
+5. The PDF's revised sums are entered as the `original` contract sum
+   (decided). `basis` defaults to `all_in` except Kaduna (Q2).
