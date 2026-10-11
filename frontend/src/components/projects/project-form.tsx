@@ -66,7 +66,11 @@ function buildInitialForm(project?: Project): Record<string, any> {
     client: project?.client ?? '',
     short_name: project?.short_name ?? '',
     state_id: project?.state_id ?? '',
-    status: project?.status ?? 'active',
+    status: project?.status ?? 'awarded',
+    status_effective_date: '',
+    contract_sum_basis: 'all_in',
+    contract_instrument_ref: '',
+    contract_sum_effective_date: '',
     project_type: project?.project_type ?? '',
     work_nature: project?.work_nature ?? '',
     is_legacy: project?.is_legacy ?? false,
@@ -167,8 +171,12 @@ export function ProjectForm({ project, mode }: ProjectFormProps) {
     }
 
     // Build payload — only include non-empty values
+    const HISTORY_ONLY = ['status_effective_date', 'contract_sum_basis', 'contract_instrument_ref', 'contract_sum_effective_date']
+    // in edit mode sums and status live in History (PRD v2 §3.2–3.3) — never send them here
+    const HISTORY_OWNED = ['status', 'original_contract_sum', 'variation_sum', 'current_contract_sum']
     const payload: Record<string, any> = {}
     for (const [key, value] of Object.entries(form)) {
+      if (mode === 'edit' && (HISTORY_ONLY.includes(key) || HISTORY_OWNED.includes(key))) continue
       if (value === '' || value === null || value === undefined) continue
       if (key === 'state_id' && value === 'none') continue
       if (NUMERIC_FIELDS.includes(key)) {
@@ -289,20 +297,41 @@ export function ProjectForm({ project, mode }: ProjectFormProps) {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="relative">
-                <FieldDot field="status" />
-                <Label htmlFor="status">Status</Label>
-                <Select value={form.status} onValueChange={(v) => handleChange('status', v)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {STATUS_OPTIONS.map((opt) => (
-                      <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              {mode === 'create' ? (
+                <>
+                  <div className="relative">
+                    <Label htmlFor="status">Opening status</Label>
+                    <Select value={form.status} onValueChange={(v) => handleChange('status', v)}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {STATUS_OPTIONS.map((opt) => (
+                          <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="relative">
+                    <Label htmlFor="status_effective_date">Status effective from</Label>
+                    <Input
+                      id="status_effective_date"
+                      type="date"
+                      value={form.status_effective_date}
+                      onChange={(e) => handleChange('status_effective_date', e.target.value)}
+                    />
+                    <p className="mt-0.5 text-[11px] text-muted-foreground">Blank = commencement date, else award date, else today.</p>
+                  </div>
+                </>
+              ) : (
+                <div className="relative">
+                  <Label>Status</Label>
+                  <p className="mt-2 text-sm">
+                    {STATUS_OPTIONS.find((o) => o.value === form.status)?.label ?? form.status}
+                    <span className="ml-2 text-xs text-muted-foreground">— change it on the project&apos;s History tab</span>
+                  </p>
+                </div>
+              )}
               <div className="relative">
                 <FieldDot field="project_type" />
                 <Label htmlFor="project_type">Type</Label>
@@ -362,45 +391,60 @@ export function ProjectForm({ project, mode }: ProjectFormProps) {
         <SectionHeader id="contract" label="Contract Details" />
         {openSections.contract && (
           <CardContent className="space-y-4">
+            {mode === 'edit' && (
+              <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+                Contract sums are dated facts: the current sum is {form.current_contract_sum !== '' ? `₦${Number(form.current_contract_sum).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'not recorded'}.
+                Record a variation, revision or correction on the project&apos;s <strong>History</strong> tab.
+              </p>
+            )}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="relative">
-                <FieldDot field="original_contract_sum" />
-                <Label htmlFor="original_contract_sum">Original Contract Sum (₦)</Label>
-                <Input
-                  id="original_contract_sum"
-                  type="number"
-                  step="0.01"
-                  value={form.original_contract_sum}
-                  onChange={(e) => handleChange('original_contract_sum', e.target.value)}
-                />
-              </div>
-              <div className="relative">
-                <FieldDot field="variation_sum" />
-                <Label htmlFor="variation_sum">Variation Sum (₦)</Label>
-                <Input
-                  id="variation_sum"
-                  type="number"
-                  step="0.01"
-                  value={form.variation_sum}
-                  onChange={(e) => handleChange('variation_sum', e.target.value)}
-                />
-              </div>
-              <div className="relative">
-                <FieldDot field="current_contract_sum" />
-                <Label htmlFor="current_contract_sum">Current Contract Sum (₦)</Label>
-                <Input
-                  id="current_contract_sum"
-                  type="number"
-                  step="0.01"
-                  value={form.current_contract_sum}
-                  onChange={(e) => handleChange('current_contract_sum', e.target.value)}
-                />
-                {Number(form.original_contract_sum) > 0 && (
-                  <p className="text-[11px] text-muted-foreground mt-0.5">
-                    Auto-computed: {Number(form.original_contract_sum) || 0} + {Number(form.variation_sum) || 0}
-                  </p>
-                )}
-              </div>
+              {mode === 'create' && (
+                <>
+                  <div className="relative">
+                    <Label htmlFor="original_contract_sum">Contract sum (₦)</Label>
+                    <Input
+                      id="original_contract_sum"
+                      type="number"
+                      step="0.01"
+                      value={form.original_contract_sum}
+                      onChange={(e) => handleChange('original_contract_sum', e.target.value)}
+                      placeholder="the sum the company works to today"
+                    />
+                  </div>
+                  <div className="relative">
+                    <Label htmlFor="contract_sum_basis">Basis</Label>
+                    <Select value={form.contract_sum_basis} onValueChange={(v) => handleChange('contract_sum_basis', v)}>
+                      <SelectTrigger id="contract_sum_basis">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all_in">All-in (incl. provisions &amp; VAT)</SelectItem>
+                        <SelectItem value="ex_vat">Ex-VAT</SelectItem>
+                        <SelectItem value="unknown">Unknown</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="relative">
+                    <Label htmlFor="contract_sum_effective_date">Sum effective from</Label>
+                    <Input
+                      id="contract_sum_effective_date"
+                      type="date"
+                      value={form.contract_sum_effective_date}
+                      onChange={(e) => handleChange('contract_sum_effective_date', e.target.value)}
+                    />
+                    <p className="mt-0.5 text-[11px] text-muted-foreground">Blank = award date.</p>
+                  </div>
+                  <div className="relative md:col-span-2">
+                    <Label htmlFor="contract_instrument_ref">Instrument reference</Label>
+                    <Input
+                      id="contract_instrument_ref"
+                      value={form.contract_instrument_ref}
+                      onChange={(e) => handleChange('contract_instrument_ref', e.target.value)}
+                      placeholder="award letter / contract reference"
+                    />
+                  </div>
+                </>
+              )}
               <div className="relative">
                 <FieldDot field="retc" />
                 <Label htmlFor="retc">RETC</Label>

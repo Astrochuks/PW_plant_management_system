@@ -143,6 +143,11 @@ export interface CreateProjectRequest {
   client: string;
   short_name?: string;
   state_id?: string;
+  /** PRD v2 §3.2–3.3 — recorded with the project, stored in the history tables */
+  status_effective_date?: string;
+  contract_sum_basis?: ContractSumBasis;
+  contract_sum_effective_date?: string;
+  contract_instrument_ref?: string;
   original_contract_sum?: number;
   variation_sum?: number;
   current_contract_sum?: number;
@@ -1384,4 +1389,164 @@ export async function markFleetNumberExternal(raw: string, label?: string): Prom
   await apiClient.post('/projects/unmapped-fleet-numbers/mark-external', {
     fleet_number_raw: raw, label,
   });
+}
+
+// ============================================================================
+// Register history, documents, team, ongoing (PRD v2 — A-3/A-4)
+// ============================================================================
+
+export type ContractSumKind = 'original' | 'variation' | 'revision' | 'correction'
+export type ContractSumBasis = 'all_in' | 'ex_vat' | 'unknown'
+
+export interface HistoryEntry {
+  id: string
+  entry_type: 'contract_sum' | 'status'
+  /** contract-sum kind or the status value */
+  label: string
+  amount: number | null
+  delta: number | null
+  basis: ContractSumBasis | null
+  is_current: boolean
+  effective_date: string
+  instrument_ref: string | null
+  document_path: string | null
+  note: string | null
+  created_at: string
+  created_by_name: string | null
+  created_by_email: string | null
+}
+
+export interface ActivityEntry {
+  id: string
+  action: string
+  table_name: string
+  record_id: string | null
+  description: string | null
+  old_values: Record<string, unknown> | null
+  new_values: Record<string, unknown> | null
+  user_email: string | null
+  created_at: string
+}
+
+export interface OngoingProject {
+  id: string
+  project_name: string
+  short_name: string | null
+  client: string
+  project_type: string | null
+  state_name: string | null
+  status: ProjectStatus
+  status_since: string
+  contract_sum: number | null
+  contract_sum_basis: ContractSumBasis | null
+  contract_sum_kind: ContractSumKind | null
+}
+
+export interface ProjectDocument {
+  id: string
+  project_id: string
+  document_type: string
+  title: string | null
+  description: string | null
+  file_path: string
+  file_name: string
+  file_size: number | null
+  mime_type: string | null
+  uploaded_by: string | null
+  uploaded_by_name: string | null
+  uploaded_at: string
+  linked_table: string | null
+  linked_id: string | null
+}
+
+export interface TeamMember {
+  id: string
+  full_name: string | null
+  email: string
+  role: string
+  project_scope?: string
+  role_on_project?: string
+  assigned_at?: string
+}
+
+export interface AddContractSumRequest {
+  kind: ContractSumKind
+  amount: number
+  basis: ContractSumBasis
+  effective_date: string
+  instrument_ref?: string
+  document_path?: string
+  note?: string
+}
+
+export interface AddStatusEventRequest {
+  status: ProjectStatus
+  effective_date: string
+  note?: string
+}
+
+const numOrNull = (v: unknown): number | null => (v == null ? null : Number(v))
+
+export async function getProjectHistory(projectId: string): Promise<HistoryEntry[]> {
+  const res = await apiClient.get<{ data: HistoryEntry[] }>(`/projects/${projectId}/history`)
+  return res.data.data.map((e) => ({ ...e, amount: numOrNull(e.amount), delta: numOrNull(e.delta) }))
+}
+
+export async function getProjectActivity(projectId: string, limit = 100): Promise<ActivityEntry[]> {
+  const res = await apiClient.get<{ data: ActivityEntry[] }>(`/projects/${projectId}/activity`, { params: { limit } })
+  return res.data.data
+}
+
+export async function getOngoingProjects(asAt?: string): Promise<{
+  data: OngoingProject[]
+  meta: { as_at: string; count: number; total_contract_sum: number }
+}> {
+  const res = await apiClient.get<{ data: OngoingProject[]; meta: { as_at: string; count: number; total_contract_sum: number } }>(
+    '/projects/ongoing', { params: asAt ? { as_at: asAt } : {} })
+  return {
+    data: res.data.data.map((p) => ({ ...p, contract_sum: numOrNull(p.contract_sum) })),
+    meta: { ...res.data.meta, total_contract_sum: Number(res.data.meta.total_contract_sum ?? 0) },
+  }
+}
+
+export async function addContractSum(projectId: string, body: AddContractSumRequest): Promise<{ current_contract_sum: number }> {
+  const res = await apiClient.post<{ meta: { current_contract_sum: number } }>(`/projects/${projectId}/contract-sums`, body)
+  return { current_contract_sum: Number(res.data.meta.current_contract_sum) }
+}
+
+export async function addStatusEvent(projectId: string, body: AddStatusEventRequest): Promise<{ status: ProjectStatus; status_since: string }> {
+  const res = await apiClient.post<{ meta: { status: ProjectStatus; status_since: string } }>(`/projects/${projectId}/status-events`, body)
+  return res.data.meta
+}
+
+export async function getProjectDocuments(projectId: string): Promise<ProjectDocument[]> {
+  const res = await apiClient.get<{ data: ProjectDocument[] }>(`/projects/${projectId}/documents`)
+  return res.data.data
+}
+
+export async function uploadProjectDocument(
+  projectId: string,
+  file: File,
+  meta: { document_type: string; title?: string; linked_table?: string; linked_id?: string },
+): Promise<ProjectDocument> {
+  const fd = new FormData()
+  fd.append('file', file)
+  fd.append('document_type', meta.document_type)
+  if (meta.title) fd.append('title', meta.title)
+  if (meta.linked_table) fd.append('linked_table', meta.linked_table)
+  if (meta.linked_id) fd.append('linked_id', meta.linked_id)
+  const res = await apiClient.post<{ data: ProjectDocument }>(`/projects/${projectId}/documents`, fd, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+  return res.data.data
+}
+
+export async function getProjectDocumentUrl(projectId: string, documentId: string): Promise<string> {
+  const res = await apiClient.get<{ data: { url: string } }>(`/projects/${projectId}/documents/${documentId}/download`)
+  return res.data.data.url
+}
+
+export async function getProjectTeam(projectId: string): Promise<{ assigned: TeamMember[]; general_managers: TeamMember[] }> {
+  const res = await apiClient.get<{ data: { assigned: TeamMember[]; general_managers: TeamMember[] } }>(`/projects/${projectId}/team`)
+  return res.data.data
 }

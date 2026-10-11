@@ -325,9 +325,13 @@ is 034.)
    + `created_by`, `ended_at` (assignments end, never delete), FK to users;
    `project_documents.linked_table/linked_id`; notification types
    `approval_requested`, `approval_decided`, `assignment_changed`.
-6. (phase B) `040_beme_revisions`: revisions table, `revision_id` on
+6. `040_seed_history_bypass` — **applied 2026-10-11**: the 038 trigger
+   stands down for a transaction that sets `app.seed_history = 'off'`, so
+   `POST /projects` writes the first status event and original contract
+   sum itself (basis, instrument, effective dates from the form).
+7. (phase B) `041_beme_revisions`: revisions table, `revision_id` on
    bills/items, backfill revision 1 per project, parameters table.
-7. (phase C) `041_week_items`.
+8. (phase C) `042_week_items`.
 
 Each migration ships with its `down` and a `tests/test_migration_03x.py`
 that asserts counts before/after (run with the user's go — DB-heavy).
@@ -420,7 +424,7 @@ Migration
 | A-1 | Roles v3 (migration 031, `roles.ts`, user form, gates) | E1, C4 pass; existing users log in and land correctly |
 | A-2 | History tables + caches + backfill (032–033) | E2; register page unchanged to the eye |
 | A-3 | Register API (contract sums, status events, history, activity, ongoing-as-at) + scoping (`project_scope` + assignments, router-level 404 guard, portfolio/list/stats/submissions filtered) + user-form scope picker + audit on every write | A2–A6, C1–C3, D1 — **shipped 2026-10-11** (create-with-history endpoint moves to A-4 with its screen) |
-| A-4 | Screens: register, new project, project page (History, Activity, Documents, Team), approvals, ongoing-as-at + export | manual walkthrough with the 3 active projects |
+| A-4 | Screens: new project (opening status + contract sum with basis/instrument/effective dates), project page tabs History (timeline + record-sum / change-status dialogs), Documents (upload to private storage, signed links), Team, Activity; `/projects/ongoing` as-at + Excel export; PM header picker | **shipped 2026-10-11** — walked through on Maru-Lugga; approvals screen → phase B |
 | A-5 | Enter the 12 ongoing projects (user, by hand, from documents) | `/projects/ongoing` reproduces the PDF to the kobo |
 
 Each milestone: one PR-sized commit set, change manifest, verify

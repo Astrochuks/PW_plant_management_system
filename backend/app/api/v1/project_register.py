@@ -13,12 +13,15 @@ from datetime import date
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
+import re
+from uuid import uuid4
+
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Query, Request, UploadFile
 from pydantic import BaseModel, Field, field_validator
 
 from app.api.v1.auth import get_client_ip
 from app.core.exceptions import NotFoundError, ValidationError
-from app.core.pool import fetch, fetchrow
+from app.core.pool import fetch, fetchrow, fetchval
 from app.core.project_scope import (
     project_scope_guard,
     scope_condition,
@@ -306,3 +309,138 @@ async def add_status_event(
                 effective=str(body.effective_date), by=current_user.email)
     return {"success": True, "data": row,
             "meta": {"status": after["status"], "status_since": str(after["status_since"])}}
+
+
+# ── team ───────────────────────────────────────────────────────────────────
+
+@router.get("/{project_id}/team")
+async def project_team(
+    project_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(require_projects_read)],
+) -> dict[str, Any]:
+    """Who works this project: the users assigned to it (project-scoped PMs,
+    site engineers) plus the General PMs, who see every project by scope."""
+    await _project_or_404(project_id)
+    assigned = await fetch(
+        """SELECT u.id, u.full_name, u.email, u.role::text AS role, u.project_scope,
+                  a.role_on_project, a.created_at AS assigned_at
+             FROM user_project_assignments a
+             JOIN users u ON u.id = a.user_id
+            WHERE a.project_id = $1::uuid AND a.ended_at IS NULL AND u.is_active
+            ORDER BY u.role, u.full_name""",
+        str(project_id),
+    )
+    general = await fetch(
+        """SELECT id, full_name, email, role::text AS role
+             FROM users
+            WHERE role = 'project_manager' AND project_scope = 'all' AND is_active
+            ORDER BY full_name""")
+    return {"success": True, "data": {"assigned": assigned, "general_managers": general}}
+
+
+# ── documents ──────────────────────────────────────────────────────────────
+
+DOCUMENT_TYPES = ['award_letter', 'completion_cert', 'certificate', 'contract', 'payment_voucher', 'other']
+_SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
+MAX_DOCUMENT_BYTES = 25 * 1024 * 1024
+
+
+@router.get("/{project_id}/documents")
+async def list_documents(
+    project_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(require_projects_read)],
+) -> dict[str, Any]:
+    await _project_or_404(project_id)
+    rows = await fetch(
+        """SELECT d.*, u.full_name AS uploaded_by_name
+             FROM project_documents d
+             LEFT JOIN users u ON u.id = d.uploaded_by
+            WHERE d.project_id = $1::uuid
+            ORDER BY d.uploaded_at DESC""",
+        str(project_id),
+    )
+    return {"success": True, "data": rows}
+
+
+@router.post("/{project_id}/documents", status_code=201)
+async def upload_document(
+    project_id: UUID,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+    file: UploadFile = File(...),
+    document_type: str = Form("other"),
+    title: str | None = Form(None),
+    linked_table: str | None = Form(None),
+    linked_id: UUID | None = Form(None),
+) -> dict[str, Any]:
+    """Attach the evidence behind a register fact (award letter, variation
+    order, completion certificate…). Stored untouched in the private
+    'reports' bucket; served only through the signed-link route below."""
+    project = await _project_or_404(project_id)
+    if document_type not in DOCUMENT_TYPES:
+        raise ValidationError(f"document_type must be one of: {', '.join(DOCUMENT_TYPES)}")
+    if linked_table and linked_table not in ("project_contract_sums", "project_status_events", "project_beme_revisions"):
+        raise ValidationError("linked_table must name a history table")
+    content = await file.read()
+    if not content:
+        raise ValidationError("The file is empty")
+    if len(content) > MAX_DOCUMENT_BYTES:
+        raise ValidationError("The file is larger than 25 MB")
+
+    safe = _SAFE_NAME.sub("_", file.filename or "document")[:120]
+    storage_path = f"projects/{project_id}/documents/{uuid4().hex}_{safe}"
+    from app.core.database import get_supabase_admin_client  # Storage only
+    try:
+        get_supabase_admin_client().storage.from_("reports").upload(
+            storage_path, content,
+            {"content-type": file.content_type or "application/octet-stream"},
+        )
+    except Exception as e:  # noqa: BLE001 — surface the storage error as-is
+        logger.error("Document upload failed", path=storage_path, error=f"{type(e).__name__}: {e}")
+        raise ValidationError(f"Could not store the file: {e}") from e
+
+    row = await fetchrow(
+        """INSERT INTO project_documents
+             (project_id, document_type, title, file_path, file_name, file_size,
+              mime_type, uploaded_by, linked_table, linked_id)
+           VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8::uuid, $9, $10::uuid)
+           RETURNING *""",
+        str(project_id), document_type, (title or "").strip() or None, storage_path,
+        file.filename or safe, len(content), file.content_type, current_user.id,
+        linked_table, str(linked_id) if linked_id else None,
+    )
+    _audit(background_tasks, request, current_user,
+           action="document_uploaded", table="project_documents", record_id=str(project_id),
+           old=None,
+           new={"project_id": str(project_id), "id": str(row["id"]), "document_type": document_type,
+                "file_name": file.filename, "size": len(content), "linked_table": linked_table,
+                "linked_id": str(linked_id) if linked_id else None},
+           description=f"{document_type} '{file.filename}' uploaded to "
+                       f"{project['short_name'] or project['project_name']}")
+    logger.info("Project document uploaded", project_id=str(project_id), type=document_type,
+                size=len(content), by=current_user.email)
+    return {"success": True, "data": row}
+
+
+@router.get("/{project_id}/documents/{document_id}/download")
+async def document_download_url(
+    project_id: UUID,
+    document_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(require_projects_read)],
+) -> dict[str, Any]:
+    """One-hour signed link; the route itself is scope-guarded, so a user who
+    may not see the project cannot reach its documents."""
+    doc = await fetchrow(
+        "SELECT file_path, file_name FROM project_documents WHERE id = $1::uuid AND project_id = $2::uuid",
+        str(document_id), str(project_id),
+    )
+    if not doc:
+        raise NotFoundError("Document", str(document_id))
+    from app.core.database import get_supabase_admin_client  # Storage only
+    res = get_supabase_admin_client().storage.from_("reports").create_signed_url(
+        doc["file_path"], 3600, options={"download": doc["file_name"] or True})
+    url = res.get("signedURL") or res.get("signedUrl") or res.get("signed_url") if isinstance(res, dict) else None
+    if not url:
+        raise ValidationError("Could not create a download link")
+    return {"success": True, "data": {"url": url, "expires_in": 3600}}

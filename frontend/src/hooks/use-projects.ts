@@ -35,6 +35,22 @@ import {
   type Milestone,
   type ProjectMilestonesData,
   type LinkableProject,
+  getProjectHistory,
+  getProjectActivity,
+  getOngoingProjects,
+  addContractSum,
+  addStatusEvent,
+  getProjectDocuments,
+  uploadProjectDocument,
+  getProjectDocumentUrl,
+  getProjectTeam,
+  type HistoryEntry,
+  type ActivityEntry,
+  type OngoingProject,
+  type ProjectDocument,
+  type TeamMember,
+  type AddContractSumRequest,
+  type AddStatusEventRequest,
 } from '@/lib/api/projects';
 
 export type { Project, ProjectStats, PaginationMeta, ProjectsListParams, ImportResult, Milestone, ProjectMilestonesData, LinkableProject };
@@ -600,5 +616,101 @@ export function usePreviewWeeklyReport() {
   return useMutation({
     mutationFn: ({ file, projectId }: { file: File; projectId?: string }) =>
       previewWeeklyReport(file, projectId),
+  });
+}
+
+// ============================================================================
+// Register history, documents, team, ongoing (PRD v2 — A-3/A-4)
+// ============================================================================
+
+export type { HistoryEntry, ActivityEntry, OngoingProject, ProjectDocument, TeamMember };
+
+export function useProjectHistory(id: string | null) {
+  return useQuery({
+    queryKey: [...projectsKeys.detail(id!), 'history'],
+    queryFn: () => getProjectHistory(id!),
+    enabled: !!id,
+    staleTime: 60 * 1000,
+  });
+}
+
+export function useProjectActivity(id: string | null, limit = 100) {
+  return useQuery({
+    queryKey: [...projectsKeys.detail(id!), 'activity', limit],
+    queryFn: () => getProjectActivity(id!, limit),
+    enabled: !!id,
+    staleTime: 30 * 1000,
+  });
+}
+
+export function useOngoingProjects(asAt?: string) {
+  return useQuery({
+    queryKey: [...projectsKeys.all, 'ongoing', asAt ?? 'today'],
+    queryFn: () => getOngoingProjects(asAt),
+    staleTime: 60 * 1000,
+    placeholderData: keepPreviousData,
+  });
+}
+
+/** after any history write: the project row (caches), its history, the lists, the ongoing page */
+function useInvalidateProjectHistory(projectId: string) {
+  const queryClient = useQueryClient();
+  return () => {
+    queryClient.invalidateQueries({ queryKey: projectsKeys.detail(projectId) });
+    queryClient.invalidateQueries({ queryKey: projectsKeys.lists() });
+    queryClient.invalidateQueries({ queryKey: projectsKeys.stats() });
+    queryClient.invalidateQueries({ queryKey: [...projectsKeys.all, 'ongoing'] });
+  };
+}
+
+export function useAddContractSum(projectId: string) {
+  const invalidate = useInvalidateProjectHistory(projectId);
+  return useMutation({
+    mutationFn: (body: AddContractSumRequest) => addContractSum(projectId, body),
+    onSuccess: invalidate,
+  });
+}
+
+export function useAddStatusEvent(projectId: string) {
+  const invalidate = useInvalidateProjectHistory(projectId);
+  return useMutation({
+    mutationFn: (body: AddStatusEventRequest) => addStatusEvent(projectId, body),
+    onSuccess: invalidate,
+  });
+}
+
+export function useProjectDocuments(id: string | null) {
+  return useQuery({
+    queryKey: [...projectsKeys.detail(id!), 'documents'],
+    queryFn: () => getProjectDocuments(id!),
+    enabled: !!id,
+    staleTime: 60 * 1000,
+  });
+}
+
+export function useUploadProjectDocument(projectId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { file: File; document_type: string; title?: string; linked_table?: string; linked_id?: string }) =>
+      uploadProjectDocument(projectId, args.file, args),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [...projectsKeys.detail(projectId), 'documents'] });
+      queryClient.invalidateQueries({ queryKey: [...projectsKeys.detail(projectId), 'activity'] });
+    },
+  });
+}
+
+export function useProjectDocumentUrl() {
+  return useMutation({
+    mutationFn: (args: { projectId: string; documentId: string }) => getProjectDocumentUrl(args.projectId, args.documentId),
+  });
+}
+
+export function useProjectTeam(id: string | null) {
+  return useQuery({
+    queryKey: [...projectsKeys.detail(id!), 'team'],
+    queryFn: () => getProjectTeam(id!),
+    enabled: !!id,
+    staleTime: 60 * 1000,
   });
 }

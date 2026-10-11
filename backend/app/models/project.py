@@ -56,6 +56,13 @@ class ProjectCreate(BaseModel):
         "awarded",
         pattern=r"^(awarded|mobilised|active|suspended|substantially_complete|finally_complete|closed)$",
     )
+    # ── history facts recorded with the project (PRD v2 §3.2–3.3) — these
+    # are NOT projects columns; create_project writes them to the history
+    # tables itself (migration 040 lets it bypass the 038 seed trigger)
+    status_effective_date: date | None = None
+    contract_sum_basis: str = Field("all_in", pattern=r"^(all_in|ex_vat|unknown)$")
+    contract_sum_effective_date: date | None = None
+    contract_instrument_ref: str | None = Field(None, max_length=200)
     project_type: str | None = Field(
         None,
         pattern=r"^(road|bridge|drainage|building|airport|water|infrastructure|other)$",

@@ -31,6 +31,7 @@ import {
   Lightbulb,
   AlertTriangle,
   BookOpen,
+  ClipboardList,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { homePathForRole, isProjectManagerRole, isSiteEngineerRole } from '@/lib/roles';
@@ -130,6 +131,11 @@ const projectNavItems = [
     title: 'Project Registry',
     href: '/projects',
     icon: FolderKanban,
+  },
+  {
+    title: 'Ongoing Projects',
+    href: '/projects/ongoing',
+    icon: ClipboardList,
   },
 ];
 
@@ -348,7 +354,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           <NavSection label="PROJECTS" collapsed={collapsed} separator>
             {projectNavItems.map((item) => {
               // each sub-page owns its own prefix; Registry owns the rest
-              const owned = ['/projects/executive'];
+              const owned = ['/projects/executive', '/projects/ongoing'];
               const active = owned.includes(item.href)
                 ? pathname.startsWith(item.href)
                 : pathname.startsWith('/projects') &&

@@ -2292,6 +2292,12 @@ async def create_project(
     """Create a new project (admin only)."""
     # python-mode dump: asyncpg needs real date/UUID objects, not strings
     data = project.model_dump(exclude_none=True)
+    # History facts travel with the project but live in the history tables
+    # (PRD v2 §3.2–3.3): pop them before the INSERT and write them below.
+    status_effective = data.pop("status_effective_date", None)
+    sum_basis = data.pop("contract_sum_basis", "all_in")
+    sum_effective = data.pop("contract_sum_effective_date", None)
+    instrument_ref = data.pop("contract_instrument_ref", None)
     data["created_by"] = current_user.id
     data["updated_by"] = current_user.id
 
@@ -2304,11 +2310,43 @@ async def create_project(
         else:
             placeholders.append(f"${i + 1}")
 
-    created = await fetchrow(
-        f"INSERT INTO projects ({', '.join(cols)}) "
-        f"VALUES ({', '.join(placeholders)}) RETURNING *",
-        *vals,
-    )
+    opening_sum = (project.original_contract_sum
+                   if project.original_contract_sum is not None
+                   else project.current_contract_sum)
+    today = date.today()
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            # 040: we write the first history rows ourselves, with the basis,
+            # instrument and effective dates the form knows and the row does not
+            await conn.execute("SET LOCAL app.seed_history = 'off'")
+            created_row = await conn.fetchrow(
+                f"INSERT INTO projects ({', '.join(cols)}) "
+                f"VALUES ({', '.join(placeholders)}) RETURNING *",
+                *vals,
+            )
+            new_id = str(created_row["id"])
+            await conn.execute(
+                """INSERT INTO project_status_events
+                     (project_id, status, effective_date, note, created_by)
+                   VALUES ($1::uuid, $2::project_status, $3, $4, $5::uuid)""",
+                new_id, project.status,
+                status_effective or project.commencement_date or project.award_date or today,
+                "opening status recorded with the project", current_user.id,
+            )
+            if opening_sum is not None:
+                await conn.execute(
+                    """INSERT INTO project_contract_sums
+                         (project_id, kind, amount, basis, effective_date,
+                          instrument_ref, note, created_by)
+                       VALUES ($1::uuid, 'original', $2, $3::contract_sum_basis, $4, $5,
+                               'original contract sum recorded with the project', $6::uuid)""",
+                    new_id, opening_sum, sum_basis,
+                    sum_effective or project.award_date or project.commencement_date or today,
+                    instrument_ref, current_user.id,
+                )
+    # the cache triggers ran inside the transaction; re-read the row they updated
+    created = await fetchrow("SELECT * FROM projects WHERE id = $1::uuid", new_id)
 
     background_tasks.add_task(
         audit_service.log,
