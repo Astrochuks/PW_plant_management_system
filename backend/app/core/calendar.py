@@ -7,10 +7,12 @@ Decided 2026-10-11 (docs/CALENDAR.md):
   sheet); plants' weeks run Monday→Sunday. Both carry the same ISO number
   for the Monday–Friday they share.
 * **A week belongs to the month, quarter and year that contain its
-  THURSDAY** — ISO's own anchor, the day with the majority of the week on
-  each side. This reproduces the head-office month table (Jan 2026 = weeks
-  1–5, Feb = 6–9, …, Dec = 49–53) exactly, and it is the same rule for both
-  modules even though their weeks end on different days.
+  THURSDAY** — ISO's own anchor. For a Mon–Sun week that is also the
+  majority day; for the Sat→Fri company week it is not (Tuesday would be),
+  and we still use the Thursday so a week stays in the month and year its
+  own week number says. This reproduces the head-office month table
+  (Jan 2026 = weeks 1–5, Feb = 6–9, …, Dec = 49–53) exactly, for both
+  modules, in any year — computed, never tabulated.
 * The "Date" cell a site types on its Contract Summary is the day the
   report was prepared, never the week-ending date.
 """

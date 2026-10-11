@@ -22,8 +22,20 @@ offset and key both by the same anchor (§2), so months and quarters agree.
 ## 2. Which month, quarter and year a week belongs to
 
 **The period that contains the week's Thursday.** ISO uses the Thursday to
-assign a week to a year; we use it for months and quarters too. It is also
-the day with the majority of the week on either side.
+assign a week to a year; we use it for months and quarters too. For a
+Monday–Sunday week the Thursday is also the majority day. For the company's
+Saturday–Friday week it is not (that would be the Tuesday) — we still use
+the Thursday, on purpose: it keeps every week in the month and year that
+its own **week number** says, so "week 1 of 2026" is January 2026 even
+though five of its seven days are in December. The two readings differ only
+in weeks where the 1st of a month falls on a Wednesday or Thursday; the
+Thursday reading is the one consistent with the sites' numbering and with
+the head-office table.
+
+It is computed, never tabulated: step back from the week-ending date to
+the Thursday, read month / quarter / year off that date. The same three
+lines of arithmetic in SQL, Python and TypeScript; no year-specific table
+anywhere in the logic (the 2026 table lives only in the tests, as proof).
 
 This reproduces the head-office month table exactly. For 2026:
 

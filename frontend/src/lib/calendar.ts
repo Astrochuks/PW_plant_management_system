@@ -4,8 +4,9 @@
  * to. Pair with `isoWeek()` in lib/format.ts, which names the current week.
  *
  * Rule: a week belongs to the period that contains its THURSDAY (ISO's own
- * anchor; the day with the majority of the week around it). Project weeks
- * end on Friday, plant weeks on Sunday — the anchor works for both.
+ * anchor — chosen so a week stays in the month and year its week number
+ * says). Project weeks end on Friday, plant weeks on Sunday — the anchor
+ * works for both, in any year, with no table.
  */
 
 /** ISO date of the Thursday of the week that ends on `weekEnding`. */
