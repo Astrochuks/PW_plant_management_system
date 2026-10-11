@@ -280,8 +280,10 @@ POST   /projects                                     admin
 GET    /projects/{id}
 GET    /projects/{id}/history                        merged timeline
 GET    /projects/{id}/activity                       audit rows
-POST   /projects/{id}/contract-sums                  admin — saved, audited
-POST   /projects/{id}/status-events                  admin — saved, audited
+POST   /projects/{id}/contract-sums                  admin — saved, audited   (A-3 ✓)
+POST   /projects/{id}/status-events                  admin — saved, audited; transition-checked as at the date (A-3 ✓)
+GET    /projects/{id}/history, /activity, /projects/ongoing?as_at=   (A-3 ✓; xlsx/pdf export → A-4)
+PATCH  /auth/users/{id}  {project_scope, project_ids}  replaces live assignments (A-3 ✓)
 (phase B)
 GET    /projects/approvals?state=pending             PM
 POST   /projects/beme-revisions/{id}/approve         PM
@@ -318,9 +320,11 @@ is 034.)
    `projects` seeds the first status event and the `original` contract
    sum from the inserted row, so no insert path (including the July create
    form until A-4) can leave a project without history.
-5. `039_assignments_audit`: `users.project_scope`; extend
-   `user_project_assignments` (created_by, ended_at);
-   `project_documents.kind/linked_*`; notification types.
+5. `039_scope_and_assignments` — **applied 2026-10-11**: `users.project_scope`
+   (`all|assigned`, site engineers set to `assigned`); `user_project_assignments`
+   + `created_by`, `ended_at` (assignments end, never delete), FK to users;
+   `project_documents.linked_table/linked_id`; notification types
+   `approval_requested`, `approval_decided`, `assignment_changed`.
 6. (phase B) `040_beme_revisions`: revisions table, `revision_id` on
    bills/items, backfill revision 1 per project, parameters table.
 7. (phase C) `041_week_items`.
@@ -415,7 +419,7 @@ Migration
 |---|---|---|
 | A-1 | Roles v3 (migration 031, `roles.ts`, user form, gates) | E1, C4 pass; existing users log in and land correctly |
 | A-2 | History tables + caches + backfill (032–033) | E2; register page unchanged to the eye |
-| A-3 | Register API (create, contract sums, status events, history, activity, ongoing-as-at) + audit wrapper | A1–A6, D1 |
+| A-3 | Register API (contract sums, status events, history, activity, ongoing-as-at) + scoping (`project_scope` + assignments, router-level 404 guard, portfolio/list/stats/submissions filtered) + user-form scope picker + audit on every write | A2–A6, C1–C3, D1 — **shipped 2026-10-11** (create-with-history endpoint moves to A-4 with its screen) |
 | A-4 | Screens: register, new project, project page (History, Activity, Documents, Team), approvals, ongoing-as-at + export | manual walkthrough with the 3 active projects |
 | A-5 | Enter the 12 ongoing projects (user, by hand, from documents) | `/projects/ongoing` reproduces the PDF to the kobo |
 

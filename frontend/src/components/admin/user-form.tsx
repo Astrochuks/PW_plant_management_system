@@ -26,7 +26,9 @@ import { toast } from 'sonner'
 import type { User } from '@/lib/api/admin'
 import { ROLE_DESCRIPTIONS, ROLE_LABELS, USER_ROLES } from '@/lib/roles'
 import { useCreateUser, useUpdateUser } from '@/hooks/use-users'
+import { useProjects } from '@/hooks/use-projects'
 import { Loader2 } from 'lucide-react'
+import { cn } from '@/lib/utils'
 
 const userFormSchema = z.object({
   email: z.string().email('Invalid email address'),
@@ -40,6 +42,14 @@ const userFormSchema = z.object({
     .or(z.literal('')),
   full_name: z.string().min(2, 'Full name must be at least 2 characters'),
   role: z.enum(USER_ROLES),
+  project_scope: z.enum(['all', 'assigned']),
+  project_ids: z.array(z.string()),
+}).superRefine((data, ctx) => {
+  // PRD v2 §3.5: a project-scoped PM and every site engineer need ≥ 1 project
+  const scoped = data.role === 'site_engineer' || (data.role === 'project_manager' && data.project_scope === 'assigned')
+  if (scoped && data.project_ids.length === 0) {
+    ctx.addIssue({ code: 'custom', path: ['project_ids'], message: 'Select at least one project' })
+  }
 })
 
 type UserFormValues = z.infer<typeof userFormSchema>
@@ -73,8 +83,18 @@ export function UserForm({ user, onSuccess, onCancel }: UserFormProps) {
       password: '',
       full_name: user?.full_name || '',
       role: initialRole,
+      project_scope: user?.project_scope ?? (initialRole === 'site_engineer' ? 'assigned' : 'all'),
+      project_ids: user?.projects?.map((p) => p.id) ?? [],
     },
   })
+
+  const watchedRole = form.watch('role')
+  const watchedScope = form.watch('project_scope')
+  // the picker lists the live register only — legacy rows are history, not assignable
+  const { data: projectsData } = useProjects({ is_legacy: false, limit: 100, sort_by: 'project_name', sort_order: 'asc' })
+  const assignable = projectsData?.data ?? []
+  const isScopedRole =
+    watchedRole === 'site_engineer' || (watchedRole === 'project_manager' && watchedScope === 'assigned')
 
   async function onSubmit(values: UserFormValues) {
     try {
@@ -83,9 +103,12 @@ export function UserForm({ user, onSuccess, onCancel }: UserFormProps) {
       if (isEditing) {
         // Roles v3: site engineers are scoped by project assignment, not by
         // a plant location — a legacy location link is cleared on edit.
+        const scope = values.role === 'site_engineer' ? 'assigned' : values.role === 'project_manager' ? values.project_scope : 'all'
         const patch: Parameters<typeof updateMutation.mutateAsync>[0] = {
           full_name: values.full_name,
           role: values.role,
+          project_scope: scope,
+          project_ids: scope === 'assigned' ? values.project_ids : [],
           ...(user?.location_id ? { clear_location: true } : {}),
         }
         await updateMutation.mutateAsync(patch)
@@ -102,6 +125,11 @@ export function UserForm({ user, onSuccess, onCancel }: UserFormProps) {
           full_name: values.full_name,
           role: values.role,
           location_id: null,
+          project_scope: values.role === 'site_engineer' ? 'assigned' : values.role === 'project_manager' ? values.project_scope : 'all',
+          project_ids:
+            values.role === 'site_engineer' || (values.role === 'project_manager' && values.project_scope === 'assigned')
+              ? values.project_ids
+              : [],
         })
         toast.success('User created successfully')
       }
@@ -201,6 +229,93 @@ export function UserForm({ user, onSuccess, onCancel }: UserFormProps) {
             </FormItem>
           )}
         />
+
+        {watchedRole === 'project_manager' && (
+          <FormField
+            control={form.control}
+            name="project_scope"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Scope</FormLabel>
+                <div className="grid grid-cols-2 gap-2">
+                  {([
+                    ['all', 'All projects', 'General Project Manager — every site, with a picker to focus one'],
+                    ['assigned', 'Selected projects', 'Only the projects chosen below'],
+                  ] as const).map(([value, label, hint]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => field.onChange(value)}
+                      className={cn(
+                        'rounded-md border p-3 text-left transition-colors',
+                        field.value === value ? 'border-primary bg-primary/5' : 'hover:bg-muted'
+                      )}
+                    >
+                      <div className="text-sm font-medium">{label}</div>
+                      <div className="text-xs text-muted-foreground">{hint}</div>
+                    </button>
+                  ))}
+                </div>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        )}
+
+        {isScopedRole && (
+          <FormField
+            control={form.control}
+            name="project_ids"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>
+                  {watchedRole === 'site_engineer' ? 'Project' : 'Projects'}{' '}
+                  <span className="font-normal text-muted-foreground">({field.value.length} selected)</span>
+                </FormLabel>
+                <div className="max-h-56 overflow-y-auto rounded-md border">
+                  {assignable.length === 0 ? (
+                    <p className="p-3 text-sm text-muted-foreground">No live projects in the register yet.</p>
+                  ) : (
+                    assignable.map((p) => {
+                      const checked = field.value.includes(p.id)
+                      return (
+                        <label
+                          key={p.id}
+                          className="flex cursor-pointer items-start gap-3 border-b px-3 py-2 text-sm last:border-b-0 hover:bg-muted/50"
+                        >
+                          <input
+                            type="checkbox"
+                            className="mt-0.5 h-4 w-4 accent-primary"
+                            checked={checked}
+                            onChange={(e) =>
+                              field.onChange(
+                                e.target.checked
+                                  ? [...field.value, p.id]
+                                  : field.value.filter((id: string) => id !== p.id)
+                              )
+                            }
+                          />
+                          <span>
+                            <span className="font-medium">{p.short_name || p.project_name}</span>
+                            {p.short_name && (
+                              <span className="block text-xs text-muted-foreground">{p.project_name}</span>
+                            )}
+                          </span>
+                        </label>
+                      )
+                    })
+                  )}
+                </div>
+                <FormDescription>
+                  {watchedRole === 'site_engineer'
+                    ? 'The engineer sees only these projects — their bills and, later, the weekly form.'
+                    : 'This project manager sees only these projects.'}
+                </FormDescription>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        )}
 
         <div className="flex gap-3">
           <Button

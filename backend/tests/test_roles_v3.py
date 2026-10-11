@@ -109,3 +109,21 @@ def test_project_manager_is_assignable():
     assert UpdateUserRequest(role="project_manager").role == "project_manager"
     assert CreateUserRequest(email="pm@example.com", password="Secur3pass!",
                              full_name="Engr. Buge", role="project_manager").role == "project_manager"
+
+
+# ── project scope resolution on user create/update (PRD v2 §3.5) ──────────
+
+def test_resolve_project_scope_rules():
+    from app.api.v1.auth import resolve_project_scope
+    from app.core.exceptions import ValidationError
+    assert resolve_project_scope("site_engineer", None, ["p1"]) == "assigned"
+    assert resolve_project_scope("site_engineer", "all", ["p1"]) == "assigned"   # cannot widen
+    assert resolve_project_scope("project_manager", None, None) == "all"          # the General PM
+    assert resolve_project_scope("project_manager", "assigned", ["p1"]) == "assigned"
+    assert resolve_project_scope("admin", "assigned", None) == "all"              # never consulted
+    with pytest.raises(ValidationError):
+        resolve_project_scope("project_manager", "assigned", [])                  # needs ≥ 1 project
+    with pytest.raises(ValidationError):
+        resolve_project_scope("project_manager", "all", ["p1"])                   # projects need 'assigned'
+    with pytest.raises(ValidationError):
+        resolve_project_scope("plant_officer", None, ["p1"])

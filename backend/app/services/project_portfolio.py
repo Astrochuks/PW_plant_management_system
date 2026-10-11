@@ -121,7 +121,8 @@ LEFT JOIN LATERAL (
 ) pay ON TRUE
 -- the live portfolio: every non-legacy project, plus anything that has
 -- ever reported (a project archived to legacy keeps its history here)
-WHERE COALESCE(p.is_legacy, false) = false OR lw.year IS NOT NULL
+WHERE (COALESCE(p.is_legacy, false) = false OR lw.year IS NOT NULL)
+  AND ($1::uuid[] IS NULL OR p.id = ANY($1::uuid[]))
 ORDER BY p.short_name NULLS LAST, p.project_name
 """
 
@@ -142,6 +143,7 @@ LEFT JOIN LATERAL (
     FROM project_cost_report
     WHERE weekly_report_id = r.id
 ) c ON TRUE
+WHERE ($1::uuid[] IS NULL OR r.project_id = ANY($1::uuid[]))
 ORDER BY r.year, r.week_number
 """
 
@@ -152,6 +154,7 @@ SELECT r.project_id, r.year, r.week_number, r.week_ending_date,
        COALESCE(sum(c.amount_this_week), 0)  AS amount
 FROM project_weekly_reports r
 JOIN project_cost_report c ON c.weekly_report_id = r.id
+WHERE ($1::uuid[] IS NULL OR r.project_id = ANY($1::uuid[]))
 GROUP BY r.project_id, r.year, r.week_number, r.week_ending_date, 5
 ORDER BY r.year, r.week_number
 """
@@ -192,10 +195,13 @@ def _schedule(row: dict[str, Any], works: float, scope: float) -> dict[str, Any]
     }
 
 
-async def build_portfolio(today: date) -> dict[str, Any]:
-    rows = await fetch(_SQL)
-    series = await fetch(_SERIES_SQL)
-    cost_series = await fetch(_COST_SERIES_SQL)
+async def build_portfolio(today: date, project_ids: list[str] | None = None) -> dict[str, Any]:
+    """project_ids=None → the whole portfolio; a list → only those projects
+    (a project-scoped PM, PRD v2 §3.5). The same filter is applied to the
+    headline rows and both series so nothing leaks through a total."""
+    rows = await fetch(_SQL, project_ids)
+    series = await fetch(_SERIES_SQL, project_ids)
+    cost_series = await fetch(_COST_SERIES_SQL, project_ids)
 
     projects: list[dict[str, Any]] = []
 

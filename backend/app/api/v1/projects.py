@@ -23,17 +23,23 @@ from fastapi import (
 from app.api.v1.auth import get_client_ip
 from app.core.exceptions import NotFoundError, ValidationError
 from app.core.pool import fetch, fetchrow, fetchval, execute, get_pool
+from app.core.project_scope import (
+    project_scope_guard,
+    scope_condition,
+    visible_project_ids,
+)
 from app.core.security import (
     CurrentUser,
     require_admin,
     require_projects_access,
+    require_projects_read,
 )
 from app.models.project import ProjectCreate, ProjectUpdate
 from app.core.events import broadcast
 from app.monitoring.logging import get_logger
 from app.services.audit_service import audit_service
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(project_scope_guard)])
 logger = get_logger(__name__)
 
 _ALLOWED_SORT_COLUMNS = {
@@ -298,6 +304,7 @@ async def list_project_submissions(
     if project_id:
         params.append(str(project_id))
         conds.append(f"s.project_id = ${len(params)}::uuid")
+    conds.append(scope_condition(await visible_project_ids(current_user), "s.project_id", params))
     params += [limit, (page - 1) * limit]
     rows = await fetch(
         f"""SELECT s.*, p.short_name, p.project_name,
@@ -713,7 +720,8 @@ async def get_executive_summary(
     all from the same locked per-project formulas."""
     from app.services.project_portfolio import build_portfolio
 
-    return {"success": True, "data": await build_portfolio(date.today())}
+    ids = await visible_project_ids(current_user)
+    return {"success": True, "data": await build_portfolio(date.today(), project_ids=ids)}
 
 
 @router.get("/executive/brief")
@@ -732,7 +740,7 @@ async def get_executive_brief(
     from app.services.project_portfolio import build_portfolio
 
     today = date.today()
-    portfolio = await build_portfolio(today)
+    portfolio = await build_portfolio(today, project_ids=await visible_project_ids(current_user))
     findings = await build_findings(today, portfolio["projects"])
     return {
         "success": True,
@@ -1867,20 +1875,22 @@ async def get_project_stats(
     is_legacy: bool | None = Query(None, description="Filter stats by legacy status"),
 ) -> dict[str, Any]:
     """Dashboard summary: counts by status, total contract value, top clients."""
-    where = "TRUE"
+    conds: list[str] = []
     params: list[Any] = []
     if is_legacy is not None:
         params.append(is_legacy)
-        where = "is_legacy = $1::boolean"
+        conds.append(f"is_legacy = ${len(params)}::boolean")
+    conds.append(scope_condition(await visible_project_ids(current_user), "id", params))
+    where = " AND ".join(conds)
 
     stats_row = await fetchrow(
         f"""SELECT
                count(*)::int AS total,
                count(*) FILTER (WHERE status = 'active')::int AS active,
-               count(*) FILTER (WHERE status = 'completed')::int AS completed,
-               count(*) FILTER (WHERE status = 'on_hold')::int AS on_hold,
-               count(*) FILTER (WHERE status = 'retention_period')::int AS retention_period,
-               count(*) FILTER (WHERE status = 'cancelled')::int AS cancelled,
+               count(*) FILTER (WHERE status IN ('awarded', 'mobilised'))::int AS not_started,
+               count(*) FILTER (WHERE status = 'suspended')::int AS suspended,
+               count(*) FILTER (WHERE status IN ('substantially_complete', 'finally_complete'))::int AS completing,
+               count(*) FILTER (WHERE status = 'closed')::int AS closed,
                count(*) FILTER (WHERE is_legacy)::int AS legacy,
                count(*) FILTER (WHERE NOT is_legacy)::int AS non_legacy,
                COALESCE(SUM(current_contract_sum), 0)::float AS total_contract_value,
@@ -1914,8 +1924,10 @@ async def list_clients(
     current_user: Annotated[CurrentUser, Depends(require_projects_access)],
 ) -> dict[str, Any]:
     """List distinct client names for filter dropdowns."""
+    params: list[Any] = []
+    scope = scope_condition(await visible_project_ids(current_user), "id", params)
     rows = await fetch(
-        "SELECT DISTINCT client FROM projects ORDER BY client"
+        f"SELECT DISTINCT client FROM projects WHERE {scope} ORDER BY client", *params
     )
     return {
         "success": True,
@@ -2072,14 +2084,17 @@ async def list_linkable_projects(
     current_user: Annotated[CurrentUser, Depends(require_projects_access)],
 ) -> dict[str, Any]:
     """List non-legacy projects that don't yet have a linked location."""
+    params: list[Any] = []
+    scope = scope_condition(await visible_project_ids(current_user), "p.id", params)
     rows = await fetch(
-        """SELECT p.id, p.project_name, p.client, p.status
+        f"""SELECT p.id, p.project_name, p.client, p.status
            FROM projects p
            WHERE NOT p.is_legacy
              AND NOT EXISTS (
                  SELECT 1 FROM locations l WHERE l.project_id = p.id
              )
-           ORDER BY p.project_name"""
+             AND {scope}
+           ORDER BY p.project_name""", *params
     )
     return {"success": True, "data": rows}
 
@@ -2091,7 +2106,7 @@ async def list_linkable_projects(
 
 @router.get("")
 async def list_projects(
-    current_user: Annotated[CurrentUser, Depends(require_projects_access)],
+    current_user: Annotated[CurrentUser, Depends(require_projects_read)],
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     search: str | None = None,
@@ -2152,6 +2167,8 @@ async def list_projects(
     if register_source:
         params.append(register_source)
         conds.append(f"v.register_source = ${len(params)}")
+    # roles v3: a project-scoped PM or a site engineer sees only their projects
+    conds.append(scope_condition(await visible_project_ids(current_user), "v.id", params))
 
     where = " AND ".join(conds) if conds else "TRUE"
     safe_sort = sort_by if sort_by in _ALLOWED_SORT_COLUMNS else "created_at"
@@ -2190,7 +2207,7 @@ async def list_projects(
 @router.get("/{project_id}")
 async def get_project(
     project_id: UUID,
-    current_user: Annotated[CurrentUser, Depends(require_projects_access)],
+    current_user: Annotated[CurrentUser, Depends(require_projects_read)],
 ) -> dict[str, Any]:
     """Get a single project by ID."""
     row = await fetchrow(

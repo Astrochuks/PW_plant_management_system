@@ -202,7 +202,8 @@ async def _get_user_data(user_id: str) -> dict:
     # Cache miss — fetch from database via asyncpg
     try:
         row = await fetchrow(
-            "SELECT id, email, role, full_name, is_active, location_id FROM users WHERE id = $1::uuid",
+            "SELECT id, email, role, full_name, is_active, location_id, project_scope "
+            "FROM users WHERE id = $1::uuid",
             user_id,
         )
     except DatabaseUnavailableError:
@@ -237,6 +238,10 @@ class CurrentUser(BaseModel):
     full_name: str | None = None
     is_active: bool = True
     location_id: str | None = None  # legacy plant-site link; no longer required
+    # 'all' | 'assigned' — which projects this user may see (migration 039,
+    # PRD v2 §3.5). Consulted for project managers; site engineers are
+    # always 'assigned'; admins and plant officers never consult it.
+    project_scope: str = "all"
 
     @property
     def is_admin(self) -> bool:
@@ -299,6 +304,7 @@ async def get_current_user(
             full_name=user.get("full_name"),
             is_active=user.get("is_active", True),
             location_id=str(location_id) if location_id else None,
+            project_scope=user.get("project_scope") or "all",
         )
 
     except AuthenticationError:
@@ -358,14 +364,24 @@ def require_shared_read(
 def require_projects_access(
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> CurrentUser:
-    """Gate for the PROJECTS module: admin or project manager.
-
-    The plant officer has no business with projects (decision 2026-07-07).
-    Site engineers get project-scoped read access through their own gate
-    once assignments exist (PRD v2 §8), not through this one.
+    """Gate for the PROJECTS module's working routes: admin or project
+    manager. The plant officer has no business with projects (decision
+    2026-07-07). Site engineers come in through require_projects_read.
     """
     if not (current_user.is_admin or current_user.is_project_manager):
         raise AuthorizationError("Projects access requires admin or project manager role")
+    return current_user
+
+
+def require_projects_read(
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> CurrentUser:
+    """Read gate for the register: admin, project manager or site
+    engineer. WHAT they see is narrowed by app.core.project_scope
+    (assignments) — this gate only says they may look."""
+    if not (current_user.is_admin or current_user.is_project_manager
+            or current_user.is_site_engineer):
+        raise AuthorizationError("Projects access requires admin, project manager or site engineer role")
     return current_user
 
 

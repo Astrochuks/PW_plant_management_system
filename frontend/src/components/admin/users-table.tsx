@@ -113,6 +113,7 @@ export function UsersTable({ users, isLoading }: UsersTableProps) {
               <TableHead>Email</TableHead>
               <TableHead>Full Name</TableHead>
               <TableHead>Role</TableHead>
+              <TableHead>Projects</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Last Login</TableHead>
               <TableHead>Created</TableHead>
@@ -135,6 +136,21 @@ export function UsersTable({ users, isLoading }: UsersTableProps) {
                   >
                     {roleLabel(user.role)}
                   </Badge>
+                </TableCell>
+                <TableCell className="text-sm text-muted-foreground">
+                  {user.role === 'admin' || user.role === 'plant_officer' ? (
+                    <span className="text-muted-foreground/40">—</span>
+                  ) : user.project_scope === 'all' ? (
+                    'All projects'
+                  ) : user.projects.length === 0 ? (
+                    <span className="italic">None assigned</span>
+                  ) : (
+                    <span title={user.projects.map((p) => p.short_name || p.project_name).join('\n')}>
+                      {user.projects.length === 1
+                        ? (user.projects[0].short_name || user.projects[0].project_name)
+                        : `${user.projects.length} projects`}
+                    </span>
+                  )}
                 </TableCell>
                 <TableCell>
                   {user.is_active ? (

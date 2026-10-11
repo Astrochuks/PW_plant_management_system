@@ -745,6 +745,57 @@ AssignableRole = Literal[
 ]
 
 
+def resolve_project_scope(role: str, requested: str | None, project_ids: list | None) -> str:
+    """PRD v2 §3.5. Site engineers are always 'assigned'; admins and plant
+    officers are 'all' (the value is never consulted for them); a project
+    manager chooses, and 'assigned' needs at least one project."""
+    if role == "site_engineer":
+        scope = "assigned"
+    elif role == "project_manager":
+        scope = requested or "all"
+    else:
+        scope = "all"
+    if scope == "assigned" and role == "project_manager" and not project_ids:
+        raise ValidationError("A project-scoped project manager needs at least one project")
+    if scope == "all" and project_ids:
+        raise ValidationError("Projects can only be assigned when the scope is 'assigned'")
+    return scope
+
+
+async def replace_assignments(user_id: str, project_ids: list, by: str) -> dict[str, list[str]]:
+    """Make the live assignments equal `project_ids`: end the ones no longer
+    listed (rows are never deleted), add the new ones. Returns what changed."""
+    wanted = {str(pid) for pid in project_ids}
+    live = {str(r["project_id"]) for r in await fetch(
+        "SELECT project_id FROM user_project_assignments WHERE user_id = $1::uuid AND ended_at IS NULL",
+        user_id)}
+    ended = sorted(live - wanted); added = sorted(wanted - live)
+    if ended:
+        await execute(
+            "UPDATE user_project_assignments SET ended_at = now() "
+            "WHERE user_id = $1::uuid AND ended_at IS NULL AND project_id = ANY($2::uuid[])",
+            user_id, ended)
+    for pid in added:
+        exists = await fetchrow(
+            "SELECT id FROM user_project_assignments WHERE user_id = $1::uuid AND project_id = $2::uuid",
+            user_id, pid)
+        if exists:  # unique(user_id, project_id): revive the ended row
+            await execute("UPDATE user_project_assignments SET ended_at = NULL, created_by = $2::uuid, created_at = now() WHERE id = $1::uuid",
+                          str(exists["id"]), by)
+        else:
+            await execute(
+                "INSERT INTO user_project_assignments (user_id, project_id, role_on_project, created_by) "
+                "VALUES ($1::uuid, $2::uuid, 'member', $3::uuid)", user_id, pid, by)
+    return {"ended": ended, "added": added}
+
+
+_USER_PROJECTS_SQL = """COALESCE((
+    SELECT json_agg(json_build_object('id', p.id, 'short_name', p.short_name,
+                                      'project_name', p.project_name) ORDER BY p.short_name)
+      FROM user_project_assignments a JOIN projects p ON p.id = a.project_id
+     WHERE a.user_id = u.id AND a.ended_at IS NULL), '[]'::json) AS projects"""
+
+
 class CreateUserRequest(BaseModel):
     """Request body for creating a new user."""
 
@@ -753,6 +804,10 @@ class CreateUserRequest(BaseModel):
     full_name: str = Field(..., min_length=2, max_length=255)
     role: AssignableRole = "site_engineer"
     location_id: UUID | None = None  # legacy plant-site link; optional, site_engineer only
+    # PRD v2 §3.5: which projects the user may see. Project managers choose
+    # 'all' (General PM) or 'assigned'; site engineers are always 'assigned'.
+    project_scope: Literal["all", "assigned"] | None = None
+    project_ids: list[UUID] | None = None  # the assignments when scope = 'assigned'
 
     @field_validator("password")
     @classmethod
@@ -768,6 +823,8 @@ class UpdateUserRequest(BaseModel):
     is_active: bool | None = None
     location_id: UUID | None = None  # For assigning/changing site engineer location
     clear_location: bool = False  # Set True to explicitly unlink location
+    project_scope: Literal["all", "assigned"] | None = None
+    project_ids: list[UUID] | None = None  # replaces the live assignments when given
 
 
 class ResetPasswordRequest(BaseModel):
@@ -827,6 +884,14 @@ async def create_user(
         if not loc:
             raise ValidationError("Location not found")
 
+    project_scope = resolve_project_scope(
+        request_body.role, request_body.project_scope, request_body.project_ids)
+    if request_body.project_ids:
+        known = await fetchval("SELECT count(*) FROM projects WHERE id = ANY($1::uuid[])",
+                               [str(x) for x in request_body.project_ids])
+        if known != len(set(request_body.project_ids)):
+            raise ValidationError("One or more project ids do not exist")
+
     try:
         # Create user in Supabase Auth (stays as SDK)
         admin_client = get_supabase_admin_client()
@@ -843,8 +908,8 @@ async def create_user(
 
         # Create user record in our users table via asyncpg
         created = await fetchrow(
-            """INSERT INTO users (id, email, full_name, role, is_active, must_change_password, location_id)
-               VALUES ($1::uuid, $2, $3, $4, $5, $6, $7::uuid)
+            """INSERT INTO users (id, email, full_name, role, is_active, must_change_password, location_id, project_scope)
+               VALUES ($1::uuid, $2, $3, $4, $5, $6, $7::uuid, $8)
                RETURNING *""",
             str(user_id),
             request_body.email,
@@ -853,7 +918,10 @@ async def create_user(
             True,
             False,  # Password set by admin is ready to use
             str(request_body.location_id) if request_body.location_id else None,
+            project_scope,
         )
+        assigned = await replace_assignments(
+            str(user_id), request_body.project_ids or [], current_user.id)
 
         # Log user creation
         await auth_service.log_auth_event(
@@ -861,6 +929,8 @@ async def create_user(
             ip_address=ip_address,
             details={
                 "role": request_body.role,
+                "project_scope": project_scope,
+                "projects": assigned["added"],
                 "created_by": current_user.id,
                 "created_by_email": current_user.email
             }
@@ -883,6 +953,8 @@ async def create_user(
                 "role": request_body.role,
                 "is_active": True,
                 "location_id": str(request_body.location_id) if request_body.location_id else None,
+                "project_scope": project_scope,
+                "project_ids": assigned["added"],
             },
             "message": "User created successfully.",
         }
@@ -921,7 +993,8 @@ async def list_users(
     data = await fetch(
         f"""SELECT u.id, u.email, u.full_name, u.role, u.is_active,
                    u.must_change_password, u.last_login_at, u.created_at,
-                   u.location_id, l.name AS location_name
+                   u.location_id, l.name AS location_name,
+                   u.project_scope, {_USER_PROJECTS_SQL}
             FROM users u
             LEFT JOIN locations l ON l.id = u.location_id
             WHERE {where}
@@ -950,9 +1023,10 @@ async def get_user(
         User details.
     """
     row = await fetchrow(
-        """SELECT u.id, u.email, u.full_name, u.role, u.is_active, u.must_change_password,
+        f"""SELECT u.id, u.email, u.full_name, u.role, u.is_active, u.must_change_password,
                   u.last_login_at, u.created_at, u.updated_at,
-                  u.location_id, l.name AS location_name
+                  u.location_id, l.name AS location_name,
+                  u.project_scope, {_USER_PROJECTS_SQL}
            FROM users u
            LEFT JOIN locations l ON l.id = u.location_id
            WHERE u.id = $1::uuid""",
@@ -990,7 +1064,7 @@ async def update_user(
 
     # Check user exists and get current values
     existing = await fetchrow(
-        "SELECT id, email, full_name, role, is_active, location_id FROM users WHERE id = $1::uuid",
+        "SELECT id, email, full_name, role, is_active, location_id, project_scope FROM users WHERE id = $1::uuid",
         str(user_id),
     )
 
@@ -1015,8 +1089,25 @@ async def update_user(
         update_data["is_active"] = request_body.is_active
         changes["is_active"] = {"old": existing["is_active"], "new": request_body.is_active}
 
-    # Handle location_id update for site_engineer
     new_role = request_body.role or existing.get("role")
+    # project scope (PRD v2 §3.5): resolved from the role whenever role, scope
+    # or assignments are touched, so a role change can never leave a stale scope
+    if (request_body.role is not None or request_body.project_scope is not None
+            or request_body.project_ids is not None):
+        live_ids = request_body.project_ids
+        if live_ids is None:
+            live_ids = [r["project_id"] for r in await fetch(
+                "SELECT project_id FROM user_project_assignments WHERE user_id = $1::uuid AND ended_at IS NULL",
+                str(user_id))]
+        resolved = resolve_project_scope(
+            new_role, request_body.project_scope or existing.get("project_scope"), live_ids)
+        if resolved != existing.get("project_scope"):
+            update_data["project_scope"] = resolved
+            changes["project_scope"] = {"old": existing.get("project_scope"), "new": resolved}
+        if resolved == "all" and request_body.project_ids is None and live_ids:
+            request_body.project_ids = []  # scope widened: assignments end
+
+    # Handle location_id update for site_engineer
     if request_body.clear_location:
         update_data["location_id"] = None
         changes["location_id"] = {"old": str(existing.get("location_id") or ""), "new": None}
@@ -1027,7 +1118,7 @@ async def update_user(
         update_data["location_id"] = str(request_body.location_id)
         changes["location_id"] = {"old": str(existing.get("location_id") or ""), "new": str(request_body.location_id)}
 
-    if not update_data:
+    if not update_data and request_body.project_ids is None:
         raise ValidationError("No fields to update")
 
     # Build SET clause
@@ -1045,10 +1136,22 @@ async def update_user(
     params.append(str(user_id))
     set_clause = ", ".join(set_parts)
 
-    updated = await fetchrow(
-        f"UPDATE users SET {set_clause} WHERE id = ${len(params)}::uuid RETURNING *",
-        *params,
-    )
+    if update_data:
+        updated = await fetchrow(
+            f"UPDATE users SET {set_clause} WHERE id = ${len(params)}::uuid RETURNING *",
+            *params,
+        )
+    else:  # assignments-only change: the users row itself is untouched
+        updated = await fetchrow("SELECT * FROM users WHERE id = $1::uuid", str(user_id))
+
+    if request_body.project_ids is not None:
+        known = await fetchval("SELECT count(*) FROM projects WHERE id = ANY($1::uuid[])",
+                               [str(x) for x in request_body.project_ids])
+        if known != len(set(request_body.project_ids)):
+            raise ValidationError("One or more project ids do not exist")
+        moved = await replace_assignments(str(user_id), request_body.project_ids, current_user.id)
+        if moved["added"] or moved["ended"]:
+            changes["projects"] = moved
 
     # Invalidate cached user data so changes take effect immediately
     invalidate_user_cache(str(user_id))

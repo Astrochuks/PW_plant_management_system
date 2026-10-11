@@ -17,6 +17,18 @@ export interface User {
   updated_at?: string
   location_id: string | null
   location_name: string | null
+  /** PRD v2 §3.5 — 'all' (General PM) or 'assigned' (listed projects only) */
+  project_scope: ProjectScope
+  /** live assignments; empty for 'all' */
+  projects: AssignedProject[]
+}
+
+export type ProjectScope = 'all' | 'assigned'
+
+export interface AssignedProject {
+  id: string
+  short_name: string | null
+  project_name: string
 }
 
 export interface CreateUserRequest {
@@ -25,6 +37,8 @@ export interface CreateUserRequest {
   full_name: string
   role: UserRole
   location_id?: string | null
+  project_scope?: ProjectScope
+  project_ids?: string[]
 }
 
 export interface UpdateUserRequest {
@@ -33,6 +47,9 @@ export interface UpdateUserRequest {
   is_active?: boolean
   location_id?: string | null
   clear_location?: boolean
+  project_scope?: ProjectScope
+  /** replaces the live assignments when given */
+  project_ids?: string[]
 }
 
 export interface ResetPasswordRequest {

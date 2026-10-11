@@ -18,7 +18,7 @@ from app.api.v1 import (
     transfers,
     projects,
     insights,
-    site_report,
+    project_register,
     events,
 )
 
@@ -38,7 +38,8 @@ api_router.include_router(reports.router, prefix="/reports", tags=["Reports"])
 api_router.include_router(notifications.router, prefix="/notifications", tags=["Notifications"])
 api_router.include_router(audit.router, prefix="/audit", tags=["Audit"])
 api_router.include_router(transfers.router)
+# register history/ongoing first so /projects/ongoing beats /projects/{project_id}
+api_router.include_router(project_register.router, prefix="/projects", tags=["Projects"])
 api_router.include_router(projects.router, prefix="/projects", tags=["Projects"])
 api_router.include_router(insights.router, prefix="/insights", tags=["Insights"])
-api_router.include_router(site_report.router, prefix="/site", tags=["Site Engineer"])
 api_router.include_router(events.router, prefix="/events", tags=["Events"])
