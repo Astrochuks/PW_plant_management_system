@@ -13,6 +13,7 @@ from app.core.security import (
     CurrentUser,
     require_admin,
     require_management_or_admin,
+    require_shared_read,
 )
 from app.monitoring.logging import get_logger
 from app.services.audit_service import audit_service
@@ -23,7 +24,8 @@ logger = get_logger(__name__)
 
 @router.get("")
 async def list_states(
-    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+    # master data both modules filter by — the project manager may read it
+    current_user: Annotated[CurrentUser, Depends(require_shared_read)],
     include_inactive: bool = Query(False, description="Include inactive states"),
 ) -> dict[str, Any]:
     """List all states with their sites count.

@@ -65,6 +65,22 @@ def test_plant_gate(role, allowed):
             require_management_or_admin(_user(role))
 
 
+@pytest.mark.parametrize("role,allowed", [
+    ("admin", True), ("plant_officer", True), ("project_manager", True),
+    ("site_engineer", False),
+])
+def test_shared_read_gate_states_and_sites_lists(role, allowed):
+    """States and sites are master data both modules reference: the project
+    manager may READ the lists (register filters, site link) without any
+    other plant access."""
+    from app.core.security import require_shared_read
+    if allowed:
+        assert require_shared_read(_user(role)).role == role
+    else:
+        with pytest.raises(AuthorizationError):
+            require_shared_read(_user(role))
+
+
 def test_admin_gate_admits_only_admin():
     assert require_admin(_user("admin")).is_admin
     for role in ("project_manager", "plant_officer", "site_engineer"):

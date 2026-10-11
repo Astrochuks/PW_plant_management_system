@@ -9,6 +9,7 @@ import { useRouter } from 'next/navigation';
 import { Sidebar } from './sidebar';
 import { Header } from './header';
 import { useAuth } from '@/providers/auth-provider';
+import { roleMayEnter } from '@/components/protected-route';
 import { useLocations, useFleetTypes } from '@/hooks/use-plants';
 import { cn } from '@/lib/utils';
 import { Loader2 } from 'lucide-react';
@@ -40,11 +41,12 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
     localStorage.setItem('sidebar-collapsed', JSON.stringify(newState));
   };
 
-  // Prefetch locations & fleet types as soon as user is authenticated.
-  // These are used on the plants page and rarely change — fetching them
-  // here means they're already cached when the user navigates to /plants.
-  useLocations();
-  useFleetTypes();
+  // Prefetch locations & fleet types for the plant-module seats only (the
+  // endpoints are gated to admin + plant officer; roles v3 gives the project
+  // manager and site engineer no plant access, so asking would 403).
+  const hasPlantAccess = roleMayEnter(user?.role, 'management');
+  useLocations(hasPlantAccess);
+  useFleetTypes(hasPlantAccess);
 
   // Redirect to login if not authenticated
   useEffect(() => {

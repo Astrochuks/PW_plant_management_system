@@ -225,7 +225,8 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
     }
   }, [pathname]);
 
-  const { data: transferStats } = useTransferStats(lastSeenAt);
+  // transfers badge — plant-module seats only (the endpoint 403s for others)
+  const { data: transferStats } = useTransferStats(lastSeenAt, showManagementItems);
   const newTransfers = transferStats?.data?.new_since ?? 0;
 
   // Admin-only: pending site transfer requests badge (skip API call for non-admins)

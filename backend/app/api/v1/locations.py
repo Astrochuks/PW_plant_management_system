@@ -13,6 +13,7 @@ from app.core.security import (
     CurrentUser,
     require_admin,
     require_management_or_admin,
+    require_shared_read,
 )
 from app.monitoring.logging import get_logger
 from app.services.audit_service import audit_service
@@ -25,7 +26,8 @@ LOCATIONS_CACHE_KEY = "locations:list"
 
 @router.get("")
 async def list_locations(
-    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+    # the site list is shared master data — the project manager may read it
+    current_user: Annotated[CurrentUser, Depends(require_shared_read)],
 ) -> dict[str, Any]:
     """List all locations.
 
@@ -57,7 +59,7 @@ async def list_locations(
 
 @router.get("/unlinked")
 async def list_unlinked_locations(
-    current_user: Annotated[CurrentUser, Depends(require_management_or_admin)],
+    current_user: Annotated[CurrentUser, Depends(require_shared_read)],
 ) -> dict[str, Any]:
     """List locations that have no project linked (for linking UI)."""
     data = await fetch(

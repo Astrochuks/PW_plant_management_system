@@ -343,6 +343,18 @@ def require_management_or_admin(
     return current_user
 
 
+def require_shared_read(
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> CurrentUser:
+    """Read gate for master data both modules reference — the list of
+    states and the list of sites. Admin, plant officer and project manager
+    may read; writes stay admin-only on their own routes."""
+    if not (current_user.is_admin or current_user.is_plant_officer
+            or current_user.is_project_manager):
+        raise AuthorizationError("Access requires admin, plant officer or project manager role")
+    return current_user
+
+
 def require_projects_access(
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> CurrentUser:

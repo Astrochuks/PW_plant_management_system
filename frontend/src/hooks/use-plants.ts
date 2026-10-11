@@ -141,11 +141,12 @@ export function usePlantEvents(plantId: string | null) {
 /**
  * Hook to fetch all locations (for filter dropdown)
  */
-export function useLocations() {
+export function useLocations(enabled = true) {
   return useQuery({
     queryKey: locationsKeys.list(),
     queryFn: getLocations,
     staleTime: 10 * 60 * 1000,
+    enabled,
   });
 }
 
@@ -163,11 +164,12 @@ export function usePurchaseYears() {
 /**
  * Hook to fetch all fleet types (for filter dropdown)
  */
-export function useFleetTypes() {
+export function useFleetTypes(enabled = true) {
   return useQuery({
     queryKey: fleetTypesKeys.list(),
     queryFn: getFleetTypes,
     staleTime: 10 * 60 * 1000,
+    enabled,
   });
 }
 

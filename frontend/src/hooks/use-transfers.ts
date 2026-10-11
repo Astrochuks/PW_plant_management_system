@@ -51,12 +51,13 @@ export function usePendingTransfers(locationId?: string) {
   });
 }
 
-export function useTransferStats(since?: string) {
+export function useTransferStats(since?: string, enabled = true) {
   return useQuery({
     queryKey: [...transfersKeys.stats(), since],
     queryFn: () => getTransferStats(since),
     refetchInterval: 60000,
     refetchIntervalInBackground: false, // Stop polling when tab is hidden
+    enabled,
   });
 }
 
