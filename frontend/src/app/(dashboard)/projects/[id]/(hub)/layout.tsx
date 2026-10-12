@@ -9,7 +9,7 @@
 import Link from 'next/link'
 import { useParams, usePathname, useRouter } from 'next/navigation'
 import { useState } from 'react'
-import { ArrowLeft, CalendarDays, ChevronLeft, Edit2, Trash2, Users } from 'lucide-react'
+import { ArrowLeft, CalendarDays, ChevronRight, Edit2, Trash2, Users } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import {
@@ -100,35 +100,41 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
     <div className="space-y-4">
       {/* Sticky context header: identity + nav + latest-report strip */}
       <div id="hub-sticky" className="sticky top-16 z-20 -mx-6 bg-background px-6 pt-1 shadow-sm">
-      {/* Three zones: identity · status trio (centered in the leftover space) · actions */}
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-        <div className="flex items-center gap-3">
-          {/* one step back (the previous tab or page) */}
-          <Button variant="ghost" size="sm" onClick={() => router.back()} title="Back one step" aria-label="Back one step">
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-          <div>
-            {/* straight to the register this project lives in */}
-            <nav aria-label="Breadcrumb" className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
-              <Link
-                href={project?.status === 'archived' ? '/projects/archive' : '/projects/ongoing'}
-                className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-2 py-0.5 font-medium text-foreground hover:bg-muted"
-              >
-                <ChevronLeft className="h-3.5 w-3.5" />
-                {project?.status === 'archived' ? 'Archive' : 'Ongoing Projects'}
-              </Link>
-              <span aria-hidden="true">›</span>
-              <span className="truncate max-w-[40vw]">{project?.short_name || project?.project_name || '…'}</span>
-            </nav>
-            <h1 className="text-2xl font-bold tracking-tight">
-              {project?.short_name || project?.project_name || '…'}
-            </h1>
-            <p className="text-xs text-muted-foreground">
-              {project?.client}{project?.state_name ? ` · ${project.state_name}` : ''}
-            </p>
-          </div>
+      {/* Row 1 — navigation. Two controls, both unmistakably controls:
+          "Back" (one step) and the register link in the link colour.
+          The project name after the chevron is text, not a link. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 py-2">
+        <Button variant="outline" size="sm" className="h-8" onClick={() => router.back()} title="Back one step">
+          <ArrowLeft className="h-4 w-4 mr-1.5" />
+          Back
+        </Button>
+        <span className="hidden h-5 w-px bg-border sm:block" aria-hidden="true" />
+        <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 text-sm">
+          <Link
+            href={project?.status === 'archived' ? '/projects/archive' : '/projects/ongoing'}
+            className="shrink-0 font-medium text-primary underline-offset-4 hover:underline"
+          >
+            {project?.status === 'archived' ? 'Archive' : 'Ongoing Projects'}
+          </Link>
+          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <span className="truncate text-muted-foreground" aria-current="page">
+            {project?.short_name || project?.project_name || '…'}
+          </span>
+        </nav>
+      </div>
+
+      {/* Row 2 — identity on the left; status and actions on the right
+          (they drop below the title on narrow screens) */}
+      <div className="flex flex-col gap-3 pb-1 lg:flex-row lg:items-start lg:justify-between lg:gap-6">
+        <div className="min-w-0">
+          <h1 className="break-words text-2xl font-bold tracking-tight">
+            {project?.short_name || project?.project_name || '…'}
+          </h1>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            {project?.client}{project?.state_name ? ` · ${project.state_name}` : ''}
+          </p>
         </div>
-        <div className="flex flex-1 flex-wrap items-center justify-start gap-x-5 gap-y-1 lg:justify-center">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 lg:shrink-0 lg:justify-end lg:pt-1">
           {statusStyle && (
             <StatusDot
               dot={effStatus === 'active' ? 'bg-emerald-500' : 'bg-slate-400'}
@@ -147,24 +153,25 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
                 : scheduleStatus === 'completed' ? 'text-emerald-700 dark:text-emerald-400' : ''}
             />
           )}
+          {isAdmin && (
+            <div className="flex items-center gap-2 lg:ml-1 lg:border-l lg:border-border lg:pl-5">
+              <Button variant="outline" size="sm" asChild>
+                <Link href={`${base}/edit`}>
+                  <Edit2 className="h-4 w-4 mr-2" />
+                  Edit
+                </Link>
+              </Button>
+              <Button
+                variant="outline" size="sm"
+                className="text-destructive hover:text-destructive"
+                onClick={() => setConfirmDelete(true)}
+                title="Delete project"
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
         </div>
-        {isAdmin ? (
-          <div className="flex shrink-0 items-center gap-2">
-            <Button variant="outline" size="sm" asChild>
-              <Link href={`${base}/edit`}>
-                <Edit2 className="h-4 w-4 mr-2" />
-                Edit
-              </Link>
-            </Button>
-            <Button
-              variant="outline" size="sm"
-              className="text-destructive hover:text-destructive"
-              onClick={() => setConfirmDelete(true)}
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          </div>
-        ) : <div />}
       </div>
 
       {/* Tab bar — folder-style: tabs sit ON the line; the active one
