@@ -9,17 +9,14 @@
 import Link from 'next/link'
 import { useParams, usePathname, useRouter } from 'next/navigation'
 import { useState } from 'react'
-import { ArrowLeft, CalendarDays, ChevronRight, Edit2, Trash2, Users } from 'lucide-react'
+import { ArrowLeft, ChevronRight, Edit2, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
 import { useAuth } from '@/providers/auth-provider'
-import { useProject, useDeleteProject, usePrefetchHubData, useProjectIssues, useProjectOverview, useProjectSubmissions } from '@/hooks/use-projects'
-import { STATUS_STYLES, effectiveStatus } from '@/components/projects/project-status'
-import { InfoChip } from '@/components/projects/hub-ui'
-import { fmtDate, num } from '@/lib/format'
+import { useProject, useDeleteProject, usePrefetchHubData, useProjectIssues, useProjectSubmissions } from '@/hooks/use-projects'
 
 // Four tabs by decision of 2026-10-12: the project's dashboard, its bill of
 // quantities, its dated timeline, its weekly submissions. The other routes
@@ -31,17 +28,6 @@ const PAGES: Array<{ seg: string; label: string; ready: boolean; adminOnly?: boo
   { seg: 'history', label: 'Timeline', ready: true },
   { seg: 'submissions', label: 'Submissions', ready: true },
 ]
-
-function StatusDot({ dot, label, className = '' }: {
-  dot: string; label: string; className?: string
-}) {
-  return (
-    <span className={`inline-flex items-center gap-1.5 text-sm font-medium ${className}`}>
-      <span className={`h-2 w-2 shrink-0 rounded-full ${dot}`} />
-      {label}
-    </span>
-  )
-}
 
 export default function ProjectHubLayout({ children }: { children: React.ReactNode }) {
   const params = useParams<{ id: string }>()
@@ -57,9 +43,6 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
   // while one is queued/parsing, then invalidates every projects query so
   // the dashboard updates without a manual refresh.
   useProjectSubmissions({ project_id: projectId, limit: 20 }, { watch: true })
-  // shared cache with the Overview page — powers the OVERDUE badge here
-  const { data: overview } = useProjectOverview(projectId)
-  const scheduleStatus = overview?.schedule.status
   // warm every tab's data so switching tabs is instant
   usePrefetchHubData(projectId)
   const deleteMutation = useDeleteProject()
@@ -67,8 +50,6 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
 
   const base = `/projects/${projectId}`
   const activeSeg = pathname === base ? '' : pathname.slice(base.length + 1).split('/')[0]
-  const effStatus = project ? effectiveStatus(project) : null
-  const statusStyle = effStatus ? (STATUS_STYLES[effStatus] || STATUS_STYLES.active) : null
 
   const handleDelete = async () => {
     try {
@@ -134,27 +115,11 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
             {project?.client}{project?.state_name ? ` · ${project.state_name}` : ''}
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 lg:shrink-0 lg:justify-end lg:pt-1">
-          {statusStyle && (
-            <StatusDot
-              dot={effStatus === 'active' ? 'bg-emerald-500' : 'bg-slate-400'}
-              label={statusStyle.label}
-            />
-          )}
-          {project?.project_type && (
-            <StatusDot dot="bg-sky-500" label={project.project_type} className="capitalize" />
-          )}
-          {scheduleStatus && (
-            <StatusDot
-              dot={scheduleStatus === 'overdue' ? 'bg-red-500' : 'bg-emerald-500'}
-              label={scheduleStatus === 'overdue' ? 'Overdue'
-                : scheduleStatus === 'completed' ? 'Completed' : 'On track'}
-              className={scheduleStatus === 'overdue' ? 'font-semibold text-red-600'
-                : scheduleStatus === 'completed' ? 'text-emerald-700 dark:text-emerald-400' : ''}
-            />
-          )}
+        {/* status chips (Ongoing · type · schedule) removed 2026-10-12: the
+            register already says ongoing; schedule returns with the Overview */}
+        <div className="flex flex-wrap items-center gap-2 lg:shrink-0 lg:justify-end lg:pt-1">
           {isAdmin && (
-            <div className="flex items-center gap-2 lg:ml-1 lg:border-l lg:border-border lg:pl-5">
+            <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" asChild>
                 <Link href={`${base}/edit`}>
                   <Edit2 className="h-4 w-4 mr-2" />
@@ -207,15 +172,9 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
         )}
       </div>
 
-      {/* Latest-report context strip — visible on every hub tab */}
-      {overview?.latest_week && (
-        <div className="mt-6 mb-8 flex flex-wrap items-center gap-x-6 gap-y-1">
-          <InfoChip icon={CalendarDays} label="Latest report"
-            value={`W${String(overview.latest_week.week_number).padStart(2, '0')} · Date: ${fmtDate(overview.latest_week.week_ending_date)}`} />
-          <InfoChip icon={Users} label="Total headcount"
-            value={num(overview.resources.labour_direct + overview.resources.labour_casual)} />
-        </div>
-      )}
+      {/* the latest-report / headcount strip was removed 2026-10-12 — the
+          Overview becomes the project's dashboard and carries that */}
+      <div className="pb-4" />
       </div>
 
       {children}

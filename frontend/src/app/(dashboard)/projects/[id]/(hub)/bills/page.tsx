@@ -29,17 +29,10 @@ import {
 import { MiniKpi, MiniKpiRow, MiniKpiSkeleton } from '@/components/shared/mini-kpi'
 import { useAuth } from '@/providers/auth-provider'
 import { useProject, useProjectBills, usePreviewBillsImport, useRecordBillsRevision } from '@/hooks/use-projects'
-import type { BoqBill, BoqImportPreview, BoqSource } from '@/lib/api/projects'
+import type { BoqBill, BoqImportPreview } from '@/lib/api/projects'
 import { getErrorMessage } from '@/lib/api/client'
-import { fmtDate, money, num } from '@/lib/format'
+import { money, num } from '@/lib/format'
 import { exportRegisterExcel, type RegisterExportRow } from '@/lib/register-export'
-
-const SOURCE_LABEL: Record<BoqSource, string> = {
-  award_beme: 'award bill',
-  derived_from_weekly: 'from the weekly workbook',
-  variation: 'variation',
-  correction: 'correction',
-}
 
 const HEAD = 'text-[#101415] font-semibold text-xs uppercase tracking-wider border-x border-[#e6ac31]/50 whitespace-nowrap'
 const CELL = 'text-sm border-x border-border/50 align-top py-2'
@@ -109,17 +102,7 @@ export default function ProjectBillsPage() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold">Bill of Quantities</h2>
-          {revision ? (
-            <p className="text-sm text-muted-foreground">
-              Revision {revision.revision_no} · {SOURCE_LABEL[revision.source] ?? revision.source} · effective {fmtDate(revision.effective_date)}
-              {revision.source_file_name ? ` · ${revision.source_file_name}` : ''}
-            </p>
-          ) : !isLoading ? (
-            <p className="text-sm text-muted-foreground">No bill of quantities recorded for this project yet.</p>
-          ) : null}
-        </div>
+        <h2 className="text-lg font-semibold">Bill of Quantities</h2>
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting || isLoading || itemCount === 0}>
             <Download className="h-3.5 w-3.5 mr-1.5" />{exporting ? 'Exporting...' : 'Export'}
