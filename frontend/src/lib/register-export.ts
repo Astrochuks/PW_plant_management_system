@@ -37,8 +37,9 @@ export interface RegisterExportSpec {
   sheetName: string
   columns: RegisterExportColumn[]
   rows: RegisterExportRow[]
-  /** one entry per column; null leaves the cell blank. Omit for no TOTAL row. */
-  totals?: (number | null)[]
+  /** one entry per column; null leaves the cell blank; a string is a label
+   *  (if none is given, column A reads TOTAL). Omit for no TOTAL row. */
+  totals?: RegisterCell[]
 }
 
 const GOLD = 'FFFFBF36'
@@ -129,10 +130,11 @@ export async function exportRegisterExcel(spec: RegisterExportSpec): Promise<str
   // TOTAL row
   if (spec.totals && spec.totals.some((t) => t != null)) {
     const r = spec.rows.length + 3
+    const hasLabel = spec.totals.some((t) => typeof t === 'string')
     spec.columns.forEach((c, ci) => {
       const cell = ws.getCell(r, ci + 1)
       const t = spec.totals![ci]
-      cell.value = ci === 0 && t == null ? 'TOTAL' : t
+      cell.value = ci === 0 && t == null && !hasLabel ? 'TOTAL' : t
       cell.font = { bold: true }
       cell.border = CELL_BORDER
       if (c.numFmt && typeof t === 'number') cell.numFmt = c.numFmt

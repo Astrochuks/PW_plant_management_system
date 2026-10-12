@@ -16,6 +16,7 @@ Log phrases: "Bills import previewed", "Bills revision recorded".
 from __future__ import annotations
 
 import io
+import json
 import re
 from datetime import date
 from decimal import Decimal
@@ -34,6 +35,7 @@ from app.core.security import CurrentUser, require_admin, require_projects_read
 from app.monitoring.logging import get_logger
 from app.services.audit_service import audit_service
 from app.services.bills_import import pick_beme_sheet, shape_preview
+from app.services.bills_summary import compute_summary, validate_adders
 from app.services.weekly_report_sheets import parse_beme
 
 router = APIRouter(dependencies=[Depends(project_scope_guard)])
@@ -70,6 +72,13 @@ class RevisionIn(BaseModel):
     source_file_name: str | None = Field(None, max_length=255)
     source_document_path: str | None = Field(None, max_length=500)
     bills: list[BillIn] = Field(..., min_length=1)
+    # the ladder under the works total (045); the page copies the current
+    # revision's adders forward unless the admin changes them
+    adders: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class AddersIn(BaseModel):
+    adders: list[dict[str, Any]] = Field(default_factory=list)
 
 
 # ── helpers ────────────────────────────────────────────────────────────────
@@ -125,8 +134,54 @@ async def project_bills(
     in sheet order, and the revision list. One statement."""
     await _project_or_404(project_id)
     row = await fetchrow(_BILLS_SQL, str(project_id))
+    revision, bills = row["revision"], row["bills"] or []
+    # the summary — bills → works total → adders → contract figure — is
+    # computed here, once, so page, export and reports agree to the kobo
+    adders = (revision or {}).get("adders") or []
+    summary = compute_summary(
+        [{"bill_code": b["bill_code"], "name": b["name"], "amount": b["items_total"]} for b in bills],
+        adders) if revision else None
     return {"success": True, "data": {
-        "revision": row["revision"], "bills": row["bills"], "revisions": row["revisions"]}}
+        "revision": revision, "bills": bills, "summary": summary, "revisions": row["revisions"]}}
+
+
+# ── adders on the current revision ─────────────────────────────────────────
+
+@router.patch("/{project_id}/bills/adders")
+async def set_bills_adders(
+    project_id: UUID,
+    body: AddersIn,
+    request: Request,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+) -> dict[str, Any]:
+    """Set the ladder under the works total on the project's current bill.
+    Free while the bill is not in use (locked_at IS NULL); once locked this
+    becomes a pending revision — next milestone."""
+    project = await _project_or_404(project_id)
+    rev_id = project["current_beme_revision_id"]
+    if rev_id is None:
+        raise ValidationError("Record the bill first; adders belong to a bill revision")
+    try:
+        clean = validate_adders(body.adders)
+    except ValueError as e:
+        raise ValidationError(str(e)) from e
+    before = await fetchrow("SELECT adders, locked_at FROM project_beme_revisions WHERE id = $1::uuid", str(rev_id))
+    if before and before["locked_at"] is not None:
+        raise ValidationError("This bill is in use; changes to it need the project manager's approval")
+    await fetchrow(
+        "UPDATE project_beme_revisions SET adders = $2::jsonb WHERE id = $1::uuid RETURNING id",
+        str(rev_id), json.dumps(clean))
+    await audit_service.log(
+        user_id=current_user.id, user_email=current_user.email, action="bills_adders_set",
+        table_name="project_beme_revisions", record_id=str(rev_id),
+        old_values={"adders": before["adders"] if before else None}, new_values={"adders": clean},
+        ip_address=get_client_ip(request),
+        description=f"adders set on bill revision for {project['short_name'] or project['project_name']}: "
+                    + (", ".join(f"{a['name']} {a['value']}{'%' if a['kind'] != 'amount' else ''}" for a in clean) or "none"))
+    logger.info("Bills adders set", project_id=str(project_id), revision_id=str(rev_id),
+                adders=len(clean), by=current_user.email)
+    broadcast("projects", "bills_adders")
+    return {"success": True, "data": {"adders": clean}}
 
 
 # ── import preview ─────────────────────────────────────────────────────────
@@ -199,6 +254,10 @@ async def record_bills_revision(
     project = await _project_or_404(project_id)
     if not any(b.items for b in body.bills):
         raise ValidationError("The bill has no items")
+    try:
+        adders = validate_adders(body.adders)
+    except ValueError as e:
+        raise ValidationError(str(e)) from e
 
     works = sum((Decimal(str(i.contract_amount or 0)) for b in body.bills for i in b.items), Decimal("0"))
     pool = get_pool()
@@ -211,12 +270,12 @@ async def record_bills_revision(
             rev_id = await conn.fetchval(
                 """INSERT INTO project_beme_revisions
                      (project_id, revision_no, source, state, effective_date, works_total, note,
-                      source_file_name, source_document_path, proposed_by, decided_by, decided_at)
-                   VALUES ($1::uuid, $2, $3, 'approved', $4, $5, $6, $7, $8, $9::uuid, $9::uuid, now())
+                      source_file_name, source_document_path, proposed_by, decided_by, decided_at, adders)
+                   VALUES ($1::uuid, $2, $3, 'approved', $4, $5, $6, $7, $8, $9::uuid, $9::uuid, now(), $10::jsonb)
                    RETURNING id""",
                 str(project_id), rev_no, body.source, body.effective_date, works,
                 (body.note or "").strip() or None, body.source_file_name, body.source_document_path,
-                current_user.id)
+                current_user.id, json.dumps(adders))
             for b_pos, b in enumerate(body.bills, 1):
                 bill_id = await conn.fetchval(
                     """INSERT INTO project_beme_bills

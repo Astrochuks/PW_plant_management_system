@@ -1519,6 +1519,16 @@ export interface BoqBill {
   items: BoqItem[]
 }
 export type BoqSource = 'award_beme' | 'derived_from_weekly' | 'variation' | 'correction'
+export type BoqAdderKind = 'percent_of_works' | 'percent_of_running' | 'amount'
+/** one rung of the ladder under the works total (045) */
+export interface BoqAdder { name: string; kind: BoqAdderKind; value: number }
+export interface BoqSummaryLine extends BoqAdder { amount: number; running: number }
+export interface BoqSummary {
+  bills: { bill_code: string; name: string | null; amount: number }[]
+  works_total: number
+  lines: BoqSummaryLine[]
+  contract_total: number
+}
 export interface BoqRevision {
   id: string
   revision_no: number
@@ -1529,10 +1539,13 @@ export interface BoqRevision {
   note: string | null
   source_file_name: string | null
   created_at: string
+  adders?: BoqAdder[]
+  locked_at?: string | null
 }
 export interface ProjectBills {
   revision: BoqRevision | null
   bills: BoqBill[]
+  summary: BoqSummary | null
   revisions: BoqRevision[]
 }
 export interface BoqImportPreview {
@@ -1553,6 +1566,7 @@ export interface RecordBoqRevisionRequest {
   source_file_name?: string
   source_document_path?: string
   bills: BoqBill[]
+  adders?: BoqAdder[]
 }
 
 const normItem = (i: BoqItem): BoqItem => ({
@@ -1562,7 +1576,16 @@ const normBill = (b: BoqBill): BoqBill => ({
   ...b, sheet_total: numOrNull(b.sheet_total), items_total: Number(b.items_total ?? 0),
   item_count: Number(b.item_count ?? (b.items?.length ?? 0)), items: (b.items ?? []).map(normItem),
 })
-const normRevision = (r: BoqRevision): BoqRevision => ({ ...r, works_total: numOrNull(r.works_total) })
+const normRevision = (r: BoqRevision): BoqRevision => ({
+  ...r, works_total: numOrNull(r.works_total),
+  adders: (r.adders ?? []).map((a) => ({ ...a, value: Number(a.value) })),
+})
+const normSummary = (s: BoqSummary): BoqSummary => ({
+  bills: s.bills.map((b) => ({ ...b, amount: Number(b.amount ?? 0) })),
+  works_total: Number(s.works_total ?? 0),
+  lines: s.lines.map((l) => ({ ...l, value: Number(l.value), amount: Number(l.amount ?? 0), running: Number(l.running ?? 0) })),
+  contract_total: Number(s.contract_total ?? 0),
+})
 
 export async function getProjectBills(projectId: string): Promise<ProjectBills> {
   const res = await apiClient.get<{ data: ProjectBills }>(`/projects/${projectId}/bills`)
@@ -1570,8 +1593,14 @@ export async function getProjectBills(projectId: string): Promise<ProjectBills> 
   return {
     revision: d.revision ? normRevision(d.revision) : null,
     bills: (d.bills ?? []).map(normBill),
+    summary: d.summary ? normSummary(d.summary) : null,
     revisions: (d.revisions ?? []).map(normRevision),
   }
+}
+
+export async function updateBillsAdders(projectId: string, adders: BoqAdder[]): Promise<BoqAdder[]> {
+  const res = await apiClient.patch<{ data: { adders: BoqAdder[] } }>(`/projects/${projectId}/bills/adders`, { adders })
+  return res.data.data.adders
 }
 
 export async function previewBillsImport(projectId: string, file: File): Promise<BoqImportPreview> {

@@ -55,6 +55,8 @@ import {
   getProjectBills,
   previewBillsImport,
   recordBillsRevision,
+  updateBillsAdders,
+  type BoqAdder,
   type RecordBoqRevisionRequest,
 } from '@/lib/api/projects';
 
@@ -665,6 +667,14 @@ export function useProjectBills(projectId: string | null) {
 
 export function usePreviewBillsImport(projectId: string) {
   return useMutation({ mutationFn: (file: File) => previewBillsImport(projectId, file) });
+}
+
+export function useUpdateBillsAdders(projectId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (adders: BoqAdder[]) => updateBillsAdders(projectId, adders),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: [...projectsKeys.detail(projectId), 'bills'] }),
+  });
 }
 
 export function useRecordBillsRevision(projectId: string) {

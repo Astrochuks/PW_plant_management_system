@@ -13,7 +13,7 @@
 import { useMemo, useState } from 'react'
 import Image from 'next/image'
 import { useParams } from 'next/navigation'
-import { AlertTriangle, CheckCircle2, Download, FileUp, Search, X } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Download, FileUp, Search, SlidersHorizontal, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -29,10 +29,12 @@ import {
 import { MiniKpi, MiniKpiRow, MiniKpiSkeleton } from '@/components/shared/mini-kpi'
 import { useAuth } from '@/providers/auth-provider'
 import { useProject, useProjectBills, usePreviewBillsImport, useRecordBillsRevision } from '@/hooks/use-projects'
-import type { BoqBill, BoqImportPreview } from '@/lib/api/projects'
+import type { BoqAdder, BoqBill, BoqImportPreview } from '@/lib/api/projects'
 import { getErrorMessage } from '@/lib/api/client'
 import { money, num } from '@/lib/format'
 import { exportRegisterExcel, type RegisterExportRow } from '@/lib/register-export'
+import { BoqSummaryTable, adderLabel } from '@/components/projects/bills/summary-table'
+import { AddersDialog } from '@/components/projects/bills/adders-dialog'
 
 const HEAD = 'text-[#101415] font-semibold text-xs uppercase tracking-wider border-x border-[#e6ac31]/50 whitespace-nowrap'
 const CELL = 'text-sm border-x border-border/50 align-top py-2'
@@ -48,10 +50,13 @@ export default function ProjectBillsPage() {
   const [search, setSearch] = useState('')
   const [billCode, setBillCode] = useState('all')
   const [importOpen, setImportOpen] = useState(false)
+  const [addersOpen, setAddersOpen] = useState(false)
   const [exporting, setExporting] = useState(false)
 
   const bills = useMemo(() => data?.bills ?? [], [data])
   const revision = data?.revision ?? null
+  const summary = data?.summary ?? null
+  const adders = useMemo(() => revision?.adders ?? [], [revision])
 
   // the rows on screen: one bill or all, items narrowed by code / description
   const visible = useMemo(() => {
@@ -78,6 +83,13 @@ export default function ProjectBillsPage() {
         rows.push({ section: [`Bill ${b.bill_code}`, b.name ?? '', null, null, null, sumVisible(b)] })
         for (const i of b.items) rows.push([i.item_code, i.description, i.unit ?? '', i.contract_qty, i.rate, i.contract_amount])
       }
+      // the summary closes the sheet, as the BEME does: bills, works total, adders, contract sum
+      if (summary && !hasFilters) {
+        rows.push({ section: ['', 'SUMMARY', null, null, null, null] })
+        for (const b of summary.bills) rows.push([b.bill_code, b.name ?? '', '', null, null, b.amount])
+        rows.push({ section: ['', 'Works total', null, null, null, summary.works_total] })
+        for (const l of summary.lines) rows.push(['', adderLabel(l), '', null, null, l.amount])
+      }
       await exportRegisterExcel({
         title: bannerTitle,
         sheetName: 'Bill of Quantities',
@@ -87,7 +99,7 @@ export default function ProjectBillsPage() {
           { header: 'Amount', width: 22, numFmt: '#,##0.00' },
         ],
         rows,
-        totals: [null, null, null, null, null, worksTotal],
+        totals: [null, summary && !hasFilters ? (summary.lines.length ? 'CONTRACT SUM' : 'WORKS TOTAL') : null, null, null, null, summary && !hasFilters ? summary.contract_total : worksTotal],
       })
       toast.success('Export downloaded')
     } catch (err) {
@@ -107,6 +119,11 @@ export default function ProjectBillsPage() {
           <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting || isLoading || itemCount === 0}>
             <Download className="h-3.5 w-3.5 mr-1.5" />{exporting ? 'Exporting...' : 'Export'}
           </Button>
+          {isAdmin && revision && (
+            <Button variant="outline" size="sm" onClick={() => setAddersOpen(true)}>
+              <SlidersHorizontal className="h-3.5 w-3.5 mr-1.5" />Adders{adders.length ? ` (${adders.length})` : ''}
+            </Button>
+          )}
           {isAdmin && (
             <Button size="sm" onClick={() => setImportOpen(true)}>
               <FileUp className="h-3.5 w-3.5 mr-1.5" />Import bill
@@ -114,6 +131,11 @@ export default function ProjectBillsPage() {
           )}
         </div>
       </div>
+
+      {/* Summary first — the table the sheet ends with */}
+      {summary && !hasFilters && (
+        <BoqSummaryTable summary={summary} title={`P.W. NIGERIA LTD. — Bill of Quantities Summary · ${projectName}`} />
+      )}
 
       {/* Three cards — follow the filters */}
       <MiniKpiRow>
@@ -217,8 +239,11 @@ export default function ProjectBillsPage() {
       )}
 
       {isAdmin && (
-        <ImportBillDialog projectId={id} open={importOpen} onOpenChange={setImportOpen}
-          nextRevisionNo={(data?.revisions?.[0]?.revision_no ?? 0) + 1} />
+        <>
+          <ImportBillDialog projectId={id} open={importOpen} onOpenChange={setImportOpen}
+            nextRevisionNo={(data?.revisions?.[0]?.revision_no ?? 0) + 1} adders={adders} />
+          <AddersDialog projectId={id} open={addersOpen} onOpenChange={setAddersOpen} adders={adders} />
+        </>
       )}
     </div>
   )
@@ -226,8 +251,8 @@ export default function ProjectBillsPage() {
 
 // ── Import: file → preview → save as revision n ─────────────────────────
 
-function ImportBillDialog({ projectId, open, onOpenChange, nextRevisionNo }: {
-  projectId: string; open: boolean; onOpenChange: (v: boolean) => void; nextRevisionNo: number
+function ImportBillDialog({ projectId, open, onOpenChange, nextRevisionNo, adders }: {
+  projectId: string; open: boolean; onOpenChange: (v: boolean) => void; nextRevisionNo: number; adders: BoqAdder[]
 }) {
   const preview = usePreviewBillsImport(projectId)
   const record = useRecordBillsRevision(projectId)
@@ -256,6 +281,7 @@ function ImportBillDialog({ projectId, open, onOpenChange, nextRevisionNo }: {
       const res = await record.mutateAsync({
         source, effective_date: effectiveDate, note: note.trim() || undefined,
         source_file_name: result.file_name, source_document_path: result.source_document_path, bills: result.bills,
+        adders,  // the current ladder carries forward; change it with the Adders button
       })
       toast.success(`Revision ${res.revision_no} recorded · works total ${money(res.works_total)}`)
       close(false)
