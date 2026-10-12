@@ -3,6 +3,8 @@
 import { useRouter } from 'next/navigation'
 import { useState, useMemo } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
+import Link from 'next/link'
+import { money } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -363,10 +365,15 @@ export function ProjectForm({ project, mode }: ProjectFormProps) {
         {openSections.contract && (
           <CardContent className="space-y-4">
             {mode === 'edit' && (
-              <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-                Contract sums are dated facts: the current sum is {form.current_contract_sum !== '' ? `₦${Number(form.current_contract_sum).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'not recorded'}.
-                Record a variation, revision or correction on the project&apos;s <strong>Timeline</strong> tab.
-              </p>
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-dashed p-3 text-sm">
+                <p className="text-muted-foreground">
+                  Current contract sum: <span className="font-medium text-foreground tabular-nums">{form.current_contract_sum !== '' ? money(Number(form.current_contract_sum)) : 'not recorded'}</span>.
+                  A change is recorded as a dated entry on the Timeline, so earlier periods keep the sum they had.
+                </p>
+                <Button asChild size="sm" variant="outline">
+                  <Link href={`/projects/${project?.id}/history?record=sum`}>Record a new contract sum</Link>
+                </Button>
+              </div>
             )}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {mode === 'create' && (

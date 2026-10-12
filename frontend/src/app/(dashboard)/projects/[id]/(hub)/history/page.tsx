@@ -13,7 +13,7 @@
  */
 
 import { useParams } from 'next/navigation'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Archive, ArchiveRestore, Banknote, Flag, Plus, FileText } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -54,6 +54,10 @@ export default function ProjectHistoryPage() {
   const { data: entries, isLoading } = useProjectHistory(id)
   const [sumOpen, setSumOpen] = useState(false)
   const [moveOpen, setMoveOpen] = useState(false)
+  // /projects/<id>/history?record=sum (the edit form's button) opens the dialog straight away
+  useEffect(() => {
+    if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('record') === 'sum') setSumOpen(true)
+  }, [])
   const isOngoing = project ? project.status === 'active' : true
 
   const hasOriginal = entries?.some((e) => e.entry_type === 'contract_sum' && e.label === 'original') ?? false
@@ -151,9 +155,7 @@ function ContractSumDialog({ projectId, open, onOpenChange, hasOriginal, current
   const mutation = useAddContractSum(projectId)
   const [kind, setKind] = useState<ContractSumKind>(hasOriginal ? 'variation' : 'original')
   const [amount, setAmount] = useState('')
-  const [basis, setBasis] = useState<ContractSumBasis>('all_in')
   const [effectiveDate, setEffectiveDate] = useState('')
-  const [instrument, setInstrument] = useState('')
   const [note, setNote] = useState('')
 
   const submit = async () => {
@@ -162,13 +164,13 @@ function ContractSumDialog({ projectId, open, onOpenChange, hasOriginal, current
     if (!effectiveDate) return toast.error('Enter the effective date')
     if (kind === 'correction' && !note.trim()) return toast.error('A correction must say what it corrects')
     try {
+      // basis is always all-in (decision 2026-10-12: no basis / instrument fields)
       const res = await mutation.mutateAsync({
-        kind, amount: value, basis, effective_date: effectiveDate,
-        instrument_ref: instrument.trim() || undefined, note: note.trim() || undefined,
+        kind, amount: value, basis: 'all_in', effective_date: effectiveDate, note: note.trim() || undefined,
       })
       toast.success(`Recorded. Current contract sum: ${money(res.current_contract_sum)}`)
       onOpenChange(false)
-      setAmount(''); setInstrument(''); setNote('')
+      setAmount(''); setNote('')
     } catch (err) {
       toast.error(getErrorMessage(err))
     }
@@ -178,16 +180,21 @@ function ContractSumDialog({ projectId, open, onOpenChange, hasOriginal, current
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Record contract sum</DialogTitle>
+          <DialogTitle>Record a new contract sum</DialogTitle>
           <DialogDescription>
-            Enter the <strong>resulting</strong> contract sum after this instrument (not the change).
+            Enter the <strong>new total</strong> contract sum (not the difference). It applies from the date you give;
+            earlier periods keep the sum they had.
             {currentSum != null && <> Current: {money(currentSum)}.</>}
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4">
+          <div>
+            <Label>New contract sum (₦)</Label>
+            <Input type="number" step="0.01" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="e.g. 14621359979.09" autoFocus />
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label>Kind</Label>
+              <Label>What kind of change</Label>
               <Select value={kind} onValueChange={(v) => setKind(v as ContractSumKind)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -198,30 +205,9 @@ function ContractSumDialog({ projectId, open, onOpenChange, hasOriginal, current
               </Select>
             </div>
             <div>
-              <Label>Basis</Label>
-              <Select value={basis} onValueChange={(v) => setBasis(v as ContractSumBasis)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all_in">All-in (incl. provisions & VAT)</SelectItem>
-                  <SelectItem value="ex_vat">Ex-VAT</SelectItem>
-                  <SelectItem value="unknown">Unknown</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label>Resulting sum (₦)</Label>
-              <Input type="number" step="0.01" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="e.g. 14621359979.09" />
-            </div>
-            <div>
               <Label>Effective date</Label>
               <Input type="date" value={effectiveDate} onChange={(e) => setEffectiveDate(e.target.value)} />
             </div>
-          </div>
-          <div>
-            <Label>Instrument reference</Label>
-            <Input value={instrument} onChange={(e) => setInstrument(e.target.value)} placeholder="e.g. VO-02 / letter ref" />
           </div>
           <div>
             <Label>Note{kind === 'correction' ? ' (required)' : ''}</Label>
