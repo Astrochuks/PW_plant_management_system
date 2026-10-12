@@ -410,6 +410,26 @@ _CURRENCY_SYMBOLS = {"NGN": "₦", "USD": "$", "EUR": "€", "GBP": "£"}
 _MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 
+def export_banner(title: str, now: "datetime | None" = None):
+    """Row-1 banner of a register export (docs/UI_STANDARD.md §3b): the title
+    bold 14, then the export date on a second line — the same two lines the
+    client-side writer (frontend/src/lib/register-export.ts) produces, so a
+    plants file and a projects file open looking the same. Lagos time.
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from openpyxl.cell.rich_text import CellRichText, TextBlock
+    from openpyxl.cell.text import InlineFont
+
+    now = now or datetime.now(ZoneInfo("Africa/Lagos"))
+    clean = " ".join(title.split())[:200]
+    date_line = f"Exported {now.strftime('%a, %-d %B %Y')} · Week {now.isocalendar().week}"
+    return CellRichText(
+        TextBlock(InlineFont(b=True, sz=14, color="101415"), clean),
+        TextBlock(InlineFont(sz=10, color="606060"), "\n" + date_line),
+    )
+
+
 def _format_date_parts(year: int | None, month: int | None, day: int | None) -> str | None:
     """Format year/month/day into a readable date string with available precision."""
     if not year:
@@ -539,6 +559,7 @@ async def export_plants_excel(
     has_maintenance: bool = Query(False, description="Only plants with maintenance cost > 0"),
     verified_only: bool = Query(False, description="Only include physically verified plants"),
     columns: str | None = Query(None, description="Comma-separated columns to export. Default: all standard columns"),
+    title: str | None = Query(None, max_length=200, description="Row-1 banner text — the page's scope, e.g. 'P.W. NIGERIA LTD. — Plant Register for Abuja'"),
 ) -> Any:
     """Export plants to Excel file with optional column and filter selection.
 
@@ -694,7 +715,6 @@ async def export_plants_excel(
     ws.title = "Plants"
 
     # Style definitions
-    title_font = Font(bold=True, size=14, color="101415")
     header_font = Font(bold=True, size=10, color="101415")
     header_fill = PatternFill(start_color="FFBF36", end_color="FFBF36", fill_type="solid")
     header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
@@ -729,9 +749,9 @@ async def export_plants_excel(
 
     text_col = 2 if logo_added else 1
     ws.merge_cells(start_row=1, start_column=text_col, end_row=1, end_column=len(export_cols))
-    brand_cell = ws.cell(row=1, column=text_col, value="P.W. NIGERIA LTD. — Plant Register")
-    brand_cell.font = title_font
-    brand_cell.alignment = Alignment(vertical="center")
+    brand_cell = ws.cell(row=1, column=text_col)
+    brand_cell.value = export_banner(title or "P.W. NIGERIA LTD. — Plant Register")
+    brand_cell.alignment = Alignment(vertical="center", wrap_text=True)
 
     # Row 2: Column headers
     for col_idx, col_def in enumerate(export_cols, 1):
