@@ -20,6 +20,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Query, Requ
 from pydantic import BaseModel, Field, field_validator
 
 from app.api.v1.auth import get_client_ip
+from app.core.events import broadcast
 from app.core.exceptions import NotFoundError, ValidationError
 from app.core.pool import fetch, fetchrow, fetchval
 from app.core.project_scope import (
@@ -257,6 +258,8 @@ async def add_contract_sum(
                        f"effective {body.effective_date} on {project['short_name'] or project['project_name']}")
     logger.info("Contract sum recorded", project_id=str(project_id), kind=body.kind,
                 amount=body.amount, by=current_user.email)
+    # every open browser (Ongoing register, nav count, hub) refetches on this
+    broadcast("projects", "contract_sum")
     return {"success": True, "data": row,
             "meta": {"current_contract_sum": float(after["current_contract_sum"] or 0)}}
 
@@ -299,6 +302,8 @@ async def add_status_event(
                        f"on {project['short_name'] or project['project_name']}")
     logger.info("Project status recorded", project_id=str(project_id), status=body.status,
                 effective=str(body.effective_date), by=current_user.email)
+    # Ongoing <-> Archive moves must show up everywhere at once
+    broadcast("projects", "status_event")
     return {"success": True, "data": row,
             "meta": {"status": after["status"], "status_since": str(after["status_since"])}}
 
@@ -412,6 +417,7 @@ async def upload_document(
                        f"{project['short_name'] or project['project_name']}")
     logger.info("Project document uploaded", project_id=str(project_id), type=document_type,
                 size=len(content), by=current_user.email)
+    broadcast("projects", "document")
     return {"success": True, "data": row}
 
 
