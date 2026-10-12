@@ -54,6 +54,7 @@ import {
   type AddStatusEventRequest,
   getProjectBills,
   previewBillsImport,
+  previewBillsFromSubmission,
   recordBillsRevision,
   updateBillsAdders,
   type BoqAdder,
@@ -667,6 +668,10 @@ export function useProjectBills(projectId: string | null) {
 
 export function usePreviewBillsImport(projectId: string) {
   return useMutation({ mutationFn: (file: File) => previewBillsImport(projectId, file) });
+}
+
+export function usePreviewBillsFromSubmission(projectId: string) {
+  return useMutation({ mutationFn: (submissionId: string) => previewBillsFromSubmission(projectId, submissionId) });
 }
 
 export function useUpdateBillsAdders(projectId: string) {

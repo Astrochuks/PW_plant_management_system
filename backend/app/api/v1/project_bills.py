@@ -205,20 +205,9 @@ async def preview_bills_import(
     if len(content) > MAX_BYTES:
         raise ValidationError("The file is larger than 25 MB")
 
-    import openpyxl  # local import: keeps the module light for the pure tests
-    try:
-        wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
-    except Exception as e:  # noqa: BLE001 — the user needs the real reason
-        raise ValidationError(f"Could not open the workbook: {e}") from e
+    sheet, preview = _parse_bill_workbook(content)
 
-    parsed_by_sheet = {ws.title: parse_beme(ws) for ws in wb.worksheets}
-    sheet = pick_beme_sheet(parsed_by_sheet)
-    if sheet is None:
-        raise ValidationError(
-            "No bill of quantities found: no sheet has an Item / Description / Rate "
-            "header followed by priced items (bill headers are dotted codes in capitals)")
-    preview = shape_preview(parsed_by_sheet[sheet])
-
+    # keep the file as the revision's evidence
     safe = _SAFE_NAME.sub("_", name)[:120]
     storage_path = f"projects/{project_id}/boq/{uuid4().hex}_{safe}"
     from app.core.database import get_supabase_admin_client  # Storage only
@@ -230,12 +219,75 @@ async def preview_bills_import(
         logger.error("Bill file upload failed", path=storage_path, error=f"{type(e).__name__}: {e}")
         raise ValidationError(f"Could not store the file: {e}") from e
 
-    logger.info("Bills import previewed", project_id=str(project_id), sheet=sheet,
+    logger.info("Bills import previewed", project_id=str(project_id), sheet=sheet, origin="upload",
                 bills=preview["bill_count"], items=preview["item_count"],
                 works_total=preview["works_total"], mismatched=len(preview["mismatched_bills"]),
                 by=current_user.email)
     return {"success": True, "data": {
         **preview, "sheet": sheet, "file_name": name, "source_document_path": storage_path,
+        "project": {"id": project["id"], "short_name": project["short_name"]},
+    }}
+
+
+def _parse_bill_workbook(content: bytes) -> tuple[str, dict[str, Any]]:
+    """Open the workbook, run the deterministic BEME parser on every sheet,
+    keep the one that holds the bill. Raises ValidationError with the real
+    reason when nothing usable is found."""
+    import openpyxl  # local import: keeps the module light for the pure tests
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
+    except Exception as e:  # noqa: BLE001 — the user needs the real reason
+        raise ValidationError(f"Could not open the workbook: {e}") from e
+    parsed_by_sheet = {ws.title: parse_beme(ws) for ws in wb.worksheets}
+    sheet = pick_beme_sheet(parsed_by_sheet)
+    if sheet is None:
+        raise ValidationError(
+            "No bill of quantities found: no sheet has an Item / Description / Rate "
+            "header followed by priced items (bill headers are dotted codes in capitals)")
+    return sheet, shape_preview(parsed_by_sheet[sheet])
+
+
+class FromSubmissionIn(BaseModel):
+    submission_id: UUID
+
+
+@router.post("/{project_id}/bills/import-from-submission")
+async def preview_bills_from_submission(
+    project_id: UUID,
+    body: FromSubmissionIn,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+) -> dict[str, Any]:
+    """The second door: read the BEME sheet of a weekly workbook this project
+    already uploaded (contract columns only) and return the same preview.
+    The revision points at the workbook already in storage — no re-upload."""
+    project = await _project_or_404(project_id)
+    sub = await fetchrow(
+        """SELECT id, file_name, file_path, year, week_number, week_ending_date, status
+             FROM project_report_submissions
+            WHERE id = $1::uuid AND project_id = $2::uuid""",
+        str(body.submission_id), str(project_id))
+    if not sub:
+        raise NotFoundError("Submission", str(body.submission_id))
+    if not sub["file_path"]:
+        raise ValidationError("That submission has no file in storage")
+    from app.core.database import get_supabase_admin_client  # Storage only
+    try:
+        content = get_supabase_admin_client().storage.from_("reports").download(sub["file_path"])
+    except Exception as e:  # noqa: BLE001
+        logger.error("Workbook download failed", path=sub["file_path"], error=f"{type(e).__name__}: {e}")
+        raise ValidationError(f"Could not read the workbook from storage: {e}") from e
+    if not content:
+        raise ValidationError("The stored workbook is empty")
+
+    sheet, preview = _parse_bill_workbook(content)
+    week = f"W{int(sub['week_number']):02d} {sub['year']}" if sub["week_number"] else ""
+    logger.info("Bills import previewed", project_id=str(project_id), sheet=sheet, origin="submission",
+                submission_id=str(sub["id"]), bills=preview["bill_count"], items=preview["item_count"],
+                works_total=preview["works_total"], mismatched=len(preview["mismatched_bills"]),
+                by=current_user.email)
+    return {"success": True, "data": {
+        **preview, "sheet": sheet, "file_name": sub["file_name"] or "weekly workbook",
+        "source_document_path": sub["file_path"], "from_week": week,
         "project": {"id": project["id"], "short_name": project["short_name"]},
     }}
 

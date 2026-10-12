@@ -28,7 +28,7 @@ import {
 } from '@/components/ui/dialog'
 import { MiniKpi, MiniKpiRow, MiniKpiSkeleton } from '@/components/shared/mini-kpi'
 import { useAuth } from '@/providers/auth-provider'
-import { useProject, useProjectBills, usePreviewBillsImport, useRecordBillsRevision } from '@/hooks/use-projects'
+import { useProject, useProjectBills, useProjectSubmissions, usePreviewBillsImport, usePreviewBillsFromSubmission, useRecordBillsRevision } from '@/hooks/use-projects'
 import type { BoqAdder, BoqBill, BoqImportPreview } from '@/lib/api/projects'
 import { getErrorMessage } from '@/lib/api/client'
 import { money, num } from '@/lib/format'
@@ -255,7 +255,13 @@ function ImportBillDialog({ projectId, open, onOpenChange, nextRevisionNo, adder
   projectId: string; open: boolean; onOpenChange: (v: boolean) => void; nextRevisionNo: number; adders: BoqAdder[]
 }) {
   const preview = usePreviewBillsImport(projectId)
+  const previewFromSubmission = usePreviewBillsFromSubmission(projectId)
   const record = useRecordBillsRevision(projectId)
+  // the second door: a weekly workbook this project already uploaded
+  const { data: submissions } = useProjectSubmissions({ project_id: projectId, limit: 50 })
+  const usable = useMemo(() => (submissions?.data ?? []).filter((s) => s.status === 'success' || s.status === 'partial'), [submissions])
+  const [door, setDoor] = useState<'file' | 'workbook'>('file')
+  const [submissionId, setSubmissionId] = useState('')
   const [file, setFile] = useState<File | null>(null)
   const [result, setResult] = useState<BoqImportPreview | null>(null)
   const [effectiveDate, setEffectiveDate] = useState(() => new Date().toISOString().slice(0, 10))
@@ -266,13 +272,19 @@ function ImportBillDialog({ projectId, open, onOpenChange, nextRevisionNo, adder
   const close = (v: boolean) => { if (!v) reset(); onOpenChange(v) }
 
   const readFile = async () => {
-    if (!file) return toast.error('Choose the bill file first (.xlsx)')
     try {
-      setResult(await preview.mutateAsync(file))
+      if (door === 'workbook') {
+        if (!submissionId) return toast.error('Choose the weekly workbook first')
+        setResult(await previewFromSubmission.mutateAsync(submissionId))
+      } else {
+        if (!file) return toast.error('Choose the bill file first (.xlsx)')
+        setResult(await preview.mutateAsync(file))
+      }
     } catch (err) {
       toast.error(getErrorMessage(err))
     }
   }
+  const reading = preview.isPending || previewFromSubmission.isPending
 
   const save = async () => {
     if (!result) return
@@ -302,14 +314,46 @@ function ImportBillDialog({ projectId, open, onOpenChange, nextRevisionNo, adder
         </DialogHeader>
 
         {!result ? (
-          <div className="grid gap-3">
-            <Label htmlFor="boq-file">Bill file</Label>
-            <Input id="boq-file" type="file" accept=".xlsx,.xlsm" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+          <div className="grid gap-4">
+            <div className="flex rounded-lg bg-muted p-1 w-fit">
+              {([['file', 'Upload a bill file'], ['workbook', 'Use an uploaded weekly workbook']] as const).map(([k, label]) => (
+                <button key={k} type="button" onClick={() => setDoor(k)}
+                  className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${door === k ? 'bg-primary/20 text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            {door === 'file' ? (
+              <div className="grid gap-2">
+                <Label htmlFor="boq-file">Bill file (.xlsx)</Label>
+                <Input id="boq-file" type="file" accept=".xlsx,.xlsm" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+              </div>
+            ) : (
+              <div className="grid gap-2">
+                <Label>Weekly workbook</Label>
+                {usable.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">This project has no parsed weekly workbook yet.</p>
+                ) : (
+                  <Select value={submissionId} onValueChange={setSubmissionId}>
+                    <SelectTrigger><SelectValue placeholder="Choose a workbook…" /></SelectTrigger>
+                    <SelectContent>
+                      {usable.map((s) => (
+                        <SelectItem key={s.id} value={s.id}>
+                          W{String(s.week_number).padStart(2, '0')} {s.year}{s.week_ending_date ? ` · ${s.week_ending_date}` : ''}{s.file_name ? ` · ${s.file_name}` : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                <p className="text-xs text-muted-foreground">Only the bill is read from it — item, description, unit, contract quantity, rate, amount. Weekly figures are ignored.</p>
+              </div>
+            )}
           </div>
         ) : (
           <div className="space-y-4">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
               <span className="font-medium">{result.file_name}</span>
+              {result.from_week && <span className="text-muted-foreground">from {result.from_week}</span>}
               <span className="text-muted-foreground">sheet &ldquo;{result.sheet}&rdquo;</span>
               <span>{result.bill_count} bills · {result.item_count} items</span>
               <span className="font-semibold tabular-nums">works {money(result.works_total)}</span>
@@ -379,7 +423,7 @@ function ImportBillDialog({ projectId, open, onOpenChange, nextRevisionNo, adder
           {result && <Button variant="ghost" onClick={reset}>Choose another file</Button>}
           <Button variant="outline" onClick={() => close(false)}>Cancel</Button>
           {!result
-            ? <Button onClick={readFile} disabled={!file || preview.isPending}>{preview.isPending ? 'Reading…' : 'Read file'}</Button>
+            ? <Button onClick={readFile} disabled={reading || (door === 'file' ? !file : !submissionId)}>{reading ? 'Reading…' : door === 'file' ? 'Read file' : 'Read workbook'}</Button>
             : <Button onClick={save} disabled={record.isPending}>{record.isPending ? 'Saving…' : `Save as revision ${nextRevisionNo}`}</Button>}
         </DialogFooter>
       </DialogContent>

@@ -1558,6 +1558,8 @@ export interface BoqImportPreview {
   sheet: string
   file_name: string
   source_document_path: string
+  /** set when the bill was read from an uploaded weekly workbook */
+  from_week?: string
 }
 export interface RecordBoqRevisionRequest {
   source: Exclude<BoqSource, 'derived_from_weekly'>
@@ -1609,6 +1611,12 @@ export async function previewBillsImport(projectId: string, file: File): Promise
   const res = await apiClient.post<{ data: BoqImportPreview }>(`/projects/${projectId}/bills/import`, fd, {
     headers: { 'Content-Type': 'multipart/form-data' },
   })
+  const d = res.data.data
+  return { ...d, works_total: Number(d.works_total ?? 0), bills: (d.bills ?? []).map(normBill) }
+}
+
+export async function previewBillsFromSubmission(projectId: string, submissionId: string): Promise<BoqImportPreview> {
+  const res = await apiClient.post<{ data: BoqImportPreview }>(`/projects/${projectId}/bills/import-from-submission`, { submission_id: submissionId })
   const d = res.data.data
   return { ...d, works_total: Number(d.works_total ?? 0), bills: (d.bills ?? []).map(normBill) }
 }
