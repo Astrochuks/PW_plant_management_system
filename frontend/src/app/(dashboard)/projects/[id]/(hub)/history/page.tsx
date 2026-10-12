@@ -13,7 +13,7 @@
  */
 
 import { useParams } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { toast } from 'sonner'
 import { Archive, ArchiveRestore, Banknote, Flag, Plus, FileText } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -52,12 +52,11 @@ export default function ProjectHistoryPage() {
   const isAdmin = user?.role === 'admin'
   const { data: project } = useProject(id)
   const { data: entries, isLoading } = useProjectHistory(id)
-  const [sumOpen, setSumOpen] = useState(false)
+  // /projects/<id>/history?record=sum (the edit form's button) opens the dialog straight away;
+  // read once at mount — the dialog only renders after the project has loaded on the client
+  const [sumOpen, setSumOpen] = useState(
+    () => typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('record') === 'sum')
   const [moveOpen, setMoveOpen] = useState(false)
-  // /projects/<id>/history?record=sum (the edit form's button) opens the dialog straight away
-  useEffect(() => {
-    if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('record') === 'sum') setSumOpen(true)
-  }, [])
   const isOngoing = project ? project.status === 'active' : true
 
   const hasOriginal = entries?.some((e) => e.entry_type === 'contract_sum' && e.label === 'original') ?? false
