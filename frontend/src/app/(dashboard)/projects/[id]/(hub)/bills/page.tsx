@@ -14,7 +14,7 @@ import { useMemo, useState } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
-import { AlertTriangle, CheckCircle2, Download, FileUp, Lock, PencilLine, Search, SlidersHorizontal, X } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Download, FileUp, History, PencilLine, Search, SlidersHorizontal, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -29,13 +29,20 @@ import {
 } from '@/components/ui/dialog'
 import { MiniKpi, MiniKpiRow, MiniKpiSkeleton } from '@/components/shared/mini-kpi'
 import { useAuth } from '@/providers/auth-provider'
-import { useProject, useProjectBills, useProjectSubmissions, usePreviewBillsImport, usePreviewBillsFromSubmission, useRecordBillsRevision, useLockBills } from '@/hooks/use-projects'
+import { useProject, useProjectBills, useProjectSubmissions, usePreviewBillsImport, usePreviewBillsFromSubmission, useRecordBillsRevision } from '@/hooks/use-projects'
 import type { BoqAdder, BoqBill, BoqImportPreview } from '@/lib/api/projects'
 import { getErrorMessage } from '@/lib/api/client'
 import { fmtDate, money, num } from '@/lib/format'
 import { exportRegisterExcel, type RegisterExportRow } from '@/lib/register-export'
 import { BoqSummaryTable, adderLabel } from '@/components/projects/bills/summary-table'
 import { AddersDialog } from '@/components/projects/bills/adders-dialog'
+
+const SOURCE_HOW: Record<string, string> = {
+  award_beme: 'imported from a bill file',
+  derived_from_weekly: 'from a weekly workbook',
+  variation: 'variation',
+  correction: 'edited by hand',
+}
 
 const HEAD = 'text-[#101415] font-semibold text-xs uppercase tracking-wider border-x border-[#e6ac31]/50 whitespace-nowrap'
 const CELL = 'text-sm border-x border-border/50 align-top py-2'
@@ -52,16 +59,14 @@ export default function ProjectBillsPage() {
   const [billCode, setBillCode] = useState('all')
   const [importOpen, setImportOpen] = useState(false)
   const [addersOpen, setAddersOpen] = useState(false)
-  const [lockOpen, setLockOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
   const [exporting, setExporting] = useState(false)
-  const lock = useLockBills(id)
 
   const bills = useMemo(() => data?.bills ?? [], [data])
   const revision = data?.revision ?? null
   const summary = data?.summary ?? null
   const adders = useMemo(() => revision?.adders ?? [], [revision])
-  const pending = data?.pending ?? null
-  const locked = !!revision?.locked_at
+  const revisions = data?.revisions ?? []
 
   // the rows on screen: one bill or all, items narrowed by code / description
   const visible = useMemo(() => {
@@ -119,16 +124,11 @@ export default function ProjectBillsPage() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-3">
+        <h2 className="text-lg font-semibold">Bill of Quantities</h2>
         <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-lg font-semibold">Bill of Quantities</h2>
-          {revision && (locked
-            ? <Badge variant="secondary" title={`In use since ${fmtDate(revision.locked_at!.slice(0, 10))} — changes need the project manager's approval`}><Lock className="h-3 w-3 mr-1" />In use</Badge>
-            : <Badge variant="outline" className="text-muted-foreground">Not yet in use</Badge>)}
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {isAdmin && revision && !locked && (
-            <Button variant="ghost" size="sm" onClick={() => setLockOpen(true)} title="Sites have started measuring against this bill">
-              <Lock className="h-3.5 w-3.5 mr-1.5" />Mark as in use
+          {isAdmin && revisions.length > 0 && (
+            <Button variant="ghost" size="sm" onClick={() => setHistoryOpen(true)} title="Every saved version of this bill, with its date">
+              <History className="h-3.5 w-3.5 mr-1.5" />History{revisions.length > 1 ? ` (${revisions.length})` : ''}
             </Button>
           )}
           <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting || isLoading || itemCount === 0}>
@@ -151,21 +151,6 @@ export default function ProjectBillsPage() {
           )}
         </div>
       </div>
-
-      {/* A revision waiting for the project manager */}
-      {pending && (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm dark:border-amber-700 dark:bg-amber-950">
-          <div>
-            <span className="font-medium">Revision {pending.revision_no} is awaiting the project manager&apos;s approval.</span>
-            <span className="ml-2 text-muted-foreground">
-              Proposed by {pending.proposed_by_name || pending.proposed_by_email || 'admin'}{pending.proposed_at ? ` on ${fmtDate(pending.proposed_at.slice(0, 10))}` : ''}. The bill below stays in force until then.
-            </span>
-          </div>
-          <Button size="sm" variant={user?.role === 'project_manager' ? 'default' : 'outline'} asChild>
-            <Link href={`/projects/${id}/bills/revisions/${pending.id}`}>{user?.role === 'project_manager' ? 'Review and decide' : 'View the proposal'}</Link>
-          </Button>
-        </div>
-      )}
 
       {/* Summary first — the table the sheet ends with */}
       {summary && !hasFilters && (
@@ -281,24 +266,38 @@ export default function ProjectBillsPage() {
       {isAdmin && (
         <>
           <ImportBillDialog projectId={id} open={importOpen} onOpenChange={setImportOpen}
-            nextRevisionNo={(data?.revisions?.[0]?.revision_no ?? 0) + 1} adders={adders} locked={locked} />
-          <AddersDialog projectId={id} open={addersOpen} onOpenChange={setAddersOpen} adders={adders}
-            locked={locked} bills={bills} />
-          <Dialog open={lockOpen} onOpenChange={setLockOpen}>
-            <DialogContent>
+            nextRevisionNo={(revision?.revision_no ?? 0) + 1} adders={adders} />
+          <AddersDialog projectId={id} open={addersOpen} onOpenChange={setAddersOpen} adders={adders} />
+          <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
+            <DialogContent className="sm:max-w-2xl">
               <DialogHeader>
-                <DialogTitle>Mark this bill as in use?</DialogTitle>
+                <DialogTitle>Bill history</DialogTitle>
                 <DialogDescription>
-                  Do this once sites have started measuring against it. From then on every change to the bill — a rate, an item, an adder, a new import — waits for the project manager&apos;s approval, and the bill in force stays as it is until approved. This cannot be undone.
+                  Every saved version of this bill. The newest is what everyone sees; earlier ones are kept for you to open and download.
                 </DialogDescription>
               </DialogHeader>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setLockOpen(false)}>Cancel</Button>
-                <Button onClick={async () => {
-                  try { await lock.mutateAsync(); toast.success('The bill is now in use — changes need approval'); setLockOpen(false) }
-                  catch (err) { toast.error(getErrorMessage(err)) }
-                }} disabled={lock.isPending}>{lock.isPending ? 'Marking…' : 'Mark as in use'}</Button>
-              </DialogFooter>
+              <div className="rounded-lg border overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-[60px]">Rev.</TableHead><TableHead>Saved</TableHead><TableHead>By</TableHead>
+                      <TableHead>How</TableHead><TableHead className="text-right">Works total</TableHead><TableHead className="w-[80px]" />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {revisions.map((r) => (
+                      <TableRow key={r.id}>
+                        <TableCell className="tabular-nums">{r.revision_no}{r.id === revision?.id && <Badge variant="secondary" className="ml-2 text-[10px]">current</Badge>}</TableCell>
+                        <TableCell className="whitespace-nowrap">{fmtDate(r.created_at.slice(0, 10))}</TableCell>
+                        <TableCell className="whitespace-nowrap">{r.recorded_by_name || r.recorded_by_email || '—'}</TableCell>
+                        <TableCell className="whitespace-normal text-xs text-muted-foreground">{SOURCE_HOW[r.source] ?? r.source}{r.note ? ` · ${r.note}` : ''}</TableCell>
+                        <TableCell className="text-right tabular-nums whitespace-nowrap">{r.works_total != null ? money(r.works_total) : '—'}</TableCell>
+                        <TableCell><Button variant="outline" size="sm" asChild><Link href={`/projects/${id}/bills/revisions/${r.id}`}>Open</Link></Button></TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             </DialogContent>
           </Dialog>
         </>
@@ -309,8 +308,8 @@ export default function ProjectBillsPage() {
 
 // ── Import: file → preview → save as revision n ─────────────────────────
 
-function ImportBillDialog({ projectId, open, onOpenChange, nextRevisionNo, adders, locked }: {
-  projectId: string; open: boolean; onOpenChange: (v: boolean) => void; nextRevisionNo: number; adders: BoqAdder[]; locked: boolean
+function ImportBillDialog({ projectId, open, onOpenChange, nextRevisionNo, adders }: {
+  projectId: string; open: boolean; onOpenChange: (v: boolean) => void; nextRevisionNo: number; adders: BoqAdder[]
 }) {
   const preview = usePreviewBillsImport(projectId)
   const previewFromSubmission = usePreviewBillsFromSubmission(projectId)
@@ -353,9 +352,7 @@ function ImportBillDialog({ projectId, open, onOpenChange, nextRevisionNo, adder
         source_file_name: result.file_name, source_document_path: result.source_document_path, bills: result.bills,
         adders,  // the current ladder carries forward; change it with the Adders button
       })
-      toast.success(res.state === 'pending'
-        ? `Revision ${res.revision_no} sent to the project manager for approval`
-        : `Revision ${res.revision_no} recorded · works total ${money(res.works_total)}`)
+      toast.success(`Revision ${res.revision_no} recorded · works total ${money(res.works_total)}`)
       close(false)
     } catch (err) {
       toast.error(getErrorMessage(err))
@@ -369,7 +366,7 @@ function ImportBillDialog({ projectId, open, onOpenChange, nextRevisionNo, adder
           <DialogTitle>Import bill of quantities</DialogTitle>
           <DialogDescription>
             An .xlsx in the company&apos;s BEME sheet layout (Item · Description · Unit · Contract Qty · Rate · Contract Amount).
-            You see what was read before anything is saved. Saving records <strong>revision {nextRevisionNo}</strong>{locked ? ' and sends it to the project manager for approval; the current bill stays in force until then' : ''}.
+            You see what was read before anything is saved. Saving records <strong>revision {nextRevisionNo}</strong>; the previous version stays in the history.
           </DialogDescription>
         </DialogHeader>
 

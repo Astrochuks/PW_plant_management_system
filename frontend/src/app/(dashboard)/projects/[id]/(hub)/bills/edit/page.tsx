@@ -122,9 +122,7 @@ function BuilderForm({ projectId, initial }: { projectId: string; initial: Proje
         source: hasRevision ? 'correction' : 'award_beme', effective_date: effectiveDate,
         note: note.trim() || undefined, bills: payload, adders,
       })
-      toast.success(res.state === 'pending'
-        ? `Revision ${res.revision_no} sent to the project manager for approval`
-        : `Revision ${res.revision_no} recorded · works total ${money(res.works_total)}`)
+      toast.success(`Revision ${res.revision_no} recorded · works total ${money(res.works_total)}`)
       router.push(`/projects/${projectId}/bills`)
     } catch (err) {
       toast.error(getErrorMessage(err))
@@ -138,7 +136,7 @@ function BuilderForm({ projectId, initial }: { projectId: string; initial: Proje
           <h2 className="text-lg font-semibold">{hasRevision ? 'Edit the bill by hand' : 'Enter the bill by hand'}</h2>
           <p className="text-sm text-muted-foreground">
             Amount is quantity × rate. Saving records <strong>revision {nextRevisionNo}</strong>
-            {initial.revision?.locked_at ? ' and sends it to the project manager for approval; the bill in force does not change until then.' : hasRevision ? '; the current bill stays on record.' : '.'}
+            {hasRevision ? '; the current version stays in the history.' : '.'}
           </p>
         </div>
         <div className="flex items-center gap-2">

@@ -1540,21 +1540,18 @@ export interface BoqRevision {
   source_file_name: string | null
   created_at: string
   adders?: BoqAdder[]
-  locked_at?: string | null
+  /** who recorded the snapshot (admin history) */
+  recorded_by_name?: string | null
+  recorded_by_email?: string | null
   proposed_at?: string | null
   proposed_by_name?: string | null
   proposed_by_email?: string | null
-  decided_at?: string | null
-  decided_by_name?: string | null
-  decided_by_email?: string | null
-  decision_note?: string | null
 }
 export interface ProjectBills {
   revision: BoqRevision | null
   bills: BoqBill[]
   summary: BoqSummary | null
-  /** the latest revision waiting for the project manager, if any */
-  pending: BoqRevision | null
+  /** every snapshot, newest first — admins only (others get []) */
   revisions: BoqRevision[]
 }
 export interface BoqMoney { contract_qty: number | null; rate: number | null; contract_amount: number | null }
@@ -1625,7 +1622,6 @@ export async function getProjectBills(projectId: string): Promise<ProjectBills> 
     revision: d.revision ? normRevision(d.revision) : null,
     bills: (d.bills ?? []).map(normBill),
     summary: d.summary ? normSummary(d.summary) : null,
-    pending: d.pending ? normRevision(d.pending) : null,
     revisions: (d.revisions ?? []).map(normRevision),
   }
 }
@@ -1643,17 +1639,6 @@ export async function getBillsRevision(projectId: string, revisionId: string): P
     works_current: Number(d.diff.works_current ?? 0), works_proposed: Number(d.diff.works_proposed ?? 0), works_delta: Number(d.diff.works_delta ?? 0),
   } : null
   return { revision: normRevision(d.revision), bills: (d.bills ?? []).map(normBill), summary: normSummary(d.summary), diff, current_revision_no: d.current_revision_no }
-}
-
-export async function approveBillsRevision(projectId: string, revisionId: string, note?: string): Promise<void> {
-  await apiClient.post(`/projects/${projectId}/bills/revisions/${revisionId}/approve`, { note })
-}
-export async function rejectBillsRevision(projectId: string, revisionId: string, note: string): Promise<void> {
-  await apiClient.post(`/projects/${projectId}/bills/revisions/${revisionId}/reject`, { note })
-}
-export async function lockBills(projectId: string): Promise<{ revision_no: number; locked_at: string }> {
-  const res = await apiClient.post<{ data: { revision_no: number; locked_at: string } }>(`/projects/${projectId}/bills/lock`, {})
-  return res.data.data
 }
 
 export async function updateBillsAdders(projectId: string, adders: BoqAdder[]): Promise<BoqAdder[]> {
@@ -1677,8 +1662,8 @@ export async function previewBillsFromSubmission(projectId: string, submissionId
   return { ...d, works_total: Number(d.works_total ?? 0), bills: (d.bills ?? []).map(normBill) }
 }
 
-export async function recordBillsRevision(projectId: string, body: RecordBoqRevisionRequest): Promise<{ id: string; revision_no: number; works_total: number; state: 'approved' | 'pending' }> {
-  const res = await apiClient.post<{ data: { id: string; revision_no: number; works_total: number; state: 'approved' | 'pending' } }>(`/projects/${projectId}/bills/revisions`, body)
+export async function recordBillsRevision(projectId: string, body: RecordBoqRevisionRequest): Promise<{ id: string; revision_no: number; works_total: number }> {
+  const res = await apiClient.post<{ data: { id: string; revision_no: number; works_total: number } }>(`/projects/${projectId}/bills/revisions`, body)
   return { ...res.data.data, works_total: Number(res.data.data.works_total ?? 0) }
 }
 

@@ -229,23 +229,14 @@ Reports and lists:
 
 ## 6. Approval — bills only
 
-> **Refined 2026-10-12 (migration 045, `project_bills.py`).** A bill is
-> free to change until it is *in use*: while `locked_at` is null the admin
-> may import, re-import, edit items or adders at will; each save is a new
-> revision that is approved at once and becomes current, and project
-> managers get an information notice only. `locked_at` is set the moment
-> the first weekly quantity is recorded against the revision (phase C) or
-> when the admin marks the bill as in use. From then on every change is a
-> **pending** revision: project managers whose scope covers the project are
-> notified (`approval_requested`, link to the review screen with the
-> item-level diff); approve makes it current and supersedes the old one;
-> reject needs a reason; the proposer is notified (`approval_decided`).
-> Only a project manager may decide; a pending revision affects nothing.
-
-
-The only thing that waits for a signature is a **BEME revision** (phase
-B): the first import of a project's bills, and any later change to rates,
-items or bills.
+> **Withdrawn 2026-10-12 (later the same day).** No approval step for now —
+> it was over-engineering for this MVP. Only an admin creates or changes a
+> bill; the admin cross-checks before saving; every save is a new numbered
+> snapshot (`project_beme_revisions`) with its date and author; the newest
+> is what everyone sees and downloads; previous snapshots are visible and
+> downloadable to admins only (History on the bill page). `locked_at` and
+> the pending/approve/reject states stay in the schema, unused, in case
+> approval returns. The text below is kept as the original design.
 
 ```
 pending ──approve──▶ approved (effective)      admin proposes, PM approves

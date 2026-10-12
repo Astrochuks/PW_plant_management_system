@@ -57,9 +57,6 @@ import {
   previewBillsFromSubmission,
   recordBillsRevision,
   getBillsRevision,
-  approveBillsRevision,
-  rejectBillsRevision,
-  lockBills,
   updateBillsAdders,
   type BoqAdder,
   type RecordBoqRevisionRequest,
@@ -685,27 +682,6 @@ export function useBillsRevision(projectId: string | null, revisionId: string | 
     enabled: !!projectId && !!revisionId,
     staleTime: 60 * 1000,
   });
-}
-
-function useInvalidateBills(projectId: string) {
-  const queryClient = useQueryClient();
-  return () => {
-    queryClient.invalidateQueries({ queryKey: [...projectsKeys.detail(projectId), 'bills'] });
-    queryClient.invalidateQueries({ queryKey: ['notifications'] });
-  };
-}
-
-export function useApproveBillsRevision(projectId: string, revisionId: string) {
-  const invalidate = useInvalidateBills(projectId);
-  return useMutation({ mutationFn: (note?: string) => approveBillsRevision(projectId, revisionId, note), onSuccess: invalidate });
-}
-export function useRejectBillsRevision(projectId: string, revisionId: string) {
-  const invalidate = useInvalidateBills(projectId);
-  return useMutation({ mutationFn: (note: string) => rejectBillsRevision(projectId, revisionId, note), onSuccess: invalidate });
-}
-export function useLockBills(projectId: string) {
-  const invalidate = useInvalidateBills(projectId);
-  return useMutation({ mutationFn: () => lockBills(projectId), onSuccess: invalidate });
 }
 
 export function useUpdateBillsAdders(projectId: string) {
