@@ -1,16 +1,21 @@
 'use client'
 
 /**
- * History — the project's dated facts (PRD v2 §3.2–3.3, §7):
+ * Timeline — the project's dated facts (PRD v2 §3.2–3.3, §7):
  * contract sums and status events, newest first, each with who and when.
  * Admins add rows here; nothing is ever edited or deleted (the database
  * refuses), so a mistake is a 'correction' row with a note.
+ *
+ * 2026-10-12: a project is Ongoing or Archived. 'Move to Archive' records
+ * status 'closed'; 'Return to Ongoing' records 'active'. Both are dated,
+ * so a report for any period still sees the project as it was then.
+ * The finer lifecycle stays available under 'Change status'.
  */
 
 import { useParams } from 'next/navigation'
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { Banknote, Flag, Plus, FileText } from 'lucide-react'
+import { Archive, ArchiveRestore, Banknote, Flag, Plus, FileText } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -42,6 +47,9 @@ const BASIS_LABEL: Record<ContractSumBasis, string> = {
 const STATUS_ORDER: ProjectStatus[] = [
   'awarded', 'mobilised', 'active', 'suspended', 'substantially_complete', 'finally_complete', 'closed',
 ]
+/** the two buckets the register speaks in; the lifecycle value is the detail */
+const ONGOING_STATUSES: ReadonlySet<string> = new Set(['awarded', 'mobilised', 'active', 'suspended'])
+const bucketOf = (status: string) => (ONGOING_STATUSES.has(status) ? 'Ongoing' : 'Archived')
 
 export default function ProjectHistoryPage() {
   const { id } = useParams<{ id: string }>()
@@ -51,6 +59,8 @@ export default function ProjectHistoryPage() {
   const { data: entries, isLoading } = useProjectHistory(id)
   const [sumOpen, setSumOpen] = useState(false)
   const [statusOpen, setStatusOpen] = useState(false)
+  const [moveOpen, setMoveOpen] = useState(false)
+  const isOngoing = project ? ONGOING_STATUSES.has(project.status) : true
 
   const hasOriginal = entries?.some((e) => e.entry_type === 'contract_sum' && e.label === 'original') ?? false
 
@@ -58,15 +68,20 @@ export default function ProjectHistoryPage() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold">History</h2>
+          <h2 className="text-lg font-semibold">Timeline</h2>
           <p className="text-sm text-muted-foreground">
-            Every contract sum and status this project has had, with who recorded it and when.
+            Every contract sum and every move between Ongoing and Archive, dated, with who recorded it and when.
             Rows are never edited — a mistake is corrected by a new row that says so.
           </p>
         </div>
         {isAdmin && (
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => setStatusOpen(true)}>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={() => setMoveOpen(true)}>
+              {isOngoing
+                ? <><Archive className="mr-2 h-4 w-4" /> Move to Archive</>
+                : <><ArchiveRestore className="mr-2 h-4 w-4" /> Return to Ongoing</>}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setStatusOpen(true)}>
               <Flag className="mr-2 h-4 w-4" /> Change status
             </Button>
             <Button size="sm" onClick={() => setSumOpen(true)}>
@@ -92,6 +107,8 @@ export default function ProjectHistoryPage() {
             hasOriginal={hasOriginal} currentSum={project.current_contract_sum} />
           <StatusDialog projectId={id} open={statusOpen} onOpenChange={setStatusOpen}
             currentStatus={project.status} />
+          <MoveDialog projectId={id} open={moveOpen} onOpenChange={setMoveOpen}
+            currentStatus={project.status} toOngoing={!isOngoing} />
         </>
       )}
     </div>
@@ -109,7 +126,7 @@ function HistoryRow({ e }: { e: HistoryEntry }) {
       </span>
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <span className="text-sm font-medium">
-          {isSum ? KIND_LABEL[e.label as ContractSumKind] ?? e.label : `Status → ${style?.label ?? e.label}`}
+          {isSum ? KIND_LABEL[e.label as ContractSumKind] ?? e.label : `${bucketOf(e.label)} · ${style?.label ?? e.label}`}
         </span>
         <span className="text-xs text-muted-foreground">effective {fmtDate(e.effective_date)}</span>
         {e.is_current && <Badge variant="outline" className="text-[10px]">current</Badge>}
@@ -226,6 +243,57 @@ function ContractSumDialog({ projectId, open, onOpenChange, hasOriginal, current
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button onClick={submit} disabled={mutation.isPending}>Record</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** Move to Archive (-> closed) or Return to Ongoing (-> active), dated */
+function MoveDialog({ projectId, open, onOpenChange, currentStatus, toOngoing }: {
+  projectId: string; open: boolean; onOpenChange: (v: boolean) => void; currentStatus: ProjectStatus; toOngoing: boolean
+}) {
+  const mutation = useAddStatusEvent(projectId)
+  const [effectiveDate, setEffectiveDate] = useState('')
+  const [note, setNote] = useState('')
+  const target: ProjectStatus = toOngoing ? 'active' : 'closed'
+  const title = toOngoing ? 'Return to Ongoing' : 'Move to Archive'
+
+  const submit = async () => {
+    if (!effectiveDate) return toast.error('Enter the date the move takes effect')
+    try {
+      const res = await mutation.mutateAsync({ status: target, effective_date: effectiveDate, note: note.trim() || undefined })
+      toast.success(`${bucketOf(res.status)} since ${fmtDate(res.status_since)}`)
+      onOpenChange(false); setNote(''); setEffectiveDate('')
+    } catch (err) {
+      toast.error(getErrorMessage(err))
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>
+            Currently <strong>{bucketOf(currentStatus)}</strong> ({STATUS_STYLES[currentStatus]?.label ?? currentStatus}).
+            The move is recorded with its date and stays on the timeline; reports for earlier periods still see the project as it was then.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-4">
+          <div>
+            <Label>Effective date</Label>
+            <Input type="date" value={effectiveDate} onChange={(e) => setEffectiveDate(e.target.value)} />
+          </div>
+          <div>
+            <Label>Note</Label>
+            <Textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2}
+              placeholder={toOngoing ? 'e.g. works resumed after suspension' : 'e.g. final certificate issued'} />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button onClick={submit} disabled={mutation.isPending}>{title}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -66,7 +66,8 @@ function buildInitialForm(project?: Project): Record<string, any> {
     client: project?.client ?? '',
     short_name: project?.short_name ?? '',
     state_id: project?.state_id ?? '',
-    status: project?.status ?? 'awarded',
+    // created from Ongoing Projects => ongoing; moves are recorded on the Timeline tab
+    status: project?.status ?? 'active',
     status_effective_date: '',
     contract_sum_basis: 'all_in',
     contract_instrument_ref: '',
@@ -297,38 +298,12 @@ export function ProjectForm({ project, mode }: ProjectFormProps) {
                   </SelectContent>
                 </Select>
               </div>
-              {mode === 'create' ? (
-                <>
-                  <div className="relative">
-                    <Label htmlFor="status">Opening status</Label>
-                    <Select value={form.status} onValueChange={(v) => handleChange('status', v)}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {STATUS_OPTIONS.map((opt) => (
-                          <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="relative">
-                    <Label htmlFor="status_effective_date">Status effective from</Label>
-                    <Input
-                      id="status_effective_date"
-                      type="date"
-                      value={form.status_effective_date}
-                      onChange={(e) => handleChange('status_effective_date', e.target.value)}
-                    />
-                    <p className="mt-0.5 text-[11px] text-muted-foreground">Blank = commencement date, else award date, else today.</p>
-                  </div>
-                </>
-              ) : (
+              {mode === 'edit' && (
                 <div className="relative">
                   <Label>Status</Label>
                   <p className="mt-2 text-sm">
                     {STATUS_OPTIONS.find((o) => o.value === form.status)?.label ?? form.status}
-                    <span className="ml-2 text-xs text-muted-foreground">— change it on the project&apos;s History tab</span>
+                    <span className="ml-2 text-xs text-muted-foreground">— move it between Ongoing and Archive on the project&apos;s Timeline tab</span>
                   </p>
                 </div>
               )}
@@ -394,7 +369,7 @@ export function ProjectForm({ project, mode }: ProjectFormProps) {
             {mode === 'edit' && (
               <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
                 Contract sums are dated facts: the current sum is {form.current_contract_sum !== '' ? `₦${Number(form.current_contract_sum).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'not recorded'}.
-                Record a variation, revision or correction on the project&apos;s <strong>History</strong> tab.
+                Record a variation, revision or correction on the project&apos;s <strong>Timeline</strong> tab.
               </p>
             )}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -409,38 +384,6 @@ export function ProjectForm({ project, mode }: ProjectFormProps) {
                       value={form.original_contract_sum}
                       onChange={(e) => handleChange('original_contract_sum', e.target.value)}
                       placeholder="the sum the company works to today"
-                    />
-                  </div>
-                  <div className="relative">
-                    <Label htmlFor="contract_sum_basis">Basis</Label>
-                    <Select value={form.contract_sum_basis} onValueChange={(v) => handleChange('contract_sum_basis', v)}>
-                      <SelectTrigger id="contract_sum_basis">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all_in">All-in (incl. provisions &amp; VAT)</SelectItem>
-                        <SelectItem value="ex_vat">Ex-VAT</SelectItem>
-                        <SelectItem value="unknown">Unknown</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="relative">
-                    <Label htmlFor="contract_sum_effective_date">Sum effective from</Label>
-                    <Input
-                      id="contract_sum_effective_date"
-                      type="date"
-                      value={form.contract_sum_effective_date}
-                      onChange={(e) => handleChange('contract_sum_effective_date', e.target.value)}
-                    />
-                    <p className="mt-0.5 text-[11px] text-muted-foreground">Blank = award date.</p>
-                  </div>
-                  <div className="relative md:col-span-2">
-                    <Label htmlFor="contract_instrument_ref">Instrument reference</Label>
-                    <Input
-                      id="contract_instrument_ref"
-                      value={form.contract_instrument_ref}
-                      onChange={(e) => handleChange('contract_instrument_ref', e.target.value)}
-                      placeholder="award letter / contract reference"
                     />
                   </div>
                 </>

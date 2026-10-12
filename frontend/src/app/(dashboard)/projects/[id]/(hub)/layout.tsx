@@ -29,7 +29,7 @@ const PAGES: Array<{ seg: string; label: string; ready: boolean; adminOnly?: boo
   { seg: 'report', label: 'Report', ready: true },
   { seg: 'submissions', label: 'Submissions', ready: true },
   // register (PRD v2 §7): the dated history, its evidence, who works it, who did what
-  { seg: 'history', label: 'History', ready: true },
+  { seg: 'history', label: 'Timeline', ready: true },
   { seg: 'documents', label: 'Documents', ready: true },
   { seg: 'team', label: 'Team', ready: true },
   { seg: 'activity', label: 'Activity', ready: true },
