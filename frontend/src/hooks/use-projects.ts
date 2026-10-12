@@ -70,6 +70,8 @@ export const projectsKeys = {
   details: () => [...projectsKeys.all, 'detail'] as const,
   detail: (id: string) => [...projectsKeys.details(), id] as const,
   milestones: (id: string) => [...projectsKeys.detail(id), 'milestones'] as const,
+  /** the Ongoing Projects register + the nav count (any as-at) */
+  ongoing: () => [...projectsKeys.all, 'ongoing'] as const,
 };
 
 // ============================================================================
@@ -189,6 +191,7 @@ export function useCreateProject() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: projectsKeys.lists() });
       queryClient.invalidateQueries({ queryKey: projectsKeys.stats() });
+      queryClient.invalidateQueries({ queryKey: projectsKeys.ongoing() });
       queryClient.invalidateQueries({ queryKey: projectsKeys.clients() });
     },
   });
@@ -202,6 +205,7 @@ export function useUpdateProject(projectId: string) {
       queryClient.setQueryData(projectsKeys.detail(projectId), data);
       queryClient.invalidateQueries({ queryKey: projectsKeys.lists() });
       queryClient.invalidateQueries({ queryKey: projectsKeys.stats() });
+      queryClient.invalidateQueries({ queryKey: projectsKeys.ongoing() });
     },
   });
 }
@@ -213,6 +217,7 @@ export function useDeleteProject() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: projectsKeys.lists() });
       queryClient.invalidateQueries({ queryKey: projectsKeys.stats() });
+      queryClient.invalidateQueries({ queryKey: projectsKeys.ongoing() });
     },
   });
 }
@@ -646,7 +651,7 @@ export function useProjectActivity(id: string | null, limit = 100) {
 
 export function useOngoingProjects(asAt?: string, enabled = true) {
   return useQuery({
-    queryKey: [...projectsKeys.all, 'ongoing', asAt ?? 'today'],
+    queryKey: [...projectsKeys.ongoing(), asAt ?? 'today'],
     queryFn: () => getOngoingProjects(asAt),
     staleTime: 60 * 1000,
     placeholderData: keepPreviousData,
@@ -661,7 +666,7 @@ function useInvalidateProjectHistory(projectId: string) {
     queryClient.invalidateQueries({ queryKey: projectsKeys.detail(projectId) });
     queryClient.invalidateQueries({ queryKey: projectsKeys.lists() });
     queryClient.invalidateQueries({ queryKey: projectsKeys.stats() });
-    queryClient.invalidateQueries({ queryKey: [...projectsKeys.all, 'ongoing'] });
+    queryClient.invalidateQueries({ queryKey: projectsKeys.ongoing() });
   };
 }
 
