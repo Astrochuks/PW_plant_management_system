@@ -103,10 +103,21 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
       {/* Three zones: identity · status trio (centered in the leftover space) · actions */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="sm" onClick={() => router.back()}>
+          {/* one step back (the previous tab or page) */}
+          <Button variant="ghost" size="sm" onClick={() => router.back()} title="Back one step" aria-label="Back one step">
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div>
+            {/* straight to the register this project lives in */}
+            <nav aria-label="Breadcrumb" className="mb-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+              {project?.status === 'archived' ? (
+                <Link href="/projects/archive" className="hover:text-foreground hover:underline">Archive</Link>
+              ) : (
+                <Link href="/projects/ongoing" className="hover:text-foreground hover:underline">Ongoing Projects</Link>
+              )}
+              <span aria-hidden="true">›</span>
+              <span className="truncate max-w-[40vw]">{project?.short_name || project?.project_name || '…'}</span>
+            </nav>
             <h1 className="text-2xl font-bold tracking-tight">
               {project?.short_name || project?.project_name || '…'}
             </h1>
