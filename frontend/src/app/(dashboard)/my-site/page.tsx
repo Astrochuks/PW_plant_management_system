@@ -14,7 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { useAuth } from '@/providers/auth-provider'
 import { useProjects } from '@/hooks/use-projects'
-import { STATUS_STYLES, effectiveStatus } from '@/components/projects/projects-table'
+import { STATUS_STYLES, effectiveStatus } from '@/components/projects/project-status'
 import { MapPin, Loader2 } from 'lucide-react'
 
 export default function MySitePage() {

@@ -35,7 +35,7 @@ function EditProjectContent() {
     return (
       <div className="text-center py-12">
         <p className="text-lg font-medium">Project not found</p>
-        <Button variant="outline" className="mt-4" onClick={() => router.push('/projects')}>
+        <Button variant="outline" className="mt-4" onClick={() => router.push('/projects/ongoing')}>
           Back to Projects
         </Button>
       </div>

@@ -17,7 +17,7 @@ import {
 } from '@/components/ui/dialog'
 import { useAuth } from '@/providers/auth-provider'
 import { useProject, useDeleteProject, usePrefetchHubData, useProjectIssues, useProjectOverview, useProjectSubmissions } from '@/hooks/use-projects'
-import { STATUS_STYLES, effectiveStatus } from '@/components/projects/projects-table'
+import { STATUS_STYLES, effectiveStatus } from '@/components/projects/project-status'
 import { InfoChip } from '@/components/projects/hub-ui'
 import { fmtDate, num } from '@/lib/format'
 
@@ -78,7 +78,7 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
     try {
       await deleteMutation.mutateAsync(projectId)
       toast.success('Project deleted')
-      router.push('/projects')
+      router.push('/projects/ongoing')
     } catch {
       toast.error('Failed to delete project')
     }
@@ -94,7 +94,7 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
           It may have been deleted, or the link is out of date.
         </p>
         <Button className="mt-4" variant="outline" asChild>
-          <Link href="/projects">Back to Project Registry</Link>
+          <Link href="/projects/ongoing">Back to Ongoing Projects</Link>
         </Button>
       </div>
     )

@@ -10,7 +10,7 @@
 
 import { Suspense, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { Plus, Search, Table2, UploadCloud, X } from 'lucide-react'
+import { Plus, Search, UploadCloud, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -90,15 +90,9 @@ function OngoingContent() {
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <h1 className="text-2xl font-bold tracking-tight">Ongoing Projects</h1>
         {isAdmin && (
-          <div className="flex items-center rounded-lg border bg-card p-0.5 w-fit">
-            <Button asChild size="sm" variant="ghost" className="text-muted-foreground hover:text-foreground">
-              <Link href="/projects/submissions" title="Weekly Reports"><UploadCloud className="h-4 w-4" /><span className="hidden md:inline md:ml-2">Weekly Reports</span></Link>
-            </Button>
-            <div className="h-4 w-px bg-border" />
-            <Button asChild size="sm" variant="ghost" className="text-muted-foreground hover:text-foreground">
-              <Link href="/projects" title="Full register"><Table2 className="h-4 w-4" /><span className="hidden md:inline md:ml-2">Full register</span></Link>
-            </Button>
-          </div>
+          <Button asChild size="sm" variant="outline">
+            <Link href="/projects/submissions"><UploadCloud className="h-4 w-4 mr-2" />Weekly Reports</Link>
+          </Button>
         )}
       </div>
 

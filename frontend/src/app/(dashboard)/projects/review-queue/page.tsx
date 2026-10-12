@@ -182,7 +182,7 @@ function ReviewQueueContent() {
     <div className="space-y-6 p-6">
       <div>
         <Button asChild variant="ghost" size="sm" className="mb-2 -ml-2">
-          <Link href="/projects">
+          <Link href="/projects/ongoing">
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back to Projects
           </Link>

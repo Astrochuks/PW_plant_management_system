@@ -24,7 +24,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useAuth } from '@/providers/auth-provider'
 import { useAddContractSum, useAddStatusEvent, useProject, useProjectHistory } from '@/hooks/use-projects'
 import type { ContractSumBasis, ContractSumKind, HistoryEntry, ProjectStatus } from '@/lib/api/projects'
-import { STATUS_STYLES } from '@/components/projects/projects-table'
+import { STATUS_STYLES } from '@/components/projects/project-status'
 import { getErrorMessage } from '@/lib/api/client'
 import { fmtDate, money } from '@/lib/format'
 

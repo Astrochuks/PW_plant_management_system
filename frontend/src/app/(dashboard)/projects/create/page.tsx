@@ -21,7 +21,7 @@ function CreateProjectContent() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="sm" onClick={() => router.push('/projects')}>
+          <Button variant="ghost" size="sm" onClick={() => router.push('/projects/ongoing')}>
             <ArrowLeft className="h-4 w-4 mr-2" />
             Projects
           </Button>
