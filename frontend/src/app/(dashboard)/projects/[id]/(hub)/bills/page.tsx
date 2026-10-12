@@ -12,8 +12,9 @@
 
 import { useMemo, useState } from 'react'
 import Image from 'next/image'
+import Link from 'next/link'
 import { useParams } from 'next/navigation'
-import { AlertTriangle, CheckCircle2, Download, FileUp, Search, SlidersHorizontal, X } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Download, FileUp, PencilLine, Search, SlidersHorizontal, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -125,6 +126,11 @@ export default function ProjectBillsPage() {
             </Button>
           )}
           {isAdmin && (
+            <Button variant="outline" size="sm" asChild>
+              <Link href={`/projects/${id}/bills/edit`}><PencilLine className="h-3.5 w-3.5 mr-1.5" />{revision ? 'Edit by hand' : 'Enter by hand'}</Link>
+            </Button>
+          )}
+          {isAdmin && (
             <Button size="sm" onClick={() => setImportOpen(true)}>
               <FileUp className="h-3.5 w-3.5 mr-1.5" />Import bill
             </Button>
@@ -176,7 +182,12 @@ export default function ProjectBillsPage() {
         <div className="text-center py-12 text-muted-foreground border rounded-lg">
           <p className="text-lg">No bill of quantities yet</p>
           <p className="text-sm mt-1">{isAdmin ? 'Import the bill (.xlsx) to record revision 1.' : 'The admin has not recorded this project’s bill yet.'}</p>
-          {isAdmin && <Button className="mt-4" size="sm" onClick={() => setImportOpen(true)}><FileUp className="h-3.5 w-3.5 mr-1.5" />Import bill</Button>}
+          {isAdmin && (
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
+              <Button size="sm" onClick={() => setImportOpen(true)}><FileUp className="h-3.5 w-3.5 mr-1.5" />Import bill</Button>
+              <Button size="sm" variant="outline" asChild><Link href={`/projects/${id}/bills/edit`}><PencilLine className="h-3.5 w-3.5 mr-1.5" />Enter by hand</Link></Button>
+            </div>
+          )}
         </div>
       ) : visible.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground border rounded-lg">
