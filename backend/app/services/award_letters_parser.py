@@ -408,10 +408,9 @@ def _parse_row(
         "source_row": row_idx + 1,
         "import_batch_id": batch_id,
         "is_legacy": True,
-        # workbook data is NEVER active (user decision); since 036 the
-        # register's vocabulary has no 'legacy' — the is_legacy flag carries
-        # that meaning and the status is 'closed'
-        "status": "closed",
+        # workbook data is NEVER ongoing (user decision); the is_legacy flag
+        # carries the 'legacy' meaning and the status is 'archived' (042)
+        "status": "archived",
         "register_source": "award_letters_workbook",
     }
 

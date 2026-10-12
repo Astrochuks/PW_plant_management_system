@@ -76,23 +76,25 @@ def test_projects_read_gate(role, allowed):
 
 # ── lifecycle ──────────────────────────────────────────────────────────────
 
-def test_every_status_can_be_closed_except_closed_itself():
-    for s in STATUSES:
-        assert transition_allowed(s, "closed") is (s != "closed")
+def test_exactly_two_statuses():
+    # migration 042, decision 2026-10-12: Ongoing ('active') or Archived
+    assert STATUSES == ("active", "archived")
 
 
-def test_no_history_may_start_anywhere_but_only_with_a_real_status():
-    assert transition_allowed(None, "awarded")
+def test_no_history_may_start_as_either_but_only_with_a_real_status():
     assert transition_allowed(None, "active")
+    assert transition_allowed(None, "archived")
+    assert not transition_allowed(None, "awarded")   # retired by 042
+    assert not transition_allowed(None, "closed")    # retired by 042
     assert not transition_allowed(None, "legacy")
 
 
 @pytest.mark.parametrize("frm,to,ok", [
-    ("awarded", "active", True), ("active", "awarded", False),
-    ("active", "suspended", True), ("suspended", "active", True),
-    ("active", "substantially_complete", True),
-    ("substantially_complete", "finally_complete", True),
-    ("finally_complete", "active", False),
+    ("active", "archived", True),    # Move to Archive
+    ("archived", "active", True),    # Return to Ongoing
+    ("active", "active", False),     # a move must move
+    ("archived", "archived", False),
+    ("active", "closed", False),     # retired vocabulary is refused
     ("closed", "active", False),
 ])
 def test_transitions(frm, to, ok):

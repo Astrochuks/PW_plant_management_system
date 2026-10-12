@@ -182,6 +182,16 @@ Delivered live over the existing SSE stream.
 
 ## 4. Status machine
 
+> **Superseded 2026-10-12 (migration 042).** There are exactly two statuses:
+> `active` (shown as **Ongoing**) and `archived`. The lifecycle below is
+> retired; its values were mapped (awarded/mobilised/active/suspended →
+> active; substantially_complete/finally_complete/closed → archived) and the
+> old label kept in each history row's note. A move is `active ↔ archived`,
+> recorded with its effective date in `project_status_events`, which is what
+> makes a project count as ongoing for the periods it was. The UI offers
+> "Move to Archive" / "Return to Ongoing" on the project's Timeline tab.
+
+
 ```
 awarded → mobilised → active ⇄ suspended
 active → substantially_complete → finally_complete → closed

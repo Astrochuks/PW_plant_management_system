@@ -3,7 +3,7 @@
 /**
  * Archive — finished and historical projects (decision 2026-10-11). A
  * project stays reportable for the period it was active; this page is
- * where it lives once it has closed. First cut: the closed list from the
+ * where it lives once it is archived. First cut: the closed list from the
  * register with search and a state filter.
  */
 
@@ -44,7 +44,7 @@ function ArchiveContent() {
   const { data: statesData } = useStates()
   const states = Array.isArray(statesData) ? statesData : []
   const params = useMemo(() => ({
-    status: 'closed' as const, search: search || undefined, state_id: filters.state_id || undefined,
+    status: 'archived' as const, search: search || undefined, state_id: filters.state_id || undefined,
     page, limit: 25, sort_by: 'project_name', sort_order: 'asc' as const,
   }), [search, filters.state_id, page])
   const { data, isLoading } = useProjects(params)
@@ -57,7 +57,7 @@ function ArchiveContent() {
         <div className="p-2.5 rounded-xl bg-primary/10"><ArchiveIcon className="h-6 w-6 text-primary" /></div>
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Archive</h1>
-          <p className="text-sm text-muted-foreground">{meta ? `${meta.total} closed project${meta.total !== 1 ? 's' : ''}` : 'Loading…'}</p>
+          <p className="text-sm text-muted-foreground">{meta ? `${meta.total} archived project${meta.total !== 1 ? 's' : ''}` : 'Loading…'}</p>
         </div>
       </div>
 
@@ -87,7 +87,7 @@ function ArchiveContent() {
             {isLoading ? (
               <TableRow><TableCell colSpan={6} className="py-8 text-center text-sm text-muted-foreground">Loading…</TableCell></TableRow>
             ) : rows.length === 0 ? (
-              <TableRow><TableCell colSpan={6} className="py-8 text-center text-sm text-muted-foreground">No closed projects match.</TableCell></TableRow>
+              <TableRow><TableCell colSpan={6} className="py-8 text-center text-sm text-muted-foreground">No archived projects match.</TableCell></TableRow>
             ) : rows.map((p) => (
               <TableRow key={p.id} className="cursor-pointer" onClick={() => router.push(`/projects/${p.id}`)}>
                 <TableCell>
@@ -100,7 +100,7 @@ function ArchiveContent() {
                   {p.final_completion_date ? fmtDate(p.final_completion_date) : p.substantial_completion_date ? fmtDate(p.substantial_completion_date) : <span className="text-muted-foreground">date not on record</span>}
                 </TableCell>
                 <TableCell className="text-right text-sm tabular-nums">{p.current_contract_sum != null ? money(p.current_contract_sum) : '—'}</TableCell>
-                <TableCell>{p.is_legacy ? <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">Legacy register</Badge> : <Badge variant="secondary">Closed</Badge>}</TableCell>
+                <TableCell>{p.is_legacy ? <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">Legacy register</Badge> : <Badge variant="secondary">Archived</Badge>}</TableCell>
               </TableRow>
             ))}
           </TableBody>

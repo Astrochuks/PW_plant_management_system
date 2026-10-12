@@ -1887,10 +1887,7 @@ async def get_project_stats(
         f"""SELECT
                count(*)::int AS total,
                count(*) FILTER (WHERE status = 'active')::int AS active,
-               count(*) FILTER (WHERE status IN ('awarded', 'mobilised'))::int AS not_started,
-               count(*) FILTER (WHERE status = 'suspended')::int AS suspended,
-               count(*) FILTER (WHERE status IN ('substantially_complete', 'finally_complete'))::int AS completing,
-               count(*) FILTER (WHERE status = 'closed')::int AS closed,
+               count(*) FILTER (WHERE status = 'archived')::int AS archived,
                count(*) FILTER (WHERE is_legacy)::int AS legacy,
                count(*) FILTER (WHERE NOT is_legacy)::int AS non_legacy,
                COALESCE(SUM(current_contract_sum), 0)::float AS total_contract_value,

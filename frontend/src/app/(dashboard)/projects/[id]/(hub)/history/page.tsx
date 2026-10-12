@@ -6,10 +6,10 @@
  * Admins add rows here; nothing is ever edited or deleted (the database
  * refuses), so a mistake is a 'correction' row with a note.
  *
- * 2026-10-12: a project is Ongoing or Archived. 'Move to Archive' records
- * status 'closed'; 'Return to Ongoing' records 'active'. Both are dated,
- * so a report for any period still sees the project as it was then.
- * The finer lifecycle stays available under 'Change status'.
+ * 2026-10-12 (migration 042): a project is Ongoing ('active') or Archived
+ * ('archived') — nothing else. 'Move to Archive' / 'Return to Ongoing'
+ * record the move with its date, so a report for any period still sees
+ * the project as it was then.
  */
 
 import { useParams } from 'next/navigation'
@@ -29,7 +29,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useAuth } from '@/providers/auth-provider'
 import { useAddContractSum, useAddStatusEvent, useProject, useProjectHistory } from '@/hooks/use-projects'
 import type { ContractSumBasis, ContractSumKind, HistoryEntry, ProjectStatus } from '@/lib/api/projects'
-import { STATUS_STYLES } from '@/components/projects/project-status'
+import { STATUS_STYLES, statusLabel } from '@/components/projects/project-status'
 import { getErrorMessage } from '@/lib/api/client'
 import { fmtDate, money } from '@/lib/format'
 
@@ -44,12 +44,7 @@ const BASIS_LABEL: Record<ContractSumBasis, string> = {
   ex_vat: 'ex-VAT',
   unknown: 'basis unknown',
 }
-const STATUS_ORDER: ProjectStatus[] = [
-  'awarded', 'mobilised', 'active', 'suspended', 'substantially_complete', 'finally_complete', 'closed',
-]
-/** the two buckets the register speaks in; the lifecycle value is the detail */
-const ONGOING_STATUSES: ReadonlySet<string> = new Set(['awarded', 'mobilised', 'active', 'suspended'])
-const bucketOf = (status: string) => (ONGOING_STATUSES.has(status) ? 'Ongoing' : 'Archived')
+const bucketOf = (status: string) => statusLabel(status)
 
 export default function ProjectHistoryPage() {
   const { id } = useParams<{ id: string }>()
@@ -58,9 +53,8 @@ export default function ProjectHistoryPage() {
   const { data: project } = useProject(id)
   const { data: entries, isLoading } = useProjectHistory(id)
   const [sumOpen, setSumOpen] = useState(false)
-  const [statusOpen, setStatusOpen] = useState(false)
   const [moveOpen, setMoveOpen] = useState(false)
-  const isOngoing = project ? ONGOING_STATUSES.has(project.status) : true
+  const isOngoing = project ? project.status === 'active' : true
 
   const hasOriginal = entries?.some((e) => e.entry_type === 'contract_sum' && e.label === 'original') ?? false
 
@@ -80,9 +74,6 @@ export default function ProjectHistoryPage() {
               {isOngoing
                 ? <><Archive className="mr-2 h-4 w-4" /> Move to Archive</>
                 : <><ArchiveRestore className="mr-2 h-4 w-4" /> Return to Ongoing</>}
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => setStatusOpen(true)}>
-              <Flag className="mr-2 h-4 w-4" /> Change status
             </Button>
             <Button size="sm" onClick={() => setSumOpen(true)}>
               <Plus className="mr-2 h-4 w-4" /> Record contract sum
@@ -105,8 +96,6 @@ export default function ProjectHistoryPage() {
         <>
           <ContractSumDialog projectId={id} open={sumOpen} onOpenChange={setSumOpen}
             hasOriginal={hasOriginal} currentSum={project.current_contract_sum} />
-          <StatusDialog projectId={id} open={statusOpen} onOpenChange={setStatusOpen}
-            currentStatus={project.status} />
           <MoveDialog projectId={id} open={moveOpen} onOpenChange={setMoveOpen}
             currentStatus={project.status} toOngoing={!isOngoing} />
         </>
@@ -117,7 +106,6 @@ export default function ProjectHistoryPage() {
 
 function HistoryRow({ e }: { e: HistoryEntry }) {
   const isSum = e.entry_type === 'contract_sum'
-  const style = !isSum ? (STATUS_STYLES[e.label] || STATUS_STYLES.active) : null
   return (
     <li className="mb-6 ml-6">
       <span className={`absolute -left-3 flex h-6 w-6 items-center justify-center rounded-full border bg-background ${
@@ -126,7 +114,7 @@ function HistoryRow({ e }: { e: HistoryEntry }) {
       </span>
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <span className="text-sm font-medium">
-          {isSum ? KIND_LABEL[e.label as ContractSumKind] ?? e.label : `${bucketOf(e.label)} · ${style?.label ?? e.label}`}
+          {isSum ? KIND_LABEL[e.label as ContractSumKind] ?? e.label : bucketOf(e.label)}
         </span>
         <span className="text-xs text-muted-foreground">effective {fmtDate(e.effective_date)}</span>
         {e.is_current && <Badge variant="outline" className="text-[10px]">current</Badge>}
@@ -256,7 +244,7 @@ function MoveDialog({ projectId, open, onOpenChange, currentStatus, toOngoing }:
   const mutation = useAddStatusEvent(projectId)
   const [effectiveDate, setEffectiveDate] = useState('')
   const [note, setNote] = useState('')
-  const target: ProjectStatus = toOngoing ? 'active' : 'closed'
+  const target: ProjectStatus = toOngoing ? 'active' : 'archived'
   const title = toOngoing ? 'Return to Ongoing' : 'Move to Archive'
 
   const submit = async () => {
@@ -276,7 +264,7 @@ function MoveDialog({ projectId, open, onOpenChange, currentStatus, toOngoing }:
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>
-            Currently <strong>{bucketOf(currentStatus)}</strong> ({STATUS_STYLES[currentStatus]?.label ?? currentStatus}).
+            Currently <strong>{bucketOf(currentStatus)}</strong>.
             The move is recorded with its date and stays on the timeline; reports for earlier periods still see the project as it was then.
           </DialogDescription>
         </DialogHeader>
@@ -300,59 +288,3 @@ function MoveDialog({ projectId, open, onOpenChange, currentStatus, toOngoing }:
   )
 }
 
-function StatusDialog({ projectId, open, onOpenChange, currentStatus }: {
-  projectId: string; open: boolean; onOpenChange: (v: boolean) => void; currentStatus: ProjectStatus
-}) {
-  const mutation = useAddStatusEvent(projectId)
-  const [status, setStatus] = useState<ProjectStatus>('active')
-  const [effectiveDate, setEffectiveDate] = useState('')
-  const [note, setNote] = useState('')
-
-  const submit = async () => {
-    if (!effectiveDate) return toast.error('Enter the effective date')
-    try {
-      const res = await mutation.mutateAsync({ status, effective_date: effectiveDate, note: note.trim() || undefined })
-      toast.success(`Status is now ${STATUS_STYLES[res.status]?.label ?? res.status} since ${fmtDate(res.status_since)}`)
-      onOpenChange(false); setNote('')
-    } catch (err) {
-      toast.error(getErrorMessage(err))
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Change status</DialogTitle>
-          <DialogDescription>
-            Currently <strong>{STATUS_STYLES[currentStatus]?.label ?? currentStatus}</strong>. Backdating is allowed;
-            the move is checked against the status as at that date.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-4">
-          <div>
-            <Label>New status</Label>
-            <Select value={status} onValueChange={(v) => setStatus(v as ProjectStatus)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {STATUS_ORDER.map((s) => <SelectItem key={s} value={s}>{STATUS_STYLES[s]?.label ?? s}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label>Effective date</Label>
-            <Input type="date" value={effectiveDate} onChange={(e) => setEffectiveDate(e.target.value)} />
-          </div>
-          <div>
-            <Label>Note</Label>
-            <Textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="e.g. practical completion certificate issued" />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={submit} disabled={mutation.isPending}>Record</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}

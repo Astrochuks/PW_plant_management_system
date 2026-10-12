@@ -34,25 +34,20 @@ from app.services.audit_service import audit_service
 router = APIRouter(dependencies=[Depends(project_scope_guard)])
 logger = get_logger(__name__)
 
-STATUSES = (
-    "awarded", "mobilised", "active", "suspended",
-    "substantially_complete", "finally_complete", "closed",
-)
-# PRD v2 §4 — what may follow what. 'closed' is reachable from anywhere.
+# Two statuses only (migration 042, decision 2026-10-12): 'active' is shown
+# as Ongoing, 'archived' as Archived. The PRD v2 §4 lifecycle is retired; the
+# dated rows in project_status_events are what make a project count as
+# ongoing for the periods it was. A move must move: active <-> archived.
+STATUSES = ("active", "archived")
 ALLOWED_TRANSITIONS: dict[str, set[str]] = {
-    "awarded": {"mobilised", "active", "closed"},
-    "mobilised": {"active", "suspended", "closed"},
-    "active": {"suspended", "substantially_complete", "closed"},
-    "suspended": {"active", "closed"},
-    "substantially_complete": {"finally_complete", "active", "closed"},
-    "finally_complete": {"closed"},
-    "closed": set(),
+    "active": {"archived"},
+    "archived": {"active"},
 }
-ONGOING = ("mobilised", "active", "suspended")
+ONGOING = ("active",)
 
 
 def transition_allowed(current: str | None, new: str) -> bool:
-    """Pure rule, unit-tested: None (no history yet) may become anything."""
+    """Pure rule, unit-tested: None (no history yet) may become either."""
     if current is None:
         return new in STATUSES
     return new in ALLOWED_TRANSITIONS.get(current, set())
@@ -77,10 +72,7 @@ class ContractSumIn(BaseModel):
 
 
 class StatusEventIn(BaseModel):
-    status: Literal[
-        "awarded", "mobilised", "active", "suspended",
-        "substantially_complete", "finally_complete", "closed",
-    ]
+    status: Literal["active", "archived"]
     effective_date: date
     note: str | None = Field(None, max_length=2000)
 
@@ -143,7 +135,7 @@ async def list_ongoing(
               JOIN st ON st.project_id = p.id
               LEFT JOIN cs ON cs.project_id = p.id
               LEFT JOIN states s ON s.id = p.state_id
-             WHERE st.status IN ('mobilised', 'active', 'suspended')
+             WHERE st.status = 'active'
                AND {scope}
              ORDER BY s.name NULLS LAST, p.short_name NULLS LAST, p.project_name""",
         *params,

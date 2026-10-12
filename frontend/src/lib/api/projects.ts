@@ -9,16 +9,10 @@ import apiClient from './client';
 // Types
 // ============================================================================
 
-// PRD v2 §4 lifecycle (migration 036). 'legacy' is not a status any more —
-// is_legacy carries that meaning; effectiveStatus() still renders it.
-export type ProjectStatus =
-  | 'awarded'
-  | 'mobilised'
-  | 'active'
-  | 'suspended'
-  | 'substantially_complete'
-  | 'finally_complete'
-  | 'closed';
+// Two statuses only (migration 042, decision 2026-10-12): 'active' is shown
+// as Ongoing, 'archived' as Archived. 'legacy' is not a status — is_legacy
+// carries that meaning; effectiveStatus() still renders it.
+export type ProjectStatus = 'active' | 'archived';
 
 export interface Project {
   id: string;

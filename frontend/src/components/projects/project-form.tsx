@@ -30,14 +30,10 @@ interface ProjectFormProps {
 
 // PRD v2 §4 lifecycle (migration 036). This July form is replaced by the
 // register screens in A-4; until then it must at least speak the new words.
+// two statuses only (migration 042): active = Ongoing, archived = Archived
 const STATUS_OPTIONS = [
-  { value: 'awarded', label: 'Awarded' },
-  { value: 'mobilised', label: 'Mobilised' },
-  { value: 'active', label: 'Active' },
-  { value: 'suspended', label: 'Suspended' },
-  { value: 'substantially_complete', label: 'Substantially complete' },
-  { value: 'finally_complete', label: 'Finally complete' },
-  { value: 'closed', label: 'Closed' },
+  { value: 'active', label: 'Ongoing' },
+  { value: 'archived', label: 'Archived' },
 ]
 
 const TYPE_OPTIONS = [

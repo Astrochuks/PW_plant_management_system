@@ -51,11 +51,9 @@ class ProjectCreate(BaseModel):
     cost_to_date: float | None = Field(None, ge=0)
     revenue_to_date: float | None = Field(None, ge=0)
 
-    # PRD v2 §4 vocabulary (migration 036); a new project starts 'awarded'
-    status: str = Field(
-        "awarded",
-        pattern=r"^(awarded|mobilised|active|suspended|substantially_complete|finally_complete|closed)$",
-    )
+    # two statuses only (migration 042): 'active' = Ongoing, 'archived';
+    # a project created from Ongoing Projects is ongoing
+    status: str = Field("active", pattern=r"^(active|archived)$")
     # ── history facts recorded with the project (PRD v2 §3.2–3.3) — these
     # are NOT projects columns; create_project writes them to the history
     # tables itself (migration 040 lets it bypass the 038 seed trigger)
