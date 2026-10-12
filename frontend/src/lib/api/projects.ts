@@ -1491,6 +1491,104 @@ export async function getProjectActivity(projectId: string, limit = 100): Promis
   return res.data.data
 }
 
+// ── Bill of quantities (migration 044; milestone A, 2026-10-12) ──────────
+
+export interface BoqItem {
+  id?: string
+  item_code: string
+  description: string
+  unit: string | null
+  contract_qty: number | null
+  rate: number | null
+  contract_amount: number | null
+  sort_order?: number | null
+  dup_seq?: number
+}
+export interface BoqBill {
+  id?: string
+  bill_code: string
+  bill_no: number | null
+  sort_order: number | null
+  name: string | null
+  /** the sheet's own "Total Bill … carried to summary" */
+  sheet_total: number | null
+  /** our Σ of the items */
+  items_total: number
+  item_count: number
+  matches_sheet?: boolean | null
+  items: BoqItem[]
+}
+export type BoqSource = 'award_beme' | 'derived_from_weekly' | 'variation' | 'correction'
+export interface BoqRevision {
+  id: string
+  revision_no: number
+  source: BoqSource
+  state: 'pending' | 'approved' | 'rejected' | 'superseded'
+  effective_date: string
+  works_total: number | null
+  note: string | null
+  source_file_name: string | null
+  created_at: string
+}
+export interface ProjectBills {
+  revision: BoqRevision | null
+  bills: BoqBill[]
+  revisions: BoqRevision[]
+}
+export interface BoqImportPreview {
+  bills: BoqBill[]
+  bill_count: number
+  item_count: number
+  works_total: number
+  mismatched_bills: string[]
+  warnings: string[]
+  sheet: string
+  file_name: string
+  source_document_path: string
+}
+export interface RecordBoqRevisionRequest {
+  source: Exclude<BoqSource, 'derived_from_weekly'>
+  effective_date: string
+  note?: string
+  source_file_name?: string
+  source_document_path?: string
+  bills: BoqBill[]
+}
+
+const normItem = (i: BoqItem): BoqItem => ({
+  ...i, contract_qty: numOrNull(i.contract_qty), rate: numOrNull(i.rate), contract_amount: numOrNull(i.contract_amount),
+})
+const normBill = (b: BoqBill): BoqBill => ({
+  ...b, sheet_total: numOrNull(b.sheet_total), items_total: Number(b.items_total ?? 0),
+  item_count: Number(b.item_count ?? (b.items?.length ?? 0)), items: (b.items ?? []).map(normItem),
+})
+const normRevision = (r: BoqRevision): BoqRevision => ({ ...r, works_total: numOrNull(r.works_total) })
+
+export async function getProjectBills(projectId: string): Promise<ProjectBills> {
+  const res = await apiClient.get<{ data: ProjectBills }>(`/projects/${projectId}/bills`)
+  const d = res.data.data
+  return {
+    revision: d.revision ? normRevision(d.revision) : null,
+    bills: (d.bills ?? []).map(normBill),
+    revisions: (d.revisions ?? []).map(normRevision),
+  }
+}
+
+export async function previewBillsImport(projectId: string, file: File): Promise<BoqImportPreview> {
+  const fd = new FormData()
+  fd.append('file', file)
+  const res = await apiClient.post<{ data: BoqImportPreview }>(`/projects/${projectId}/bills/import`, fd, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+  const d = res.data.data
+  return { ...d, works_total: Number(d.works_total ?? 0), bills: (d.bills ?? []).map(normBill) }
+}
+
+export async function recordBillsRevision(projectId: string, body: RecordBoqRevisionRequest): Promise<{ id: string; revision_no: number; works_total: number }> {
+  const res = await apiClient.post<{ data: { id: string; revision_no: number; works_total: number } }>(`/projects/${projectId}/bills/revisions`, body)
+  return { ...res.data.data, works_total: Number(res.data.data.works_total ?? 0) }
+}
+
 export async function getOngoingProjects(asAt?: string): Promise<{
   data: OngoingProject[]
   meta: { as_at: string; count: number; total_contract_sum: number }

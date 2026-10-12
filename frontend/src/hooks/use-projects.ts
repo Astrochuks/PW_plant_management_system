@@ -52,6 +52,10 @@ import {
   type TeamMember,
   type AddContractSumRequest,
   type AddStatusEventRequest,
+  getProjectBills,
+  previewBillsImport,
+  recordBillsRevision,
+  type RecordBoqRevisionRequest,
 } from '@/lib/api/projects';
 
 export type { Project, ProjectStats, PaginationMeta, ProjectsListParams, ImportResult, Milestone, ProjectMilestonesData, LinkableProject };
@@ -646,6 +650,31 @@ export function useProjectActivity(id: string | null, limit = 100) {
     queryFn: () => getProjectActivity(id!, limit),
     enabled: !!id,
     staleTime: 30 * 1000,
+  });
+}
+
+// ── Bill of quantities ──────────────────────────────────────────────────
+export function useProjectBills(projectId: string | null) {
+  return useQuery({
+    queryKey: [...projectsKeys.detail(projectId!), 'bills'],
+    queryFn: () => getProjectBills(projectId!),
+    enabled: !!projectId,
+    staleTime: 2 * 60 * 1000,
+  });
+}
+
+export function usePreviewBillsImport(projectId: string) {
+  return useMutation({ mutationFn: (file: File) => previewBillsImport(projectId, file) });
+}
+
+export function useRecordBillsRevision(projectId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: RecordBoqRevisionRequest) => recordBillsRevision(projectId, body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: projectsKeys.detail(projectId) });
+      queryClient.invalidateQueries({ queryKey: projectsKeys.ongoing() });
+    },
   });
 }
 

@@ -128,7 +128,10 @@ Decided 2026-10-12 on the Ongoing Projects page; applies to every register.
   row 2 header fill `#FFBF36`, bold 10, centred, medium `#606060`
   borders; data cells thin `#808080` borders; freeze panes `A3`; money
   `#,##0.00`; a bold `TOTAL` row closes money columns. No S/NO column,
-  no filter line — the title already says the scope.
+  no filter line — the title already says the scope. A grouped table
+  (a bill of quantities) writes each group header as a bold section row
+  on a light gold ground with the group subtotal in the money column
+  (`{ section: [...] }` rows in `exportRegisterExcel`).
 
 ## 4. Numbers (CLAUDE.md rule 1, restated)
 

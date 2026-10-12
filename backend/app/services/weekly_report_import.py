@@ -584,15 +584,29 @@ async def persist_weekly_report(
         counts["project_payments"] = len(pay_rows)
 
         # ── BEME: bills + items upserted once; progress per report ───────
+        # 044: bills and items belong to the project's CURRENT revision; a
+        # project without one gets revision 1 (derived_from_weekly) here.
         beme_sheet = sheets.get("BEME & Works Completed Fd", {})
+        rev_id = await conn.fetchval(
+            "SELECT current_beme_revision_id FROM projects WHERE id = $1::uuid", project_id)
+        if rev_id is None:
+            rev_id = await conn.fetchval(
+                """INSERT INTO project_beme_revisions
+                     (project_id, revision_no, source, state, effective_date, note)
+                   VALUES ($1::uuid, 1, 'derived_from_weekly', 'approved', current_date,
+                           'revision 1 established by the first weekly workbook')
+                   RETURNING id""", project_id)
+            await conn.execute(
+                "UPDATE projects SET current_beme_revision_id = $2 WHERE id = $1::uuid",
+                project_id, rev_id)
         bill_ids: dict[str, str] = {}
         for b in beme_sheet.get("bills", []) or []:
             bill_ids[b["bill_code"]] = str(await conn.fetchval(
-                """INSERT INTO project_beme_bills (project_id, bill_code,
+                """INSERT INTO project_beme_bills (project_id, revision_id, bill_code,
                                                    bill_no, sort_order, name,
                                                    contract_amount)
-                   VALUES ($1::uuid, $2, $3, $4, $5, $6)
-                   ON CONFLICT (project_id, bill_code) DO UPDATE SET
+                   VALUES ($1::uuid, $7, $2, $3, $4, $5, $6)
+                   ON CONFLICT (revision_id, bill_code) DO UPDATE SET
                        name = COALESCE(EXCLUDED.name, project_beme_bills.name),
                        bill_no = COALESCE(EXCLUDED.bill_no,
                                           project_beme_bills.bill_no),
@@ -602,35 +616,36 @@ async def persist_weekly_report(
                                                   project_beme_bills.contract_amount)
                    RETURNING id""",
                 project_id, b["bill_code"], b.get("bill_no"),
-                b.get("sort_order"), b["name"], b["sheet_total_contract"],
+                b.get("sort_order"), b["name"], b["sheet_total_contract"], rev_id,
             ))
         # defensive: items referencing a bill without a header row
         for bill_code in sorted({r["bill_code"] for r in beme_rows} - set(bill_ids)):
             bill_ids[bill_code] = str(await conn.fetchval(
-                """INSERT INTO project_beme_bills (project_id, bill_code)
-                   VALUES ($1::uuid, $2)
-                   ON CONFLICT (project_id, bill_code) DO UPDATE SET
+                """INSERT INTO project_beme_bills (project_id, revision_id, bill_code)
+                   VALUES ($1::uuid, $3, $2)
+                   ON CONFLICT (revision_id, bill_code) DO UPDATE SET
                        bill_code = EXCLUDED.bill_code
                    RETURNING id""",
-                project_id, bill_code,
+                project_id, bill_code, rev_id,
             ))
 
         await conn.executemany(
             """INSERT INTO project_beme_items
-               (project_id, bill_id, item_code, description, unit,
-                contract_qty, rate, contract_amount, dup_seq)
-               VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9)
+               (project_id, bill_id, revision_id, item_code, description, unit,
+                contract_qty, rate, contract_amount, dup_seq, sort_order)
+               VALUES ($1::uuid, $2::uuid, $10, $3, $4, $5, $6, $7, $8, $9, $11)
                ON CONFLICT (bill_id, item_code, description, dup_seq) DO UPDATE SET
                    contract_qty = COALESCE(EXCLUDED.contract_qty,
                                            project_beme_items.contract_qty),
                    rate = COALESCE(EXCLUDED.rate, project_beme_items.rate),
                    contract_amount = COALESCE(EXCLUDED.contract_amount,
-                                              project_beme_items.contract_amount)""",
+                                              project_beme_items.contract_amount),
+                   sort_order = COALESCE(project_beme_items.sort_order, EXCLUDED.sort_order)""",
             [
                 (project_id, bill_ids[r["bill_code"]], r["item_code"] or "",
                  r["description"], r["unit"], r["contract_qty"], r["rate"],
-                 r["contract_amount"], r.get("dup_seq", 0))
-                for r in beme_rows
+                 r["contract_amount"], r.get("dup_seq", 0), rev_id, pos)
+                for pos, r in enumerate(beme_rows, 1)
             ],
             timeout=120,
         )
@@ -640,8 +655,8 @@ async def persist_weekly_report(
                 """SELECT i.id, b.bill_code, i.item_code, i.description, i.dup_seq
                    FROM project_beme_items i
                    JOIN project_beme_bills b ON b.id = i.bill_id
-                   WHERE i.project_id = $1::uuid""",
-                project_id, timeout=60,
+                   WHERE i.project_id = $1::uuid AND i.revision_id = $2""",
+                project_id, rev_id, timeout=60,
             )
         }
         await conn.executemany(

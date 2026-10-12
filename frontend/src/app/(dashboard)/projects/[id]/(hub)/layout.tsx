@@ -21,19 +21,15 @@ import { STATUS_STYLES, effectiveStatus } from '@/components/projects/project-st
 import { InfoChip } from '@/components/projects/hub-ui'
 import { fmtDate, num } from '@/lib/format'
 
+// Four tabs by decision of 2026-10-12: the project's dashboard, its bill of
+// quantities, its dated timeline, its weekly submissions. The other routes
+// (work-cost, plant, financials, report, documents, team, activity, issues)
+// still exist but are off the bar until the sheets behind them return.
 const PAGES: Array<{ seg: string; label: string; ready: boolean; adminOnly?: boolean }> = [
   { seg: '', label: 'Overview', ready: true },
-  { seg: 'work-cost', label: 'Work & Cost', ready: true },
-  { seg: 'plant', label: 'Plant & Diesel', ready: true },
-  { seg: 'financials', label: 'Financials', ready: true },
-  { seg: 'report', label: 'Report', ready: true },
-  { seg: 'submissions', label: 'Submissions', ready: true },
-  // register (PRD v2 §7): the dated history, its evidence, who works it, who did what
+  { seg: 'bills', label: 'Bill of Quantities', ready: true },
   { seg: 'history', label: 'Timeline', ready: true },
-  { seg: 'documents', label: 'Documents', ready: true },
-  { seg: 'team', label: 'Team', ready: true },
-  { seg: 'activity', label: 'Activity', ready: true },
-  { seg: 'issues', label: 'Issues', ready: true, adminOnly: true },
+  { seg: 'submissions', label: 'Submissions', ready: true },
 ]
 
 function StatusDot({ dot, label, className = '' }: {

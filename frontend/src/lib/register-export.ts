@@ -27,12 +27,16 @@ export interface RegisterExportColumn {
   numFmt?: string
 }
 
+export type RegisterCell = string | number | null
+/** a data row, or a section row (bold, gold-tinted — a bill header with its subtotal) */
+export type RegisterExportRow = RegisterCell[] | { section: RegisterCell[] }
+
 export interface RegisterExportSpec {
   /** full banner text, e.g. "P.W. NIGERIA LTD. — Ongoing Projects in Kaduna" */
   title: string
   sheetName: string
   columns: RegisterExportColumn[]
-  rows: (string | number | null)[][]
+  rows: RegisterExportRow[]
   /** one entry per column; null leaves the cell blank. Omit for no TOTAL row. */
   totals?: (number | null)[]
 }
@@ -104,15 +108,21 @@ export async function exportRegisterExcel(spec: RegisterExportSpec): Promise<str
     cell.border = HEADER_BORDER
   })
 
-  // Data
+  // Data — a section row is bold on a light gold ground
   spec.rows.forEach((r, ri) => {
-    r.forEach((v, ci) => {
+    const isSection = !Array.isArray(r)
+    const cells = isSection ? r.section : r
+    cells.forEach((v, ci) => {
       const cell = ws.getCell(ri + 3, ci + 1)
       cell.value = v
       cell.border = CELL_BORDER
       cell.alignment = { vertical: 'middle', wrapText: true }
       const fmt = spec.columns[ci]?.numFmt
       if (fmt && typeof v === 'number') cell.numFmt = fmt
+      if (isSection) {
+        cell.font = { bold: true, color: { argb: INK } }
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3D6' } }
+      }
     })
   })
 
