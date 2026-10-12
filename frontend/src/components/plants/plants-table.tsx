@@ -31,6 +31,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { toast } from 'sonner';
 import { exportPlantsExcel } from '@/lib/api/plants';
+import { registerFileName } from '@/lib/register-export';
 import type { PlantSummary } from '@/hooks/use-plants';
 import type { PlantCondition } from '@/lib/api/plants';
 import type { PaginationMeta } from '@/lib/api/plants';
@@ -385,7 +386,7 @@ export function PlantsTable({
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `plants_export_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      a.download = registerFileName(bannerTitle);
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);

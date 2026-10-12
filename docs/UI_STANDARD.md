@@ -113,13 +113,18 @@ Decided 2026-10-12 on the Ongoing Projects page; applies to every register.
   two cards — `Total projects in Kaduna`, `Total contract sum in Kaduna`.
   The label carries the scope; nothing else is written on a card (§2).
 - **Export = the screen.** The filtered rows, the visible columns in their
-  on-screen order, the banner text as the file title. Filename
-  `<register>_<yyyy-mm-dd>.xlsx`.
+  on-screen order, the banner text as the file title, and the export date
+  under it (`Exported Mon, 12 October 2026 · Week 42`, Lagos time). The
+  file is saved as **the table name and the day**:
+  `Ongoing Projects in Kaduna - 2026-10-12.xlsx`,
+  `Plant Register for Abuja · Working - 2026-10-12.xlsx`
+  (`registerFileName()` in `lib/register-export.ts`).
 - **One file layout** — the Plant Register's, implemented twice and kept
   identical: `frontend/src/lib/register-export.ts` (client, exceljs) and
   `export_plants_excel` in `backend/app/api/v1/plants.py` (server,
   openpyxl):
-  row 1 height 55, logo in A1, title merged from B1 bold 14 `#101415`;
+  row 1 height 55, logo in A1, title merged from B1 bold 14 `#101415`
+  with the date line beneath it in 10 `#606060` (rich text, wrapped);
   row 2 header fill `#FFBF36`, bold 10, centred, medium `#606060`
   borders; data cells thin `#808080` borders; freeze panes `A3`; money
   `#,##0.00`; a bold `TOTAL` row closes money columns. No S/NO column,

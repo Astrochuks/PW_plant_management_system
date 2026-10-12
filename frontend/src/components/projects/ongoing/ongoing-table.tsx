@@ -251,7 +251,6 @@ export async function exportOngoingRows(rows: OngoingRow[], columns: ColumnDef[]
   return exportRegisterExcel({
     title,
     sheetName: 'Ongoing projects',
-    fileStem: 'ongoing_projects',
     columns: columns.map((c) => ({ header: c.header, width: c.exportWidth, numFmt: c.numFmt })),
     rows: rows.map((r) => columns.map((c) => c.cell(r))),
     totals,

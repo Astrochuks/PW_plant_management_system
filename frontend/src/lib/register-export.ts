@@ -4,7 +4,8 @@
  * export (`export_plants_excel`) cell for cell, so a projects file and a
  * plants file open looking the same:
  *
- *   row 1  height 55 · logo in A1 · title merged from B1, bold 14 #101415
+ *   row 1  height 55 · logo in A1 · title merged from B1, bold 14 #101415,
+ *          then the export date on a second line, 10 #606060
  *   row 2  header · fill #FFBF36 · bold 10 · centred · medium #606060 borders
  *   rows   thin #808080 borders · vertical centre · wrap
  *   last   optional bold TOTAL row over the money columns
@@ -12,7 +13,12 @@
  *
  * Values are written as stored — money gets the `#,##0.00` number format,
  * never a rounded value (CLAUDE.md rule 1).
+ *
+ * The file is named after the table and the day:
+ *   "Ongoing Projects in Kaduna - 2026-10-12.xlsx"
  */
+
+import { isoWeek } from '@/lib/format'
 
 export interface RegisterExportColumn {
   header: string
@@ -25,8 +31,6 @@ export interface RegisterExportSpec {
   /** full banner text, e.g. "P.W. NIGERIA LTD. — Ongoing Projects in Kaduna" */
   title: string
   sheetName: string
-  /** without extension; the date is appended */
-  fileStem: string
   columns: RegisterExportColumn[]
   rows: (string | number | null)[][]
   /** one entry per column; null leaves the cell blank. Omit for no TOTAL row. */
@@ -35,7 +39,20 @@ export interface RegisterExportSpec {
 
 const GOLD = 'FFFFBF36'
 const INK = 'FF101415'
-const thin = { style: 'thin' as const, color: { argb: 'FF808080' } }
+const INK_SOFT = 'FF606060'
+const BRAND_PREFIX = /^P\.W\. NIGERIA LTD\. — /
+
+/** "Exported Mon, 12 October 2026 · Week 42" — the same shape as the app header */
+export const exportDateLine = (d: Date = new Date()): string =>
+  `Exported ${d.toLocaleDateString('en-NG', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' })} · Week ${isoWeek(d)}`
+
+/** "<table name> - <yyyy-mm-dd>.xlsx", from the banner title */
+export const registerFileName = (title: string, d: Date = new Date()): string => {
+  const name = title.replace(BRAND_PREFIX, '').replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, ' ').trim()
+  return `${name} - ${d.toISOString().slice(0, 10)}.xlsx`
+}
+
+const thin ={ style: 'thin' as const, color: { argb: 'FF808080' } }
 const medium = { style: 'medium' as const, color: { argb: 'FF606060' } }
 const CELL_BORDER = { top: thin, left: thin, bottom: thin, right: thin }
 const HEADER_BORDER = { top: medium, left: medium, bottom: medium, right: medium }
@@ -69,9 +86,13 @@ export async function exportRegisterExcel(spec: RegisterExportSpec): Promise<str
   const titleCol = logo && n > 1 ? 2 : 1
   if (n > titleCol) ws.mergeCells(1, titleCol, 1, n)
   const title = ws.getCell(1, titleCol)
-  title.value = spec.title
-  title.font = { bold: true, size: 14, color: { argb: INK } }
-  title.alignment = { vertical: 'middle' }
+  title.value = {
+    richText: [
+      { font: { bold: true, size: 14, color: { argb: INK } }, text: spec.title },
+      { font: { size: 10, color: { argb: INK_SOFT } }, text: `\n${exportDateLine()}` },
+    ],
+  }
+  title.alignment = { vertical: 'middle', wrapText: true }
 
   // Row 2 — header
   spec.columns.forEach((c, i) => {
@@ -115,7 +136,7 @@ export async function exportRegisterExcel(spec: RegisterExportSpec): Promise<str
   const url = URL.createObjectURL(new Blob([buf], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   }))
-  const fileName = `${spec.fileStem}_${new Date().toISOString().slice(0, 10)}.xlsx`
+  const fileName = registerFileName(spec.title)
   const a = document.createElement('a')
   a.href = url
   a.download = fileName
