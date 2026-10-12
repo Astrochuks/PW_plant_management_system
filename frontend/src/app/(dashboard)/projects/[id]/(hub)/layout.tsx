@@ -9,7 +9,7 @@
 import Link from 'next/link'
 import { useParams, usePathname, useRouter } from 'next/navigation'
 import { useState } from 'react'
-import { ArrowLeft, CalendarDays, Edit2, Trash2, Users } from 'lucide-react'
+import { ArrowLeft, CalendarDays, ChevronLeft, Edit2, Trash2, Users } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import {
@@ -109,12 +109,14 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
           </Button>
           <div>
             {/* straight to the register this project lives in */}
-            <nav aria-label="Breadcrumb" className="mb-0.5 flex items-center gap-1 text-xs text-muted-foreground">
-              {project?.status === 'archived' ? (
-                <Link href="/projects/archive" className="hover:text-foreground hover:underline">Archive</Link>
-              ) : (
-                <Link href="/projects/ongoing" className="hover:text-foreground hover:underline">Ongoing Projects</Link>
-              )}
+            <nav aria-label="Breadcrumb" className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
+              <Link
+                href={project?.status === 'archived' ? '/projects/archive' : '/projects/ongoing'}
+                className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-2 py-0.5 font-medium text-foreground hover:bg-muted"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+                {project?.status === 'archived' ? 'Archive' : 'Ongoing Projects'}
+              </Link>
               <span aria-hidden="true">›</span>
               <span className="truncate max-w-[40vw]">{project?.short_name || project?.project_name || '…'}</span>
             </nav>
