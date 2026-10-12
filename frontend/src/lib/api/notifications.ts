@@ -17,6 +17,8 @@ export interface Notification {
   notification_type: string | null;
   related_entity_type: string | null;
   related_entity_id: string | null;
+  /** set by the bills workflow: where the notification leads */
+  action_url?: string | null;
   read: boolean;
   read_at: string | null;
   created_at: string;

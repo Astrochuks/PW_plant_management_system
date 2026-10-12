@@ -29,6 +29,7 @@ function relativeTime(iso: string): string {
 }
 
 function getEntityLink(n: Notification): string | null {
+  if (n.action_url) return n.action_url
   if (!n.related_entity_type || !n.related_entity_id) return null
   const type = n.related_entity_type.toLowerCase()
   if (type === 'plant' || type === 'plants_master') return `/plants/${n.related_entity_id}`

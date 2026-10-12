@@ -28,12 +28,13 @@ from pydantic import BaseModel, Field
 
 from app.api.v1.auth import get_client_ip
 from app.core.events import broadcast
-from app.core.exceptions import NotFoundError, ValidationError
-from app.core.pool import fetchrow, get_pool
+from app.core.exceptions import AuthorizationError, NotFoundError, ValidationError
+from app.core.pool import execute, fetch, fetchrow, get_pool
 from app.core.project_scope import project_scope_guard
-from app.core.security import CurrentUser, require_admin, require_projects_read
+from app.core.security import CurrentUser, require_admin, require_projects_access, require_projects_read
 from app.monitoring.logging import get_logger
 from app.services.audit_service import audit_service
+from app.services.bills_diff import diff_bills
 from app.services.bills_import import pick_beme_sheet, shape_preview
 from app.services.bills_summary import compute_summary, validate_adders
 from app.services.weekly_report_sheets import parse_beme
@@ -114,6 +115,13 @@ WITH cur AS (
 )
 SELECT (SELECT row_to_json(cur) FROM cur) AS revision,
        COALESCE((SELECT json_agg(bills ORDER BY sort_order NULLS LAST, bill_code) FROM bills), '[]'::json) AS bills,
+       (SELECT json_build_object('id', r.id, 'revision_no', r.revision_no, 'source', r.source, 'state', r.state,
+                                 'effective_date', r.effective_date, 'works_total', r.works_total, 'note', r.note,
+                                 'proposed_at', r.proposed_at, 'proposed_by_name', u.full_name,
+                                 'proposed_by_email', u.email)
+          FROM project_beme_revisions r LEFT JOIN users u ON u.id = r.proposed_by
+         WHERE r.project_id = $1::uuid AND r.state = 'pending'
+         ORDER BY r.revision_no DESC LIMIT 1) AS pending,
        COALESCE((SELECT json_agg(json_build_object(
                    'id', r.id, 'revision_no', r.revision_no, 'source', r.source, 'state', r.state,
                    'effective_date', r.effective_date, 'works_total', r.works_total, 'note', r.note,
@@ -142,7 +150,41 @@ async def project_bills(
         [{"bill_code": b["bill_code"], "name": b["name"], "amount": b["items_total"]} for b in bills],
         adders) if revision else None
     return {"success": True, "data": {
-        "revision": revision, "bills": bills, "summary": summary, "revisions": row["revisions"]}}
+        "revision": revision, "bills": bills, "summary": summary,
+        "pending": row["pending"], "revisions": row["revisions"]}}
+
+
+# the same statement for ANY revision of the project (review screen)
+_BILLS_SQL_FOR = _BILLS_SQL.replace(
+    "(SELECT current_beme_revision_id FROM projects WHERE id = $1::uuid)", "$2::uuid")
+
+
+async def _pm_user_ids(project_id: UUID) -> list[str]:
+    """Who approves: active project managers whose scope covers the project
+    (scope 'all' — the General PM — or an open assignment to it)."""
+    rows = await fetch(
+        """SELECT u.id FROM users u
+            WHERE u.role = 'project_manager' AND u.is_active
+              AND (u.project_scope = 'all'
+                   OR u.id IN (SELECT a.user_id FROM user_project_assignments a
+                                WHERE a.project_id = $1::uuid AND a.ended_at IS NULL))""",
+        str(project_id))
+    return [str(r["id"]) for r in rows]
+
+
+async def _notify(user_ids: list[str], ntype: str, title: str, message: str,
+                  project_id: UUID, action_url: str, data: dict[str, Any] | None = None) -> None:
+    """One in-app notification per person; never lets a notification failure
+    break the action it reports on."""
+    for uid in user_ids:
+        try:
+            await execute(
+                """INSERT INTO notifications
+                     (target_user_id, type, title, message, entity_type, entity_id, action_url, action_label, data, read)
+                   VALUES ($1::uuid, $2, $3, $4, 'project', $5::uuid, $6, 'Open', $7::jsonb, false)""",
+                uid, ntype, title, message, str(project_id), action_url, json.dumps(data or {}))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Bills notification failed", user_id=uid, type=ntype, error=str(e))
 
 
 # ── adders on the current revision ─────────────────────────────────────────
@@ -301,8 +343,14 @@ async def record_bills_revision(
     request: Request,
     current_user: Annotated[CurrentUser, Depends(require_admin)],
 ) -> dict[str, Any]:
-    """Write a new revision (bills + items) in one transaction and make it
-    current. The previous approved revision becomes 'superseded'."""
+    """Write a new revision (bills + items) in one transaction.
+
+    Rule (decision 2026-10-12): while the current bill is not in use
+    (locked_at IS NULL) the new revision is approved at once and becomes
+    current; the previous one is superseded; project managers get an
+    information notice. Once the bill is in use, the new revision is
+    PENDING — the project manager is asked to approve it, and the bill in
+    force does not change until they do."""
     project = await _project_or_404(project_id)
     if not any(b.items for b in body.bills):
         raise ValidationError("The bill has no items")
@@ -310,6 +358,12 @@ async def record_bills_revision(
         adders = validate_adders(body.adders)
     except ValueError as e:
         raise ValidationError(str(e)) from e
+
+    cur = await fetchrow(
+        "SELECT id, revision_no, locked_at FROM project_beme_revisions WHERE id = $1::uuid",
+        str(project["current_beme_revision_id"])) if project["current_beme_revision_id"] else None
+    needs_approval = bool(cur and cur["locked_at"] is not None)
+    state = "pending" if needs_approval else "approved"
 
     works = sum((Decimal(str(i.contract_amount or 0)) for b in body.bills for i in b.items), Decimal("0"))
     pool = get_pool()
@@ -323,11 +377,13 @@ async def record_bills_revision(
                 """INSERT INTO project_beme_revisions
                      (project_id, revision_no, source, state, effective_date, works_total, note,
                       source_file_name, source_document_path, proposed_by, decided_by, decided_at, adders)
-                   VALUES ($1::uuid, $2, $3, 'approved', $4, $5, $6, $7, $8, $9::uuid, $9::uuid, now(), $10::jsonb)
+                   VALUES ($1::uuid, $2, $3, $11, $4, $5, $6, $7, $8, $9::uuid,
+                           CASE WHEN $11 = 'approved' THEN $9::uuid END,
+                           CASE WHEN $11 = 'approved' THEN now() END, $10::jsonb)
                    RETURNING id""",
                 str(project_id), rev_no, body.source, body.effective_date, works,
                 (body.note or "").strip() or None, body.source_file_name, body.source_document_path,
-                current_user.id, json.dumps(adders))
+                current_user.id, json.dumps(adders), state)
             for b_pos, b in enumerate(body.bills, 1):
                 bill_id = await conn.fetchval(
                     """INSERT INTO project_beme_bills
@@ -350,27 +406,217 @@ async def record_bills_revision(
                              (project_id, bill_id, revision_id, item_code, description, unit,
                               contract_qty, rate, contract_amount, dup_seq, sort_order)
                            VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $10, $11)""", rows)
-            if prev:
+            if not needs_approval:
+                if cur:
+                    await conn.execute(
+                        "UPDATE project_beme_revisions SET state = 'superseded' WHERE id = $1::uuid AND state = 'approved'",
+                        cur["id"])
                 await conn.execute(
-                    "UPDATE project_beme_revisions SET state = 'superseded' WHERE id = $1::uuid AND state = 'approved'",
-                    prev["id"])
-            await conn.execute(
-                "UPDATE projects SET current_beme_revision_id = $2::uuid, updated_at = now() WHERE id = $1::uuid",
-                str(project_id), rev_id)
+                    "UPDATE projects SET current_beme_revision_id = $2::uuid, updated_at = now() WHERE id = $1::uuid",
+                    str(project_id), rev_id)
 
     item_count = sum(len(b.items) for b in body.bills)
+    pname = project["short_name"] or project["project_name"]
     await audit_service.log(
-        user_id=current_user.id, user_email=current_user.email, action="bills_revision_recorded",
+        user_id=current_user.id, user_email=current_user.email,
+        action="bills_revision_proposed" if needs_approval else "bills_revision_recorded",
         table_name="project_beme_revisions", record_id=str(rev_id),
-        old_values={"previous_revision_id": str(prev["id"]) if prev else None},
-        new_values={"project_id": str(project_id), "revision_no": rev_no, "source": body.source,
+        old_values={"current_revision_id": str(cur["id"]) if cur else None},
+        new_values={"project_id": str(project_id), "revision_no": rev_no, "source": body.source, "state": state,
                     "effective_date": body.effective_date.isoformat(), "bills": len(body.bills),
                     "items": item_count, "works_total": float(works), "file": body.source_file_name},
         ip_address=get_client_ip(request),
-        description=f"bill of quantities revision {rev_no} ({body.source}): {len(body.bills)} bills, "
-                    f"{item_count} items, works {works:,.2f} on {project['short_name'] or project['project_name']}")
-    logger.info("Bills revision recorded", project_id=str(project_id), revision_no=rev_no,
+        description=f"bill of quantities revision {rev_no} ({body.source}, {state}): {len(body.bills)} bills, "
+                    f"{item_count} items, works {works:,.2f} on {pname}")
+    logger.info("Bills revision recorded", project_id=str(project_id), revision_no=rev_no, state=state,
                 bills=len(body.bills), items=item_count, works_total=float(works), by=current_user.email)
+
+    approvers = await _pm_user_ids(project_id)
+    if needs_approval:
+        await _notify(approvers, "approval_requested",
+                      f"Bill revision {rev_no} awaits your approval — {pname}",
+                      f"{len(body.bills)} bills, {item_count} items, works {works:,.2f}. Proposed by {current_user.email}."
+                      + (f" Note: {body.note.strip()}" if body.note and body.note.strip() else ""),
+                      project_id, f"/projects/{project_id}/bills/revisions/{rev_id}",
+                      {"revision_id": str(rev_id), "revision_no": rev_no})
+    else:
+        await _notify(approvers, "info",
+                      f"Bill recorded — {pname}",
+                      f"Revision {rev_no}: {len(body.bills)} bills, {item_count} items, works {works:,.2f}. "
+                      f"Recorded by {current_user.email}; no approval needed until the bill is in use.",
+                      project_id, f"/projects/{project_id}/bills",
+                      {"revision_id": str(rev_id), "revision_no": rev_no})
     broadcast("projects", "bills_revision")
-    return {"success": True, "data": {"id": str(rev_id), "revision_no": rev_no,
+    return {"success": True, "data": {"id": str(rev_id), "revision_no": rev_no, "state": state,
                                       "works_total": float(works), "bills": len(body.bills), "items": item_count}}
+
+
+# ── review, approve, reject, lock ──────────────────────────────────────────
+
+async def _revision_or_404(project_id: UUID, revision_id: UUID) -> dict[str, Any]:
+    row = await fetchrow(
+        """SELECT r.*, pu.full_name AS proposed_by_name, pu.email AS proposed_by_email,
+                  du.full_name AS decided_by_name, du.email AS decided_by_email
+             FROM project_beme_revisions r
+             LEFT JOIN users pu ON pu.id = r.proposed_by
+             LEFT JOIN users du ON du.id = r.decided_by
+            WHERE r.id = $1::uuid AND r.project_id = $2::uuid""",
+        str(revision_id), str(project_id))
+    if not row:
+        raise NotFoundError("Bill revision", str(revision_id))
+    return dict(row)
+
+
+@router.get("/{project_id}/bills/revisions/{revision_id}")
+async def bills_revision_detail(
+    project_id: UUID,
+    revision_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(require_projects_read)],
+) -> dict[str, Any]:
+    """One revision in full — its bills, its summary — and, when it is not
+    the current one, the item-level difference against the current bill."""
+    project = await _project_or_404(project_id)
+    rev = await _revision_or_404(project_id, revision_id)
+    row = await fetchrow(_BILLS_SQL_FOR, str(project_id), str(revision_id))
+    bills = row["bills"] or []
+    summary = compute_summary(
+        [{"bill_code": b["bill_code"], "name": b["name"], "amount": b["items_total"]} for b in bills],
+        rev.get("adders") or [])
+    diff = None
+    current_no = None
+    if project["current_beme_revision_id"] and str(project["current_beme_revision_id"]) != str(revision_id):
+        cur_row = await fetchrow(_BILLS_SQL, str(project_id))
+        cur_rev = cur_row["revision"] or {}
+        current_no = cur_rev.get("revision_no")
+        diff = diff_bills(cur_row["bills"] or [], bills, cur_rev.get("adders") or [], rev.get("adders") or [])
+    for k in ("id", "project_id", "proposed_by", "decided_by"):
+        if rev.get(k) is not None:
+            rev[k] = str(rev[k])
+    return {"success": True, "data": {"revision": rev, "bills": bills, "summary": summary,
+                                      "diff": diff, "current_revision_no": current_no}}
+
+
+class DecisionIn(BaseModel):
+    note: str | None = Field(None, max_length=2000)
+
+
+def _approver(current_user: CurrentUser) -> None:
+    if not current_user.is_project_manager:
+        raise AuthorizationError("Only a project manager approves or rejects a bill revision")
+
+
+@router.post("/{project_id}/bills/revisions/{revision_id}/approve")
+async def approve_bills_revision(
+    project_id: UUID,
+    revision_id: UUID,
+    body: DecisionIn,
+    request: Request,
+    current_user: Annotated[CurrentUser, Depends(require_projects_access)],
+) -> dict[str, Any]:
+    """The project manager makes a pending revision the bill in force."""
+    _approver(current_user)
+    project = await _project_or_404(project_id)
+    rev = await _revision_or_404(project_id, revision_id)
+    if rev["state"] != "pending":
+        raise ValidationError(f"Revision {rev['revision_no']} is {rev['state']}, not pending")
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            prev_id = project["current_beme_revision_id"]
+            await conn.execute(
+                """UPDATE project_beme_revisions
+                      SET state = 'approved', decided_by = $2::uuid, decided_at = now(),
+                          decision_note = $3, locked_at = COALESCE(locked_at, now())
+                    WHERE id = $1::uuid""",
+                str(revision_id), current_user.id, (body.note or "").strip() or None)
+            if prev_id:
+                await conn.execute(
+                    "UPDATE project_beme_revisions SET state = 'superseded' WHERE id = $1::uuid AND state = 'approved'",
+                    str(prev_id))
+            await conn.execute(
+                "UPDATE projects SET current_beme_revision_id = $2::uuid, updated_at = now() WHERE id = $1::uuid",
+                str(project_id), str(revision_id))
+    pname = project["short_name"] or project["project_name"]
+    await audit_service.log(
+        user_id=current_user.id, user_email=current_user.email, action="bills_revision_approved",
+        table_name="project_beme_revisions", record_id=str(revision_id),
+        old_values={"state": "pending", "current_revision_id": str(project["current_beme_revision_id"]) if project["current_beme_revision_id"] else None},
+        new_values={"state": "approved", "revision_no": rev["revision_no"], "note": body.note},
+        ip_address=get_client_ip(request),
+        description=f"bill revision {rev['revision_no']} approved on {pname}")
+    logger.info("Bills revision approved", project_id=str(project_id), revision_no=rev["revision_no"], by=current_user.email)
+    if rev.get("proposed_by"):
+        await _notify([str(rev["proposed_by"])], "approval_decided",
+                      f"Bill revision {rev['revision_no']} approved — {pname}",
+                      f"Approved by {current_user.email}." + (f" Note: {body.note.strip()}" if body.note and body.note.strip() else ""),
+                      project_id, f"/projects/{project_id}/bills", {"revision_id": str(revision_id), "decision": "approved"})
+    broadcast("projects", "bills_revision")
+    return {"success": True, "data": {"id": str(revision_id), "revision_no": rev["revision_no"], "state": "approved"}}
+
+
+@router.post("/{project_id}/bills/revisions/{revision_id}/reject")
+async def reject_bills_revision(
+    project_id: UUID,
+    revision_id: UUID,
+    body: DecisionIn,
+    request: Request,
+    current_user: Annotated[CurrentUser, Depends(require_projects_access)],
+) -> dict[str, Any]:
+    """The project manager sends a pending revision back, with a reason."""
+    _approver(current_user)
+    project = await _project_or_404(project_id)
+    rev = await _revision_or_404(project_id, revision_id)
+    if rev["state"] != "pending":
+        raise ValidationError(f"Revision {rev['revision_no']} is {rev['state']}, not pending")
+    note = (body.note or "").strip()
+    if len(note) < 3:
+        raise ValidationError("Say why it is rejected — the admin needs the reason to fix it")
+    await execute(
+        """UPDATE project_beme_revisions
+              SET state = 'rejected', decided_by = $2::uuid, decided_at = now(), decision_note = $3
+            WHERE id = $1::uuid""",
+        str(revision_id), current_user.id, note)
+    pname = project["short_name"] or project["project_name"]
+    await audit_service.log(
+        user_id=current_user.id, user_email=current_user.email, action="bills_revision_rejected",
+        table_name="project_beme_revisions", record_id=str(revision_id),
+        old_values={"state": "pending"}, new_values={"state": "rejected", "revision_no": rev["revision_no"], "note": note},
+        ip_address=get_client_ip(request),
+        description=f"bill revision {rev['revision_no']} rejected on {pname}: {note}")
+    logger.info("Bills revision rejected", project_id=str(project_id), revision_no=rev["revision_no"], by=current_user.email)
+    if rev.get("proposed_by"):
+        await _notify([str(rev["proposed_by"])], "approval_decided",
+                      f"Bill revision {rev['revision_no']} rejected — {pname}",
+                      f"Rejected by {current_user.email}: {note}",
+                      project_id, f"/projects/{project_id}/bills/revisions/{revision_id}",
+                      {"revision_id": str(revision_id), "decision": "rejected"})
+    broadcast("projects", "bills_revision")
+    return {"success": True, "data": {"id": str(revision_id), "revision_no": rev["revision_no"], "state": "rejected"}}
+
+
+@router.post("/{project_id}/bills/lock")
+async def lock_bills(
+    project_id: UUID,
+    request: Request,
+    current_user: Annotated[CurrentUser, Depends(require_admin)],
+) -> dict[str, Any]:
+    """Mark the current bill as in use — sites have started measuring
+    against it. From now on every change waits for the project manager.
+    (Phase C sets this automatically with the first weekly quantity.)"""
+    project = await _project_or_404(project_id)
+    rev_id = project["current_beme_revision_id"]
+    if rev_id is None:
+        raise ValidationError("There is no bill to mark as in use")
+    row = await fetchrow(
+        """UPDATE project_beme_revisions SET locked_at = COALESCE(locked_at, now())
+            WHERE id = $1::uuid RETURNING revision_no, locked_at""", str(rev_id))
+    pname = project["short_name"] or project["project_name"]
+    await audit_service.log(
+        user_id=current_user.id, user_email=current_user.email, action="bills_locked",
+        table_name="project_beme_revisions", record_id=str(rev_id),
+        new_values={"revision_no": row["revision_no"], "locked_at": row["locked_at"].isoformat()},
+        ip_address=get_client_ip(request),
+        description=f"bill revision {row['revision_no']} marked in use on {pname}")
+    logger.info("Bills locked", project_id=str(project_id), revision_no=row["revision_no"], by=current_user.email)
+    broadcast("projects", "bills_locked")
+    return {"success": True, "data": {"revision_no": row["revision_no"], "locked_at": row["locked_at"].isoformat()}}
