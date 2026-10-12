@@ -7,6 +7,11 @@
  * Export writes exactly what is on screen: the rows the page filtered,
  * the columns that are visible, in that order (UI standard §3).
  * Money figures are the stored figures — nothing is rounded here.
+ *
+ * Four columns by decision of 2026-10-12: Project Name, Client, State,
+ * Contract Sum. No Status column — everything here is ongoing by
+ * definition; the dated status history lives in project_status_events.
+ * More columns come back only when asked for.
  */
 
 import { useState } from 'react'
@@ -27,33 +32,16 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import type { OngoingProject } from '@/lib/api/projects'
-import { STATUS_STYLES } from '@/components/projects/projects-table'
-import { type Figures, marginOf } from '@/components/projects/ongoing/lens'
-import { fmtDate, money } from '@/lib/format'
+import { money } from '@/lib/format'
 import { exportRegisterExcel } from '@/lib/register-export'
 
 export interface OngoingRow {
   project: OngoingProject
-  /** sum of every week on file for this project */
-  figures: Figures
 }
 
 // ── Columns ──────────────────────────────────────────────────────────────
 
-export type OngoingColumnKey =
-  | 'project_name'
-  | 'client'
-  | 'state'
-  | 'status'
-  | 'project_type'
-  | 'contract_sum'
-  | 'status_since'
-  | 'last_report'
-  | 'weeks_on_file'
-  | 'work_done'
-  | 'cost'
-  | 'net_earnings'
-  | 'margin'
+export type OngoingColumnKey = 'project_name' | 'client' | 'state' | 'contract_sum'
 
 interface ColumnDef {
   key: OngoingColumnKey
@@ -74,155 +62,48 @@ const COLUMN_DEFS: ColumnDef[] = [
   {
     key: 'project_name',
     header: 'Project Name',
+    // the full name, wrapped — never clipped; the column takes the width the
+    // others leave, and keeps a floor so it never collapses on narrow screens
     render: ({ project: p }) => (
-      <div className="max-w-[320px]">
-        <span className="font-medium line-clamp-1">{p.project_name}</span>
-        {p.short_name && <div className="text-xs text-muted-foreground">{p.short_name}</div>}
+      <div className="min-w-[260px] whitespace-normal break-words">
+        <span className="font-medium leading-snug">{p.project_name}</span>
+        {p.short_name && <div className="mt-0.5 text-xs text-muted-foreground">{p.short_name}</div>}
       </div>
     ),
     cell: ({ project: p }) => p.project_name,
-    exportWidth: 60,
-    skeleton: 'w-full max-w-[300px]',
+    exportWidth: 70,
+    skeleton: 'w-full max-w-[400px]',
   },
   {
     key: 'client',
     header: 'Client',
-    width: 'w-[180px]',
-    render: ({ project: p }) => <span className="text-sm">{p.client}</span>,
+    width: 'w-[30%]',
+    render: ({ project: p }) => <div className="min-w-[200px] whitespace-normal break-words text-sm">{p.client}</div>,
     cell: ({ project: p }) => p.client,
-    exportWidth: 34,
-    skeleton: 'w-24',
+    exportWidth: 40,
+    skeleton: 'w-40',
   },
   {
     key: 'state',
     header: 'State',
-    width: 'w-[120px]',
+    width: 'w-[130px]',
     render: ({ project: p }) => <span className="text-sm">{p.state_name || dash}</span>,
     cell: ({ project: p }) => p.state_name ?? '',
     exportWidth: 14,
     skeleton: 'w-20',
   },
   {
-    key: 'status',
-    header: 'Status',
-    width: 'w-[150px]',
-    render: ({ project: p, figures }) => {
-      if (figures.weeks === 0) {
-        return <Badge variant="outline" className="text-muted-foreground">Awaiting first report</Badge>
-      }
-      const style = STATUS_STYLES[p.status] || STATUS_STYLES.active
-      return <Badge variant={style.variant} className={style.className}>{style.label}</Badge>
-    },
-    cell: ({ project: p, figures }) =>
-      figures.weeks === 0 ? 'Awaiting first report' : (STATUS_STYLES[p.status]?.label ?? p.status),
-    exportWidth: 22,
-    skeleton: 'w-16',
-  },
-  {
-    key: 'project_type',
-    header: 'Type',
-    width: 'w-[110px]',
-    render: ({ project: p }) =>
-      p.project_type
-        ? <Badge variant="outline" className="w-fit text-[10px] capitalize">{p.project_type}</Badge>
-        : dash,
-    cell: ({ project: p }) => p.project_type ?? '',
-    exportWidth: 12,
-    skeleton: 'w-16',
-  },
-  {
     key: 'contract_sum',
     header: 'Contract Sum',
-    width: 'w-[190px]',
+    width: 'w-[200px]',
     align: 'right',
     render: ({ project: p }) => (
-      <span className="font-medium tabular-nums">{p.contract_sum != null ? money(p.contract_sum) : dash}</span>
+      <span className="font-medium tabular-nums whitespace-nowrap">{p.contract_sum != null ? money(p.contract_sum) : dash}</span>
     ),
     cell: ({ project: p }) => p.contract_sum,
     numFmt: '#,##0.00',
     exportWidth: 22,
     skeleton: 'w-28 ml-auto',
-  },
-  {
-    key: 'status_since',
-    header: 'Since',
-    width: 'w-[110px]',
-    render: ({ project: p }) => <span className="text-sm tabular-nums">{fmtDate(p.status_since)}</span>,
-    cell: ({ project: p }) => p.status_since,
-    exportWidth: 12,
-    skeleton: 'w-20',
-  },
-  {
-    key: 'last_report',
-    header: 'Last Report',
-    width: 'w-[110px]',
-    render: ({ figures }) => (
-      <span className="text-sm tabular-nums">{figures.last_week_ending ? fmtDate(figures.last_week_ending) : dash}</span>
-    ),
-    cell: ({ figures }) => figures.last_week_ending ?? '',
-    exportWidth: 12,
-    skeleton: 'w-20',
-  },
-  {
-    key: 'weeks_on_file',
-    header: 'Weeks',
-    width: 'w-[80px]',
-    align: 'right',
-    render: ({ figures }) => <span className="text-sm tabular-nums">{figures.weeks}</span>,
-    cell: ({ figures }) => figures.weeks,
-    exportWidth: 8,
-    skeleton: 'w-8 ml-auto',
-  },
-  {
-    key: 'work_done',
-    header: 'Work Done incl. VAT',
-    width: 'w-[190px]',
-    align: 'right',
-    render: ({ figures }) => <span className="text-sm tabular-nums">{figures.weeks ? money(figures.works_incl_vat) : dash}</span>,
-    cell: ({ figures }) => (figures.weeks ? figures.works_incl_vat : null),
-    numFmt: '#,##0.00',
-    exportWidth: 24,
-    skeleton: 'w-28 ml-auto',
-  },
-  {
-    key: 'cost',
-    header: 'Cost',
-    width: 'w-[170px]',
-    align: 'right',
-    render: ({ figures }) => <span className="text-sm tabular-nums">{figures.weeks ? money(figures.cost) : dash}</span>,
-    cell: ({ figures }) => (figures.weeks ? figures.cost : null),
-    numFmt: '#,##0.00',
-    exportWidth: 22,
-    skeleton: 'w-28 ml-auto',
-  },
-  {
-    key: 'net_earnings',
-    header: 'Net Earnings',
-    width: 'w-[180px]',
-    align: 'right',
-    render: ({ figures }) => (
-      <span className={`text-sm font-medium tabular-nums ${figures.weeks && figures.net < 0 ? 'text-red-600' : ''}`}>
-        {figures.weeks ? money(figures.net) : dash}
-      </span>
-    ),
-    cell: ({ figures }) => (figures.weeks ? figures.net : null),
-    numFmt: '#,##0.00',
-    exportWidth: 22,
-    skeleton: 'w-28 ml-auto',
-  },
-  {
-    key: 'margin',
-    header: 'Margin',
-    width: 'w-[90px]',
-    align: 'right',
-    render: ({ figures }) => {
-      const m = marginOf(figures)
-      return <span className="text-sm tabular-nums">{m == null ? dash : `${(m * 100).toFixed(2)}%`}</span>
-    },
-    cell: ({ figures }) => marginOf(figures),
-    numFmt: '0.00%',
-    exportWidth: 10,
-    skeleton: 'w-12 ml-auto',
   },
 ]
 
@@ -231,15 +112,7 @@ const COLUMN_MAP = new Map(COLUMN_DEFS.map((c) => [c.key, c]))
 export const ONGOING_COLUMNS: { key: OngoingColumnKey; label: string }[] =
   COLUMN_DEFS.map((c) => ({ key: c.key, label: c.header }))
 
-export const DEFAULT_ONGOING_COLUMNS: OngoingColumnKey[] = [
-  'project_name',
-  'client',
-  'state',
-  'status',
-  'contract_sum',
-  'net_earnings',
-  'last_report',
-]
+export const DEFAULT_ONGOING_COLUMNS: OngoingColumnKey[] = ['project_name', 'client', 'state', 'contract_sum']
 
 // ── Export ───────────────────────────────────────────────────────────────
 
@@ -264,7 +137,6 @@ interface OngoingTableProps {
   isLoading: boolean
   visibleColumns: OngoingColumnKey[]
   onVisibleColumnsChange: (columns: OngoingColumnKey[]) => void
-  resultText?: string
   /** what the table holds, e.g. "for all states" / "in Kaduna" — the banner and the export title say it */
   scope: string
   actions?: React.ReactNode
@@ -275,7 +147,6 @@ export function OngoingTable({
   isLoading,
   visibleColumns,
   onVisibleColumnsChange,
-  resultText,
   scope,
   actions,
 }: OngoingTableProps) {
@@ -313,9 +184,8 @@ export function OngoingTable({
 
   return (
     <div className="space-y-0">
-      {/* Toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-2 py-2">
-        <p className="text-sm text-muted-foreground">{resultText}</p>
+      {/* Toolbar — actions only; the banner already says what the table holds */}
+      <div className="flex flex-wrap items-center justify-end gap-2 py-2">
         <div className="flex flex-wrap items-center gap-2">
           {actions}
 
@@ -397,7 +267,7 @@ export function OngoingTable({
                   {columns.map((col) => (
                     <TableCell
                       key={col.key}
-                      className={`text-sm border-x border-border/50 ${col.align === 'right' ? 'text-right' : ''}`}
+                      className={`text-sm border-x border-border/50 align-top py-3 ${col.align === 'right' ? 'text-right' : ''}`}
                     >
                       {col.render(row)}
                     </TableCell>

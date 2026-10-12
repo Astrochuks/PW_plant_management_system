@@ -4,8 +4,8 @@
  * Ongoing projects — the projects module's register, in the Plant
  * Register's shape (docs/UI_STANDARD.md): title, three summary cards that
  * follow the filters, a search bar and one state filter, then the branded
- * table. Figures are the sum of the weeks on file for each project — never
- * the workbook's own "to date". Ended projects live in /projects/archive.
+ * table (Project Name, Client, State, Contract Sum). One API call.
+ * Ended projects live in /projects/archive.
  */
 
 import { Suspense, useEffect, useMemo, useState } from 'react'
@@ -18,10 +18,9 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { MiniKpi, MiniKpiRow, MiniKpiSkeleton } from '@/components/shared/mini-kpi'
 import { ProtectedRoute } from '@/components/protected-route'
 import { useAuth } from '@/providers/auth-provider'
-import { useOngoingFigures, useOngoingProjects } from '@/hooks/use-projects'
+import { useOngoingProjects } from '@/hooks/use-projects'
 import { useUrlFilters } from '@/hooks/use-url-filters'
 import { useDebounce } from '@/hooks/use-debounce'
-import { figuresFor } from '@/components/projects/ongoing/lens'
 import {
   DEFAULT_ONGOING_COLUMNS,
   OngoingTable,
@@ -57,18 +56,11 @@ function OngoingContent() {
 
   const [visibleColumns, setVisibleColumns] = useState<OngoingColumnKey[]>(DEFAULT_ONGOING_COLUMNS)
 
-  const { data: ongoing, isLoading: loadingList, isFetching } = useOngoingProjects()
-  const { data: figures, isLoading: loadingFigures } = useOngoingFigures()
-  const isLoading = loadingList || loadingFigures
+  const { data: ongoing, isLoading } = useOngoingProjects()
 
-  const today = useMemo(() => new Date().toISOString().slice(0, 10), [])
-
-  // every ongoing project with the sum of its stored weeks
-  const allRows = useMemo<OngoingRow[]>(() => {
-    if (!ongoing) return []
-    const series = figures?.series ?? []
-    return ongoing.data.map((project) => ({ project, figures: figuresFor(series, project.id, 'stored', today) }))
-  }, [ongoing, figures, today])
+  const allRows = useMemo<OngoingRow[]>(
+    () => (ongoing ? ongoing.data.map((project) => ({ project })) : []),
+    [ongoing])
 
   const states = useMemo(
     () => [...new Set(allRows.map((r) => r.project.state_name).filter(Boolean) as string[])].sort(),
@@ -89,9 +81,6 @@ function OngoingContent() {
   const contractTotal = rows.reduce((a, r) => a + (r.project.contract_sum ?? 0), 0)
 
   const hasActiveFilters = Boolean(filters.q || stateFilter)
-  const resultText = isLoading
-    ? ''
-    : `${rows.length} ongoing project${rows.length !== 1 ? 's' : ''}${isFetching ? ' · refreshing…' : ''}`
   // one phrase names the scope everywhere: cards, banner, export title
   const scope = (stateFilter ? `in ${stateFilter}` : 'for all states') + (filters.q ? ` · search "${filters.q}"` : '')
 
@@ -165,7 +154,6 @@ function OngoingContent() {
         isLoading={isLoading}
         visibleColumns={visibleColumns}
         onVisibleColumnsChange={setVisibleColumns}
-        resultText={resultText}
         scope={scope}
         actions={isAdmin ? (
           <Button size="sm" asChild>
