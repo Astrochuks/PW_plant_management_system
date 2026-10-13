@@ -57,6 +57,7 @@ import {
   previewBillsFromSubmission,
   recordBillsRevision,
   getBillsRevision,
+  getBillsProgress,
   updateBillsAdders,
   type BoqAdder,
   type RecordBoqRevisionRequest,
@@ -681,6 +682,15 @@ export function useBillsRevision(projectId: string | null, revisionId: string | 
     queryFn: () => getBillsRevision(projectId!, revisionId!),
     enabled: !!projectId && !!revisionId,
     staleTime: 60 * 1000,
+  });
+}
+
+export function useBillsProgress(projectId: string | null) {
+  return useQuery({
+    queryKey: [...projectsKeys.detail(projectId!), 'bills', 'progress'],
+    queryFn: () => getBillsProgress(projectId!),
+    enabled: !!projectId,
+    staleTime: 2 * 60 * 1000,
   });
 }
 

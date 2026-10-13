@@ -436,3 +436,46 @@ async def bills_revision_detail(
             rev[k] = str(rev[k])
     return {"success": True, "data": {"revision": rev, "bills": bills, "summary": summary,
                                       "diff": diff, "current_revision_no": current_no}}
+
+
+# ── progress by bill (the Overview) ────────────────────────────────────────
+
+_PROGRESS_SQL = """
+WITH cur AS (SELECT current_beme_revision_id AS rid FROM projects WHERE id = $1::uuid),
+weeks AS (
+  SELECT id, year, week_number, week_ending_date
+    FROM project_weekly_reports WHERE project_id = $1::uuid AND status = 'completed'),
+latest AS (SELECT * FROM weeks ORDER BY week_ending_date DESC NULLS LAST LIMIT 1),
+per_bill AS (
+  SELECT b.bill_code, b.name, b.sort_order,
+         COALESCE((SELECT sum(i.contract_amount) FROM project_beme_items i WHERE i.bill_id = b.id), 0) AS amount,
+         COALESCE((SELECT sum(p.amount_this_week)
+                     FROM project_beme_progress p
+                     JOIN project_beme_items i ON i.id = p.item_id
+                     JOIN weeks w ON w.id = p.weekly_report_id
+                    WHERE i.bill_id = b.id), 0) AS to_date,
+         COALESCE((SELECT sum(p.amount_this_week)
+                     FROM project_beme_progress p
+                     JOIN project_beme_items i ON i.id = p.item_id
+                     JOIN latest l ON l.id = p.weekly_report_id
+                    WHERE i.bill_id = b.id), 0) AS this_week
+    FROM project_beme_bills b JOIN cur ON b.revision_id = cur.rid)
+SELECT (SELECT row_to_json(latest) FROM latest) AS latest_week,
+       (SELECT count(*) FROM weeks)::int AS weeks_on_file,
+       COALESCE((SELECT json_agg(per_bill ORDER BY sort_order NULLS LAST, bill_code) FROM per_bill), '[]'::json) AS bills
+"""
+
+
+@router.get("/{project_id}/bills/progress")
+async def bills_progress(
+    project_id: UUID,
+    current_user: Annotated[CurrentUser, Depends(require_projects_read)],
+) -> dict[str, Any]:
+    """Progress by bill for the Overview: per bill of the current revision,
+    the bill amount, what was done in the latest week on file and the sum
+    of every week on file (never the workbook's own 'to date'). One
+    statement; dashes on the page when there is no bill or no week yet."""
+    await _project_or_404(project_id)
+    row = await fetchrow(_PROGRESS_SQL, str(project_id))
+    return {"success": True, "data": {
+        "latest_week": row["latest_week"], "weeks_on_file": row["weeks_on_file"], "bills": row["bills"]}}

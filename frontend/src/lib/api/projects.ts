@@ -1662,6 +1662,23 @@ export async function previewBillsFromSubmission(projectId: string, submissionId
   return { ...d, works_total: Number(d.works_total ?? 0), bills: (d.bills ?? []).map(normBill) }
 }
 
+export interface BillsProgress {
+  latest_week: { year: number; week_number: number; week_ending_date: string | null } | null
+  weeks_on_file: number
+  bills: { bill_code: string; name: string | null; amount: number; this_week: number; to_date: number }[]
+}
+
+/** progress by bill of the current revision — sums of the weeks on file */
+export async function getBillsProgress(projectId: string): Promise<BillsProgress> {
+  const res = await apiClient.get<{ data: BillsProgress }>(`/projects/${projectId}/bills/progress`)
+  const d = res.data.data
+  return {
+    latest_week: d.latest_week,
+    weeks_on_file: Number(d.weeks_on_file ?? 0),
+    bills: (d.bills ?? []).map((b) => ({ ...b, amount: Number(b.amount ?? 0), this_week: Number(b.this_week ?? 0), to_date: Number(b.to_date ?? 0) })),
+  }
+}
+
 export async function recordBillsRevision(projectId: string, body: RecordBoqRevisionRequest): Promise<{ id: string; revision_no: number; works_total: number }> {
   const res = await apiClient.post<{ data: { id: string; revision_no: number; works_total: number } }>(`/projects/${projectId}/bills/revisions`, body)
   return { ...res.data.data, works_total: Number(res.data.data.works_total ?? 0) }
