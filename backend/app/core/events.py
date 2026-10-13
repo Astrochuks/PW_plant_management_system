@@ -158,6 +158,8 @@ async def event_stream(q: asyncio.Queue) -> AsyncGenerator[str, None]:
     new process straight away, then returns.
     """
     stop = _shutdown_event()
+    getter: asyncio.Future | None = None
+    stopper: asyncio.Future | None = None
     try:
         while not stop.is_set():
             getter = asyncio.ensure_future(q.get())
@@ -181,3 +183,9 @@ async def event_stream(q: asyncio.Queue) -> AsyncGenerator[str, None]:
         yield "event: shutdown\ndata: {}\n\n"
     except asyncio.CancelledError:
         pass
+    finally:
+        # a client that drops mid-wait leaves the get() pending; cancel it so
+        # the loop never logs "Task was destroyed but it is pending"
+        for fut in (getter, stopper):
+            if fut is not None and not fut.done():
+                fut.cancel()

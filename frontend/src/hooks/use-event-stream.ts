@@ -70,6 +70,7 @@ export function useEventStream(isAuthenticated: boolean) {
   const sourceRef = useRef<EventSource | null>(null);
   const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryCountRef = useRef(0);
+  const errorStreakRef = useRef(0);
 
   const cleanup = useCallback(() => {
     if (sourceRef.current) {
@@ -111,8 +112,9 @@ export function useEventStream(isAuthenticated: boolean) {
       sourceRef.current = es;
 
       es.onopen = () => {
-        // Connected — reset retry counter
+        // Connected — reset retry counters
         retryCountRef.current = 0;
+        errorStreakRef.current = 0;
       };
 
       es.onmessage = (event) => {
@@ -136,6 +138,15 @@ export function useEventStream(isAuthenticated: boolean) {
       };
 
       es.onerror = () => {
+        // EventSource reconnects on its own after a dropped connection
+        // (readyState CONNECTING). Closing it here and reopening 2 s later
+        // raced that built-in reconnect and produced a connect/disconnect
+        // every few seconds (2026-10-13 log). Let the browser retry; step
+        // in only when it has given up (CLOSED) or keeps failing — the
+        // latter usually means the token in the URL expired, so reconnect
+        // with a fresh one.
+        errorStreakRef.current++;
+        if (es.readyState !== EventSource.CLOSED && errorStreakRef.current < 3) return;
         es.close();
         sourceRef.current = null;
 

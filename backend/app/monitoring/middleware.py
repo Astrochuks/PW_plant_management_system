@@ -3,6 +3,7 @@
 Logs all requests and collects metrics for observability.
 """
 
+import os
 import random
 import time
 import uuid
@@ -23,7 +24,7 @@ from app.monitoring.metrics import get_metrics_collector
 logger = get_logger(__name__)
 
 
-SLOW_REQUEST_MS = 2000
+SLOW_REQUEST_MS = int(os.environ.get("SLOW_REQUEST_MS", "2000"))  # env-tunable; see pool.SLOW_QUERY_MS
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):

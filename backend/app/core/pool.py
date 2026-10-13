@@ -15,6 +15,7 @@ Usage:
 
 import time
 import json
+import os
 import ssl
 from collections.abc import AsyncIterator
 from datetime import date, datetime
@@ -146,7 +147,9 @@ class DatabaseUnavailableError(Exception):
     pass
 
 
-SLOW_QUERY_MS = 1000  # one statement slower than this is logged as 'Slow query'
+# one statement slower than this logs 'Slow query'. Env SLOW_QUERY_MS; default suits
+# a same-region deployment — raise it locally where the round trip alone is ~0.5–1 s
+SLOW_QUERY_MS = int(os.environ.get("SLOW_QUERY_MS", "1000"))
 
 
 async def _exec_with_recovery(fn_name: str, coro_factory, *, retried: bool = False, sql: str | None = None):

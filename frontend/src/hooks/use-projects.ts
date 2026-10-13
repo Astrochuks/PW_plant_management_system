@@ -397,14 +397,16 @@ export function useProjectSubmissions(params: {
     networkMode: 'always',
     retry: 2,
     // poll: steady 4s (submission tables). watch (hub layout): 4s while
-    // anything is processing, slow 15s heartbeat otherwise so changes
-    // made elsewhere still surface without a manual refresh.
+    // anything is processing, otherwise NO polling — the event stream
+    // announces queued and finished reports (2026-10-13: the idle 15 s
+    // heartbeat was 28 requests in 7 quiet minutes, 3–8 s each over the
+    // laptop→EU link, for nothing).
     refetchInterval: opts.poll
       ? 4000
       : opts.watch
         ? (q) => (PENDING_SUBMISSIONS.size > 0
             || (q.state.data?.data ?? []).some(
-              (sub) => ACTIVE_STATUSES.has(sub.status)) ? 4000 : 15000)
+              (sub) => ACTIVE_STATUSES.has(sub.status)) ? 4000 : false)
         : undefined,
   });
 

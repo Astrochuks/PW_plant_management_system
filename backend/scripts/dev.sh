@@ -14,6 +14,12 @@
 # Usage:  backend/scripts/dev.sh          (PORT=8001 backend/scripts/dev.sh)
 set -eu
 cd "$(dirname "$0")/.."
+# Local thresholds for the 'Slow query' / 'Slow request' warnings: from this
+# laptop the Frankfurt round trip alone is 0.5–1.2 s, so the same-region
+# defaults (1000 / 2000 ms) would flag everything. Production keeps the defaults.
+export SLOW_QUERY_MS="${SLOW_QUERY_MS:-2500}"
+export SLOW_REQUEST_MS="${SLOW_REQUEST_MS:-4000}"
+
 exec uvicorn app.main:app \
   --reload --reload-dir app \
   --host 127.0.0.1 --port "${PORT:-8000}" \
