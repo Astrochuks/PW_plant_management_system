@@ -20,7 +20,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { MiniKpi, MiniKpiRow } from '@/components/shared/mini-kpi'
 import { useAuth } from '@/providers/auth-provider'
 import { useBillsRevision, useProject } from '@/hooks/use-projects'
-import { fmtDate, money, num } from '@/lib/format'
+import { fmtDate, money, num, unitLabel } from '@/lib/format'
 import { BoqSummaryTable, adderLabel } from '@/components/projects/bills/summary-table'
 import { exportRegisterExcel, type RegisterExportRow } from '@/lib/register-export'
 
@@ -52,7 +52,7 @@ export default function BillRevisionReviewPage() {
       const rows: RegisterExportRow[] = []
       for (const b of bills) {
         rows.push({ section: [`Bill ${b.bill_code}`, b.name ?? '', null, null, null, b.items_total] })
-        for (const i of b.items) rows.push([i.item_code, i.description, i.unit ?? '', i.contract_qty, i.rate, i.contract_amount])
+        for (const i of b.items) rows.push([i.item_code, i.description, unitLabel(i.unit), i.contract_qty, i.rate, i.contract_amount])
       }
       rows.push({ section: ['', 'SUMMARY', null, null, null, null] })
       for (const b of summary.bills) rows.push([b.bill_code, b.name ?? '', '', null, null, b.amount])
@@ -196,7 +196,7 @@ export default function BillRevisionReviewPage() {
                 <TableRow key={i.id ?? `${b.bill_code}-${idx}`} className={`${idx % 2 === 0 ? 'bg-background' : 'bg-muted/30'} border-b border-border`}>
                   <TableCell className={`${CELL} tabular-nums whitespace-nowrap`}>{i.item_code || '—'}</TableCell>
                   <TableCell className={`${CELL} min-w-[320px] whitespace-normal break-words`}>{i.description}</TableCell>
-                  <TableCell className={CELL}>{i.unit || '—'}</TableCell>
+                  <TableCell className={CELL}>{i.unit ? unitLabel(i.unit) : '—'}</TableCell>
                   <TableCell className={`${CELL} text-right tabular-nums`}>{i.contract_qty != null ? num(i.contract_qty) : '—'}</TableCell>
                   <TableCell className={`${CELL} text-right tabular-nums`}>{i.rate != null ? money(i.rate) : '—'}</TableCell>
                   <TableCell className={`${CELL} text-right tabular-nums`}>{i.contract_amount != null ? money(i.contract_amount) : '—'}</TableCell>

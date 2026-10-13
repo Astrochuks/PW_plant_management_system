@@ -112,6 +112,17 @@ export const num = (v: number | null | undefined, dp = MAX_DP): string =>
     ? '—'
     : v.toLocaleString('en-NG', { maximumFractionDigits: dp })
 
+/**
+ * A bill unit the way the bill prints it: "m2" → "m²", "m3" → "m³", "mm2" →
+ * "mm²", "km2" → "km²"; anything else untouched ("Ha", "P.S", "L.S", "No").
+ * Storage stays plain ASCII (see unitKey) so rows compare and sort alike.
+ */
+export const unitLabel = (u: string | null | undefined): string =>
+  (u ?? '').replace(/([A-Za-z])2\b/g, '$1²').replace(/([A-Za-z])3\b/g, '$1³')
+
+/** the stored form of a unit: superscripts typed or pasted become plain digits */
+export const unitKey = (u: string): string => u.replace(/²/g, '2').replace(/³/g, '3').trim()
+
 export const fmtDate = (d: string | null | undefined): string =>
   d ? new Date(d + (d.length === 10 ? 'T00:00:00' : '')).toLocaleDateString('en-GB', {
     day: '2-digit', month: 'short', year: 'numeric',

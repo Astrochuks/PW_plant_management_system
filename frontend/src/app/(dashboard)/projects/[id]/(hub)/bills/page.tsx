@@ -32,7 +32,7 @@ import { useAuth } from '@/providers/auth-provider'
 import { useProject, useProjectBills, useProjectSubmissions, usePreviewBillsImport, usePreviewBillsFromSubmission, useRecordBillsRevision } from '@/hooks/use-projects'
 import type { BoqAdder, BoqBill, BoqImportPreview } from '@/lib/api/projects'
 import { getErrorMessage } from '@/lib/api/client'
-import { fmtDate, money, num } from '@/lib/format'
+import { fmtDate, money, num, unitLabel } from '@/lib/format'
 import { exportRegisterExcel, type RegisterExportRow } from '@/lib/register-export'
 import { BoqSummaryTable, adderLabel } from '@/components/projects/bills/summary-table'
 import { AddersDialog } from '@/components/projects/bills/adders-dialog'
@@ -91,7 +91,7 @@ export default function ProjectBillsPage() {
       const rows: RegisterExportRow[] = []
       for (const b of visible) {
         rows.push({ section: [`Bill ${b.bill_code}`, b.name ?? '', null, null, null, sumVisible(b)] })
-        for (const i of b.items) rows.push([i.item_code, i.description, i.unit ?? '', i.contract_qty, i.rate, i.contract_amount])
+        for (const i of b.items) rows.push([i.item_code, i.description, unitLabel(i.unit), i.contract_qty, i.rate, i.contract_amount])
       }
       // the summary closes the sheet, as the BEME does: bills, works total, adders, contract sum
       if (summary && !hasFilters) {
@@ -246,7 +246,7 @@ export default function ProjectBillsPage() {
                     <TableRow key={i.id ?? `${b.bill_code}-${i.item_code}-${idx}`} className={`${idx % 2 === 0 ? 'bg-background' : 'bg-muted/30'} hover:bg-muted/60 border-b border-border`}>
                       <TableCell className={`${CELL} tabular-nums whitespace-nowrap`}>{i.item_code || <span className="text-muted-foreground">—</span>}</TableCell>
                       <TableCell className={`${CELL} min-w-[320px] whitespace-normal break-words`}>{i.description}</TableCell>
-                      <TableCell className={CELL}>{i.unit || <span className="text-muted-foreground">—</span>}</TableCell>
+                      <TableCell className={CELL}>{i.unit ? unitLabel(i.unit) : <span className="text-muted-foreground">—</span>}</TableCell>
                       <TableCell className={`${CELL} text-right tabular-nums whitespace-nowrap`}>{i.contract_qty != null ? num(i.contract_qty) : <span className="text-muted-foreground">—</span>}</TableCell>
                       <TableCell className={`${CELL} text-right tabular-nums whitespace-nowrap`}>{i.rate != null ? money(i.rate) : <span className="text-muted-foreground">—</span>}</TableCell>
                       <TableCell className={`${CELL} text-right tabular-nums whitespace-nowrap`}>{i.contract_amount != null ? money(i.contract_amount) : <span className="text-muted-foreground">—</span>}</TableCell>

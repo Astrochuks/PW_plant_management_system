@@ -25,7 +25,7 @@ import { useAuth } from '@/providers/auth-provider'
 import { useProjectBills, useRecordBillsRevision } from '@/hooks/use-projects'
 import type { BoqAdder, BoqBill, ProjectBills } from '@/lib/api/projects'
 import { getErrorMessage } from '@/lib/api/client'
-import { money } from '@/lib/format'
+import { money, unitKey, unitLabel } from '@/lib/format'
 
 type ItemRow = { key: string; item_code: string; description: string; unit: string; qty: string; rate: string }
 type BillRow = { key: string; bill_code: string; name: string; items: ItemRow[] }
@@ -106,7 +106,7 @@ function BuilderForm({ projectId, initial }: { projectId: string; initial: Proje
     }
     const payload: BoqBill[] = bills.map((b, bi) => {
       const items = b.items.map((i, ii) => ({
-        item_code: i.item_code.trim(), description: i.description.trim(), unit: i.unit.trim() || null,
+        item_code: i.item_code.trim(), description: i.description.trim(), unit: unitKey(i.unit) || null,
         contract_qty: i.qty.trim() === '' ? null : Number(i.qty), rate: i.rate.trim() === '' ? null : Number(i.rate),
         contract_amount: amountOf(i.qty, i.rate), sort_order: ii + 1,
       }))
@@ -180,13 +180,14 @@ function BuilderForm({ projectId, initial }: { projectId: string; initial: Proje
             <div className="overflow-x-auto">
               <div className="min-w-[860px]">
                 <div className="grid grid-cols-[110px_minmax(0,1fr)_80px_130px_150px_170px_40px] gap-2 px-1 text-[11px] uppercase tracking-wide text-muted-foreground">
-                  <span>Item</span><span>Description</span><span>Unit</span><span className="text-right">Quantity</span><span className="text-right">Rate</span><span className="text-right">Amount</span><span />
+                  <span>Item</span><span>Description</span><span title="type m2 / m3 — prints as m² / m³">Unit</span><span className="text-right">Quantity</span><span className="text-right">Rate</span><span className="text-right">Amount</span><span />
                 </div>
                 {b.items.map((i) => (
                   <div key={i.key} className="grid grid-cols-[110px_minmax(0,1fr)_80px_130px_150px_170px_40px] items-center gap-2 py-1">
                     <Input value={i.item_code} onChange={(e) => updateItem(b.key, i.key, { item_code: e.target.value })} placeholder="5.01" className="h-9" />
                     <Input value={i.description} onChange={(e) => updateItem(b.key, i.key, { description: e.target.value })} placeholder="Description" className="h-9" />
-                    <Input value={i.unit} onChange={(e) => updateItem(b.key, i.key, { unit: e.target.value })} placeholder="m3" className="h-9" />
+                    <Input value={i.unit} onChange={(e) => updateItem(b.key, i.key, { unit: e.target.value })} placeholder="m3" className="h-9"
+                      title={i.unit ? `shows as ${unitLabel(unitKey(i.unit))}` : 'type m2 / m3 — it prints as m² / m³'} />
                     <Input type="number" step="0.001" value={i.qty} onChange={(e) => updateItem(b.key, i.key, { qty: e.target.value })} className="h-9 text-right" />
                     <Input type="number" step="0.01" min="0" value={i.rate} onChange={(e) => updateItem(b.key, i.key, { rate: e.target.value })} className="h-9 text-right" />
                     <div className="text-right text-sm tabular-nums">{amountOf(i.qty, i.rate) == null ? <span className="text-muted-foreground">—</span> : money(amountOf(i.qty, i.rate) as number)}</div>
