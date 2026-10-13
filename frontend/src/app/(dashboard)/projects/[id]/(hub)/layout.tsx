@@ -82,11 +82,12 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
   return (
     <div className="space-y-4">
       {/* Sticky context header: identity + nav + latest-report strip */}
-      <div id="hub-sticky" className="sticky top-16 z-20 -mx-6 bg-background px-6 pt-1 shadow-sm">
+      {/* pulled up by the page padding so the navigation row sits just under the top bar's line */}
+      <div id="hub-sticky" className="sticky top-16 z-20 -mx-6 -mt-6 bg-background px-6 pt-2 shadow-sm">
       {/* Row 1 — navigation. Two controls, both unmistakably controls:
           "Back" (one step) and the register link in the link colour.
           The project name after the chevron is text, not a link. */}
-      <div className="flex flex-nowrap items-center gap-x-3 pt-2 pb-4">
+      <div className="flex flex-nowrap items-center gap-x-3 pb-4">
         <Button variant="outline" size="sm" className="h-8 shrink-0" onClick={() => router.back()} title="Back one step">
           <ArrowLeft className="h-4 w-4 mr-1.5" />
           Back
