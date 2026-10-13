@@ -17,6 +17,7 @@ import { useDebounce } from '@/hooks/use-debounce';
 import { useUrlFilters } from '@/hooks/use-url-filters';
 import type { ColumnKey } from '@/components/plants/plants-table';
 import { conditionLabel } from '@/lib/conditions';
+import { plantPath } from '@/lib/api/plants'
 
 const FILTER_DEFAULTS = {
   search: '',
@@ -120,8 +121,8 @@ function PlantsPageInner() {
     setUrlFilters({ page: String(newPage) });
   }, [setUrlFilters]);
 
-  const handleRowClick = useCallback((plant: { id: string }) => {
-    router.push(`/plants/${plant.id}`);
+  const handleRowClick = useCallback((plant: { id: string; fleet_number?: string | null }) => {
+    router.push(plantPath(plant));
   }, [router]);
 
   const handleRowHover = useCallback((plantId: string) => {

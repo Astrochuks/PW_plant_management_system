@@ -164,6 +164,16 @@ export async function getPlants(params: PlantsListParams = {}): Promise<{
 /**
  * Get a single plant by ID
  */
+/** the address of a plant: its fleet number, or the id if a row has none */
+export const plantPath = (p: { id: string; fleet_number?: string | null }): string =>
+  `/plants/${p.fleet_number ? encodeURIComponent(p.fleet_number) : p.id}`
+
+/** /plants/<fleet number> → the plant (the API normalises case and spacing) */
+export async function getPlantByFleet(fleetNumber: string): Promise<PlantSummary> {
+  const response = await apiClient.get<ApiResponse<PlantSummary>>(`/plants/by-fleet/${encodeURIComponent(fleetNumber)}`);
+  return response.data.data;
+}
+
 export async function getPlant(id: string): Promise<PlantSummary> {
   const response = await apiClient.get<ApiResponse<PlantSummary>>(`/plants/${id}`);
   return response.data.data;

@@ -44,6 +44,7 @@ import { useDebounce } from '@/hooks/use-debounce';
 import { useLocations } from '@/hooks/use-plants';
 import type { SparePart } from '@/lib/api/spare-parts';
 import { naira, money as formatCurrency } from '@/lib/format';
+import { plantPath } from '@/lib/api/plants'
 
 const DEFAULT_FILTERS: SparePartsFiltersState = {
   search: '',
@@ -417,7 +418,7 @@ export default function SparePartsPage() {
                       <TableRow
                         key={p.plant_id}
                         className="cursor-pointer hover:bg-muted/50"
-                        onClick={() => router.push(`/plants/${p.plant_id}`)}
+                        onClick={() => router.push(plantPath({ id: p.plant_id, fleet_number: p.fleet_number }))}
                       >
                         <TableCell className="font-mono font-medium">{p.fleet_number}</TableCell>
                         <TableCell className="max-w-[250px] truncate text-sm">{p.description || '-'}</TableCell>

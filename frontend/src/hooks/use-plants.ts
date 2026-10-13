@@ -2,6 +2,7 @@
  * Plants data hooks using React Query
  */
 
+import { useParams } from 'next/navigation';
 import { useCallback } from 'react';
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import {
@@ -31,6 +32,7 @@ import {
   type LocationRecord,
   type WeeklyUsageRecord,
   type PlantEvent,
+  getPlantByFleet,
 } from '@/lib/api/plants';
 
 // Re-export types for convenience
@@ -81,6 +83,26 @@ export function usePlants(params: PlantsListParams = {}) {
 /**
  * Hook to fetch a single plant by ID
  */
+// ── Plant route: /plants/<fleet number | id>/… ──────────────────────────
+// A plant's readable address is its fleet number (AC10, T468). The UUID
+// keeps working as a fallback so old links never break.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+export interface PlantRoute { id: string; segment: string; resolving: boolean; missing: boolean }
+export function usePlantRoute(): PlantRoute {
+  const params = useParams<{ id?: string }>();
+  const segment = params?.id ?? '';
+  const isUuid = UUID_RE.test(segment);
+  const lookup = useQuery({
+    queryKey: [...plantsKeys.all, 'by-fleet', segment],
+    queryFn: () => getPlantByFleet(decodeURIComponent(segment)),
+    enabled: !!segment && !isUuid,
+    staleTime: 30 * 60 * 1000,
+    retry: false,
+  });
+  if (isUuid) return { id: segment, segment, resolving: false, missing: false };
+  return { id: lookup.data?.id ?? '', segment, resolving: lookup.isLoading, missing: lookup.isError };
+}
+
 export function usePlant(id: string | null) {
   return useQuery({
     queryKey: plantsKeys.detail(id!),

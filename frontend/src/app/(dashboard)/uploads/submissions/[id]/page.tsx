@@ -29,6 +29,7 @@ import {
 import { ProtectedRoute } from '@/components/protected-route'
 import { useWeeklySubmission } from '@/hooks/use-uploads'
 import { downloadSubmissionFile } from '@/lib/api/uploads'
+import { plantPath } from '@/lib/api/plants'
 
 const STATUS_BADGE: Record<string, { variant: 'default' | 'secondary' | 'destructive' | 'outline'; icon: React.ElementType }> = {
   pending: { variant: 'outline', icon: Clock },
@@ -218,7 +219,7 @@ function SubmissionDetailContent() {
                       <TableCell className="font-mono font-medium">
                         {record.plant_id ? (
                           <Link
-                            href={`/plants/${record.plant_id}`}
+                            href={plantPath({ id: record.plant_id, fleet_number: record.fleet_number })}
                             className="text-primary hover:underline"
                           >
                             {record.fleet_number}

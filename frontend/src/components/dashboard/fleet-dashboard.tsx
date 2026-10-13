@@ -33,6 +33,7 @@ import { ConditionDonutChart } from '@/components/dashboard/condition-donut-char
 import { FleetTypeBarChart } from '@/components/dashboard/fleet-type-bar-chart'
 import { NigeriaMapChart } from '@/components/dashboard/nigeria-map-chart'
 import { CostTrendChart } from '@/components/dashboard/cost-trend-chart'
+import { plantPath } from '@/lib/api/plants'
 
 // ---------------------------------------------------------------------------
 // Fleet dashboard — the plant module's home. Rendered at "/" for admins and
@@ -188,7 +189,7 @@ export function FleetDashboard({ title, subtitle }: {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <Link
-                          href={`/plants/${plant.id}`}
+                          href={plantPath(plant)}
                           className="text-sm font-medium hover:underline"
                         >
                           {plant.fleet_number}

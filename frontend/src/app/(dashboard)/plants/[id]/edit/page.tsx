@@ -1,14 +1,14 @@
 'use client'
 
-import { useRouter, useParams } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ProtectedRoute } from '@/components/protected-route'
 import { PlantForm } from '@/components/plants/plant-form'
-import { usePlant } from '@/hooks/use-plants'
+import { usePlant, usePlantRoute } from '@/hooks/use-plants'
 import { ArrowLeft } from 'lucide-react'
 
-function EditPlantContent({ plantId }: { plantId: string }) {
+function EditPlantContent({ plantId, segment }: { plantId: string; segment: string }) {
   const router = useRouter()
   const { data: plant, isLoading } = usePlant(plantId)
 
@@ -57,7 +57,7 @@ function EditPlantContent({ plantId }: { plantId: string }) {
       <div className="max-w-3xl bg-white dark:bg-slate-950 border border-border rounded-lg p-6">
         <PlantForm
           plant={plant}
-          onSuccess={() => router.replace(`/plants/${plantId}`)}
+          onSuccess={() => router.replace(`/plants/${segment}`)}
           onCancel={() => router.back()}
         />
       </div>
@@ -66,12 +66,13 @@ function EditPlantContent({ plantId }: { plantId: string }) {
 }
 
 export default function EditPlantPage() {
-  const params = useParams()
-  const plantId = params.id as string
+  const route = usePlantRoute()
+  const plantId = route.id
+  if (route.resolving || !plantId) return <Skeleton className="h-64" />
 
   return (
     <ProtectedRoute requiredRole="admin">
-      <EditPlantContent plantId={plantId} />
+      <EditPlantContent plantId={plantId} segment={route.segment} />
     </ProtectedRoute>
   )
 }

@@ -26,6 +26,7 @@ import {
 } from '@/components/ui/select'
 import { ProtectedRoute } from '@/components/protected-route'
 import { useStateDetail, useStatePlants } from '@/hooks/use-states'
+import { plantPath } from '@/lib/api/plants'
 
 const STATUS_OPTIONS = [
   'working', 'standby', 'breakdown',
@@ -252,7 +253,7 @@ function StateDetailContent() {
                         <TableRow key={p.id}>
                           <TableCell className="font-mono font-medium">
                             <Link
-                              href={`/plants/${p.id}`}
+                              href={plantPath(p)}
                               className="text-primary hover:underline"
                             >
                               {p.fleet_number}

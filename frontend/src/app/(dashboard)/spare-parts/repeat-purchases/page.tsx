@@ -27,6 +27,7 @@ import {
 import { useRepeatPurchases, useRepeatPurchaseDetail, type RepeatPurchase } from '@/hooks/use-spare-parts';
 import { ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
 import { money as formatNGN } from '@/lib/format';
+import { plantPath } from '@/lib/api/plants'
 
 
 function SeverityBadge({ severity }: { severity: string }) {
@@ -328,7 +329,7 @@ function RepeatPurchaseRow({ item, isExpanded, onToggle }: { item: RepeatPurchas
         </TableCell>
         <TableCell className="font-mono font-medium text-sm">
           {item.fleet_number ? (
-            <Link href={`/plants/${item.plant_id}`} className="hover:underline text-primary" onClick={(e) => e.stopPropagation()}>
+            <Link href={plantPath({ id: item.plant_id ?? '', fleet_number: item.fleet_number })} className="hover:underline text-primary" onClick={(e) => e.stopPropagation()}>
               {item.fleet_number}
             </Link>
           ) : (

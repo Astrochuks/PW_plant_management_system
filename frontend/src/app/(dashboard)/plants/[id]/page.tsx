@@ -1,6 +1,6 @@
 'use client'
 
-import { useRouter, useParams } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useState, useMemo } from 'react'
 import {
@@ -48,6 +48,7 @@ import {
   usePlantWeeklyRecords,
   usePlantEvents,
   useDeletePlant,
+  usePlantRoute,
 } from '@/hooks/use-plants'
 import { usePlantCosts, usePlantSharedCosts } from '@/hooks/use-spare-parts'
 import type { PlantRecentPart, PlantSharedCost } from '@/lib/api/spare-parts'
@@ -101,13 +102,21 @@ function formatDate(dateString: string): string {
 // Main page
 // ---------------------------------------------------------------------------
 export default function PlantDetailPage() {
-  const params = useParams()
-  const plantId = params.id as string
-
-  return <PlantDetailContent plantId={plantId} />
+  // the address is the fleet number (or the UUID); resolve to the id once
+  const route = usePlantRoute()
+  if (route.resolving) return <Skeleton className="h-64" />
+  if (route.missing || !route.id) {
+    return (
+      <div className="rounded-lg border border-dashed p-12 text-center">
+        <p className="text-lg font-medium">Plant not found</p>
+        <p className="mt-1 text-sm text-muted-foreground">No plant carries the fleet number &ldquo;{decodeURIComponent(route.segment)}&rdquo;, or the link is out of date.</p>
+      </div>
+    )
+  }
+  return <PlantDetailContent plantId={route.id} segment={route.segment} />
 }
 
-function PlantDetailContent({ plantId }: { plantId: string }) {
+function PlantDetailContent({ plantId, segment }: { plantId: string; segment: string }) {
   const router = useRouter()
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
@@ -179,7 +188,7 @@ function PlantDetailContent({ plantId }: { plantId: string }) {
         {isAdmin && (
           <div className="flex gap-2">
             <Button variant="outline" size="sm" asChild>
-              <Link href={`/plants/${plantId}/edit`}>
+              <Link href={`/plants/${segment}/edit`}>
                 <Edit2 className="mr-2 h-4 w-4" />
                 Edit
               </Link>

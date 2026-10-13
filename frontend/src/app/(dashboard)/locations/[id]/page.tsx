@@ -75,6 +75,7 @@ import { downloadSubmissionFile, deleteWeeklySubmission } from '@/lib/api/upload
 import { useQueryClient } from '@tanstack/react-query'
 import { locationsKeys } from '@/hooks/use-locations'
 import { money as formatCurrency } from '@/lib/format';
+import { plantPath } from '@/lib/api/plants'
 
 const CONDITION_STYLES: Record<string, { label: string; className: string }> = {
   working: { label: 'Working', className: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200' },
@@ -307,7 +308,7 @@ export default function LocationDetailPage() {
                       <TableRow
                         key={plant.id}
                         className="cursor-pointer"
-                        onClick={() => router.push(`/plants/${plant.id}`)}
+                        onClick={() => router.push(plantPath(plant))}
                       >
                         <TableCell className="font-mono font-medium">{plant.fleet_number}</TableCell>
                         <TableCell className="max-w-[200px] truncate">{plant.description || '-'}</TableCell>

@@ -25,6 +25,7 @@ import {
 import { useUnverifiedPlants } from '@/hooks/use-reports'
 import { useLocationsWithStats } from '@/hooks/use-locations'
 import { ALL, only } from '@/lib/filters'
+import { plantPath } from '@/lib/api/plants'
 
 const WEEKS_OPTIONS = [2, 3, 4, 6, 8, 12]
 const PAGE_SIZE = 50
@@ -165,7 +166,7 @@ export default function UnverifiedPlantsPage() {
                       <TableRow key={row.plant_id}>
                         <TableCell className="font-mono font-medium">
                           <Link
-                            href={`/plants/${row.plant_id}`}
+                            href={plantPath({ id: row.plant_id, fleet_number: row.fleet_number })}
                             className="text-primary hover:underline"
                           >
                             {row.fleet_number}

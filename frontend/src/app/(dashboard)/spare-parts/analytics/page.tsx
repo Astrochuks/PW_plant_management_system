@@ -30,6 +30,7 @@ import {
 } from '@/hooks/use-spare-parts'
 import { useLocationsWithStats } from '@/hooks/use-locations'
 import { naira, money as formatNGN } from '@/lib/format';
+import { plantPath } from '@/lib/api/plants'
 
 const currentYear = new Date().getFullYear()
 const YEAR_OPTIONS = Array.from({ length: 5 }, (_, i) => currentYear - i)
@@ -394,7 +395,7 @@ export default function SparePartsAnalyticsPage() {
                         <TableCell className="text-xs text-muted-foreground">{i + 1}</TableCell>
                         <TableCell className="font-mono font-medium">
                           <Link
-                            href={`/plants/${p.plant_id}`}
+                            href={plantPath({ id: p.plant_id, fleet_number: p.fleet_number })}
                             className="text-primary hover:underline"
                           >
                             {p.fleet_number}
