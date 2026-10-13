@@ -24,11 +24,11 @@ import { titleCase } from '@/lib/format'
 // quantities, its dated timeline, its weekly submissions. The other routes
 // (work-cost, plant, financials, report, documents, team, activity, issues)
 // still exist but are off the bar until the sheets behind them return.
+// 2026-10-14: the bill is the focus — one tab. Overview, Timeline and
+// Submissions keep their routes and code (overview-page.tsx, history/,
+// submissions/) and come back on the bar when they are needed again.
 const PAGES: Array<{ seg: string; label: string; ready: boolean; adminOnly?: boolean }> = [
-  { seg: '', label: 'Overview', ready: true },
   { seg: 'bills', label: 'Bill of Quantities', ready: true },
-  { seg: 'history', label: 'Timeline', ready: true },
-  { seg: 'submissions', label: 'Submissions', ready: true },
 ]
 
 export default function ProjectHubLayout({ children }: { children: React.ReactNode }) {
