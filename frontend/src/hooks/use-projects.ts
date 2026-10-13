@@ -595,34 +595,27 @@ export type { ReportPreview, SheetPreview };
  * the visible page's own requests win the connection first.
  */
 export function usePrefetchHubData(id: string | null) {
+  // Warms only the four live tabs (decision 2026-10-12/13): the bill, its
+  // progress, the timeline. Submissions are fetched by the layout itself.
+  // The parked tabs' data (financials, work-done, site, ledgers, plant
+  // utilisation, unmapped fleet) is NOT prefetched any more — the plant
+  // utilisation statement alone ran 6–10 s on every project visit.
   const queryClient = useQueryClient();
   useEffect(() => {
     if (!id) return;
     const t = setTimeout(() => {
       const two = 2 * 60 * 1000;
       queryClient.prefetchQuery({
-        queryKey: [...operationsKeys.all, 'financials', id] as const,
-        queryFn: () => getProjectFinancials(id), staleTime: two,
+        queryKey: [...projectsKeys.detail(id), 'bills'],
+        queryFn: () => getProjectBills(id), staleTime: two,
       });
       queryClient.prefetchQuery({
-        queryKey: [...projectsKeys.detail(id), 'work-done', 'latest', 'latest'],
-        queryFn: () => getProjectWorkDone(id), staleTime: two,
+        queryKey: [...projectsKeys.detail(id), 'bills', 'progress'],
+        queryFn: () => getBillsProgress(id), staleTime: two,
       });
       queryClient.prefetchQuery({
-        queryKey: [...projectsKeys.detail(id), 'site'],
-        queryFn: () => getProjectSite(id), staleTime: two,
-      });
-      queryClient.prefetchQuery({
-        queryKey: [...projectsKeys.detail(id), 'ledgers'],
-        queryFn: () => getProjectLedgers(id), staleTime: two,
-      });
-      queryClient.prefetchQuery({
-        queryKey: [...operationsKeys.all, 'plants', id] as const,
-        queryFn: () => getProjectPlantData(id), staleTime: two,
-      });
-      queryClient.prefetchQuery({
-        queryKey: submissionKeys.unmapped(),
-        queryFn: getUnmappedFleetNumbers, staleTime: 5 * 60 * 1000,
+        queryKey: [...projectsKeys.detail(id), 'history'],
+        queryFn: () => getProjectHistory(id), staleTime: two,
       });
     }, 800);
     return () => clearTimeout(t);

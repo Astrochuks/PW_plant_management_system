@@ -16,7 +16,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
 import { useAuth } from '@/providers/auth-provider'
-import { useProject, useDeleteProject, usePrefetchHubData, useProjectIssues, useProjectSubmissions } from '@/hooks/use-projects'
+import { useProject, useDeleteProject, usePrefetchHubData, useProjectSubmissions } from '@/hooks/use-projects'
 
 // Four tabs by decision of 2026-10-12: the project's dashboard, its bill of
 // quantities, its dated timeline, its weekly submissions. The other routes
@@ -38,7 +38,6 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
   const projectId = params.id
 
   const { data: project, isError: projectMissing } = useProject(projectId)
-  const { data: issues } = useProjectIssues(projectId, isAdmin)
   // Watches for workbooks finishing in the background worker: polls only
   // while one is queued/parsing, then invalidates every projects query so
   // the dashboard updates without a manual refresh.
@@ -160,11 +159,6 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
               }`}
             >
               {p.label}
-              {p.seg === 'issues' && (issues?.open_count ?? 0) > 0 && (
-                <span className="rounded-full bg-amber-500/90 px-1.5 text-[11px] font-semibold leading-4 text-white tabular-nums">
-                  {issues!.open_count}
-                </span>
-              )}
             </Link>
           ) : (
             <span
