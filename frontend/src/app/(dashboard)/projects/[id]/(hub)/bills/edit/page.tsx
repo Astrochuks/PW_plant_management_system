@@ -89,7 +89,7 @@ function BuilderForm({ projectId, initial }: { projectId: string; initial: Proje
   const record = useRecordBillsRevision(projectId)
   const hasRevision = !!initial.revision
   const nextRevisionNo = (initial.revisions[0]?.revision_no ?? 0) + 1
-  const adders: BoqAdder[] = initial.revision?.adders ?? []
+  const adders = useMemo<BoqAdder[]>(() => initial.revision?.adders ?? [], [initial.revision])
   // a draft in this browser wins over the saved bill — it is what you were typing
   const [draft] = useState<DraftShape | null>(() => (typeof window === 'undefined' ? null : loadDraft(projectId)))
   const [bills, setBills] = useState<BillRow[]>(() => draft?.bills ?? (hasRevision ? seedFrom(initial.bills) : []))
