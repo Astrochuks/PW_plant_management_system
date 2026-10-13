@@ -2,7 +2,8 @@
  * Projects data hooks using React Query
  */
 
-import { useCallback, useEffect } from 'react';
+import { createContext, useCallback, useContext, useEffect } from 'react';
+import { useParams } from 'next/navigation';
 import {
   useMutation,
   useQuery,
@@ -38,6 +39,7 @@ import {
   getProjectHistory,
   getProjectActivity,
   getOngoingProjects,
+  resolveProjectSlug,
   getOngoingFigures,
   addContractSum,
   addStatusEvent,
@@ -388,7 +390,7 @@ const PENDING_SUBMISSIONS = new Set<string>();
 
 export function useProjectSubmissions(params: {
   status?: SubmissionStatus; project_id?: string; page?: number; limit?: number;
-} = {}, opts: { poll?: boolean; watch?: boolean } = {}) {
+} = {}, opts: { poll?: boolean; watch?: boolean; enabled?: boolean } = {}) {
   const queryClient = useQueryClient();
   const query = useQuery({
     queryKey: submissionKeys.list(params),
@@ -396,6 +398,7 @@ export function useProjectSubmissions(params: {
     staleTime: 30 * 1000,
     networkMode: 'always',
     retry: 2,
+    enabled: opts.enabled ?? true,
     // poll: steady 4s (submission tables). watch (hub layout): 4s while
     // anything is processing, otherwise NO polling — the event stream
     // announces queued and finished reports (2026-10-13: the idle 15 s
@@ -707,6 +710,35 @@ export function useRecordBillsRevision(projectId: string) {
     },
   });
 }
+
+// ── Project route: /projects/<slug|id>/… (048) ───────────────────────────
+// The address segment may be the slug or the UUID; pages need the UUID for
+// every API call and the segment for every link they build. The hub layout
+// resolves once and provides both; pages outside it resolve on their own.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+export interface ProjectRoute { id: string; segment: string; resolving: boolean; missing: boolean }
+export const ProjectRouteContext = createContext<ProjectRoute | null>(null)
+
+export function useProjectRoute(): ProjectRoute {
+  const ctx = useContext(ProjectRouteContext);
+  const params = useParams<{ id?: string }>();
+  const segment = ctx?.segment ?? (params?.id ?? '');
+  const isUuid = UUID_RE.test(segment);
+  const lookup = useQuery({
+    queryKey: [...projectsKeys.all, 'slug', segment],
+    queryFn: () => resolveProjectSlug(segment),
+    enabled: !ctx && !!segment && !isUuid,
+    staleTime: 30 * 60 * 1000,
+    retry: false,
+  });
+  if (ctx) return ctx;
+  if (isUuid) return { id: segment, segment, resolving: false, missing: false };
+  return { id: lookup.data?.id ?? '', segment, resolving: lookup.isLoading, missing: lookup.isError };
+}
+/** the project's UUID for API calls ('' only while a slug is still resolving) */
+export const useProjectId = (): string => useProjectRoute().id;
+/** the address segment for links (slug when the project has one) */
+export const useProjectSegment = (): string => useProjectRoute().segment;
 
 export function useOngoingProjects(asAt?: string, enabled = true) {
   return useQuery({

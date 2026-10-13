@@ -36,7 +36,22 @@ from app.core.security import (
 )
 from app.models.project import ProjectCreate, ProjectUpdate
 from app.core.events import broadcast
-from app.core.text import title_case
+from app.core.text import slugify, title_case
+
+
+async def _unique_slug(base: str, exclude_id: str | None = None) -> str:
+    """The readable address of a project (048): slugify(short name or name),
+    with -2, -3 … when another project already holds it."""
+    base = slugify(base) or "project"
+    candidate, n = base, 1
+    while True:
+        taken = await fetchval(
+            "SELECT 1 FROM projects WHERE slug = $1 AND ($2::uuid IS NULL OR id <> $2::uuid)",
+            candidate, exclude_id)
+        if not taken:
+            return candidate
+        n += 1
+        candidate = f"{base}-{n}"
 from app.monitoring.logging import get_logger
 from app.services.audit_service import audit_service
 
@@ -2301,6 +2316,7 @@ async def create_project(
     sum_effective = data.pop("contract_sum_effective_date", None)
     instrument_ref = data.pop("contract_instrument_ref", None)
     data["created_by"] = current_user.id
+    data["slug"] = await _unique_slug(data.get("short_name") or data.get("project_name") or "")
     data["updated_by"] = current_user.id
 
     cols = list(data.keys())
@@ -2394,6 +2410,12 @@ async def update_project(
 
     set_parts: list[str] = []
     params: list[Any] = []
+    # a new short name is a new readable address (the UUID keeps working);
+    # a name change only re-addresses a project that has no short name
+    if "short_name" in update_data or ("project_name" in update_data and not existing.get("short_name")):
+        update_data["slug"] = await _unique_slug(
+            update_data.get("short_name") or existing.get("short_name") or update_data.get("project_name") or existing.get("project_name") or "",
+            exclude_id=str(project_id))
     for key, val in update_data.items():
         params.append(val)
         if key in _UUID_FIELDS:

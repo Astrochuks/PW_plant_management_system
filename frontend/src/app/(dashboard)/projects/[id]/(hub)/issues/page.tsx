@@ -10,7 +10,6 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { useParams } from 'next/navigation'
 import { toast } from 'sonner'
 import {
   AlertTriangle, CalendarX2, CheckCircle2, FileWarning, Scale, Truck, Undo2,
@@ -22,7 +21,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Legend } from '@/components/projects/hub-ui'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useAuth } from '@/providers/auth-provider'
-import { useProjectIssues, projectsKeys } from '@/hooks/use-projects'
+import { useProjectIssues, projectsKeys, useProjectId } from '@/hooks/use-projects'
 import { resolveSheetFlag, unresolveSheetFlag, type SheetFlag } from '@/lib/api/projects'
 import { getErrorMessage } from '@/lib/api/client'
 import { ProtectedRoute } from '@/components/protected-route'
@@ -44,7 +43,7 @@ export default function ProjectIssuesPage() {
 }
 
 function IssuesContent() {
-  const params = useParams<{ id: string }>()
+  const params = { id: useProjectId() }
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
   const { data: issues, isLoading } = useProjectIssues(params.id)

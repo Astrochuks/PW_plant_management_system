@@ -7,16 +7,17 @@
  */
 
 import Link from 'next/link'
-import { useParams, usePathname, useRouter } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { ArrowLeft, ChevronRight, Edit2, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
 import { useAuth } from '@/providers/auth-provider'
-import { useProject, useDeleteProject, usePrefetchHubData, useProjectSubmissions } from '@/hooks/use-projects'
+import { ProjectRouteContext, useDeleteProject, usePrefetchHubData, useProject, useProjectRoute, useProjectSubmissions } from '@/hooks/use-projects'
 import { titleCase } from '@/lib/format'
 
 // Four tabs by decision of 2026-10-12: the project's dashboard, its bill of
@@ -31,24 +32,27 @@ const PAGES: Array<{ seg: string; label: string; ready: boolean; adminOnly?: boo
 ]
 
 export default function ProjectHubLayout({ children }: { children: React.ReactNode }) {
-  const params = useParams<{ id: string }>()
+  // the address may be the slug or the UUID (048): resolve once here and
+  // hand every tab both the id (for the API) and the segment (for links)
+  const route = useProjectRoute()
   const pathname = usePathname()
   const router = useRouter()
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
-  const projectId = params.id
+  const projectId = route.id
 
-  const { data: project, isError: projectMissing } = useProject(projectId)
+  const { data: project, isError: projectError } = useProject(projectId || null)
+  const projectMissing = route.missing || projectError
   // Watches for workbooks finishing in the background worker: polls only
   // while one is queued/parsing, then invalidates every projects query so
   // the dashboard updates without a manual refresh.
-  useProjectSubmissions({ project_id: projectId, limit: 20 }, { watch: true })
+  useProjectSubmissions({ project_id: projectId, limit: 20 }, { watch: true, enabled: !!projectId })
   // warm every tab's data so switching tabs is instant
   usePrefetchHubData(projectId)
   const deleteMutation = useDeleteProject()
   const [confirmDelete, setConfirmDelete] = useState(false)
 
-  const base = `/projects/${projectId}`
+  const base = `/projects/${route.segment}`
   const activeSeg = pathname === base ? '' : pathname.slice(base.length + 1).split('/')[0]
   const title = titleCase(project?.short_name || project?.project_name) || '…'
   const longTitle = title.length > 60
@@ -63,6 +67,9 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
     }
   }
 
+  if (route.resolving) {
+    return <div className="space-y-4"><Skeleton className="h-10 w-80" /><Skeleton className="h-64" /></div>
+  }
   // A stale link or a deleted project would otherwise sit on skeletons
   // forever — say so instead.
   if (projectMissing) {
@@ -178,7 +185,9 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
       <div className="pb-4" />
       </div>
 
-      {children}
+      <ProjectRouteContext.Provider value={route}>
+        {children}
+      </ProjectRouteContext.Provider>
 
       <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <DialogContent>

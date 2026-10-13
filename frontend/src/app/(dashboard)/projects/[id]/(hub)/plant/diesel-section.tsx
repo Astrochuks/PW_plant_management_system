@@ -7,12 +7,11 @@
  */
 
 import { useMemo } from 'react'
-import { useParams } from 'next/navigation'
 import ECharts from 'echarts-for-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Delta, Kpi, Legend } from '@/components/projects/hub-ui'
-import { useProjectFinancials, useProjectPlantData } from '@/hooks/use-projects'
+import { useProjectFinancials, useProjectPlantData, useProjectId } from '@/hooks/use-projects'
 import { naira, num, pctFmt } from '@/lib/format'
 import type { Granularity } from '../work-cost/analytics-section'
 import { bucketKey } from './analytics-section'
@@ -35,7 +34,7 @@ export default function DieselSection({ year, gran }: {
   year: number | 'all'
   gran: Granularity
 }) {
-  const params = useParams<{ id: string }>()
+  const params = { id: useProjectId() }
   const { data, isLoading } = useProjectPlantData(params.id)
   const { data: fin } = useProjectFinancials(params.id)
 

@@ -7,7 +7,6 @@
  */
 
 import { useMemo, useState } from 'react'
-import { useParams } from 'next/navigation'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Legend } from '@/components/projects/hub-ui'
@@ -16,12 +15,12 @@ import {
 } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
-import { useProjectWorkDone } from '@/hooks/use-projects'
+import { useProjectWorkDone, useProjectId } from '@/hooks/use-projects'
 import type { WorkDoneBill } from '@/lib/api/projects'
 import { fmtDate, naira, num, pctFmt, weekLabel } from '@/lib/format'
 
 export default function WorkDonePage() {
-  const params = useParams<{ id: string }>()
+  const params = { id: useProjectId() }
   const [sel, setSel] = useState<{ y: number; w: number } | null>(null)
   const { data, isLoading } = useProjectWorkDone(params.id, sel?.y, sel?.w)
   const [open, setOpen] = useState<Record<string, boolean>>({})

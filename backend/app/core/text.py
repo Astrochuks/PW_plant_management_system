@@ -68,6 +68,17 @@ def _title_word(word: str, first: bool) -> str:
     return lead + "".join(parts) + trail
 
 
+def slugify(value: str | None, max_len: int = 80) -> str:
+    """A readable address segment: lower-case, hyphenated, ASCII letters and
+    digits only, at most max_len characters, trimmed at a word boundary.
+    'Akwa Ibom Airport Apron' → 'akwa-ibom-airport-apron'. Uniqueness is the
+    caller's job (-2, -3 … suffixes)."""
+    s = re.sub(r"[^a-z0-9]+", "-", (value or "").lower()).strip("-")
+    if len(s) > max_len:
+        s = s[:max_len].rsplit("-", 1)[0] if "-" in s[:max_len] else s[:max_len]
+    return s.strip("-")
+
+
 def title_case(value: str | None) -> str | None:
     """House Title Case for a name; None stays None, blank stays blank."""
     if value is None:

@@ -7,18 +7,17 @@
  */
 
 import Link from 'next/link'
-import { useParams } from 'next/navigation'
 import { Users } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useAuth } from '@/providers/auth-provider'
-import { useProjectTeam } from '@/hooks/use-projects'
+import { useProjectTeam, useProjectId } from '@/hooks/use-projects'
 import { roleLabel } from '@/lib/roles'
 import { fmtDate } from '@/lib/format'
 
 export default function ProjectTeamPage() {
-  const { id } = useParams<{ id: string }>()
+  const id = useProjectId()
   const { user } = useAuth()
   const { data, isLoading } = useProjectTeam(id)
 

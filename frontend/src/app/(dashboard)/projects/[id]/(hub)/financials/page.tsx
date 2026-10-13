@@ -11,12 +11,11 @@
  */
 
 import { useMemo } from 'react'
-import { useParams } from 'next/navigation'
 import ECharts from 'echarts-for-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Kpi, Legend } from '@/components/projects/hub-ui'
 import { Skeleton } from '@/components/ui/skeleton'
-import { useProjectLedgers, useProjectOverview } from '@/hooks/use-projects'
+import { useProjectLedgers, useProjectOverview, useProjectId } from '@/hooks/use-projects'
 import { naira, num, fmtDate } from '@/lib/format'
 
 const n = (v: unknown): number | null => (v == null ? null : Number(v))
@@ -27,7 +26,7 @@ const compactNaira = (v: number) =>
     : Math.abs(v) >= 1_000 ? `₦${(v / 1_000).toFixed(0)}k` : `₦${v}`
 
 export default function FinancialsPage() {
-  const params = useParams<{ id: string }>()
+  const params = { id: useProjectId() }
   const { data: ledgers, isLoading } = useProjectLedgers(params.id)
   const { data: o } = useProjectOverview(params.id)
 

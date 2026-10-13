@@ -1,12 +1,12 @@
 'use client'
 
-import { useParams, useRouter } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 import { ArrowLeft, FolderKanban } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ProtectedRoute } from '@/components/protected-route'
 import { ProjectForm } from '@/components/projects/project-form'
-import { useProject } from '@/hooks/use-projects'
+import { useProject, useProjectRoute } from '@/hooks/use-projects'
 
 export default function EditProjectPage() {
   return (
@@ -17,12 +17,12 @@ export default function EditProjectPage() {
 }
 
 function EditProjectContent() {
-  const params = useParams()
+  const route = useProjectRoute()
   const router = useRouter()
-  const projectId = params.id as string
-  const { data: project, isLoading } = useProject(projectId)
+  const projectId = route.id
+  const { data: project, isLoading } = useProject(projectId || null)
 
-  if (isLoading) {
+  if (route.resolving || isLoading) {
     return (
       <div className="space-y-6">
         <Skeleton className="h-8 w-32" />

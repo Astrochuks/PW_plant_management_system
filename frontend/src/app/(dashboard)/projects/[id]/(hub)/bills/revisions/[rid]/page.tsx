@@ -19,7 +19,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { MiniKpi, MiniKpiRow } from '@/components/shared/mini-kpi'
 import { useAuth } from '@/providers/auth-provider'
-import { useBillsRevision, useProject } from '@/hooks/use-projects'
+import { useBillsRevision, useProject, useProjectId, useProjectSegment } from '@/hooks/use-projects'
 import { fmtDate, money, num, titleCase, unitLabel } from '@/lib/format'
 import { BoqSummaryTable, adderLabel } from '@/components/projects/bills/summary-table'
 import { exportRegisterExcel, type RegisterExportRow } from '@/lib/register-export'
@@ -32,7 +32,9 @@ const fmtTriple = (m: { contract_qty: number | null; rate: number | null; contra
   m ? `${m.contract_qty == null ? '—' : num(m.contract_qty)} × ${m.rate == null ? '—' : money(m.rate)} = ${m.contract_amount == null ? '—' : money(m.contract_amount)}` : '—'
 
 export default function BillRevisionReviewPage() {
-  const { id, rid } = useParams<{ id: string; rid: string }>()
+  const { rid } = useParams<{ rid: string }>()
+  const id = useProjectId()
+  const segment = useProjectSegment()
   const { user } = useAuth()
   const { data: project } = useProject(id)
   const { data, isLoading } = useBillsRevision(id, rid)
@@ -94,7 +96,7 @@ export default function BillRevisionReviewPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" size="sm" asChild>
-            <Link href={`/projects/${id}/bills`}><ArrowLeft className="h-3.5 w-3.5 mr-1.5" />Back to the bill</Link>
+            <Link href={`/projects/${segment}/bills`}><ArrowLeft className="h-3.5 w-3.5 mr-1.5" />Back to the bill</Link>
           </Button>
           <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting}>
             <Download className="h-3.5 w-3.5 mr-1.5" />{exporting ? 'Exporting...' : 'Export this version'}

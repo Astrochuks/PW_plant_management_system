@@ -11,11 +11,10 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import { useParams } from 'next/navigation'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
-import { useProjectPlantData } from '@/hooks/use-projects'
+import { useProjectPlantData, useProjectId } from '@/hooks/use-projects'
 import type { Granularity } from '../work-cost/analytics-section'
 import PlantAnalyticsSection from './analytics-section'
 import PlantsSection from './plants-section'
@@ -37,7 +36,7 @@ const GRANS: Array<{ key: Granularity; label: string }> = [
 ]
 
 export default function PlantDieselPage() {
-  const params = useParams<{ id: string }>()
+  const params = { id: useProjectId() }
   const [view, setView] = useState<ViewKey>('analytics')
   const [gran, setGran] = useState<Granularity>('week')
   // 'auto' resolves to the latest stored year once data arrives

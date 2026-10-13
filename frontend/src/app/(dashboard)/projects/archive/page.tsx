@@ -23,6 +23,7 @@ import { useStates } from '@/hooks/use-locations'
 import { useDebounce } from '@/hooks/use-debounce'
 import { useUrlFilters } from '@/hooks/use-url-filters'
 import { fmtDate, money } from '@/lib/format'
+import { projectPath } from '@/lib/api/projects'
 
 const FILTER_DEFAULTS = { search: '', state_id: '', page: '1' }
 
@@ -89,7 +90,7 @@ function ArchiveContent() {
             ) : rows.length === 0 ? (
               <TableRow><TableCell colSpan={6} className="py-8 text-center text-sm text-muted-foreground">No archived projects match.</TableCell></TableRow>
             ) : rows.map((p) => (
-              <TableRow key={p.id} className="cursor-pointer" onClick={() => router.push(`/projects/${p.id}`)}>
+              <TableRow key={p.id} className="cursor-pointer" onClick={() => router.push(projectPath(p))}>
                 <TableCell>
                   <div className="font-medium">{p.short_name || p.project_name}</div>
                   {p.short_name && <div className="max-w-md truncate text-xs text-muted-foreground">{p.project_name}</div>}

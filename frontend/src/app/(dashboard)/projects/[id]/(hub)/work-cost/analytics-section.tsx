@@ -14,7 +14,6 @@
 
 import { monthLabel, quarterLabel, yearLabel } from '@/lib/calendar'
 import { useMemo, useState } from 'react'
-import { useParams } from 'next/navigation'
 import ECharts from 'echarts-for-react'
 import { Card, CardContent } from '@/components/ui/card'
 import {
@@ -25,7 +24,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import {
   categoryColor, Delta, Kpi, Legend,
 } from '@/components/projects/hub-ui'
-import { useProjectFinancials } from '@/hooks/use-projects'
+import { useProjectFinancials, useProjectId } from '@/hooks/use-projects'
 import type { FinancialWeek } from '@/hooks/use-projects'
 import { naira, pctFmt, weekLabel } from '@/lib/format'
 
@@ -106,7 +105,7 @@ export default function AnalyticsSection({ gran, year }: {
   gran: Granularity
   year: number | 'all'
 }) {
-  const params = useParams<{ id: string }>()
+  const params = { id: useProjectId() }
   const { data: fin, isLoading } = useProjectFinancials(params.id)
   const [workBill, setWorkBill] = useState('all')
   const [costCat, setCostCat] = useState('all')

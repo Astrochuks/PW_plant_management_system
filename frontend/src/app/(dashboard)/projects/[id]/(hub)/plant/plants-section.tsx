@@ -9,7 +9,6 @@
  */
 
 import { Fragment, useMemo, useState } from 'react'
-import { useParams } from 'next/navigation'
 import ECharts from 'echarts-for-react'
 import { toast } from 'sonner'
 import { ChevronRight, RefreshCcw } from 'lucide-react'
@@ -23,7 +22,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { Legend } from '@/components/projects/hub-ui'
 import { useQueryClient } from '@tanstack/react-query'
-import { useProjectPlantData, useUnmappedFleetNumbers } from '@/hooks/use-projects'
+import { useProjectPlantData, useUnmappedFleetNumbers, useProjectId } from '@/hooks/use-projects'
 import type { PlantWeekRow, ProjectPlantRollup } from '@/hooks/use-projects'
 import { markFleetNumberExternal, reResolveFleetNumbers } from '@/lib/api/projects'
 import { getErrorMessage } from '@/lib/api/client'
@@ -52,7 +51,7 @@ const utilisation = (p: ProjectPlantRollup): number | null => {
 }
 
 export default function PlantsSection() {
-  const params = useParams<{ id: string }>()
+  const params = { id: useProjectId() }
   const { data, isLoading } = useProjectPlantData(params.id)
   const { data: unmapped } = useUnmappedFleetNumbers()
   const qc = useQueryClient()

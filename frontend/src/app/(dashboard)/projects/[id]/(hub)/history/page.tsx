@@ -12,7 +12,6 @@
  * the project as it was then.
  */
 
-import { useParams } from 'next/navigation'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { Archive, ArchiveRestore, Banknote, Flag, Plus, FileText } from 'lucide-react'
@@ -27,7 +26,7 @@ import {
 } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useAuth } from '@/providers/auth-provider'
-import { useAddContractSum, useAddStatusEvent, useProject, useProjectHistory } from '@/hooks/use-projects'
+import { useAddContractSum, useAddStatusEvent, useProject, useProjectHistory, useProjectId } from '@/hooks/use-projects'
 import type { ContractSumBasis, ContractSumKind, HistoryEntry, ProjectStatus } from '@/lib/api/projects'
 import { statusLabel } from '@/components/projects/project-status'
 import { getErrorMessage } from '@/lib/api/client'
@@ -47,7 +46,7 @@ const BASIS_LABEL: Record<ContractSumBasis, string> = {
 const bucketOf = (status: string) => statusLabel(status)
 
 export default function ProjectHistoryPage() {
-  const { id } = useParams<{ id: string }>()
+  const id = useProjectId()
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
   const { data: project } = useProject(id)

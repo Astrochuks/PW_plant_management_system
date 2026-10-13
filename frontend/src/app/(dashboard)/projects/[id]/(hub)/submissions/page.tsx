@@ -8,7 +8,6 @@
 
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
-import { useParams } from 'next/navigation'
 import { UploadCloud } from 'lucide-react'
 import { useAuth } from '@/providers/auth-provider'
 import { Button } from '@/components/ui/button'
@@ -23,11 +22,12 @@ import {
 } from '@/components/ui/table'
 import {
   useProjectSubmissions, type ProjectSubmission,
+  useProjectId,
 } from '@/hooks/use-projects'
 import { STATUS_BADGE, SubmissionRow } from '@/components/projects/submission-row'
 
 export default function ProjectSubmissionsTab() {
-  const params = useParams<{ id: string }>()
+  const params = { id: useProjectId() }
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
   const [status, setStatus] = useState('all')

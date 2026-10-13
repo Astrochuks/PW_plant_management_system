@@ -11,7 +11,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { useParams, useRouter } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 import { ArrowLeft, Plus, RotateCcw, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -22,7 +22,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { MiniKpi, MiniKpiRow } from '@/components/shared/mini-kpi'
 import { useAuth } from '@/providers/auth-provider'
-import { useProjectBills, useRecordBillsRevision } from '@/hooks/use-projects'
+import { useProjectBills, useRecordBillsRevision, useProjectId, useProjectSegment } from '@/hooks/use-projects'
 import type { BoqAdder, BoqBill, ProjectBills } from '@/lib/api/projects'
 import { getErrorMessage } from '@/lib/api/client'
 import { money, unitKey, unitLabel } from '@/lib/format'
@@ -74,7 +74,7 @@ const seedFrom = (bills: BoqBill[]): BillRow[] =>
   }))
 
 export default function BillBuilderPage() {
-  const { id } = useParams<{ id: string }>()
+  const id = useProjectId()
   const { user } = useAuth()
   const { data, isLoading } = useProjectBills(id)
   if (user && user.role !== 'admin') {
@@ -86,6 +86,7 @@ export default function BillBuilderPage() {
 
 function BuilderForm({ projectId, initial }: { projectId: string; initial: ProjectBills }) {
   const router = useRouter()
+  const segment = useProjectSegment()
   const record = useRecordBillsRevision(projectId)
   const hasRevision = !!initial.revision
   const nextRevisionNo = (initial.revisions[0]?.revision_no ?? 0) + 1
@@ -175,7 +176,7 @@ function BuilderForm({ projectId, initial }: { projectId: string; initial: Proje
       })
       clearDraft(projectId)  // saved — nothing to restore next visit
       toast.success(`Revision ${res.revision_no} recorded · works total ${money(res.works_total)}`)
-      router.push(`/projects/${projectId}/bills`)
+      router.push(`/projects/${segment}/bills`)
     } catch (err) {
       toast.error(getErrorMessage(err))
     }
@@ -193,7 +194,7 @@ function BuilderForm({ projectId, initial }: { projectId: string; initial: Proje
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" asChild>
-            <Link href={`/projects/${projectId}/bills`}><ArrowLeft className="h-3.5 w-3.5 mr-1.5" />Back to the bill</Link>
+            <Link href={`/projects/${segment}/bills`}><ArrowLeft className="h-3.5 w-3.5 mr-1.5" />Back to the bill</Link>
           </Button>
           {hasRevision && bills.length > 0 && (
             <Button variant="ghost" size="sm" onClick={() => setBills([])}>Clear all and start empty</Button>

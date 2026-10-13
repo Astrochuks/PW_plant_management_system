@@ -5,10 +5,9 @@
  * A site engineer sees only their own actions (PRD v2 §11 D2).
  */
 
-import { useParams } from 'next/navigation'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { useProjectActivity } from '@/hooks/use-projects'
+import { useProjectActivity, useProjectId } from '@/hooks/use-projects'
 
 const ACTION_LABEL: Record<string, string> = {
   create: 'Created project',
@@ -23,7 +22,7 @@ const ACTION_LABEL: Record<string, string> = {
 }
 
 export default function ProjectActivityPage() {
-  const { id } = useParams<{ id: string }>()
+  const id = useProjectId()
   const { data, isLoading } = useProjectActivity(id, 200)
 
   return (

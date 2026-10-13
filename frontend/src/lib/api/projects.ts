@@ -18,6 +18,8 @@ export interface Project {
   id: string;
   project_name: string;
   short_name: string | null;
+  /** readable address segment (048): /projects/<slug>; null only on rows older than the migration */
+  slug?: string | null;
   client: string;
   state_id: string | null;
   state_name: string | null;
@@ -1426,6 +1428,7 @@ export interface OngoingProject {
   id: string
   project_name: string
   short_name: string | null
+  slug?: string | null
   client: string
   project_type: string | null
   state_name: string | null
@@ -1682,6 +1685,15 @@ export async function getBillsProgress(projectId: string): Promise<BillsProgress
 export async function recordBillsRevision(projectId: string, body: RecordBoqRevisionRequest): Promise<{ id: string; revision_no: number; works_total: number }> {
   const res = await apiClient.post<{ data: { id: string; revision_no: number; works_total: number } }>(`/projects/${projectId}/bills/revisions`, body)
   return { ...res.data.data, works_total: Number(res.data.data.works_total ?? 0) }
+}
+
+/** the address of a project: its slug, or the id while a row has none */
+export const projectPath = (p: { slug?: string | null; id: string }): string => `/projects/${p.slug || p.id}`
+
+/** /projects/<slug> → the project's id (scoped; 404 outside the caller's projects) */
+export async function resolveProjectSlug(slug: string): Promise<{ id: string; slug: string | null; short_name: string | null; project_name: string }> {
+  const res = await apiClient.get<{ data: { id: string; slug: string | null; short_name: string | null; project_name: string } }>(`/projects/resolve/${encodeURIComponent(slug)}`)
+  return res.data.data
 }
 
 export async function getOngoingProjects(asAt?: string): Promise<{

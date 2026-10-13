@@ -105,6 +105,23 @@ def _audit(bg: BackgroundTasks, request: Request, user: CurrentUser, *, action: 
 
 # ── the ongoing list ───────────────────────────────────────────────────────
 
+@router.get("/resolve/{slug}")
+async def resolve_project_slug(
+    slug: str,
+    current_user: Annotated[CurrentUser, Depends(require_projects_read)],
+) -> dict[str, Any]:
+    """The project behind a readable address (048): /projects/<slug> → id.
+    Scoped like every other read — a project outside the caller's
+    assignments is a 404, not a hint."""
+    row = await fetchrow("SELECT id, slug, short_name, project_name FROM projects WHERE slug = $1", slug.strip().lower())
+    if not row:
+        raise NotFoundError("Project", slug)
+    ids = await visible_project_ids(current_user)
+    if ids is not None and str(row["id"]) not in ids:
+        raise NotFoundError("Project", slug)
+    return {"success": True, "data": dict(row)}
+
+
 @router.get("/ongoing")
 async def list_ongoing(
     current_user: Annotated[CurrentUser, Depends(require_projects_read)],
@@ -127,7 +144,7 @@ async def list_ongoing(
                 FROM project_contract_sums
                WHERE effective_date <= $1
                ORDER BY project_id, effective_date DESC, created_at DESC)
-            SELECT p.id, p.project_name, p.short_name, p.client, p.project_type,
+            SELECT p.id, p.slug, p.project_name, p.short_name, p.client, p.project_type,
                    s.name AS state_name,
                    st.status::text AS status, st.effective_date AS status_since,
                    cs.amount AS contract_sum, cs.basis::text AS contract_sum_basis,

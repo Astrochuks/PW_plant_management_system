@@ -10,7 +10,6 @@
 
 import { monthLabel, quarterLabel, yearLabel } from '@/lib/calendar'
 import { useMemo, useState } from 'react'
-import { useParams } from 'next/navigation'
 import ECharts from 'echarts-for-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -19,7 +18,7 @@ import {
 } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Delta, Kpi, Legend } from '@/components/projects/hub-ui'
-import { useProjectFinancials, useProjectPlantData } from '@/hooks/use-projects'
+import { useProjectFinancials, useProjectPlantData, useProjectId } from '@/hooks/use-projects'
 import type { ProjectFinancials, ProjectPlantData } from '@/hooks/use-projects'
 import { naira, num, pctFmt, weekLabel } from '@/lib/format'
 import type { Granularity } from '../work-cost/analytics-section'
@@ -71,7 +70,7 @@ export default function PlantAnalyticsSection({ gran, year }: {
   gran: Granularity
   year: number | 'all'
 }) {
-  const params = useParams<{ id: string }>()
+  const params = { id: useProjectId() }
   const { data, isLoading } = useProjectPlantData(params.id)
   const { data: fin } = useProjectFinancials(params.id)
 

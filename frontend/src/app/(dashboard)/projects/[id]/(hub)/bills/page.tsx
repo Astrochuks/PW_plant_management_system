@@ -13,7 +13,6 @@
 import { useMemo, useState } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
-import { useParams } from 'next/navigation'
 import { AlertTriangle, CheckCircle2, Download, FileUp, History, PencilLine, Search, SlidersHorizontal, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -29,7 +28,7 @@ import {
 } from '@/components/ui/dialog'
 import { MiniKpi, MiniKpiRow, MiniKpiSkeleton } from '@/components/shared/mini-kpi'
 import { useAuth } from '@/providers/auth-provider'
-import { useProject, useProjectBills, useProjectSubmissions, usePreviewBillsImport, usePreviewBillsFromSubmission, useRecordBillsRevision } from '@/hooks/use-projects'
+import { useProject, useProjectBills, useProjectSubmissions, usePreviewBillsImport, usePreviewBillsFromSubmission, useRecordBillsRevision, useProjectId, useProjectSegment } from '@/hooks/use-projects'
 import type { BoqAdder, BoqBill, BoqImportPreview } from '@/lib/api/projects'
 import { getErrorMessage } from '@/lib/api/client'
 import { fmtDate, money, num, titleCase, unitLabel } from '@/lib/format'
@@ -50,7 +49,8 @@ const sumVisible = (b: BoqBill) => b.items.reduce((a, i) => a + (i.contract_amou
 const differs = (a: number, b: number | null) => b != null && Math.abs(a - b) > 0.01
 
 export default function ProjectBillsPage() {
-  const { id } = useParams<{ id: string }>()
+  const id = useProjectId()
+  const segment = useProjectSegment()
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
   const { data: project } = useProject(id)
@@ -141,7 +141,7 @@ export default function ProjectBillsPage() {
           )}
           {isAdmin && (
             <Button variant="outline" size="sm" asChild>
-              <Link href={`/projects/${id}/bills/edit`}><PencilLine className="h-3.5 w-3.5 mr-1.5" />{revision ? 'Edit by hand' : 'Enter by hand'}</Link>
+              <Link href={`/projects/${segment}/bills/edit`}><PencilLine className="h-3.5 w-3.5 mr-1.5" />{revision ? 'Edit by hand' : 'Enter by hand'}</Link>
             </Button>
           )}
           {isAdmin && (
@@ -199,7 +199,7 @@ export default function ProjectBillsPage() {
           {isAdmin && (
             <div className="mt-4 flex flex-wrap justify-center gap-2">
               <Button size="sm" onClick={() => setImportOpen(true)}><FileUp className="h-3.5 w-3.5 mr-1.5" />Import bill</Button>
-              <Button size="sm" variant="outline" asChild><Link href={`/projects/${id}/bills/edit`}><PencilLine className="h-3.5 w-3.5 mr-1.5" />Enter by hand</Link></Button>
+              <Button size="sm" variant="outline" asChild><Link href={`/projects/${segment}/bills/edit`}><PencilLine className="h-3.5 w-3.5 mr-1.5" />Enter by hand</Link></Button>
             </div>
           )}
         </div>
@@ -292,7 +292,7 @@ export default function ProjectBillsPage() {
                         <TableCell className="whitespace-nowrap">{r.recorded_by_name || r.recorded_by_email || '—'}</TableCell>
                         <TableCell className="whitespace-normal text-xs text-muted-foreground">{SOURCE_HOW[r.source] ?? r.source}{r.note ? ` · ${r.note}` : ''}</TableCell>
                         <TableCell className="text-right tabular-nums whitespace-nowrap">{r.works_total != null ? money(r.works_total) : '—'}</TableCell>
-                        <TableCell><Button variant="outline" size="sm" asChild><Link href={`/projects/${id}/bills/revisions/${r.id}`}>Open</Link></Button></TableCell>
+                        <TableCell><Button variant="outline" size="sm" asChild><Link href={`/projects/${segment}/bills/revisions/${r.id}`}>Open</Link></Button></TableCell>
                       </TableRow>
                     ))}
                   </TableBody>

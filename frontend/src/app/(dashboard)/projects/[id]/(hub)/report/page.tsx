@@ -10,7 +10,6 @@
  */
 
 import { useCallback, useState } from 'react'
-import { useParams } from 'next/navigation'
 import { FileBarChart, FileSpreadsheet, FileText, Loader2 } from 'lucide-react'
 import { useMutation } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -24,6 +23,7 @@ import { Legend } from '@/components/projects/hub-ui'
 import { generateProjectReport, type ProjectReportPack, type ReportPeriod } from '@/lib/api/projects'
 import { getErrorMessage } from '@/lib/api/client'
 import { naira, num, pctFmt, fmtDate, weekLabel } from '@/lib/format'
+import { useProjectId } from '@/hooks/use-projects'
 
 const PERIODS: Array<{ key: ReportPeriod; label: string }> = [
   { key: 'weekly', label: 'Week' },
@@ -34,7 +34,7 @@ const PERIODS: Array<{ key: ReportPeriod; label: string }> = [
 ]
 
 export default function ReportPage() {
-  const params = useParams<{ id: string }>()
+  const params = { id: useProjectId() }
   const [period, setPeriod] = useState<ReportPeriod>('weekly')
   const [refDate, setRefDate] = useState(() => new Date().toISOString().slice(0, 10))
 

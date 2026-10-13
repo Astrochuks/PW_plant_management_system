@@ -6,7 +6,6 @@
  * are served through one-hour signed links; the route is scope-guarded.
  */
 
-import { useParams } from 'next/navigation'
 import { useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Download, FileText, Upload } from 'lucide-react'
@@ -17,7 +16,7 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useAuth } from '@/providers/auth-provider'
-import { useProjectDocumentUrl, useProjectDocuments, useUploadProjectDocument } from '@/hooks/use-projects'
+import { useProjectDocumentUrl, useProjectDocuments, useUploadProjectDocument, useProjectId } from '@/hooks/use-projects'
 import { getErrorMessage } from '@/lib/api/client'
 import { fmtDate } from '@/lib/format'
 
@@ -32,7 +31,7 @@ const DOC_TYPES: Array<{ value: string; label: string }> = [
 const fmtSize = (n: number | null) => (n == null ? '' : n > 1_048_576 ? `${(n / 1_048_576).toFixed(1)} MB` : `${Math.ceil(n / 1024)} KB`)
 
 export default function ProjectDocumentsPage() {
-  const { id } = useParams<{ id: string }>()
+  const id = useProjectId()
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
   const { data: docs, isLoading } = useProjectDocuments(id)

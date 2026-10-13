@@ -31,7 +31,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import type { OngoingProject } from '@/lib/api/projects'
+import { projectPath, type OngoingProject } from '@/lib/api/projects'
 import { money, titleCase } from '@/lib/format'
 import { exportRegisterExcel } from '@/lib/register-export'
 
@@ -262,7 +262,7 @@ export function OngoingTable({
                 <TableRow
                   key={row.project.id}
                   className={`cursor-pointer ${idx % 2 === 0 ? 'bg-background' : 'bg-muted/30'} hover:bg-muted/60 border-b border-border`}
-                  onClick={() => router.push(`/projects/${row.project.id}`)}
+                  onClick={() => router.push(projectPath(row.project))}
                 >
                   {columns.map((col) => (
                     <TableCell

@@ -10,11 +10,10 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import { useParams } from 'next/navigation'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
-import { useProjectFinancials } from '@/hooks/use-projects'
+import { useProjectFinancials, useProjectId } from '@/hooks/use-projects'
 import AnalyticsSection, { type Granularity } from './analytics-section'
 import WorkDoneSection from './work-done-section'
 import SiteSection from './site-section'
@@ -35,7 +34,7 @@ const GRANS: Array<{ key: Granularity; label: string }> = [
 ]
 
 export default function WorkCostPage() {
-  const params = useParams<{ id: string }>()
+  const params = { id: useProjectId() }
   const [view, setView] = useState<ViewKey>('analytics')
   const [gran, setGran] = useState<Granularity>('week')
   // 'auto' resolves to the latest stored year once data arrives

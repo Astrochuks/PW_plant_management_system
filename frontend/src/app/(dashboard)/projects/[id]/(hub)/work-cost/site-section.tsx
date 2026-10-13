@@ -7,16 +7,15 @@
  */
 
 import { useMemo } from 'react'
-import { useParams } from 'next/navigation'
 import ECharts from 'echarts-for-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Kpi, Legend } from '@/components/projects/hub-ui'
 import { Skeleton } from '@/components/ui/skeleton'
-import { useProjectSite } from '@/hooks/use-projects'
+import { useProjectSite, useProjectId } from '@/hooks/use-projects'
 import { naira, num, weekLabel } from '@/lib/format'
 
 export default function SitePage() {
-  const params = useParams<{ id: string }>()
+  const params = { id: useProjectId() }
   const { data: site, isLoading } = useProjectSite(params.id)
 
   const labourTotals = useMemo(() => {

@@ -24,6 +24,7 @@ import { useCreateProject, useUpdateProject } from '@/hooks/use-projects'
 import { useStates } from '@/hooks/use-locations'
 import { getErrorMessage } from '@/lib/api/client'
 import type { Project, CreateProjectRequest } from '@/lib/api/projects'
+import { projectPath } from '@/lib/api/projects'
 
 interface ProjectFormProps {
   project?: Project
@@ -194,7 +195,7 @@ export function ProjectForm({ project, mode }: ProjectFormProps) {
       if (mode === 'create') {
         const created = await createMutation.mutateAsync(payload as CreateProjectRequest)
         toast.success('Project created successfully')
-        router.push(`/projects/${created.id}`)
+        router.push(projectPath(created))
       } else {
         await updateMutation.mutateAsync(payload)
         toast.success('Project updated successfully')
@@ -371,7 +372,7 @@ export function ProjectForm({ project, mode }: ProjectFormProps) {
                   A change is recorded as a dated entry on the Timeline, so earlier periods keep the sum they had.
                 </p>
                 <Button asChild size="sm" variant="outline">
-                  <Link href={`/projects/${project?.id}/history?record=sum`}>Record a new contract sum</Link>
+                  <Link href={`${project ? projectPath(project) : '/projects'}/history?record=sum`}>Record a new contract sum</Link>
                 </Button>
               </div>
             )}

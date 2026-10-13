@@ -9,13 +9,12 @@
 
 import Image from 'next/image'
 import Link from 'next/link'
-import { useParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { MiniKpi, MiniKpiRow, MiniKpiSkeleton } from '@/components/shared/mini-kpi'
 import { useAuth } from '@/providers/auth-provider'
-import { useBillsProgress, useProject, useProjectBills } from '@/hooks/use-projects'
+import { useBillsProgress, useProject, useProjectBills, useProjectId, useProjectSegment } from '@/hooks/use-projects'
 import { fmtDate, money, titleCase } from '@/lib/format'
 
 const HEAD = 'text-[#101415] font-semibold text-xs uppercase tracking-wider border-x border-[#e6ac31]/50 whitespace-nowrap'
@@ -24,7 +23,8 @@ const dash = <span className="text-muted-foreground">—</span>
 const pctOf = (part: number, whole: number) => (whole > 0 ? `${((part / whole) * 100).toFixed(2)}%` : null)
 
 export default function ProjectOverviewPage() {
-  const { id } = useParams<{ id: string }>()
+  const id = useProjectId()
+  const segment = useProjectSegment()
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
   const { data: project, isLoading: loadingProject } = useProject(id)
@@ -69,7 +69,7 @@ export default function ProjectOverviewPage() {
         <div className="text-center py-12 text-muted-foreground border rounded-lg">
           <p className="text-lg">No bill of quantities yet</p>
           <p className="text-sm mt-1">Progress is measured against the bill. {isAdmin ? 'Enter or import it on the Bill of Quantities tab.' : 'The admin has not recorded it yet.'}</p>
-          {isAdmin && <Button className="mt-4" size="sm" asChild><Link href={`/projects/${id}/bills`}>Open Bill of Quantities</Link></Button>}
+          {isAdmin && <Button className="mt-4" size="sm" asChild><Link href={`/projects/${segment}/bills`}>Open Bill of Quantities</Link></Button>}
         </div>
       ) : (
         <div className="rounded-lg border-2 border-border overflow-x-auto">
