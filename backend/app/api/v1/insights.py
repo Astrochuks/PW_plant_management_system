@@ -7,6 +7,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.core.exceptions import DatabaseError
 from app.core.pool import fetch, fetchrow, fetchval, execute
 from app.core.security import (
     CurrentUser,
@@ -226,10 +227,21 @@ async def get_weekly_brief(
         return_exceptions=True,
     )
 
-    fleet_overview = results[0] if not isinstance(results[0], Exception) else {}
+    names = ["fleet_overview", "site_rankings", "condition_changes", "insights", "chronic"]
+    for name, result in zip(names, results):
+        if isinstance(result, Exception):
+            logger.error("Insights query failed", query=name, error=str(result))
+    # the fleet overview and the insights ARE the page: a failure there is a
+    # 503 the client retries, never a success with empty blocks (2026-10-13
+    # sweep after the dashboard showed NaN from exactly this pattern)
+    essential_failed = [n for n, r in zip(names, results) if isinstance(r, Exception) and n in ("fleet_overview", "insights")]
+    if essential_failed:
+        raise DatabaseError("Insights are unavailable right now; retrying",
+                            operation=",".join(essential_failed), retryable=True)
+    fleet_overview = results[0]
     site_rankings = results[1] if not isinstance(results[1], Exception) else []
     condition_changes = results[2] if not isinstance(results[2], Exception) else []
-    insights = results[3] if not isinstance(results[3], Exception) else []
+    insights = results[3]
     chronic = results[4] if not isinstance(results[4], Exception) else []
 
     # Build recommendations from insights

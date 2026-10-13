@@ -23,6 +23,9 @@ from app.monitoring.metrics import get_metrics_collector
 logger = get_logger(__name__)
 
 
+SLOW_REQUEST_MS = 2000
+
+
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
     """Middleware for logging requests and collecting metrics."""
 
@@ -108,9 +111,12 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
             # Log completion
             if should_log and not is_health_check:
-                log_method = logger.error if status_code >= 500 else logger.info
+                # 2026-10-13: a request over SLOW_REQUEST_MS is a warning so slow
+                # endpoints show up with `grep 'Slow request'`
+                slow = duration_ms > SLOW_REQUEST_MS
+                log_method = logger.error if status_code >= 500 else logger.warning if slow else logger.info
                 log_method(
-                    "Request completed",
+                    "Slow request" if slow and status_code < 500 else "Request completed",
                     method=method,
                     path=path,
                     status_code=status_code,

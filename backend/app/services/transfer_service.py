@@ -360,39 +360,36 @@ class TransferService:
         Returns:
             List of pending transfer records with plant and location data.
         """
-        try:
-            conds = ["t.status = 'pending'"]
-            params: list[Any] = []
+        conds = ["t.status = 'pending'"]
+        params: list[Any] = []
 
-            if plant_id:
-                params.append(str(plant_id))
-                conds.append(f"t.plant_id = ${len(params)}::uuid")
+        if plant_id:
+            params.append(str(plant_id))
+            conds.append(f"t.plant_id = ${len(params)}::uuid")
 
-            where = " AND ".join(conds)
+        where = " AND ".join(conds)
 
-            rows = await fetch(
-                f"""SELECT t.*,
-                           json_build_object('id', pm.id, 'fleet_number', pm.fleet_number, 'description', pm.description) AS plant,
-                           CASE WHEN fl.id IS NOT NULL
-                                THEN json_build_object('id', fl.id, 'name', fl.name)
-                                ELSE NULL END AS from_location,
-                           CASE WHEN tl.id IS NOT NULL
-                                THEN json_build_object('id', tl.id, 'name', tl.name)
-                                ELSE NULL END AS to_location
-                    FROM plant_transfers t
-                    LEFT JOIN plants_master pm ON pm.id = t.plant_id
-                    LEFT JOIN locations fl ON fl.id = t.from_location_id
-                    LEFT JOIN locations tl ON tl.id = t.to_location_id
-                    WHERE {where}
-                    ORDER BY t.created_at DESC""",
-                *params,
-            )
+        rows = await fetch(
+            f"""SELECT t.*,
+                       json_build_object('id', pm.id, 'fleet_number', pm.fleet_number, 'description', pm.description) AS plant,
+                       CASE WHEN fl.id IS NOT NULL
+                            THEN json_build_object('id', fl.id, 'name', fl.name)
+                            ELSE NULL END AS from_location,
+                       CASE WHEN tl.id IS NOT NULL
+                            THEN json_build_object('id', tl.id, 'name', tl.name)
+                            ELSE NULL END AS to_location
+                FROM plant_transfers t
+                LEFT JOIN plants_master pm ON pm.id = t.plant_id
+                LEFT JOIN locations fl ON fl.id = t.from_location_id
+                LEFT JOIN locations tl ON tl.id = t.to_location_id
+                WHERE {where}
+                ORDER BY t.created_at DESC""",
+            *params,
+        )
 
-            return rows
-
-        except Exception as e:
-            logger.error("Failed to get pending transfers", error=str(e))
-            return []
+        return rows
+        # 2026-10-13: no 'except → return []' here — a database failure must
+        # reach the global handler (503/500), not read as 'no transfers'
 
     async def get_plant_transfers(
         self,
@@ -408,30 +405,27 @@ class TransferService:
         Returns:
             List of transfer records, newest first.
         """
-        try:
-            rows = await fetch(
-                """SELECT t.*,
-                          CASE WHEN fl.id IS NOT NULL
-                               THEN json_build_object('id', fl.id, 'name', fl.name)
-                               ELSE NULL END AS from_location,
-                          CASE WHEN tl.id IS NOT NULL
-                               THEN json_build_object('id', tl.id, 'name', tl.name)
-                               ELSE NULL END AS to_location
-                   FROM plant_transfers t
-                   LEFT JOIN locations fl ON fl.id = t.from_location_id
-                   LEFT JOIN locations tl ON tl.id = t.to_location_id
-                   WHERE t.plant_id = $1::uuid
-                   ORDER BY t.created_at DESC
-                   LIMIT $2""",
-                str(plant_id),
-                limit,
-            )
+        rows = await fetch(
+            """SELECT t.*,
+                      CASE WHEN fl.id IS NOT NULL
+                           THEN json_build_object('id', fl.id, 'name', fl.name)
+                           ELSE NULL END AS from_location,
+                      CASE WHEN tl.id IS NOT NULL
+                           THEN json_build_object('id', tl.id, 'name', tl.name)
+                           ELSE NULL END AS to_location
+               FROM plant_transfers t
+               LEFT JOIN locations fl ON fl.id = t.from_location_id
+               LEFT JOIN locations tl ON tl.id = t.to_location_id
+               WHERE t.plant_id = $1::uuid
+               ORDER BY t.created_at DESC
+               LIMIT $2""",
+            str(plant_id),
+            limit,
+        )
 
-            return rows
-
-        except Exception as e:
-            logger.error("Failed to get plant transfers", error=str(e))
-            return []
+        return rows
+        # 2026-10-13: no 'except → return []' here — a database failure must
+        # reach the global handler (503/500), not read as 'no transfers'
 
     async def cancel_transfer(
         self,

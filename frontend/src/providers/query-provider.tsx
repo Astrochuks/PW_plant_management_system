@@ -32,8 +32,10 @@ export function QueryProvider({ children }: QueryProviderProps) {
             refetchOnReconnect: 'always',
           },
           mutations: {
-            // Retry mutations once
-            retry: 1,
+            // Never auto-retry a mutation: a POST that timed out may already
+            // have landed (a bill revision, a contract sum), and a retry would
+            // record it twice. The user retries deliberately. (2026-10-13)
+            retry: 0,
           },
         },
       })

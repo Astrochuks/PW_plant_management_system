@@ -13,6 +13,7 @@ Usage:
     await execute("UPDATE plants_master SET status = $1 WHERE id = $2", "standby", pid)
 """
 
+import time
 import json
 import ssl
 from collections.abc import AsyncIterator
@@ -145,7 +146,10 @@ class DatabaseUnavailableError(Exception):
     pass
 
 
-async def _exec_with_recovery(fn_name: str, coro_factory, *, retried: bool = False):
+SLOW_QUERY_MS = 1000  # one statement slower than this is logged as 'Slow query'
+
+
+async def _exec_with_recovery(fn_name: str, coro_factory, *, retried: bool = False, sql: str | None = None):
     """Execute a pool operation, triggering recovery on pool death.
 
     Reads (fetch/fetchrow/fetchval) are retried ONCE on a plain query
@@ -162,12 +166,13 @@ async def _exec_with_recovery(fn_name: str, coro_factory, *, retried: bool = Fal
         asyncio.create_task(_try_recover_pool())
         raise DatabaseUnavailableError("Database temporarily unavailable — reconnecting")
 
+    started = time.perf_counter()
     try:
-        return await coro_factory(pool)
+        result = await coro_factory(pool)
     except TimeoutError as e:
         if fn_name in ("fetch", "fetchrow", "fetchval") and not retried:
-            logger.warning(f"Query timeout in {fn_name} — retrying once")
-            return await _exec_with_recovery(fn_name, coro_factory, retried=True)
+            logger.warning(f"Query timeout in {fn_name} — retrying once", sql=(sql or "")[:120])
+            return await _exec_with_recovery(fn_name, coro_factory, retried=True, sql=sql)
         logger.warning(f"Query timeout in {fn_name} (final), triggering pool recovery", error=str(e))
         asyncio.create_task(_try_recover_pool())
         raise DatabaseUnavailableError("Database temporarily unavailable — reconnecting") from e
@@ -176,6 +181,12 @@ async def _exec_with_recovery(fn_name: str, coro_factory, *, retried: bool = Fal
         logger.warning(f"Connection error in {fn_name}, triggering pool recovery", error=str(e))
         asyncio.create_task(_try_recover_pool())
         raise DatabaseUnavailableError("Database temporarily unavailable — reconnecting") from e
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    if elapsed_ms > SLOW_QUERY_MS:
+        # grep-able: 'Slow query' — the statement's first line tells you which
+        logger.warning("Slow query", fn=fn_name, duration_ms=round(elapsed_ms, 1),
+                       sql=" ".join((sql or "").split())[:160])
+    return result
 
 
 async def fetch(sql: str, *args: Any) -> list[dict[str, Any]]:
@@ -188,7 +199,7 @@ async def fetch(sql: str, *args: Any) -> list[dict[str, Any]]:
     Returns:
         List of row dicts. Empty list if no rows.
     """
-    rows = await _exec_with_recovery("fetch", lambda pool: pool.fetch(sql, *args))
+    rows = await _exec_with_recovery("fetch", lambda pool: pool.fetch(sql, *args), sql=sql)
     return [_record_to_dict(r) for r in rows]
 
 
@@ -253,7 +264,7 @@ async def fetchrow(sql: str, *args: Any) -> dict[str, Any] | None:
     Returns:
         Row dict, or None if no rows.
     """
-    row = await _exec_with_recovery("fetchrow", lambda pool: pool.fetchrow(sql, *args))
+    row = await _exec_with_recovery("fetchrow", lambda pool: pool.fetchrow(sql, *args), sql=sql)
     if row is None:
         return None
     return _record_to_dict(row)
@@ -269,7 +280,7 @@ async def fetchval(sql: str, *args: Any) -> Any:
     Returns:
         The first column of the first row, or None.
     """
-    return await _exec_with_recovery("fetchval", lambda pool: pool.fetchval(sql, *args))
+    return await _exec_with_recovery("fetchval", lambda pool: pool.fetchval(sql, *args), sql=sql)
 
 
 async def execute(sql: str, *args: Any) -> str:
@@ -282,7 +293,7 @@ async def execute(sql: str, *args: Any) -> str:
     Returns:
         PostgreSQL status string (e.g. "UPDATE 1", "INSERT 0 1").
     """
-    return await _exec_with_recovery("execute", lambda pool: pool.execute(sql, *args))
+    return await _exec_with_recovery("execute", lambda pool: pool.execute(sql, *args), sql=sql)
 
 
 async def fetch_insert(sql: str, *args: Any) -> dict[str, Any] | None:
@@ -320,7 +331,7 @@ async def executemany(sql: str, args_list: list[tuple]) -> None:
         sql: Parameterized SQL statement.
         args_list: List of parameter tuples.
     """
-    await _exec_with_recovery("executemany", lambda pool: pool.executemany(sql, args_list))
+    await _exec_with_recovery("executemany", lambda pool: pool.executemany(sql, args_list), sql=sql)
 
 
 async def fetch_json_rpc(func_name: str, *args: Any) -> Any:
@@ -339,7 +350,7 @@ async def fetch_json_rpc(func_name: str, *args: Any) -> Any:
     placeholders = ", ".join(f"${i+1}" for i in range(len(args)))
     sql = f"SELECT * FROM {func_name}({placeholders})"
 
-    row = await _exec_with_recovery("fetch_json_rpc", lambda pool: pool.fetchrow(sql, *args))
+    row = await _exec_with_recovery("fetch_json_rpc", lambda pool: pool.fetchrow(sql, *args), sql=sql)
     if row is None:
         return None
 
