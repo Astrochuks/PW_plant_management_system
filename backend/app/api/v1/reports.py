@@ -14,6 +14,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 
+from app.core.exceptions import DatabaseError
 from app.core.pool import fetch, fetchrow, fetchval, fetch_json_rpc, stream_rows
 from app.core.security import (
     CurrentUser,
@@ -166,7 +167,22 @@ async def get_dashboard_summary(
         return_exceptions=True,
     )
 
-    # Unpack results, logging any failures
+    # Unpack results, logging any failures. The plant counts and the site/
+    # state counts ARE the dashboard: if either failed, answer 503 so the
+    # client retries and keeps its last good numbers — never a fake success
+    # with an empty plant block (2026-10-13: that reached the cards as
+    # "NaN%" and "undefined of undefined" and sat in the cache for two
+    # minutes). The side panels (top sites, submissions, unread) may degrade.
+    failed_essential = [name for name, result in zip(["plant_stats", "site_state_counts"],
+                                                     [results[0], results[4]])
+                        if isinstance(result, Exception)]
+    if failed_essential:
+        for name, result in zip(["plant_stats", "site_state_counts"], [results[0], results[4]]):
+            if isinstance(result, Exception):
+                logger.error("Dashboard query failed", query=name, error=str(result))
+        raise DatabaseError("Dashboard counts are unavailable right now; retrying",
+                            operation=",".join(failed_essential), retryable=True)
+
     for i, (name, result) in enumerate(zip(
         ["plant_stats", "location_stats", "recent_submissions", "unread_count",
          "site_state_counts"],

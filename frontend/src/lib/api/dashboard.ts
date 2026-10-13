@@ -119,9 +119,30 @@ export interface DashboardFilterParams {
   year?: number;
 }
 
+const PLANT_STAT_FIELDS: (keyof DashboardPlantStats)[] = [
+  'total_plants', 'working_plants', 'standby_plants', 'breakdown_plants', 'missing_plants',
+  'scrap_plants', 'off_hire_plants', 'unknown_condition_plants', 'verified_plants', 'unverified_plants',
+];
+
 export async function getDashboardSummary(params?: DashboardFilterParams): Promise<DashboardSummary> {
   const response = await apiClient.get<ApiResponse<DashboardSummary>>('/reports/dashboard', { params });
-  return response.data.data;
+  const d = response.data.data;
+  // A plant block without its counts means the server's plant query failed
+  // (2026-10-13: the cards read NaN% and "undefined of undefined"). Throw,
+  // so React Query retries and the previous good numbers stay on screen,
+  // instead of caching a fake-success payload for two minutes.
+  const raw = (d?.plants ?? {}) as Partial<Record<keyof DashboardPlantStats, unknown>>;
+  if (raw.total_plants == null) {
+    throw new Error('Dashboard summary incomplete: plant counts missing');
+  }
+  const plants = Object.fromEntries(PLANT_STAT_FIELDS.map((k) => [k, Number(raw[k] ?? 0)])) as unknown as DashboardPlantStats;
+  return {
+    ...d,
+    plants,
+    total_sites: Number(d.total_sites ?? 0),
+    total_states: Number(d.total_states ?? 0),
+    unread_notifications: Number(d.unread_notifications ?? 0),
+  };
 }
 
 export async function getFleetSummary(locationId?: string): Promise<FleetSummaryItem[]> {
