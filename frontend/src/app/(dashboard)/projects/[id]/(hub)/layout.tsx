@@ -50,6 +50,8 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
 
   const base = `/projects/${projectId}`
   const activeSeg = pathname === base ? '' : pathname.slice(base.length + 1).split('/')[0]
+  const title = project?.short_name || project?.project_name || '…'
+  const longTitle = title.length > 60
 
   const handleDelete = async () => {
     try {
@@ -84,13 +86,14 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
       {/* Row 1 — navigation. Two controls, both unmistakably controls:
           "Back" (one step) and the register link in the link colour.
           The project name after the chevron is text, not a link. */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 py-2">
-        <Button variant="outline" size="sm" className="h-8" onClick={() => router.back()} title="Back one step">
+      <div className="flex flex-nowrap items-center gap-x-3 pt-2 pb-4">
+        <Button variant="outline" size="sm" className="h-8 shrink-0" onClick={() => router.back()} title="Back one step">
           <ArrowLeft className="h-4 w-4 mr-1.5" />
           Back
         </Button>
-        <span className="hidden h-5 w-px bg-border sm:block" aria-hidden="true" />
-        <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 text-sm">
+        <span className="hidden h-5 w-px shrink-0 bg-border sm:block" aria-hidden="true" />
+        {/* the crumb never takes more than the row allows: it ellipsises, the row never wraps */}
+        <nav aria-label="Breadcrumb" className="flex min-w-0 flex-1 items-center gap-2 text-sm">
           <Link
             href={project?.status === 'archived' ? '/projects/archive' : '/projects/ongoing'}
             className="shrink-0 font-medium text-primary underline-offset-4 hover:underline"
@@ -98,20 +101,22 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
             {project?.status === 'archived' ? 'Archive' : 'Ongoing Projects'}
           </Link>
           <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-          <span className="truncate text-muted-foreground" aria-current="page">
-            {project?.short_name || project?.project_name || '…'}
+          <span className="min-w-0 truncate text-muted-foreground sm:max-w-md" aria-current="page" title={title}>
+            {title}
           </span>
         </nav>
       </div>
 
-      {/* Row 2 — identity on the left; status and actions on the right
-          (they drop below the title on narrow screens) */}
-      <div className="flex flex-col gap-3 pb-1 lg:flex-row lg:items-start lg:justify-between lg:gap-6">
+      {/* Row 2 — identity on the left; actions on the right (they drop
+          below the title on narrow screens). A long name — a project with
+          no short name — steps down a size and wraps in a readable measure
+          instead of shouting across four lines. */}
+      <div className="flex flex-col gap-3 pb-6 lg:flex-row lg:items-start lg:justify-between lg:gap-6">
         <div className="min-w-0">
-          <h1 className="break-words text-2xl font-bold tracking-tight">
-            {project?.short_name || project?.project_name || '…'}
+          <h1 className={`break-words font-bold tracking-tight ${longTitle ? 'max-w-4xl text-lg leading-snug sm:text-xl' : 'text-2xl'}`}>
+            {title}
           </h1>
-          <p className="mt-0.5 text-sm text-muted-foreground">
+          <p className="mt-1 text-sm text-muted-foreground">
             {project?.client}{project?.state_name ? ` · ${project.state_name}` : ''}
           </p>
         </div>
@@ -141,7 +146,7 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
 
       {/* Tab bar — folder-style: tabs sit ON the line; the active one
           opens into the page (bottom border removed, background merged) */}
-      <div className="mt-5 flex items-end gap-0.5 overflow-x-auto border-b [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className="flex items-end gap-0.5 overflow-x-auto border-b [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {PAGES.filter((p) => !p.adminOnly || isAdmin).map((p) =>
           p.ready ? (
             <Link
