@@ -19,7 +19,6 @@ Log phrases: "Bills import previewed", "Bills revision recorded", "Bills adders 
 from __future__ import annotations
 
 import io
-import json
 import re
 from datetime import date
 from decimal import Decimal
@@ -181,9 +180,9 @@ async def set_bills_adders(
     before = await fetchrow("SELECT adders FROM project_beme_revisions WHERE id = $1::uuid", str(rev_id))
     await fetchrow(
         "UPDATE project_beme_revisions SET adders = $2::jsonb WHERE id = $1::uuid RETURNING id",
-        str(rev_id), json.dumps(clean))
+        str(rev_id), clean)  # list, not json.dumps — see record_bills_revision
     await audit_service.log(
-        user_id=current_user.id, user_email=current_user.email, action="bills_adders_set",
+        user_id=current_user.id, user_email=current_user.email, action="boq_adders_set",
         table_name="project_beme_revisions", record_id=str(rev_id),
         old_values={"adders": before["adders"] if before else None}, new_values={"adders": clean},
         ip_address=get_client_ip(request),
@@ -340,29 +339,41 @@ async def record_bills_revision(
                    RETURNING id""",
                 str(project_id), rev_no, body.source, body.effective_date, works,
                 (body.note or "").strip() or None, body.source_file_name, body.source_document_path,
-                current_user.id, json.dumps(adders))
-            for b_pos, b in enumerate(body.bills, 1):
-                bill_id = await conn.fetchval(
-                    """INSERT INTO project_beme_bills
-                         (project_id, revision_id, bill_code, bill_no, sort_order, name, contract_amount)
-                       VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7) RETURNING id""",
-                    str(project_id), rev_id, b.bill_code.strip(), b.bill_no, b.sort_order or b_pos,
-                    (b.name or "").strip() or None, b.sheet_total)
+                current_user.id, adders)  # the pool's jsonb codec encodes the list; a json.dumps here stores a quoted string
+            # all bills in ONE statement, all items in ONE batch — a save is a
+            # handful of round trips however many bills it has (from the
+            # laptop each round trip to the EU pooler is 0.5–1 s)
+            codes = [b.bill_code.strip() for b in body.bills]
+            if len(set(codes)) != len(codes):
+                raise ValidationError("Two bills carry the same code")
+            bill_rows = await conn.fetch(
+                """INSERT INTO project_beme_bills
+                     (project_id, revision_id, bill_code, bill_no, sort_order, name, contract_amount)
+                   SELECT $1::uuid, $2::uuid, c, n, s, nm, t
+                     FROM unnest($3::text[], $4::int[], $5::int[], $6::text[], $7::numeric[]) AS u(c, n, s, nm, t)
+                   RETURNING id, bill_code""",
+                str(project_id), rev_id, codes,
+                [b.bill_no for b in body.bills],
+                [b.sort_order or pos for pos, b in enumerate(body.bills, 1)],
+                [(b.name or "").strip() or None for b in body.bills],
+                [None if b.sheet_total is None else Decimal(str(b.sheet_total)) for b in body.bills])
+            bill_ids = {r["bill_code"]: r["id"] for r in bill_rows}
+            rows = []
+            for b in body.bills:
                 seen: dict[tuple[str, str], int] = {}
-                rows = []
                 for pos, i in enumerate(b.items, 1):
-                    key = (i.item_code or "", i.description)
+                    key = (i.item_code or "", i.description.strip())
                     dup = seen.get(key, 0)
                     seen[key] = dup + 1
-                    rows.append((str(project_id), bill_id, rev_id, i.item_code or "", i.description.strip(),
-                                 (i.unit or "").strip() or None, i.contract_qty, i.rate, i.contract_amount,
-                                 dup, i.sort_order or pos))
-                if rows:
-                    await conn.executemany(
-                        """INSERT INTO project_beme_items
-                             (project_id, bill_id, revision_id, item_code, description, unit,
-                              contract_qty, rate, contract_amount, dup_seq, sort_order)
-                           VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $10, $11)""", rows)
+                    rows.append((str(project_id), bill_ids[b.bill_code.strip()], rev_id, i.item_code or "",
+                                 i.description.strip(), (i.unit or "").strip() or None, i.contract_qty, i.rate,
+                                 i.contract_amount, dup, i.sort_order or pos))
+            if rows:
+                await conn.executemany(
+                    """INSERT INTO project_beme_items
+                         (project_id, bill_id, revision_id, item_code, description, unit,
+                          contract_qty, rate, contract_amount, dup_seq, sort_order)
+                       VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $10, $11)""", rows)
             # the new snapshot is the bill everyone sees; the old one stays on
             # record for the admin (decision 2026-10-12: no approval step)
             if cur_id:
@@ -376,7 +387,7 @@ async def record_bills_revision(
     item_count = sum(len(b.items) for b in body.bills)
     pname = project["short_name"] or project["project_name"]
     await audit_service.log(
-        user_id=current_user.id, user_email=current_user.email, action="bills_revision_recorded",
+        user_id=current_user.id, user_email=current_user.email, action="boq_revision_saved",
         table_name="project_beme_revisions", record_id=str(rev_id),
         old_values={"current_revision_id": str(cur_id) if cur_id else None},
         new_values={"project_id": str(project_id), "revision_no": rev_no, "source": body.source,
@@ -430,7 +441,10 @@ async def bills_revision_detail(
         cur_row = await fetchrow(_BILLS_SQL, str(project_id))
         cur_rev = cur_row["revision"] or {}
         current_no = cur_rev.get("revision_no")
-        diff = diff_bills(cur_row["bills"] or [], bills, cur_rev.get("adders") or [], rev.get("adders") or [])
+        # reading order: FROM this version TO the current bill — 'old' is this
+        # version, 'new' is what is in force now, and works_delta is what the
+        # current bill added since this version
+        diff = diff_bills(bills, cur_row["bills"] or [], rev.get("adders") or [], cur_rev.get("adders") or [])
     for k in ("id", "project_id", "proposed_by", "decided_by"):
         if rev.get(k) is not None:
             rev[k] = str(rev[k])

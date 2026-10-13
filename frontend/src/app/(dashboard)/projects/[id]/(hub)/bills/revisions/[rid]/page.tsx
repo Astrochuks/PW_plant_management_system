@@ -105,7 +105,7 @@ export default function BillRevisionReviewPage() {
       <MiniKpiRow>
         <MiniKpi label="Works total in this version" value={money(summary.works_total)} />
         {diff ? (
-          <MiniKpi label={`Current bill (rev. ${current_revision_no}) differs by`} value={`${diff.works_delta <= 0 ? '+' : '−'}${money(Math.abs(diff.works_delta))}`} />
+          <MiniKpi label={`Changed since, to revision ${current_revision_no}`} value={`${diff.works_delta >= 0 ? '+' : '−'}${money(Math.abs(diff.works_delta))}`} />
         ) : (
           <MiniKpi label="Contract sum" value={money(summary.contract_total)} />
         )}
@@ -115,7 +115,7 @@ export default function BillRevisionReviewPage() {
       {diff && (
         <div className="rounded-lg border-2 border-border overflow-x-auto">
           <div className="px-4 py-2 bg-background border-b-2 border-border font-bold tracking-wide">
-            How the current bill (revision {current_revision_no}) differs from this version
+            What changed from this version to the current bill (revision {current_revision_no})
             {diff.adders_changed && <span className="ml-2 text-xs font-normal text-amber-700 dark:text-amber-400">adders changed too</span>}
             {diff.bills_added.length > 0 && <span className="ml-2 text-xs font-normal text-muted-foreground">bills added: {diff.bills_added.join(', ')}</span>}
             {diff.bills_removed.length > 0 && <span className="ml-2 text-xs font-normal text-muted-foreground">bills removed: {diff.bills_removed.join(', ')}</span>}
@@ -129,8 +129,8 @@ export default function BillRevisionReviewPage() {
                   <TableHead className={`${HEAD} w-[90px]`}>Bill</TableHead>
                   <TableHead className={`${HEAD} w-[100px]`}>Item</TableHead>
                   <TableHead className={HEAD}>Description</TableHead>
-                  <TableHead className={`${HEAD} w-[300px]`}>Current bill (qty × rate = amount)</TableHead>
-                  <TableHead className={`${HEAD} w-[300px]`}>This version</TableHead>
+                  <TableHead className={`${HEAD} w-[300px]`}>This version (qty × rate = amount)</TableHead>
+                  <TableHead className={`${HEAD} w-[300px]`}>Current bill</TableHead>
                   <TableHead className={`${HEAD} w-[90px]`}>Change</TableHead>
                 </TableRow>
               </TableHeader>
@@ -152,7 +152,7 @@ export default function BillRevisionReviewPage() {
                     <TableCell className={`${CELL} whitespace-normal`}>{c.description}</TableCell>
                     <TableCell className={`${CELL} text-muted-foreground`}>—</TableCell>
                     <TableCell className={`${CELL} tabular-nums whitespace-nowrap font-medium`}>{fmtTriple(c.new)}</TableCell>
-                    <TableCell className={CELL}><Badge variant="outline" className="text-emerald-700 border-emerald-300">only in this version</Badge></TableCell>
+                    <TableCell className={CELL}><Badge variant="outline" className="text-emerald-700 border-emerald-300">added since</Badge></TableCell>
                   </TableRow>
                 ))}
                 {diff.items_removed.map((c, i) => (
@@ -162,7 +162,7 @@ export default function BillRevisionReviewPage() {
                     <TableCell className={`${CELL} whitespace-normal`}>{c.description}</TableCell>
                     <TableCell className={`${CELL} tabular-nums whitespace-nowrap text-muted-foreground`}>{fmtTriple(c.old)}</TableCell>
                     <TableCell className={`${CELL} text-muted-foreground`}>—</TableCell>
-                    <TableCell className={CELL}><Badge variant="outline" className="text-red-700 border-red-300">only in current</Badge></TableCell>
+                    <TableCell className={CELL}><Badge variant="outline" className="text-red-700 border-red-300">removed since</Badge></TableCell>
                   </TableRow>
                 ))}
               </TableBody>
