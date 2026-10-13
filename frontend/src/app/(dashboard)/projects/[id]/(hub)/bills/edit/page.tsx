@@ -26,6 +26,7 @@ import { useProjectBills, useRecordBillsRevision } from '@/hooks/use-projects'
 import type { BoqAdder, BoqBill, ProjectBills } from '@/lib/api/projects'
 import { getErrorMessage } from '@/lib/api/client'
 import { money, unitKey, unitLabel } from '@/lib/format'
+import { AddersFields, LadderPreview, ORDER_NOTE, addersFromRows, rowsFromAdders, type AdderRow } from '@/components/projects/bills/adders-dialog'
 
 type ItemRow = { key: string; item_code: string; description: string; unit: string; qty: string; rate: string }
 type BillRow = { key: string; bill_code: string; name: string; items: ItemRow[] }
@@ -38,7 +39,7 @@ const nextKey = () => `k${++seq}`
 // saved or the draft is discarded (2026-10-13: a mis-click on Back lost a
 // whole bill mid-entry). ────────────────────────────────────────────────
 const draftKey = (projectId: string) => `boq_builder_draft_v1:${projectId}`
-interface DraftShape { bills: BillRow[]; effectiveDate: string; note: string; savedAt: string }
+interface DraftShape { bills: BillRow[]; adders?: AdderRow[]; effectiveDate: string; note: string; savedAt: string }
 const draftIsEmpty = (bills: BillRow[], note: string) =>
   !note.trim() && !bills.some((b) => b.bill_code.trim() || b.name.trim() || b.items.some((i) => i.item_code.trim() || i.description.trim() || i.qty.trim() || i.rate.trim()))
 function loadDraft(projectId: string): DraftShape | null {
@@ -94,13 +95,15 @@ function BuilderForm({ projectId, initial }: { projectId: string; initial: Proje
   const [bills, setBills] = useState<BillRow[]>(() => draft?.bills ?? (hasRevision ? seedFrom(initial.bills) : []))
   const [effectiveDate, setEffectiveDate] = useState(() => draft?.effectiveDate || new Date().toISOString().slice(0, 10))
   const [note, setNote] = useState(draft?.note ?? '')
+  // the adders belong with the bill — entered here on a first bill, or carried from the current revision
+  const [adderRows, setAdderRows] = useState<AdderRow[]>(() => draft?.adders ?? rowsFromAdders(adders))
   const [draftRestored, setDraftRestored] = useState(!!draft)
 
   // keep the draft current on every change; an empty form clears it
   useEffect(() => {
-    if (draftIsEmpty(bills, note)) clearDraft(projectId)
-    else saveDraft(projectId, { bills, effectiveDate, note, savedAt: new Date().toISOString() })
-  }, [projectId, bills, effectiveDate, note])
+    if (draftIsEmpty(bills, note) && adderRows.length === 0) clearDraft(projectId)
+    else saveDraft(projectId, { bills, adders: adderRows, effectiveDate, note, savedAt: new Date().toISOString() })
+  }, [projectId, bills, adderRows, effectiveDate, note])
 
   // leaving with unsaved typing asks first (the draft survives either way)
   useEffect(() => {
@@ -112,10 +115,11 @@ function BuilderForm({ projectId, initial }: { projectId: string; initial: Proje
   const discardDraft = useCallback(() => {
     clearDraft(projectId)
     setBills(hasRevision ? seedFrom(initial.bills) : [])
+    setAdderRows(rowsFromAdders(adders))
     setNote('')
     setEffectiveDate(new Date().toISOString().slice(0, 10))
     setDraftRestored(false)
-  }, [projectId, hasRevision, initial.bills])
+  }, [projectId, hasRevision, initial.bills, adders])
 
   const itemCount = bills.reduce((a, b) => a + b.items.length, 0)
   const worksTotal = useMemo(() => bills.reduce((a, b) => a + billTotal(b), 0), [bills])
@@ -143,6 +147,8 @@ function BuilderForm({ projectId, initial }: { projectId: string; initial: Proje
     }
     if (!itemCount) return toast.error('Add at least one item')
     if (!effectiveDate) return toast.error('Enter the date the bill takes effect')
+    const parsedAdders = addersFromRows(adderRows)
+    if ('error' in parsedAdders) return toast.error(parsedAdders.error)
     const seenCodes = new Set<string>()
     for (const b of bills) {
       const c = b.bill_code.trim()
@@ -165,7 +171,7 @@ function BuilderForm({ projectId, initial }: { projectId: string; initial: Proje
     try {
       const res = await record.mutateAsync({
         source: hasRevision ? 'correction' : 'award_beme', effective_date: effectiveDate,
-        note: note.trim() || undefined, bills: payload, adders,
+        note: note.trim() || undefined, bills: payload, adders: parsedAdders.adders,
       })
       clearDraft(projectId)  // saved — nothing to restore next visit
       toast.success(`Revision ${res.revision_no} recorded · works total ${money(res.works_total)}`)
@@ -269,6 +275,18 @@ function BuilderForm({ projectId, initial }: { projectId: string; initial: Proje
       <Button variant="outline" onClick={addBill}>
         <Plus className="h-4 w-4 mr-2" />Add bill
       </Button>
+
+      {/* Adders — the ladder under the works total, saved with the bill */}
+      <Card>
+        <CardHeader className="pb-3">
+          <h3 className="text-base font-semibold">Adders under the works total</h3>
+          <p className="text-sm text-muted-foreground">{ORDER_NOTE}</p>
+        </CardHeader>
+        <CardContent className="grid gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+          <AddersFields rows={adderRows} onChange={setAdderRows} />
+          <LadderPreview works={worksTotal} rows={adderRows} />
+        </CardContent>
+      </Card>
 
       <Card>
         <CardContent className="grid gap-4 pt-6 sm:grid-cols-[200px_minmax(0,1fr)_auto] sm:items-end">

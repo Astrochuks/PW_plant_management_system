@@ -267,7 +267,7 @@ export default function ProjectBillsPage() {
         <>
           <ImportBillDialog projectId={id} open={importOpen} onOpenChange={setImportOpen}
             nextRevisionNo={(revision?.revision_no ?? 0) + 1} adders={adders} />
-          <AddersDialog projectId={id} open={addersOpen} onOpenChange={setAddersOpen} adders={adders} />
+          <AddersDialog projectId={id} open={addersOpen} onOpenChange={setAddersOpen} adders={adders} worksTotal={summary?.works_total ?? 0} />
           <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
             <DialogContent className="sm:max-w-2xl">
               <DialogHeader>
