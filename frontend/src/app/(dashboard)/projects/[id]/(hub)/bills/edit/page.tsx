@@ -9,10 +9,10 @@
  * current adders carry forward.
  */
 
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
-import { ArrowLeft, Plus, Trash2 } from 'lucide-react'
+import { ArrowLeft, Plus, RotateCcw, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -32,6 +32,27 @@ type BillRow = { key: string; bill_code: string; name: string; items: ItemRow[] 
 
 let seq = 0
 const nextKey = () => `k${++seq}`
+
+// ── Draft persistence — the same safety net the purchase-order entry has:
+// everything typed is kept in this browser, per project, until the bill is
+// saved or the draft is discarded (2026-10-13: a mis-click on Back lost a
+// whole bill mid-entry). ────────────────────────────────────────────────
+const draftKey = (projectId: string) => `boq_builder_draft_v1:${projectId}`
+interface DraftShape { bills: BillRow[]; effectiveDate: string; note: string; savedAt: string }
+const draftIsEmpty = (bills: BillRow[], note: string) =>
+  !note.trim() && !bills.some((b) => b.bill_code.trim() || b.name.trim() || b.items.some((i) => i.item_code.trim() || i.description.trim() || i.qty.trim() || i.rate.trim()))
+function loadDraft(projectId: string): DraftShape | null {
+  try {
+    const raw = localStorage.getItem(draftKey(projectId))
+    if (!raw) return null
+    const d = JSON.parse(raw) as DraftShape
+    if (!Array.isArray(d.bills) || draftIsEmpty(d.bills, d.note ?? '')) return null
+    // fresh keys so the counter never collides with restored rows
+    return { ...d, bills: d.bills.map((b) => ({ ...b, key: nextKey(), items: b.items.map((i) => ({ ...i, key: nextKey() })) })) }
+  } catch { return null }
+}
+function saveDraft(projectId: string, d: DraftShape) { try { localStorage.setItem(draftKey(projectId), JSON.stringify(d)) } catch { /* storage unavailable: nothing to keep */ } }
+function clearDraft(projectId: string) { try { localStorage.removeItem(draftKey(projectId)) } catch { /* ignore */ } }
 
 /** quantity × rate at 2 dp, or null while either is blank */
 const amountOf = (qty: string, rate: string): number | null => {
@@ -68,9 +89,33 @@ function BuilderForm({ projectId, initial }: { projectId: string; initial: Proje
   const hasRevision = !!initial.revision
   const nextRevisionNo = (initial.revisions[0]?.revision_no ?? 0) + 1
   const adders: BoqAdder[] = initial.revision?.adders ?? []
-  const [bills, setBills] = useState<BillRow[]>(() => (hasRevision ? seedFrom(initial.bills) : []))
-  const [effectiveDate, setEffectiveDate] = useState(() => new Date().toISOString().slice(0, 10))
-  const [note, setNote] = useState('')
+  // a draft in this browser wins over the saved bill — it is what you were typing
+  const [draft] = useState<DraftShape | null>(() => (typeof window === 'undefined' ? null : loadDraft(projectId)))
+  const [bills, setBills] = useState<BillRow[]>(() => draft?.bills ?? (hasRevision ? seedFrom(initial.bills) : []))
+  const [effectiveDate, setEffectiveDate] = useState(() => draft?.effectiveDate || new Date().toISOString().slice(0, 10))
+  const [note, setNote] = useState(draft?.note ?? '')
+  const [draftRestored, setDraftRestored] = useState(!!draft)
+
+  // keep the draft current on every change; an empty form clears it
+  useEffect(() => {
+    if (draftIsEmpty(bills, note)) clearDraft(projectId)
+    else saveDraft(projectId, { bills, effectiveDate, note, savedAt: new Date().toISOString() })
+  }, [projectId, bills, effectiveDate, note])
+
+  // leaving with unsaved typing asks first (the draft survives either way)
+  useEffect(() => {
+    const warn = (e: BeforeUnloadEvent) => { if (!draftIsEmpty(bills, note)) { e.preventDefault() } }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [bills, note])
+
+  const discardDraft = useCallback(() => {
+    clearDraft(projectId)
+    setBills(hasRevision ? seedFrom(initial.bills) : [])
+    setNote('')
+    setEffectiveDate(new Date().toISOString().slice(0, 10))
+    setDraftRestored(false)
+  }, [projectId, hasRevision, initial.bills])
 
   const itemCount = bills.reduce((a, b) => a + b.items.length, 0)
   const worksTotal = useMemo(() => bills.reduce((a, b) => a + billTotal(b), 0), [bills])
@@ -122,6 +167,7 @@ function BuilderForm({ projectId, initial }: { projectId: string; initial: Proje
         source: hasRevision ? 'correction' : 'award_beme', effective_date: effectiveDate,
         note: note.trim() || undefined, bills: payload, adders,
       })
+      clearDraft(projectId)  // saved — nothing to restore next visit
       toast.success(`Revision ${res.revision_no} recorded · works total ${money(res.works_total)}`)
       router.push(`/projects/${projectId}/bills`)
     } catch (err) {
@@ -148,6 +194,21 @@ function BuilderForm({ projectId, initial }: { projectId: string; initial: Proje
           )}
         </div>
       </div>
+
+      {draftRestored && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm dark:border-amber-700 dark:bg-amber-950">
+          <div>
+            <span className="font-medium">Draft restored.</span>
+            <span className="ml-2 text-muted-foreground">
+              What you typed before{draft?.savedAt ? ` (last kept ${new Date(draft.savedAt).toLocaleString('en-NG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })})` : ''} is back. It stays in this browser until you save or discard it.
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setDraftRestored(false)}>OK</Button>
+            <Button variant="outline" size="sm" onClick={discardDraft}><RotateCcw className="h-3.5 w-3.5 mr-1.5" />Discard draft</Button>
+          </div>
+        </div>
+      )}
 
       <MiniKpiRow>
         <MiniKpi label="Bills" value={bills.length.toLocaleString()} />
