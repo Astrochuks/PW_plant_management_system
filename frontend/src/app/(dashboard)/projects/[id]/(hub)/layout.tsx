@@ -112,7 +112,7 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
           below the title on narrow screens). A long name — a project with
           no short name — steps down a size and wraps in a readable measure
           instead of shouting across four lines. */}
-      <div className="flex flex-col gap-3 pb-6 lg:flex-row lg:items-start lg:justify-between lg:gap-6">
+      <div className="my-2 flex flex-col gap-3 pb-4 lg:flex-row lg:items-start lg:justify-between lg:gap-6">
         <div className="min-w-0">
           <h1 className={`break-words font-bold tracking-tight ${longTitle ? 'max-w-4xl text-lg leading-snug sm:text-xl' : 'text-2xl'}`}>
             {title}
