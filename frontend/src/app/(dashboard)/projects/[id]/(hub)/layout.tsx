@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/dialog'
 import { useAuth } from '@/providers/auth-provider'
 import { useProject, useDeleteProject, usePrefetchHubData, useProjectSubmissions } from '@/hooks/use-projects'
+import { titleCase } from '@/lib/format'
 
 // Four tabs by decision of 2026-10-12: the project's dashboard, its bill of
 // quantities, its dated timeline, its weekly submissions. The other routes
@@ -49,7 +50,7 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
 
   const base = `/projects/${projectId}`
   const activeSeg = pathname === base ? '' : pathname.slice(base.length + 1).split('/')[0]
-  const title = project?.short_name || project?.project_name || '…'
+  const title = titleCase(project?.short_name || project?.project_name) || '…'
   const longTitle = title.length > 60
 
   const handleDelete = async () => {
@@ -117,7 +118,7 @@ export default function ProjectHubLayout({ children }: { children: React.ReactNo
             {title}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {project?.client}{project?.state_name ? ` · ${project.state_name}` : ''}
+            {titleCase(project?.client)}{project?.state_name ? ` · ${project.state_name}` : ''}
           </p>
         </div>
         {/* status chips (Ongoing · type · schedule) removed 2026-10-12: the

@@ -18,7 +18,7 @@ const CELL = 'text-sm border-x border-border/50 py-2'
 export const adderLabel = (a: Pick<BoqAdder, 'name' | 'kind' | 'value'>): string => {
   if (a.kind === 'amount') return a.name
   const pct = `${Number(a.value)}%`
-  return a.kind === 'percent_of_works' ? `${a.name} · ${pct} of works total` : `${a.name} · ${pct}`
+  return a.kind === 'percent_of_works' ? `${a.name} · ${pct} of works total` : `${a.name} · ${pct} of subtotal`
 }
 
 export function BoqSummaryTable({ summary, title }: { summary: BoqSummary; title: string }) {

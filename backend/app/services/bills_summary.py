@@ -4,10 +4,13 @@ Pure, unit-tested, Decimal throughout. One place computes it so the page,
 the export and any report agree to the kobo. Each adder is applied in
 order to a running subtotal that starts at the works total:
 
-    percent_of_works    value % of the works total
-    percent_of_running  value % of the running subtotal (VAT on top of
-                        provisions, the usual last rung)
-    amount              a fixed naira amount (a provisional sum)
+    percent_of_works    a PROVISION: value % of the works total
+                        (contingency, VOP)
+    amount              a PROVISION: a fixed naira amount (provisional sum)
+    percent_of_running  a TAX on the subtotal: value % of everything above
+                        (VAT) — ALWAYS applied after the provisions, however
+                        the adders were entered (decision 2026-10-13, the
+                        way the purchase-order form fixes discount → VAT)
 
 Amounts are quantised to 2 dp — the stored precision (CLAUDE.md rule 1).
 """
@@ -60,6 +63,14 @@ def validate_adders(adders: Any) -> list[dict[str, Any]]:
     return out
 
 
+def order_adders(adders: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Provisions (percent_of_works, amount) in the order given, then every
+    tax on the subtotal (percent_of_running). Entry order never changes money."""
+    provisions = [a for a in adders if a["kind"] != "percent_of_running"]
+    taxes = [a for a in adders if a["kind"] == "percent_of_running"]
+    return provisions + taxes
+
+
 def compute_summary(bills: list[dict[str, Any]], adders: list[dict[str, Any]] | None) -> dict[str, Any]:
     """bills: [{bill_code, name, amount}] (amount = Σ items of that bill)."""
     rows = [{"bill_code": b.get("bill_code"), "name": b.get("name"), "amount": float(_q(_dec(b.get("amount"))))}
@@ -67,7 +78,7 @@ def compute_summary(bills: list[dict[str, Any]], adders: list[dict[str, Any]] | 
     works = _q(sum((_dec(b.get("amount")) for b in bills), Decimal("0")))
     running = works
     lines: list[dict[str, Any]] = []
-    for a in adders or []:
+    for a in order_adders(adders or []):
         kind, value = a["kind"], _dec(a["value"])
         if kind == "percent_of_works":
             amount = _q(works * value / Decimal("100"))

@@ -32,7 +32,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import type { OngoingProject } from '@/lib/api/projects'
-import { money } from '@/lib/format'
+import { money, titleCase } from '@/lib/format'
 import { exportRegisterExcel } from '@/lib/register-export'
 
 export interface OngoingRow {
@@ -66,11 +66,11 @@ const COLUMN_DEFS: ColumnDef[] = [
     // others leave, and keeps a floor so it never collapses on narrow screens
     render: ({ project: p }) => (
       <div className="min-w-[260px] whitespace-normal break-words">
-        <span className="font-medium leading-snug">{p.project_name}</span>
-        {p.short_name && <div className="mt-0.5 text-xs text-muted-foreground">{p.short_name}</div>}
+        <span className="font-medium leading-snug">{titleCase(p.project_name)}</span>
+        {p.short_name && <div className="mt-0.5 text-xs text-muted-foreground">{titleCase(p.short_name)}</div>}
       </div>
     ),
-    cell: ({ project: p }) => p.project_name,
+    cell: ({ project: p }) => titleCase(p.project_name),
     exportWidth: 70,
     skeleton: 'w-full max-w-[400px]',
   },
@@ -78,8 +78,8 @@ const COLUMN_DEFS: ColumnDef[] = [
     key: 'client',
     header: 'Client',
     width: 'w-[30%]',
-    render: ({ project: p }) => <div className="min-w-[200px] whitespace-normal break-words text-sm">{p.client}</div>,
-    cell: ({ project: p }) => p.client,
+    render: ({ project: p }) => <div className="min-w-[200px] whitespace-normal break-words text-sm">{titleCase(p.client)}</div>,
+    cell: ({ project: p }) => titleCase(p.client),
     exportWidth: 40,
     skeleton: 'w-40',
   },

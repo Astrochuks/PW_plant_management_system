@@ -36,6 +36,7 @@ from app.core.security import (
 )
 from app.models.project import ProjectCreate, ProjectUpdate
 from app.core.events import broadcast
+from app.core.text import title_case
 from app.monitoring.logging import get_logger
 from app.services.audit_service import audit_service
 
@@ -2289,6 +2290,10 @@ async def create_project(
     """Create a new project (admin only)."""
     # python-mode dump: asyncpg needs real date/UUID objects, not strings
     data = project.model_dump(exclude_none=True)
+    # house style: Title Case names, whatever was typed (decision 2026-10-13)
+    for key in ("project_name", "short_name"):
+        if key in data:
+            data[key] = title_case(data[key])
     # History facts travel with the project but live in the history tables
     # (PRD v2 §3.2–3.3): pop them before the INSERT and write them below.
     status_effective = data.pop("status_effective_date", None)
@@ -2372,6 +2377,9 @@ async def update_project(
     """Update an existing project (admin only)."""
     # python-mode dump: asyncpg needs real date/UUID objects, not strings
     update_data = project.model_dump(exclude_none=True)
+    for key in ("project_name", "short_name"):
+        if key in update_data:
+            update_data[key] = title_case(update_data[key])
     if not update_data:
         raise ValidationError("No fields to update")
 

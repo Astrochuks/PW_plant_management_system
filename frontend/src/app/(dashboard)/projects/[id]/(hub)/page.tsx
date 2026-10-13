@@ -16,7 +16,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { MiniKpi, MiniKpiRow, MiniKpiSkeleton } from '@/components/shared/mini-kpi'
 import { useAuth } from '@/providers/auth-provider'
 import { useBillsProgress, useProject, useProjectBills } from '@/hooks/use-projects'
-import { fmtDate, money } from '@/lib/format'
+import { fmtDate, money, titleCase } from '@/lib/format'
 
 const HEAD = 'text-[#101415] font-semibold text-xs uppercase tracking-wider border-x border-[#e6ac31]/50 whitespace-nowrap'
 const CELL = 'text-sm border-x border-border/50 py-2'
@@ -39,7 +39,7 @@ export default function ProjectOverviewPage() {
   const thisWeek = rows.reduce((a, b) => a + b.this_week, 0)
   const latest = progress?.latest_week ?? null
   const weeks = progress?.weeks_on_file ?? 0
-  const name = project?.short_name || project?.project_name || ''
+  const name = titleCase(project?.short_name || project?.project_name)
 
   return (
     <div className="space-y-6">
@@ -114,7 +114,7 @@ export default function ProjectOverviewPage() {
       {/* The register facts, in one block */}
       {project && (
         <dl className="grid grid-cols-2 gap-x-6 gap-y-3 rounded-lg border p-4 text-sm sm:grid-cols-3 lg:grid-cols-4">
-          <Fact label="Client" value={project.client} />
+          <Fact label="Client" value={titleCase(project.client)} />
           <Fact label="State" value={project.state_name ?? '—'} />
           <Fact label="Type" value={project.project_type ? project.project_type.charAt(0).toUpperCase() + project.project_type.slice(1) : '—'} />
           <Fact label="Award date" value={project.award_date ? fmtDate(project.award_date) : '—'} />

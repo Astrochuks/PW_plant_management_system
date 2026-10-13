@@ -112,6 +112,41 @@ export const num = (v: number | null | undefined, dp = MAX_DP): string =>
     ? '—'
     : v.toLocaleString('en-NG', { maximumFractionDigits: dp })
 
+// ── House Title Case for names (twin of backend app/core/text.py; golden
+// cases in backend/tests/test_text.py and scripts/check_title_case.mjs) ──
+const SMALL_WORDS = new Set('of and the in at on for to a an by with from over via'.split(' '))
+const ACRONYMS = new Set('LGA LGAS FCT FERMA NNPC NDDC PHCN KRPC JV II III IV VI VII VIII IX'.split(' '))
+const capCore = (core: string): string => {
+  if (!core) return core
+  const upper = core.toUpperCase()
+  if (ACRONYMS.has(upper)) return upper
+  if (/\d/.test(core)) {
+    let out = '', afterDigit = false, first = true
+    for (const ch of core) {
+      if (/\d/.test(ch)) { afterDigit = true; out += ch }
+      else if (/[A-Za-z]/.test(ch)) { out += (afterDigit || !first) ? ch.toLowerCase() : ch.toUpperCase(); first = false }
+      else out += ch
+    }
+    return out
+  }
+  const low = core.toLowerCase()
+  return low[0].toUpperCase() + low.slice(1)
+}
+const titleWord = (word: string, first: boolean): string => {
+  const m = /^([^\w]*)(.*?)([^\w]*)$/.exec(word)
+  if (!m) return word
+  const [, lead, core, trail] = m
+  if (!core) return word
+  if (!first && SMALL_WORDS.has(core.toLowerCase()) && !ACRONYMS.has(core.toUpperCase())) return lead + core.toLowerCase() + trail
+  const parts = core.split(/([\-–/])/)
+  return lead + parts.map((p) => (/^[\-–/]$/.test(p) ? p : capCore(p))).join('') + trail
+}
+/** house Title Case for project names, short names and clients */
+export const titleCase = (value: string | null | undefined): string => {
+  const words = (value ?? '').trim().split(/\s+/).filter(Boolean)
+  return words.map((w, i) => titleWord(w, i === 0)).join(' ')
+}
+
 /**
  * A bill unit the way the bill prints it: "m2" → "m²", "m3" → "m³", "mm2" →
  * "mm²", "km2" → "km²"; anything else untouched ("Ha", "P.S", "L.S", "No").

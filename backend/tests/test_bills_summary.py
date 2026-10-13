@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.services.bills_summary import compute_summary, validate_adders
+from app.services.bills_summary import compute_summary, order_adders, validate_adders
 
 
 BILLS = [{"bill_code": "1", "name": "PRELIMS", "amount": 1000.00},
@@ -24,6 +24,17 @@ def test_adders_apply_in_order_on_a_running_subtotal():
     assert [l["amount"] for l in s["lines"]] == [125.05, 100.00, 110.67]
     assert [l["running"] for l in s["lines"]] == [1375.55, 1475.55, 1586.22]
     assert s["contract_total"] == 1586.22
+
+
+def test_vat_is_applied_last_whatever_the_entry_order():
+    # VAT typed first, contingency later — money must come out the same
+    vat_first = [{"name": "VAT", "kind": "percent_of_running", "value": 7.5},
+                 {"name": "Contingency", "kind": "percent_of_works", "value": 10}]
+    vat_last = list(reversed(vat_first))
+    a, b = compute_summary(BILLS, vat_first), compute_summary(BILLS, vat_last)
+    assert a["contract_total"] == b["contract_total"] == 1478.72    # (1250.50 + 125.05) × 1.075
+    assert [l["name"] for l in a["lines"]] == ["Contingency", "VAT"]
+    assert [x["name"] for x in order_adders(vat_first)] == ["Contingency", "VAT"]
 
 
 def test_percent_of_works_ignores_earlier_adders():

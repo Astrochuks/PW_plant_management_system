@@ -20,7 +20,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { MiniKpi, MiniKpiRow } from '@/components/shared/mini-kpi'
 import { useAuth } from '@/providers/auth-provider'
 import { useBillsRevision, useProject } from '@/hooks/use-projects'
-import { fmtDate, money, num, unitLabel } from '@/lib/format'
+import { fmtDate, money, num, titleCase, unitLabel } from '@/lib/format'
 import { BoqSummaryTable, adderLabel } from '@/components/projects/bills/summary-table'
 import { exportRegisterExcel, type RegisterExportRow } from '@/lib/register-export'
 
@@ -44,7 +44,7 @@ export default function BillRevisionReviewPage() {
   if (isLoading || !data) return <Skeleton className="h-64" />
   const { revision: rev, bills, summary, diff, current_revision_no } = data
   const changes = diff ? diff.items_changed.length + diff.items_added.length + diff.items_removed.length : 0
-  const projectName = project?.short_name || project?.project_name || ''
+  const projectName = titleCase(project?.short_name || project?.project_name)
 
   const handleExport = async () => {
     setExporting(true)

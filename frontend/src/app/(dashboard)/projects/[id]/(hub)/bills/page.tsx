@@ -32,7 +32,7 @@ import { useAuth } from '@/providers/auth-provider'
 import { useProject, useProjectBills, useProjectSubmissions, usePreviewBillsImport, usePreviewBillsFromSubmission, useRecordBillsRevision } from '@/hooks/use-projects'
 import type { BoqAdder, BoqBill, BoqImportPreview } from '@/lib/api/projects'
 import { getErrorMessage } from '@/lib/api/client'
-import { fmtDate, money, num, unitLabel } from '@/lib/format'
+import { fmtDate, money, num, titleCase, unitLabel } from '@/lib/format'
 import { exportRegisterExcel, type RegisterExportRow } from '@/lib/register-export'
 import { BoqSummaryTable, adderLabel } from '@/components/projects/bills/summary-table'
 import { AddersDialog } from '@/components/projects/bills/adders-dialog'
@@ -81,7 +81,7 @@ export default function ProjectBillsPage() {
   const worksTotal = visible.reduce((a, b) => a + sumVisible(b), 0)
   const hasFilters = Boolean(search || billCode !== 'all')
 
-  const projectName = project?.short_name || project?.project_name || ''
+  const projectName = titleCase(project?.short_name || project?.project_name)
   const scope = (billCode === 'all' ? 'all bills' : `Bill ${billCode}`) + (search ? ` · search "${search}"` : '')
   const bannerTitle = `P.W. NIGERIA LTD. — Bill of Quantities · ${projectName}${revision ? ` · Revision ${revision.revision_no}` : ''} · ${scope}`
 
